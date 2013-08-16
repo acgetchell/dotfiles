@@ -18,6 +18,8 @@ brew install leiningen
 brew cask install textmate
 brew install ruby
 gem install homesick
+brew install legit
+legit install
 
 # dev boxen
 brew cask install virtualbox
@@ -30,8 +32,9 @@ brew install open-mpi
 # Sysadmin
 brew install ssh-copy-id
 
-brew install legit
-legit install
+# Terminal utilities
+brew install irssi
+
 
 brew cask install google-chrome
 brew cask install alfred
