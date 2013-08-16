@@ -16,6 +16,8 @@ brew install leiningen
 
 # General devel
 brew cask install textmate
+brew install ruby
+gem install homesick
 
 # dev boxen
 brew cask install virtualbox
