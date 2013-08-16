@@ -31,6 +31,7 @@ brew install cgal
 brew install open-mpi
 brew cask install zotero
 brew cask install anki
+brew cask install texmaker
 
 # Sysadmin
 brew install ssh-copy-id
