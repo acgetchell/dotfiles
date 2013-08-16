@@ -1,5 +1,6 @@
 #!/bin/bash
 
+#Run in home directory
 sudo -v
 
 brew update
@@ -17,7 +18,6 @@ brew install leiningen
 # General devel
 brew cask install textmate
 brew install ruby
-gem install homesick
 brew install legit
 legit install
 brew cask install github
@@ -38,6 +38,18 @@ brew install ssh-copy-id
 
 # Terminal utilities
 brew install irssi
+
+# Must have git first
+# Install homesick
+gem install homesick
+homesick clone https://github.com/acgetchell/dotfiles.git
+
+# Install bash_it
+git clone http://github.com/revans/bash-it.git ~/.bash_it
+~/.bash_it/install.sh
+# Pull .bash_profile from github dotfiles, overwriting the one bash_it just made
+homesick pull dotfiles
+homesick symlink dotfiles -f
 
 # Applications
 brew cask install dropbox
