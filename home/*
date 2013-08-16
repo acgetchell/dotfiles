@@ -1,0 +1,40 @@
+#!/bin/bash
+
+sudo -v
+
+brew update
+brew upgrade
+brew tap homebrew/versions
+brew tap phinze/homebrew-cask
+brew install brew-cask
+
+# Lisp-y devel
+brew install emacs
+brew install sbcl
+brew install clojure
+brew install leiningen
+
+# General devel
+brew cask install textmate
+
+# dev boxen
+brew cask install virtualbox
+brew cask install vagrant
+
+# Research
+brew install cgal
+brew install open-mpi
+
+# Sysadmin
+brew install ssh-copy-id
+
+brew install legit
+legit install
+
+brew cask install google-chrome
+brew cask install alfred
+brew cask alfred link
+brew cask install evernote
+
+# Fun
+brew cask install steam
