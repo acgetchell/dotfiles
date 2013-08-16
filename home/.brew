@@ -20,6 +20,7 @@ brew install ruby
 gem install homesick
 brew install legit
 legit install
+brew cask install github
 
 # dev boxen
 brew cask install virtualbox
@@ -28,6 +29,8 @@ brew cask install vagrant
 # Research
 brew install cgal
 brew install open-mpi
+brew cask install zotero
+brew cask install anki
 
 # Sysadmin
 brew install ssh-copy-id
@@ -35,11 +38,18 @@ brew install ssh-copy-id
 # Terminal utilities
 brew install irssi
 
-
-brew cask install google-chrome
+# Applications
+brew cask install dropbox
+brew cask install one-password
 brew cask install alfred
 brew cask alfred link
-brew cask install evernote
+brew cask install clean-my-mac
+brew cask install google-chrome
+brew cask install tor-browser
+brew cask install skype
 
 # Fun
 brew cask install steam
+
+# Cleanup
+brew cleanup
