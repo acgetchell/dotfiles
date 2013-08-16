@@ -1,0 +1,50 @@
+[user]
+	name = Adam Getchell
+	email = acgetchell@ucdavis.edu
+[core]
+	excludesfile = /Users/getchell/.gitignore_global
+	pager = less -FXRS -x2
+[alias]
+	st = status
+	di = diff
+	co = checkout
+	ci = commit
+	br = checkout -b
+	sta = stash
+	llog = log --date=local
+	go = checkout
+	in = commit -a
+	up = push origin
+	down = pull origin
+	a = add .
+	hist = log --pretty --graph --date=short
+	flog = log --pretty=fuller --decorate
+	lg = log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit --date=relative
+	lol = log --graph --decorate --oneline
+	lola = log --graph --decorate --oneline --all
+	blog = log origin/master... --left-right
+	ds = diff --staged
+	fixup = commit --fixup
+	squash = commit --squash
+	unstage = reset HEAD
+	rum = rebase
+	switch = !legit switch \"$@\"
+	branches = !legit branches
+	sprout = !legit sprout \"$@\"
+	unpublish = !legit unpublish \"$@\"
+	harvest = !legit harvest \"$@\"
+	sync = !legit sync \"$@\"
+	publish = !legit publish \"$@\"
+	graft = !legit graft \"$@\"
+[apply]
+	whitespace = nowarn
+[color]
+	branch = auto
+	diff = auto
+	interactive = auto
+	status = auto
+	ui = auto
+[branch]
+	autosetupmerge = true
+[rebase]
+	autosquash = true
