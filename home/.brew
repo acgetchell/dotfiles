@@ -35,6 +35,7 @@ brew cask install texmaker
 
 # Sysadmin
 brew install ssh-copy-id
+brew cask install menu-meters
 
 # Terminal utilities
 brew install irssi
