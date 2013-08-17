@@ -53,13 +53,15 @@ homesick pull dotfiles
 homesick symlink dotfiles -f
 
 # Applications
-brew cask install dropbox
-brew cask install true-crypt
+
 brew cask install alfred
 brew cask alfred link
 brew cask install clean-my-mac
+brew cask install dropbox
 brew cask install google-chrome
+brew cask install macfusion
 brew cask install tor-browser
+brew cask install true-crypt
 brew cask install skype
 
 # Fun
