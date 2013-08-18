@@ -11,7 +11,7 @@ export BASH_IT=$HOME/.bash_it
 
 # Lock and Load a custom theme file
 # location /.bash_it/themes/
-export BASH_IT_THEME='simple'
+export BASH_IT_THEME='zork'
 
 # Set my editor and git editor
 export EDITOR="/usr/local/bin/mate -w"
