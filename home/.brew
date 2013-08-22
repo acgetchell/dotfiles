@@ -16,7 +16,7 @@ brew install clojure
 brew install leiningen
 
 # General devel
-brew cask install textmate
+brew cask install sublime-text
 brew install ruby
 brew install legit
 legit install
