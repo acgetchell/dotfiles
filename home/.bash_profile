@@ -37,4 +37,4 @@ export TODO="t"
 source $BASH_IT/bash_it.sh
 
 # Load customization
-source .bashrc
+source ~/.bashrc
