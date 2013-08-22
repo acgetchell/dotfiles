@@ -21,15 +21,18 @@ brew install ruby
 brew install legit
 legit install
 brew cask install github
+
+# C++ devel
+brew install open-mpi
+brew install boost --with-mpi --without-single #--with c++11
 brew install doxygen --with-dot --with-doxywizard --with-libclang
 
-# dev boxen
+# devel boxen
 brew cask install virtualbox
 brew cask install vagrant
 
 # Research
 brew install cgal
-brew install open-mpi
 brew cask install zotero
 brew cask install anki
 
