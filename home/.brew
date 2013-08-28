@@ -43,6 +43,7 @@ brew cask install menu-meters
 
 # Terminal utilities
 brew install irssi
+brew install netcat
 
 # Must have git first
 # Install homesick
