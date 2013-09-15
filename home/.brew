@@ -37,6 +37,7 @@ brew cask install vagrant
 brew install cgal
 brew cask install zotero
 brew cask install anki
+brew install dieharder
 
 # Sysadmin
 brew install ssh-copy-id
