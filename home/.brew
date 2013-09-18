@@ -34,7 +34,8 @@ brew cask install virtualbox
 brew cask install vagrant
 
 # Research
-brew install cgal
+brew install eigen
+brew install cgal --imaging --with-eigen3 --with-lapack
 brew cask install zotero
 brew cask install anki
 brew install dieharder
