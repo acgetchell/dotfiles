@@ -71,6 +71,7 @@ brew cask install macfusion
 brew cask install tor-browser
 brew cask install true-crypt
 brew cask install skype
+brew cask install firefox
 
 # Fun
 brew cask install steam
