@@ -14,8 +14,8 @@ export BASH_IT=$HOME/.bash_it
 export BASH_IT_THEME='zork'
 
 # Set my editor and git editor
-export EDITOR="/bin/subl -w"
-export GIT_EDITOR='/bin/subl -w'
+export EDITOR="$HOME/bin/subl -w"
+export GIT_EDITOR='$HOME/bin/subl -w'
 
 # Don't check mail when opening terminal.
 unset MAILCHECK

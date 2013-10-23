@@ -25,7 +25,7 @@ brew cask install github
 
 # C++ devel
 brew install open-mpi
-brew install boost --with-mpi --without-single --with c++11
+brew install boost --with-mpi --without-single --with-c++11
 brew install doxygen --with-dot --with-doxywizard --with-libclang
 brew install cmake
 
