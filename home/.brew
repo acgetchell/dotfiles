@@ -27,6 +27,8 @@ brew cask install github
 brew install open-mpi
 brew install boost --with-c++11
 brew install doxygen --with-dot --with-doxywizard --with-libclang
+# GraphViz generates nice diagrams for doxygen
+brew install graphviz --with-app
 brew install cmake
 brew install cpputest
 # Manual install of gmock and gtest
@@ -81,6 +83,9 @@ brew cask install firefox
 
 # Fun
 brew cask install steam
+
+# Link installed apps to ~/Applications
+brew linkapps
 
 # Cleanup
 brew cleanup
