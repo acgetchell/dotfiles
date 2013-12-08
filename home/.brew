@@ -29,14 +29,16 @@ brew install boost --with-c++11
 brew install doxygen --with-dot --with-doxywizard --with-libclang
 # GraphViz generates nice diagrams for doxygen
 brew install graphviz --with-app
-# Geomview generates 2D and 3D diagrams for CGAL
-brew install geomview
 brew install cmake
 brew install cpputest
 # Manual install of gmock and gtest
 brew install rlog
 brew install scons
 # Manual install of JsonCpp
+
+# Python devel
+# sudo easy_install pip
+# sudo pip install pylint
 
 # devel boxen
 brew cask install virtualbox
@@ -49,15 +51,23 @@ brew cask install zotero
 brew cask install anki
 brew install dieharder
 brew install inkscape
+# Geomview generates 2D and 3D diagrams for CGAL
+# but it needs xquartz first
+brew cask install xquartz
+# To run X11/Xquartz apps locally from remote clients
+# Create ~/.ssh/config and add in:
+# ForwardX11 yes
+# ForwardX11Trusted yes
+brew install geomview
 
 # Sysadmin
 brew install ssh-copy-id
 brew cask install menu-meters
 
+
 # Terminal utilities
 brew install irssi
 brew install netcat
-
 # Must have git first
 # Install homesick
 gem install homesick
@@ -82,6 +92,10 @@ brew cask install tor-browser
 brew cask install true-crypt
 brew cask install skype
 brew cask install firefox
+
+# Octopress
+brew install pow
+# Follow http://paulsturgess.co.uk/blog/2013/04/24/hello-octopress-and-github-pages/
 
 # Fun
 brew cask install steam
