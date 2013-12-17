@@ -35,6 +35,8 @@ brew install cpputest
 brew install rlog
 brew install scons
 # Manual install of JsonCpp
+# Travis-CI checker
+gem install travis-lint
 
 # Python devel
 # sudo easy_install pip
