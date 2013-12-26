@@ -37,6 +37,8 @@ brew install scons
 # Manual install of JsonCpp
 # Travis-CI checker
 gem install travis-lint
+# Travis command line client
+sudo gem install travis -v 1.6.6 --no-rdoc --no-ri
 
 # Python devel
 # sudo easy_install pip
