@@ -103,6 +103,7 @@ brew install pow
 
 # Fun
 brew cask install steam
+brew cask install openemu
 
 # Link installed apps to ~/Applications
 brew linkapps
