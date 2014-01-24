@@ -24,8 +24,8 @@ legit install
 brew cask install github
 
 # C++ devel
-brew install open-mpi
-brew install boost --with-c++11
+brew install open-mpi --c++11 --enable-mpi-thread-multiple
+brew install boost --c++11
 brew install doxygen --with-dot --with-doxywizard --with-libclang
 # GraphViz generates nice diagrams for doxygen
 brew install graphviz --with-app
