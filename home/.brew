@@ -25,7 +25,7 @@ brew cask install github
 
 # C++ devel
 brew install open-mpi --c++11 --enable-mpi-thread-multiple
-brew install boost --c++11
+brew install boost --c++11 -without-single -with-mpi
 brew install doxygen --with-dot --with-doxywizard --with-libclang
 # GraphViz generates nice diagrams for doxygen
 brew install graphviz --with-app
@@ -43,6 +43,7 @@ sudo gem install travis -v 1.6.6 --no-rdoc --no-ri
 # Python devel
 # sudo easy_install pip
 # sudo pip install pylint
+# sudo pip install bigfloat
 
 # devel boxen
 brew cask install virtualbox
@@ -50,7 +51,7 @@ brew cask install vagrant
 
 # Research
 brew install eigen
-brew install cgal --imaging --with-eigen3 --with-lapack
+brew install cgal --c++11 --imaging --with-eigen3 --with-lapack
 brew cask install zotero
 brew cask install anki
 brew install dieharder
