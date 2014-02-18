@@ -67,7 +67,7 @@ brew install geomview
 
 # Sysadmin
 brew install ssh-copy-id
-brew cask install menu-meters
+brew cask install menumeters
 
 
 # Terminal utilities
@@ -94,7 +94,7 @@ brew cask install dropbox
 brew cask install google-chrome
 brew cask install macfusion
 brew cask install tor-browser
-brew cask install true-crypt
+brew cask install truecrypt
 brew cask install skype
 brew cask install firefox
 
