@@ -14,7 +14,7 @@ brew install emacs
 brew install sbcl
 brew install clojure
 brew install leiningen
-brew cask install light-table
+brew cask install lighttable
 
 # General devel
 brew cask install sublime-text
@@ -93,7 +93,7 @@ brew cask install clean-my-mac
 brew cask install dropbox
 brew cask install google-chrome
 brew cask install macfusion
-brew cask install tor-browser
+brew cask install torbrowserbundle
 brew cask install truecrypt
 brew cask install skype
 brew cask install firefox
