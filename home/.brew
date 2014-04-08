@@ -41,9 +41,12 @@ gem install travis-lint
 sudo gem install travis -v 1.6.6 --no-rdoc --no-ri
 
 # Python devel
-# sudo easy_install pip
+brew install python
+# sudo pip install --upgrade setuptools
+# sudo pip install --upgrade pip
 # sudo pip install pylint
 # sudo pip install bigfloat
+
 
 # devel boxen
 brew cask install virtualbox
