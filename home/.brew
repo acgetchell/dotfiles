@@ -18,6 +18,13 @@ brew cask install lighttable
 
 # General devel
 brew cask install sublime-text
+# Sublime-text packages:
+#   AdvancedNewFile
+#   DashDoc
+#   LaTeXing
+#   Package Control
+#   SublimeGit
+#   Pylinter
 brew install ruby
 brew install legit
 legit install
@@ -46,6 +53,7 @@ brew install python
 # sudo pip install --upgrade pip
 # sudo pip install pylint
 # sudo pip install bigfloat
+# sudo pip install sympy
 
 
 # devel boxen
