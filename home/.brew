@@ -114,7 +114,6 @@ brew install pow
 # Follow http://paulsturgess.co.uk/blog/2013/04/24/hello-octopress-and-github-pages/
 
 # Fun
-brew cask install steam
 brew cask install openemu
 
 # Link installed apps to ~/Applications
