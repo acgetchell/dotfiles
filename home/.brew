@@ -75,6 +75,8 @@ brew cask install xquartz
 # ForwardX11 yes
 # ForwardX11Trusted yes
 brew install geomview
+# xpdf for X11 and geomview
+brew install xpdf
 
 # Sysadmin
 brew install ssh-copy-id
