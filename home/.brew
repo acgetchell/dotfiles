@@ -18,6 +18,11 @@ brew cask install lighttable
 
 # General devel
 brew cask install atom
+# Packages:
+#  Zen
+#  Travis CI status
+#  Language Latex
+#  Latex
 #brew cask install sublime-text
 # Sublime-text packages:
 #   AdvancedNewFile
@@ -66,8 +71,8 @@ brew install eigen
 brew install cgal --c++11 --imaging --with-eigen3 --with-lapack
 brew cask install zotero
 brew cask install anki
-brew install dieharder
-brew install inkscape
+#brew install dieharder
+#brew install inkscape
 # Geomview generates 2D and 3D diagrams for CGAL
 # but it needs xquartz first
 brew cask install xquartz
@@ -85,8 +90,8 @@ brew cask install menumeters
 
 
 # Terminal utilities
-brew install irssi
-brew install netcat
+#brew install irssi
+#brew install netcat
 # Must have git first
 # Install homesick
 gem install homesick
@@ -101,8 +106,8 @@ homesick symlink dotfiles -f
 
 # Applications
 
-brew cask install alfred
-brew cask alfred link
+#brew cask install alfred
+#brew cask alfred link
 brew cask install cleanmymac
 brew cask install dropbox
 #brew cask install firefox
