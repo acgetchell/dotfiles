@@ -84,14 +84,11 @@ brew install geomview
 # xpdf for X11 and geomview
 brew install xpdf
 
-# Sysadmin
+# Utilities
+brew cask install shiftit
 brew install ssh-copy-id
 brew cask install menumeters
 
-
-# Terminal utilities
-#brew install irssi
-#brew install netcat
 # Must have git first
 # Install homesick
 gem install homesick
