@@ -19,12 +19,14 @@ brew cask install lighttable
 # General devel
 brew cask install atom
 # Packages:
-#  Zen
-#  Travis CI status
-#  Language Latex
-#  Latex
-#  Dash
-#  Script
+apm install Zen
+apm install travis-ci-status
+apm install latex
+apm install language-latex
+apm install dash
+apm install script
+apm install linter
+apm install linter-pylint
 #brew cask install sublime-text
 # Sublime-text packages:
 #   AdvancedNewFile
@@ -56,12 +58,13 @@ brew install cpputest
 #sudo gem install travis -v 1.6.6 --no-rdoc --no-ri
 
 # Python devel
-brew install python
-# sudo pip install --upgrade setuptools
-# sudo pip install --upgrade pip
-# sudo pip install pylint
-# sudo pip install bigfloat
-# sudo pip install sympy
+# brew install python
+sudo easy_install pip
+sudo pip install --upgrade setuptools
+sudo pip install --upgrade pip
+sudo pip install pylint
+sudo pip install bigfloat
+sudo pip install sympy
 
 
 # devel boxen
