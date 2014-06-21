@@ -65,6 +65,8 @@ sudo pip install --upgrade pip
 sudo pip install pylint
 sudo pip install bigfloat
 sudo pip install sympy
+# Needed for cgal-bindings
+brew install swig
 
 
 # devel boxen
