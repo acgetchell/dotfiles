@@ -23,6 +23,8 @@ brew cask install atom
 #  Travis CI status
 #  Language Latex
 #  Latex
+#  Dash
+#  Script
 #brew cask install sublime-text
 # Sublime-text packages:
 #   AdvancedNewFile
@@ -85,6 +87,7 @@ brew install geomview
 brew install xpdf
 
 # Utilities
+brew cask install caffeine
 brew cask install shiftit
 brew install ssh-copy-id
 brew cask install menumeters
@@ -117,8 +120,11 @@ brew cask install torbrowser
 #brew cask install truecrypt
 
 # Octopress
+# broken in 10.10 with Ruby 1.9.3
 brew install pow
 # Follow http://paulsturgess.co.uk/blog/2013/04/24/hello-octopress-and-github-pages/
+# sudo gem install bundler
+
 
 # Fun
 brew cask install openemu
