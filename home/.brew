@@ -27,6 +27,8 @@ apm install dash
 apm install script
 apm install linter
 apm install linter-pylint
+apm install language-cmake
+apm install linter-clang
 #brew cask install sublime-text
 # Sublime-text packages:
 #   AdvancedNewFile
