@@ -132,6 +132,9 @@ brew install pow
 # Follow http://paulsturgess.co.uk/blog/2013/04/24/hello-octopress-and-github-pages/
 # sudo gem install bundler
 
+# Windows
+brew cask install parallels
+
 
 # Fun
 brew cask install openemu
