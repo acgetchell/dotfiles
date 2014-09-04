@@ -37,5 +37,8 @@ export TODO="t"
 # Load Bash It
 source $BASH_IT/bash_it.sh
 
+# Tell homebrew-cask to put symlinks in default Applications directory
+export HOMEBREW_CASK_OPTS="--appdir=/Applications"
+
 # Load customization
 source ~/.bashrc

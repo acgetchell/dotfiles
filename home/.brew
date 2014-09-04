@@ -58,6 +58,9 @@ brew install cpputest
 #gem install travis-lint
 # Travis command line client
 #sudo gem install travis -v 1.6.6 --no-rdoc --no-ri
+# Exercism
+brew tap homebrew/binary
+brew install exercism
 
 # Python devel
 # brew install python
