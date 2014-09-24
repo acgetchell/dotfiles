@@ -41,6 +41,7 @@ apm install linter-clang
 #brew install legit
 #legit install
 brew cask install github
+# Run brew doctor and fix PATH so that /usr/local/bin comes first
 
 # C++ devel
 brew install open-mpi --c++11 --enable-mpi-thread-multiple
@@ -97,8 +98,7 @@ brew install geomview
 brew install xpdf
 
 # Utilities
-brew cask install caffeine
-brew cask install shiftit
+#brew cask install shiftit
 brew install ssh-copy-id
 brew cask install menumeters
 
@@ -120,9 +120,11 @@ homesick symlink dotfiles -f
 #brew cask alfred link
 brew cask install cleanmymac
 brew cask install dropbox
+brew cask install box-sync
 #brew cask install firefox
 #brew cask install macfusion
 brew cask install mactex
+# Fix path in .bashrc so tlmgr is accessible
 sudo tlmgr update --self
 sudo tlmgr update --all
 brew cask install skype
