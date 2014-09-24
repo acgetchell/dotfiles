@@ -29,14 +29,6 @@ apm install linter
 apm install linter-pylint
 apm install language-cmake
 apm install linter-clang
-#brew cask install sublime-text
-# Sublime-text packages:
-#   AdvancedNewFile
-#   DashDoc
-#   LaTeXing
-#   Package Control
-#   SublimeGit
-#   Pylinter
 #brew install ruby
 #brew install legit
 #legit install
@@ -48,17 +40,16 @@ brew install open-mpi --c++11 --enable-mpi-thread-multiple
 brew install boost --c++11 --without-single --with-mpi
 brew install doxygen --with-dot --with-doxywizard --with-libclang
 # GraphViz generates nice diagrams for doxygen
-brew install graphviz --with-app
+# Requires xquartz and a full install of Xcode
+brew cask install xquartz
+# To run X11/Xquartz apps locally from remote clients
+# Create ~/.ssh/config and add in:
+# ForwardX11 yes
+# ForwardX11Trusted yes
+brew install graphviz --with-app --with-x
 brew install cmake
 brew install cpputest
 # Manual install of gmock and gtest
-#brew install rlog
-#brew install scons
-# Manual install of JsonCpp
-# Travis-CI checker
-#gem install travis-lint
-# Travis command line client
-#sudo gem install travis -v 1.6.6 --no-rdoc --no-ri
 # Exercism
 brew tap homebrew/binary
 brew install exercism
@@ -74,7 +65,6 @@ sudo pip install sympy
 # Needed for cgal-bindings
 brew install swig
 
-
 # devel boxen
 brew cask install virtualbox
 brew cask install vagrant
@@ -84,15 +74,8 @@ brew install eigen
 brew install cgal --c++11 --imaging --with-eigen3 --with-lapack
 brew cask install zotero
 brew cask install anki
-#brew install dieharder
-#brew install inkscape
 # Geomview generates 2D and 3D diagrams for CGAL
 # but it needs xquartz first
-brew cask install xquartz
-# To run X11/Xquartz apps locally from remote clients
-# Create ~/.ssh/config and add in:
-# ForwardX11 yes
-# ForwardX11Trusted yes
 brew install geomview
 # xpdf for X11 and geomview
 brew install xpdf
@@ -115,13 +98,10 @@ homesick pull dotfiles
 homesick symlink dotfiles -f
 
 # Applications
-
-#brew cask install alfred
-#brew cask alfred link
 brew cask install cleanmymac
 brew cask install dropbox
 brew cask install box-sync
-#brew cask install firefox
+brew cask install firefox
 #brew cask install macfusion
 brew cask install mactex
 # Fix path in .bashrc so tlmgr is accessible
@@ -139,7 +119,6 @@ brew install pow
 
 # Windows
 brew cask install parallels
-
 
 # Fun
 brew cask install openemu
