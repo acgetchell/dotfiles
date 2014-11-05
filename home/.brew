@@ -7,6 +7,7 @@ brew update
 brew upgrade
 brew tap homebrew/versions
 brew tap caskroom/cask
+brew tap homebrew/dupes
 brew install brew-cask
 
 # Lisp-y devel
@@ -84,6 +85,7 @@ brew install xpdf
 #brew cask install shiftit
 brew install ssh-copy-id
 brew cask install menumeters
+brew cask install openssh --with-brewed-openssl --with-keychain-support --with-ldns
 
 # Must have git first
 # Install homesick
