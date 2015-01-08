@@ -51,18 +51,25 @@ brew install graphviz --with-app --with-x
 brew install cmake
 brew install cpputest
 # Manual install of gmock and gtest
-# Exercism
-brew tap homebrew/binary
-brew install exercism
+brew install ninja
+# Intel thread building blocks
+brew install tbb --c++11
 
 # Python devel
-# brew install python
+# MacOS default python doesn't work with pelican
+brew install python
 sudo easy_install pip
 sudo pip install --upgrade setuptools
 sudo pip install --upgrade pip
 sudo pip install pylint
 sudo pip install bigfloat
 sudo pip install sympy
+# Pelican blogging
+sudo pip install pelican
+sudo pip install Markdown
+sudo pip install typogrify
+sudo pip install --upgrade pelican
+sudo pip install ghp-import
 # Needed for cgal-bindings
 brew install swig
 
