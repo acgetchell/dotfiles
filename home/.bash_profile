@@ -14,7 +14,7 @@ export BASH_IT=$HOME/.bash_it
 export BASH_IT_THEME='zork'
 
 # Set my editor and git editor
-export ATOM_PATH="/Users/getchell/Applications"
+export ATOM_PATH="/Applications"
 export EDITOR="/usr/local/bin/atom -w"
 export GIT_EDITOR='/usr/local/bin/atom -w'
 

@@ -54,6 +54,7 @@ brew install cpputest
 brew install ninja
 # Intel thread building blocks
 brew install tbb --c++11
+brew install cppcheck
 
 # Python devel
 # MacOS default python doesn't work with pelican
