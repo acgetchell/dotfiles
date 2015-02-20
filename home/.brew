@@ -94,6 +94,7 @@ brew install xpdf
 brew install ssh-copy-id
 brew cask install menumeters
 brew cask install openssh --with-brewed-openssl --with-keychain-support --with-ldns
+brew cask install todoist
 
 # Must have git first
 # Install homesick
