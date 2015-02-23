@@ -10,13 +10,6 @@ brew tap caskroom/cask
 brew tap homebrew/dupes
 brew install brew-cask
 
-# Lisp-y devel
-brew install emacs
-brew install sbcl
-brew install clojure
-brew install leiningen
-brew cask install lighttable
-
 # General devel
 brew cask install atom
 # Packages:
@@ -39,7 +32,7 @@ brew cask install github
 # C++ devel
 brew install open-mpi --c++11 --enable-mpi-thread-multiple
 brew install boost --c++11 --without-single --with-mpi
-brew install doxygen --with-dot --with-doxywizard --with-libclang
+brew install doxygen --with-doxywizard --with-graphviz --with-libclang
 # GraphViz generates nice diagrams for doxygen
 # Requires xquartz and a full install of Xcode
 brew cask install xquartz
@@ -47,7 +40,7 @@ brew cask install xquartz
 # Create ~/.ssh/config and add in:
 # ForwardX11 yes
 # ForwardX11Trusted yes
-brew install graphviz --with-app --with-x
+#brew install graphviz --with-app --with-x
 brew install cmake
 brew install cpputest
 # Manual install of gmock and gtest
@@ -55,6 +48,8 @@ brew install ninja
 # Intel thread building blocks
 brew install tbb --c++11
 brew install cppcheck
+brew install eigen
+brew install cgal --c++11 --imaging --with-eigen3 --with-lapack
 
 # Python devel
 # MacOS default python doesn't work with pelican
@@ -71,16 +66,19 @@ sudo pip install Markdown
 sudo pip install typogrify
 sudo pip install --upgrade pelican
 sudo pip install ghp-import
-# Needed for cgal-bindings
-brew install swig
+
+# R devel
+brew tap homebrew/science
+brew install r
+apm install language-r
 
 # devel boxen
 brew cask install virtualbox
 brew cask install vagrant
+brew install docker
+# Checkout http://www.siliconfidential.com/articles/docker-coreos-osx/
 
 # Research
-brew install eigen
-brew install cgal --c++11 --imaging --with-eigen3 --with-lapack
 brew cask install zotero
 brew cask install anki
 # Geomview generates 2D and 3D diagrams for CGAL
@@ -110,7 +108,6 @@ homesick symlink dotfiles -f
 
 # Applications
 brew cask install cleanmymac
-brew cask install dropbox
 brew cask install box-sync
 brew cask install firefox
 #brew cask install macfusion
@@ -121,15 +118,6 @@ sudo tlmgr update --all
 brew cask install skype
 brew cask install torbrowser
 #brew cask install truecrypt
-
-# Octopress
-# broken in 10.10 with Ruby 1.9.3
-brew install pow
-# Follow http://paulsturgess.co.uk/blog/2013/04/24/hello-octopress-and-github-pages/
-# sudo gem install bundler
-
-# Windows
-brew cask install parallels
 
 # Fun
 brew cask install openemu
