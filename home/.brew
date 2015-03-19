@@ -23,9 +23,6 @@ apm install linter
 apm install linter-pylint
 apm install language-cmake
 apm install linter-clang
-#brew install ruby
-#brew install legit
-#legit install
 brew cask install github
 # Run brew doctor and fix PATH so that /usr/local/bin comes first
 
@@ -110,14 +107,14 @@ homesick symlink dotfiles -f
 brew cask install cleanmymac
 brew cask install box-sync
 brew cask install firefox
-#brew cask install macfusion
 brew cask install mactex
 # Fix path in .bashrc so tlmgr is accessible
 sudo tlmgr update --self
 sudo tlmgr update --all
 brew cask install skype
 brew cask install torbrowser
-#brew cask install truecrypt
+# So LaTexIt can export to SVG
+brew install pdf2svg
 
 # Fun
 brew cask install openemu

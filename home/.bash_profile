@@ -40,5 +40,8 @@ source $BASH_IT/bash_it.sh
 # Tell homebrew-cask to put symlinks in default Applications directory
 export HOMEBREW_CASK_OPTS="--appdir=/Applications"
 
+# Add Homebrew's sbin
+export PATH="/usr/local/sbin:$PATH"
+
 # Load customization
 source ~/.bashrc
