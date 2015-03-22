@@ -64,6 +64,9 @@ sudo pip install typogrify
 sudo pip install --upgrade pelican
 sudo pip install ghp-import
 
+# SAGE
+brew cask install sage
+
 # R devel
 brew tap homebrew/science
 brew install r
