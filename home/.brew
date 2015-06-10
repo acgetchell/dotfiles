@@ -67,6 +67,9 @@ sudo pip install ghp-import
 # SAGE
 brew cask install sage
 
+# Hugo
+brew install hugo
+
 # R devel
 brew tap homebrew/science
 brew install r
