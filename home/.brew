@@ -15,7 +15,6 @@ brew cask install atom
 # Packages:
 apm install Zen
 apm install dash
-apm install error-status
 apm install language-cmake
 apm install language-latex
 apm install language-r
