@@ -32,10 +32,12 @@ brew cask install github
 # Run brew doctor and fix PATH so that /usr/local/bin comes first
 
 # C++ devel
+brew install Caskroom/cask/java
 brew install open-mpi --c++11 --enable-mpi-thread-multiple
 brew install boost --c++11 --without-single --with-mpi
 brew install doxygen --with-doxywizard --with-graphviz --with-libclang
 # GraphViz generates nice diagrams for doxygen
+brew linkapps qt
 # Requires xquartz and a full install of Xcode
 brew cask install xquartz
 # To run X11/Xquartz apps locally from remote clients
@@ -88,12 +90,12 @@ brew install docker
 
 # Research
 brew cask install zotero
+# xpdf for X11, geomview and Zotero
+brew install homebrew/X11/xpdf
 brew cask install anki
 # Geomview generates 2D and 3D diagrams for CGAL
 # but it needs xquartz first
 brew install geomview
-# xpdf for X11 and geomview
-brew install xpdf
 
 # Utilities
 #brew cask install shiftit
@@ -128,7 +130,7 @@ brew cask install torbrowser
 brew install pdf2svg
 
 # Fun
-brew cask install openemu
+brew cask install battle-net
 
 # Link installed apps to ~/Applications
 brew linkapps
