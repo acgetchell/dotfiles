@@ -103,6 +103,7 @@ brew install ssh-copy-id
 brew cask install menumeters
 brew cask install openssh --with-brewed-openssl --with-keychain-support --with-ldns
 brew cask install todoist
+brew install ag
 
 # Must have git first
 # Install homesick
