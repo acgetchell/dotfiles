@@ -107,14 +107,14 @@ brew cask install todoist
 # Must have git first
 # Install homesick
 gem install homesick
-homesick clone https://github.com/acgetchell/dotfiles.git
+homesick clone git@github.com:acgetchell/dotfiles.git
 
 # Install bash_it
 git clone http://github.com/revans/bash-it.git ~/.bash_it
 ~/.bash_it/install.sh
 # Pull .bash_profile from github dotfiles, overwriting the one bash_it just made
 homesick pull dotfiles
-homesick symlink dotfiles -f
+homesick symlink dotfiles
 
 # Applications
 brew cask install cleanmymac
