@@ -104,6 +104,7 @@ brew cask install menumeters
 brew cask install openssh --with-brewed-openssl --with-keychain-support --with-ldns
 brew cask install todoist
 brew install ag
+brew cask install gitter
 
 # Must have git first
 # Install homesick
