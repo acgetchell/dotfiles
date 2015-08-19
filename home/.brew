@@ -14,17 +14,25 @@ brew install brew-cask
 brew cask install atom
 # Packages:
 apm install Zen
+apm install atom-material-syntax
+apm install atom-material-ui
 apm install dash
+apm install git-projects
 apm install language-cmake
 apm install language-latex
 apm install language-r
 apm install latex
 apm install linter
+apm install linter-cpplint
 apm install linter-clang
 apm install linter-pylint
+apm install merge-conflicts
 apm install minimap
 apm install run-command
 apm install script
+apm install term2
+apm install tool-bar
+apm install tool-bar-almighty
 apm install travis-ci-status
 apm install unity-ui
 
