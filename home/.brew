@@ -66,24 +66,21 @@ brew install cgal --c++11 --imaging --with-eigen3 --with-lapack
 # Python devel
 # MacOS default python doesn't work with pelican
 brew install python
-sudo easy_install pip
-sudo pip install --upgrade setuptools
-sudo pip install --upgrade pip
-sudo pip install pylint
-sudo pip install bigfloat
-sudo pip install sympy
+brew linkapps python
+pip install --upgrade pip setuptools
+pip install virtualenv virtualenvwrapper
+#sudo pip install pylint
+#sudo pip install bigfloat
+#sudo pip install sympy
 # Pelican blogging
-sudo pip install pelican
-sudo pip install Markdown
-sudo pip install typogrify
-sudo pip install --upgrade pelican
-sudo pip install ghp-import
+mkvirtualenv pelican
+workon pelican
+pip install --upgrade pelican
+pip install markdown typogrify feedgenerator pygments pytz
+pip install beautifulsoup4 webassets ghp-import
 
 # SAGE
 brew cask install sage
-
-# Hugo
-brew install hugo
 
 # R devel
 brew tap homebrew/science
@@ -113,6 +110,7 @@ brew cask install openssh --with-brewed-openssl --with-keychain-support --with-l
 brew cask install todoist
 brew install ag
 brew cask install gitter
+brew cask install selfcontrol
 
 # Must have git first
 # Install homesick
