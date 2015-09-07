@@ -43,5 +43,9 @@ export HOMEBREW_CASK_OPTS="--appdir=/Applications"
 # Add Homebrew's sbin
 export PATH="/usr/local/sbin:$PATH"
 
+# Setup Python virtualenv
+source /usr/local/bin/virtualenvwrapper.sh
+export WORKON_HOME=~/.virtualenvs
+
 # Load customization
 source ~/.bashrc
