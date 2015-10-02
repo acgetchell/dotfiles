@@ -101,6 +101,7 @@ brew cask install anki
 # Geomview generates 2D and 3D diagrams for CGAL
 # but it needs xquartz first
 brew install geomview
+brew install ipe
 
 # Utilities
 #brew cask install shiftit
