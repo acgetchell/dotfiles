@@ -36,7 +36,7 @@ apm install tool-bar-almighty
 apm install travis-ci-status
 apm install unity-ui
 
-brew cask install github
+brew cask install github-desktop
 # Run brew doctor and fix PATH so that /usr/local/bin comes first
 
 # C++ devel
@@ -79,6 +79,8 @@ pip install --upgrade pelican
 pip install markdown typogrify feedgenerator pygments pytz
 pip install beautifulsoup4 webassets ghp-import
 
+# C# Devel
+brew cask install visual-studio-code
 # SAGE
 brew cask install sage
 
@@ -129,11 +131,15 @@ homesick symlink dotfiles
 brew cask install cleanmymac
 brew cask install box-sync
 brew cask install firefox
+brew cask install gitter
+brew cask install google-chrome
+brew cask install macid
 brew cask install mactex
 # Fix path in .bashrc so tlmgr is accessible
 sudo tlmgr update --self
 sudo tlmgr update --all
-brew cask install skype
+brew cask install menumeters
+brew cask install pdftotext
 brew cask install torbrowser
 # So LaTexIt can export to SVG
 brew install pdf2svg
