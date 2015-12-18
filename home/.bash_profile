@@ -49,3 +49,5 @@ export WORKON_HOME=~/.virtualenvs
 
 # Load customization
 source ~/.bashrc
+
+[ -s "/Users/adam/.dnx/dnvm/dnvm.sh" ] && . "/Users/adam/.dnx/dnvm/dnvm.sh" # Load dnvm

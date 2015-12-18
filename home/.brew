@@ -81,6 +81,13 @@ pip install beautifulsoup4 webassets ghp-import
 
 # C# Devel
 brew cask install visual-studio-code
+brew install mono
+curl -sSL curl -sSL https://raw.githubusercontent.com/aspnet/Home/dev/dnvminstall.sh | DNX_BRANCH=dev sh && source ~/.dnx/dnvm/dnvm.sh
+dnvm upgrade -r mono
+dnu restore
+brew install node
+npm install -g gulp
+ 
 # SAGE
 brew cask install sage
 
@@ -108,6 +115,7 @@ brew install ipe
 # Utilities
 #brew cask install shiftit
 brew install ssh-copy-id
+brew install shellcheck
 brew cask install menumeters
 brew cask install openssh --with-brewed-openssl --with-keychain-support --with-ldns
 brew cask install todoist
@@ -146,6 +154,7 @@ brew install pdf2svg
 
 # Fun
 brew cask install battle-net
+brew cask install handbrake
 
 # Link installed apps to ~/Applications
 brew linkapps
