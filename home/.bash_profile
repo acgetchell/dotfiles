@@ -12,6 +12,7 @@ export BASH_IT=$HOME/.bash_it
 # Lock and Load a custom theme file
 # location /.bash_it/themes/
 export BASH_IT_THEME='zork'
+# export BASH_IT_THEME='mbriggs'
 
 # Set my editor and git editor
 export ATOM_PATH="/Applications"

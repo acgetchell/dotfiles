@@ -67,8 +67,8 @@ brew install cgal --c++11 --imaging --with-eigen3 --with-lapack
 # MacOS default python doesn't work with pelican
 brew install python
 brew linkapps python
-pip install --upgrade pip setuptools
-pip install virtualenv virtualenvwrapper
+sudo pip install --upgrade pip setuptools
+sudo pip install virtualenv virtualenvwrapper
 #sudo pip install pylint
 #sudo pip install bigfloat
 #sudo pip install sympy
@@ -76,8 +76,7 @@ pip install virtualenv virtualenvwrapper
 mkvirtualenv pelican
 workon pelican
 pip install --upgrade pelican
-pip install markdown typogrify feedgenerator pygments pytz
-pip install beautifulsoup4 webassets ghp-import
+pip install --upgrade markdown typogrify beautifulsoup4 webassets ghp-import
 
 # C# Devel
 brew cask install visual-studio-code
@@ -87,7 +86,7 @@ dnvm upgrade -r mono
 dnu restore
 brew install node
 npm install -g gulp
- 
+
 # SAGE
 brew cask install sage
 
