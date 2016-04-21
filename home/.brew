@@ -40,7 +40,8 @@ brew cask install github-desktop
 # Run brew doctor and fix PATH so that /usr/local/bin comes first
 
 # C++ devel
-brew install Caskroom/cask/java
+brew cask install clion
+brew cask install java
 brew install open-mpi --c++11 --enable-mpi-thread-multiple
 brew install boost --c++11 --without-single --with-mpi
 brew install doxygen --with-doxywizard --with-graphviz --with-libclang
@@ -152,6 +153,7 @@ brew cask install torbrowser
 brew install pdf2svg
 
 # Fun
+brew cask install audioscrobbler
 brew cask install battle-net
 brew cask install handbrake
 
