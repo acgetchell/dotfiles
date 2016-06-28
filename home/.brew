@@ -42,6 +42,7 @@ brew cask install github-desktop
 # C++ devel
 brew cask install clion
 brew cask install java
+brew install emscripten
 brew install open-mpi --c++11 --enable-mpi-thread-multiple
 brew install boost --c++11 --without-single --with-mpi
 brew install doxygen --with-doxywizard --with-graphviz --with-libclang
