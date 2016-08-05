@@ -97,12 +97,6 @@ brew tap homebrew/science
 brew install r
 apm install language-r
 
-# devel boxen
-brew cask install virtualbox
-brew cask install vagrant
-brew install docker
-# Checkout http://www.siliconfidential.com/articles/docker-coreos-osx/
-
 # Research
 brew cask install zotero
 # xpdf for X11, geomview and Zotero
@@ -117,12 +111,10 @@ brew install ipe
 #brew cask install shiftit
 brew install ssh-copy-id
 brew install shellcheck
-brew cask install menumeters
-brew cask install openssh --with-brewed-openssl --with-keychain-support --with-ldns
-brew cask install todoist
 brew install ag
 brew cask install gitter
-brew cask install selfcontrol
+brew cask install keybase
+
 
 # Must have git first
 # Install homesick
@@ -139,7 +131,6 @@ homesick symlink dotfiles
 # Applications
 brew cask install cleanmymac
 brew cask install box-sync
-brew cask install firefox
 brew cask install gitter
 brew cask install google-chrome
 brew cask install macid
@@ -157,6 +148,10 @@ brew install pdf2svg
 brew cask install audioscrobbler
 brew cask install battle-net
 brew cask install handbrake
+brew cask install imageoptim
+
+# Evil
+brew cask install flash
 
 # Link installed apps to ~/Applications
 brew linkapps
