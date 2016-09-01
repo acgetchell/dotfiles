@@ -80,6 +80,11 @@ workon pelican
 pip install --upgrade pelican
 pip install --upgrade markdown typogrify beautifulsoup4 webassets ghp-import
 
+# Docker + Jupyter + Sagemath
+brew cask install kitematic
+docker pull jupyter/datascience-notebook
+docker pull sagemath/sagemath-jupyter
+
 # C# Devel
 brew cask install visual-studio-code
 brew install mono
