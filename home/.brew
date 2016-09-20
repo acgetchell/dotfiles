@@ -71,6 +71,7 @@ brew install python
 brew linkapps python
 sudo pip install --upgrade pip setuptools
 sudo pip install virtualenv virtualenvwrapper
+brew install pyenv
 #sudo pip install pylint
 #sudo pip install bigfloat
 #sudo pip install sympy
