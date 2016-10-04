@@ -89,11 +89,12 @@ docker pull sagemath/sagemath-jupyter
 # C# Devel
 brew cask install visual-studio-code
 brew install mono
-curl -sSL curl -sSL https://raw.githubusercontent.com/aspnet/Home/dev/dnvminstall.sh | DNX_BRANCH=dev sh && source ~/.dnx/dnvm/dnvm.sh
-dnvm upgrade -r mono
-dnu restore
-brew install node
-npm install -g gulp
+brew cask install dotnet
+# curl -sSL curl -sSL https://raw.githubusercontent.com/aspnet/Home/dev/dnvminstall.sh | DNX_BRANCH=dev sh && source ~/.dnx/dnvm/dnvm.sh
+# dnvm upgrade -r mono
+# dnu restore
+# brew install node
+# npm install -g gulp
 
 # SAGE
 brew cask install sage
