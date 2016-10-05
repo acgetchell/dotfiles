@@ -90,6 +90,11 @@ docker pull sagemath/sagemath-jupyter
 brew cask install visual-studio-code
 brew install mono
 brew cask install dotnet
+ln -s /usr/local/share/dotnet/dotnet /usr/local/bin
+brew install node
+npm install -g yo bower
+npm install -g generator-aspnet
+
 # curl -sSL curl -sSL https://raw.githubusercontent.com/aspnet/Home/dev/dnvminstall.sh | DNX_BRANCH=dev sh && source ~/.dnx/dnvm/dnvm.sh
 # dnvm upgrade -r mono
 # dnu restore
@@ -156,9 +161,6 @@ brew cask install audioscrobbler
 brew cask install battle-net
 brew cask install handbrake
 brew cask install imageoptim
-
-# Evil
-brew cask install flash
 
 # Link installed apps to ~/Applications
 brew linkapps
