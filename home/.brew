@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# Turn on the app firewall
+sudo defaults write /Library/Preferences/com.apple.alf globalstate -bool true
+sudo defaults write /Library/Preferences/com.apple.alf loggingenabled -bool true
+sudo defaults write /Library/Preferences/com.apple.alf stealthenabled -bool true
+sudo defaults write /Library/Preferences/com.apple.alf allowsignedenabled -bool false
+sudo defaults write /Library/Preferences/com.apple.alf allowdownloadsignedenabled -bool false
+
 #Run in home directory
 sudo -v
 
@@ -126,6 +133,7 @@ brew install shellcheck
 brew install ag
 brew cask install gitter
 brew cask install keybase
+brew cask install the-unarchiver
 
 
 # Must have git first
