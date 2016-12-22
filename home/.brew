@@ -6,6 +6,8 @@ sudo defaults write /Library/Preferences/com.apple.alf loggingenabled -bool true
 sudo defaults write /Library/Preferences/com.apple.alf stealthenabled -bool true
 sudo defaults write /Library/Preferences/com.apple.alf allowsignedenabled -bool false
 sudo defaults write /Library/Preferences/com.apple.alf allowdownloadsignedenabled -bool false
+sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.pfctl.plist
+
 
 #Run in home directory
 sudo -v
@@ -94,22 +96,16 @@ docker pull jupyter/datascience-notebook
 docker pull sagemath/sagemath-jupyter
 
 # C# Devel
-brew cask install visual-studio-code
-brew install mono
-brew cask install dotnet
-ln -s /usr/local/share/dotnet/dotnet /usr/local/bin
-brew install node
-npm install -g yo bower
-npm install -g generator-aspnet
+brew cask install visual-studio
+# brew install node
+# npm install -g yo bower
+# npm install -g generator-aspnet
 
 # curl -sSL curl -sSL https://raw.githubusercontent.com/aspnet/Home/dev/dnvminstall.sh | DNX_BRANCH=dev sh && source ~/.dnx/dnvm/dnvm.sh
 # dnvm upgrade -r mono
 # dnu restore
 # brew install node
 # npm install -g gulp
-
-# SAGE
-brew cask install sage
 
 # R devel
 brew tap homebrew/science
@@ -128,11 +124,13 @@ brew install ipe
 
 # Utilities
 #brew cask install shiftit
-brew install ssh-copy-id
-brew install shellcheck
 brew install ag
-brew cask install gitter
+brew cask install fiddler
 brew cask install keybase
+brew cask install prey
+brew cask install screenhero
+brew install shellcheck
+brew install ssh-copy-id
 brew cask install the-unarchiver
 
 
@@ -159,16 +157,18 @@ brew cask install mactex
 sudo tlmgr update --self
 sudo tlmgr update --all
 brew cask install menumeters
-brew cask install pdftotext
+brew cask install skype
 brew cask install torbrowser
+brew cask install vmware-fusion
 # So LaTexIt can export to SVG
 brew install pdf2svg
 
 # Fun
-brew cask install audioscrobbler
 brew cask install battle-net
+brew cask install garmin-basecamp
 brew cask install handbrake
 brew cask install imageoptim
+brew cask install lastfm
 
 # Link installed apps to ~/Applications
 brew linkapps
