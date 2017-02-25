@@ -45,6 +45,9 @@ source $BASH_IT/bash_it.sh
 # Tell homebrew-cask to put symlinks in default Applications directory
 export HOMEBREW_CASK_OPTS="--appdir=/Applications"
 
+# Set path for various programs
+export PATH=/usr/local/bin:/usr/local/Cellar/llvm/3.9.1/bin:$PATH
+
 
 # Load customization
 source ~/.bashrc
