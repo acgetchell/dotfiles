@@ -96,7 +96,8 @@ docker pull jupyter/datascience-notebook
 docker pull sagemath/sagemath-jupyter
 
 # C# Devel
-brew cask install visual-studio
+brew install mono
+brew cask install visual-studio-code
 # brew install node
 # npm install -g yo bower
 # npm install -g generator-aspnet
@@ -125,10 +126,10 @@ brew install ipe
 # Utilities
 #brew cask install shiftit
 brew install ag
-brew cask install fiddler
+#brew cask install fiddler
 brew cask install keybase
 brew cask install prey
-brew cask install screenhero
+#brew cask install screenhero
 brew install shellcheck
 brew install ssh-copy-id
 brew cask install the-unarchiver
