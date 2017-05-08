@@ -127,6 +127,7 @@ brew install ipe
 #brew cask install shiftit
 brew install ag
 #brew cask install fiddler
+brew cask install crashplan
 brew cask install keybase
 brew cask install prey
 #brew cask install screenhero
@@ -141,7 +142,7 @@ gem install homesick
 homesick clone https://github.com/acgetchell/dotfiles.git
 
 # Install bash_it
-git clone https://github.com/revans/bash-it.git ~/.bash_it
+git clone https://github.com/Bash-it/bash-it.git ~/.bash_it
 ~/.bash_it/install.sh
 # Pull .bash_profile from github dotfiles, overwriting the one bash_it just made
 homesick pull dotfiles
@@ -170,6 +171,7 @@ brew cask install garmin-basecamp
 brew cask install handbrake
 brew cask install imageoptim
 brew cask install lastfm
+brew cask install steam
 
 # Link installed apps to ~/Applications
 brew linkapps
