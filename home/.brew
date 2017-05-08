@@ -17,7 +17,6 @@ brew upgrade
 brew tap homebrew/versions
 brew tap caskroom/cask
 brew tap homebrew/dupes
-brew install brew-cask
 
 # General devel
 brew cask install atom
