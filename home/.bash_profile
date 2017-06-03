@@ -46,7 +46,7 @@ source $BASH_IT/bash_it.sh
 export HOMEBREW_CASK_OPTS="--appdir=/Applications"
 
 # Set path for various programs
-export PATH=/usr/local/bin:/usr/local/Cellar/llvm/4.0.0/bin:$PATH
+export PATH=$PATH:/usr/local/bin:/usr/local/Cellar/llvm/4.0.0_1/bin
 
 
 # Load customization
