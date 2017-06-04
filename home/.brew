@@ -24,9 +24,15 @@ brew cask install atom
 apm install Zen
 apm install atom-material-syntax
 apm install atom-material-ui
+apm install autocomplete-clang
 apm install dash
 apm install git-projects
+apm install haskell-grammar
+apm install ide-haskell
+apm install ide-haskell-cabal
+apm install ide-haskell-repl
 apm install language-cmake
+apm install language-haskell
 apm install language-latex
 apm install language-r
 apm install latex
@@ -111,6 +117,11 @@ brew cask install visual-studio-code
 brew tap homebrew/science
 brew install r
 apm install language-r
+
+# Haskell devel
+brew install ghc
+brew install cabal-install
+brew install haskell-stack
 
 # Research
 brew cask install zotero
