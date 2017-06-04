@@ -25,8 +25,10 @@ apm install Zen
 apm install atom-material-syntax
 apm install atom-material-ui
 apm install autocomplete-clang
+apm install autocomplete-haskell
 apm install dash
 apm install git-projects
+apm install haskell-ghc-mod
 apm install haskell-grammar
 apm install ide-haskell
 apm install ide-haskell-cabal
@@ -122,6 +124,10 @@ apm install language-r
 brew install ghc
 brew install cabal-install
 brew install haskell-stack
+cabal update
+cabal install happy
+cabal install ghc-mod
+cabal install stylish-haskell
 
 # Research
 brew cask install zotero
