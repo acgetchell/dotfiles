@@ -96,6 +96,7 @@ mkvirtualenv pelican
 workon pelican
 pip install --upgrade pelican
 pip install --upgrade markdown typogrify beautifulsoup4 webassets ghp-import
+# `source deactivate` to leave virtualenv
 
 # Docker + Jupyter + Sagemath
 brew cask install kitematic
