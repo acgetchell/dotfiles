@@ -130,6 +130,11 @@ cabal install happy
 cabal install ghc-mod
 cabal install stylish-haskell
 
+# Julia and iJulia
+brew cask install julia
+# julia> Pkg.add("IJulia")
+# See https://github.com/JuliaLang/IJulia.jl for details
+
 # Research
 brew cask install zotero
 # xpdf for X11, geomview and Zotero
