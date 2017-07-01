@@ -56,9 +56,15 @@ brew cask install github-desktop
 # Run brew doctor and fix PATH so that /usr/local/bin comes first
 
 # C++ devel
-brew cask install clion
+# brew cask install clion
+brew cask install cevelop
+brew install gdb
+echo "set startup-with-shell off" >> ~/.gdbinit
+# Create Keychain Cert to codesign gdb
+codesign -s gdbcert /usr/local/bin/gdb
+# Configure eclipse to point to /usr/local/bin/gdb
 brew cask install java
-brew install emscripten
+# brew install emscripten
 brew install open-mpi --c++11 --enable-mpi-thread-multiple
 brew install boost --c++11 --without-single --with-mpi
 brew install doxygen --with-doxywizard --with-graphviz --with-libclang
@@ -83,11 +89,16 @@ brew install cgal --c++11 --imaging --with-eigen3 --with-lapack
 
 # Python devel
 # MacOS default python doesn't work with pelican
-brew install python
-brew linkapps python
-sudo pip install --upgrade pip setuptools
-sudo pip install virtualenv virtualenvwrapper
-brew install pyenv
+brew cask install miniconda
+conda update conda
+conda config --add channels conda-forge
+conda config --set always_yes True
+conda config --set show_channel_urls True
+# brew install python
+# brew linkapps python
+# sudo pip install --upgrade pip setuptools
+# sudo pip install virtualenv virtualenvwrapper
+# brew install pyenv
 #sudo pip install pylint
 #sudo pip install bigfloat
 #sudo pip install sympy
