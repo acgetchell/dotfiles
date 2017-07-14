@@ -56,14 +56,15 @@ brew cask install github-desktop
 # Run brew doctor and fix PATH so that /usr/local/bin comes first
 
 # C++ devel
-# brew cask install clion
+# Eclipse/Cevelop and clion requires java
+brew cask install java
+brew cask install clion
 brew cask install cevelop
 brew install gdb
 echo "set startup-with-shell off" >> ~/.gdbinit
 # Create Keychain Cert to codesign gdb
 codesign -s gdbcert /usr/local/bin/gdb
 # Configure eclipse to point to /usr/local/bin/gdb
-brew cask install java
 # brew install emscripten
 brew install open-mpi --c++11 --enable-mpi-thread-multiple
 brew install boost --c++11 --without-single --with-mpi
