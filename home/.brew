@@ -132,6 +132,7 @@ brew cask install visual-studio-code
 # R devel
 brew tap homebrew/science
 brew install r
+brew cask install rstudio
 apm install language-r
 
 # Haskell devel

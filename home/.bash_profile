@@ -48,7 +48,6 @@ export HOMEBREW_CASK_OPTS="--appdir=/Applications"
 # Set path for various programs
 export PATH=$PATH:/usr/local/bin:/usr/local/opt/llvm/bin
 export PATH=$PATH:/usr/local/miniconda3/bin
-export PATH=$PATH:~/cov-analysis-macosx-2017.07/bin
 
 
 # Load customization
