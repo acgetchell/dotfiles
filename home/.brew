@@ -22,6 +22,7 @@ brew tap homebrew/dupes
 brew install git
 brew install git-subrepo
 brew install git-lfs
+brew install git-flow
 brew cask install atom
 # Packages:
 apm install Zen
@@ -55,7 +56,7 @@ apm install tool-bar-almighty
 apm install travis-ci-status
 apm install unity-ui
 
-brew cask install github-desktop
+brew cask install gitkraken
 # Run brew doctor and fix PATH so that /usr/local/bin comes first
 
 # C++ devel
@@ -120,7 +121,7 @@ docker pull jupyter/datascience-notebook
 docker pull sagemath/sagemath-jupyter
 
 # C# Devel
-brew install mono
+brew cask install dotnet
 brew cask install visual-studio-code
 # brew install node
 # npm install -g yo bower
