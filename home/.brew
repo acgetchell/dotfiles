@@ -63,18 +63,18 @@ brew cask install gitkraken
 # Eclipse/Cevelop and clion requires java
 brew cask install java
 brew cask install clion
-brew cask install cevelop
+# brew cask install cevelop
 brew install gdb
 echo "set startup-with-shell off" >> ~/.gdbinit
 # Create Keychain Cert to codesign gdb
 codesign -s gdbcert /usr/local/bin/gdb
 # Configure eclipse to point to /usr/local/bin/gdb
 # brew install emscripten
-brew install open-mpi --c++11 --enable-mpi-thread-multiple
-brew install boost --c++11 --without-single --with-mpi
-brew install doxygen --with-doxywizard --with-graphviz --with-libclang
+# brew install open-mpi --c++11 --enable-mpi-thread-multiple
+brew install boost --without-single
+brew install doxygen --with-graphviz --with-llvm --with-qt
 # GraphViz generates nice diagrams for doxygen
-brew linkapps qt
+brew linkapps
 # Requires xquartz and a full install of Xcode
 brew cask install xquartz
 # To run X11/Xquartz apps locally from remote clients
@@ -87,10 +87,10 @@ brew install cpputest
 # Manual install of gmock and gtest
 brew install ninja
 # Intel thread building blocks
-brew install tbb --c++11
+brew install tbb
 brew install cppcheck
 brew install eigen
-brew install cgal --c++11 --imaging --with-eigen3 --with-lapack
+brew install cgal --with-eigen --with-qt
 
 # Python devel
 # MacOS default python doesn't work with pelican
@@ -158,16 +158,17 @@ brew cask install zotero
 # xpdf for X11, geomview and Zotero
 brew install homebrew/X11/xpdf
 brew cask install anki
+brew cask install xquartz
 # Geomview generates 2D and 3D diagrams for CGAL
 # but it needs xquartz first
 brew install geomview
-brew install ipe
+brew cask install ipe
 
 # Utilities
 #brew cask install shiftit
 brew install ag
 #brew cask install fiddler
-brew cask install crashplan
+#brew cask install crashplan
 brew cask install keybase
 brew cask install prey
 #brew cask install screenhero
@@ -185,22 +186,24 @@ homesick clone https://github.com/acgetchell/dotfiles.git
 git clone https://github.com/Bash-it/bash-it.git ~/.bash_it
 ~/.bash_it/install.sh
 # Pull .bash_profile from github dotfiles, overwriting the one bash_it just made
-homesick pull dotfiles
+homesick clone acgetchell/dotfiles
 homesick symlink dotfiles
 
 # Applications
 brew cask install cleanmymac
-brew cask install box-sync
+# brew cask install box-sync
+brew cask install evernote
+brew cask install firefox
 brew cask install gitter
 brew cask install google-chrome
-brew cask install macid
+# brew cask install macid
 brew cask install mactex
 # Fix path in .bashrc so tlmgr is accessible
 sudo tlmgr update --self
 sudo tlmgr update --all
-brew cask install menumeters
-brew cask install skype
-brew cask install torbrowser
+# brew cask install menumeters
+# brew cask install skype
+# brew cask install torbrowser
 brew cask install vmware-fusion
 # So LaTexIt can export to SVG
 brew install pdf2svg
@@ -210,8 +213,8 @@ brew cask install battle-net
 brew cask install garmin-basecamp
 brew cask install handbrake
 brew cask install imageoptim
-brew cask install lastfm
-brew cask install steam
+# brew cask install lastfm
+# brew cask install steam
 
 # Link installed apps to ~/Applications
 brew linkapps
