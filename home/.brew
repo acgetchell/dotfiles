@@ -134,10 +134,12 @@ brew cask install visual-studio-code
 # npm install -g gulp
 
 # R devel
-brew tap homebrew/science
+brew tap brewsci/science
 brew install r
 brew cask install rstudio
 apm install language-r
+# STAN
+brew install cmdstan
 
 # Haskell devel
 brew install ghc
