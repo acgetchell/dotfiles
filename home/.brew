@@ -155,6 +155,12 @@ brew cask install julia
 # julia> Pkg.add("IJulia")
 # See https://github.com/JuliaLang/IJulia.jl for details
 
+# .NET
+brew cask install visual-studio-code
+brew install node-js
+brew cask install dotnet-sdk
+
+
 # Research
 brew cask install zotero
 # xpdf for X11, geomview and Zotero
