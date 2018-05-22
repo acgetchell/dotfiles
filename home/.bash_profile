@@ -48,7 +48,7 @@ export HOMEBREW_CASK_OPTS="--appdir=/Applications"
 # Set path for various programs
 export PATH=$PATH:/usr/local/bin:/usr/local/opt/llvm/bin
 export PATH=$PATH:/usr/local/miniconda3/bin
-export PATH=$PATH:/usr/local/Cellar/llvm/5.0.1/share/clang
+export PATH=$PATH:/usr/local/Cellar/llvm/6.0.0/share/clang
 
 
 # Load customization
