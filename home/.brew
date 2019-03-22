@@ -63,7 +63,7 @@ brew cask install gitkraken
 # Eclipse/Cevelop and clion requires java
 brew cask install java
 brew cask install clion
-# brew cask install cevelop
+brew cask install sourcetrail
 brew install gdb
 echo "set startup-with-shell off" >> ~/.gdbinit
 # Create Keychain Cert to codesign gdb

@@ -47,9 +47,16 @@ export HOMEBREW_CASK_OPTS="--appdir=/Applications"
 
 # Set path for various programs
 export PATH=$PATH:/usr/local/bin:/usr/local/opt/llvm/bin
-export PATH=$PATH:/usr/local/miniconda3/bin
-export PATH=$PATH:/usr/local/Cellar/llvm/6.0.0/share/clang
+# export PATH=$PATH:/usr/local/Cellar/qt/5.12.0/bin
+export PATH=$PATH:/usr/local/Cellar/llvm/7.0.1/share/clang
 
 
 # Load customization
 source ~/.bashrc
+
+# Setting PATH for Python 3.6
+# The original version is saved in .bash_profile.pysave
+PATH="/Library/Frameworks/Python.framework/Versions/3.6/bin:${PATH}"
+export PATH
+
+export PATH="$HOME/.cargo/bin:$PATH"
