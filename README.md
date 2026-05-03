@@ -18,8 +18,7 @@ dotfiles/
 │   └── .zshrc              # stows to ~/.zshrc
 └── agents/
     └── .agents/skills/     # stows to ~/.agents/skills/
-        ├── rust-style-hygiene/SKILL.md
-        └── rust-test-quality/SKILL.md
+        └── */SKILL.md
 ```
 
 ## Fresh-machine setup
@@ -84,8 +83,7 @@ readlink ~/.zshrc
 readlink ~/.gitconfig
 
 # global skills are available from ~/.agents/skills
-ls ~/.agents/skills/rust-style-hygiene/SKILL.md
-ls ~/.agents/skills/rust-test-quality/SKILL.md
+ls ~/.agents/skills/*/SKILL.md
 
 # git reads public config plus local include
 git config --global --get user.email
@@ -104,7 +102,7 @@ Expected symlink shape:
 ```text
 ~/.zshrc                  -> projects/dotfiles/zsh/.zshrc
 ~/.gitconfig              -> projects/dotfiles/git/.gitconfig
-~/.agents/skills/rust-*   -> ../../projects/dotfiles/agents/.agents/skills/rust-*
+~/.agents/skills/*        -> ../../projects/dotfiles/agents/.agents/skills/*
 ```
 
 ## Local override files

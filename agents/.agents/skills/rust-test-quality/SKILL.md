@@ -1,6 +1,6 @@
 ---
 name: rust-test-quality
-description: "Evaluate Rust code for test coverage, doctests, and documentation quality on changed code. USE FOR: Rust test review, missing or trivial doctests on public APIs, missing /// docs on private helpers, weak assertions, missing boundary/error/negative cases, brittle or duplicated tests, doctest correctness vs actual behavior. DO NOT USE FOR: style/naming/import critique (use rust-style-hygiene), non-Rust code, or unchanged files."
+description: "Evaluate Rust code for test coverage, doctests, public API panic behavior, and documentation quality on changed code. USE FOR: Rust test review, public functions that panic for recoverable conditions, missing or trivial doctests on public APIs, missing /// docs on private helpers, weak assertions, missing boundary/error/negative cases, brittle or duplicated tests, doctest correctness vs actual behavior. DO NOT USE FOR: style/naming/import critique (use rust-style-hygiene), non-Rust code, or unchanged files."
 ---
 
 # rust-test-quality
@@ -40,6 +40,7 @@ Prefer:
 ### 2. Public Functions (API Quality)
 
 All public functions must include **doctests**.
+Public functions should not panic for recoverable conditions. They should either be truly infallible or return `Result` / `Option`.
 
 Doctests must:
 - compile
@@ -51,10 +52,26 @@ Flag:
 - missing doctests
 - trivial doctests that add no value
 - examples that don't match actual behavior
+- public API paths that can panic on recoverable input or state
+- `unwrap`, `expect`, unchecked indexing, `assert!`, or `panic!` in public API paths unless they enforce a documented invariant that cannot be represented as a normal error
+- undocumented panic preconditions
 
 ---
 
-### 3. Private Functions (Design Clarity)
+### 3. Non-Panicking Public Behavior
+
+For public APIs, prefer recoverable behavior that callers can handle:
+
+- return `Result` for errors with useful diagnostics
+- return `Option` when absence is the only expected failure mode
+- keep infallible functions genuinely infallible
+- document any remaining panic as an invariant violation or explicit precondition
+
+Tests and doctests should verify that recoverable bad inputs return `Err` / `None` instead of panicking.
+
+---
+
+### 4. Private Functions (Design Clarity)
 
 All private functions must include `///` comments explaining:
 
@@ -67,7 +84,7 @@ Reject:
 
 ---
 
-### 4. Quality of Tests
+### 5. Quality of Tests
 
 Evaluate whether tests:
 
