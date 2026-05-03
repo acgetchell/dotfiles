@@ -1,0 +1,7 @@
+[user]
+	email = adam@adamgetchell.org
+	name = Adam Getchell
+# Per-machine overrides (e.g. coderabbit.machineId, work email, signing key).
+# Lives in $HOME, never tracked by this repo.
+[include]
+	path = ~/.gitconfig.local

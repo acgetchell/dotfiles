@@ -1,1 +1,7 @@
 .DS_Store
+*.swp
+*.bak
+# Per-machine overrides (do not commit)
+Brewfile.local
+*.gitconfig.local
+*.zshrc.local
