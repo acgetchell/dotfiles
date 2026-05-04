@@ -1,6 +1,6 @@
 ---
 name: cargo-rdme-adoption
-description: "Standardize a Rust crate's docs.rs landing page and README using cargo-rdme, treating src/lib.rs //! as the single source of truth and auto-generating the README's API section. USE FOR: adopting cargo-rdme on a new or existing crate; producing a uniform docs.rs front page across multiple crates; migrating away from #![doc = include_str!(\"../README.md\")] / #![cfg_attr(any(doc, doctest), doc = include_str!(\"../README.md\"))]; restructuring src/lib.rs //! to be the canonical landing page (pitch + minimal doctest + concepts); reformatting README.md to the standard layout (badges → <!-- cargo-rdme --> marker → install/MSRV/features/contributing/license); adding cargo rdme --check to CI; adding docs-readme/docs-readme-check recipes to a justfile; producing a .cargo-rdme.toml when defaults are not enough. DO NOT USE FOR: writing substantive doc content (use crate-docs-update); commit messages (use changelog-commit-message); reviewing /// public-API doc sections (use rust-api-docs); Cargo.toml / feature flag / MSRV review (use rust-cargo-hygiene); non-Rust repositories; repositories that already correctly use cargo-rdme and only need content edits."
+description: "Standardize a Rust crate's docs.rs landing page and README using cargo-rdme, treating src/lib.rs //! as the single source of truth and auto-generating the README's API section. USE FOR: adopting cargo-rdme on a new or existing crate; producing a uniform docs.rs front page across multiple crates; migrating away from #![doc = include_str!(\"../README.md\")] / #![cfg_attr(any(doc, doctest), doc = include_str!(\"../README.md\"))]; restructuring src/lib.rs //! to be the canonical landing page (pitch + minimal doctest + concepts); reformatting README.md to the standard layout (badges → hand-written GitHub landing page → cargo-rdme API guide marker → examples/docs/contributing/citation); adding cargo rdme --check to CI; adding docs-readme/docs-readme-check recipes to a justfile; producing a .cargo-rdme.toml when defaults are not enough. DO NOT USE FOR: writing substantive doc content (use crate-docs-update); commit messages (use changelog-commit-message); reviewing /// public-API doc sections (use rust-api-docs); Cargo.toml / feature flag / MSRV review (use rust-cargo-hygiene); non-Rust repositories; repositories that already correctly use cargo-rdme and only need content edits."
 ---
 
 # cargo-rdme-adoption
@@ -77,11 +77,12 @@ Goes in `lib.rs` `//!` (visible on docs.rs *and* in README):
 - brief feature/concepts overview
 - pointers to deeper crate items via intra-doc links such as `[Thing](crate::Thing)`
 - audience / when-to-use / when-not-to-use, if short
-- validation/safety/contract pointers, if short
+- **scientific basis / scope / contract sections**, even when long: acceptance formulae, MCMC/Metropolis-Hastings contract bullets, log-space conventions, "what the crate provides" / "what the crate does not prove", invariants stack, validation hierarchy, numerical-semantics notes, safety/contract pointers — these describe the API contract and belong on docs.rs alongside the API they shape
 
 Stays only in README (outside markers):
 
 - badges (CI, crates.io, docs.rs, codecov, DOI, license)
+- short hand-written GitHub landing page before the cargo-rdme marker: one-paragraph pitch, status/pre-release note, install snippet, MSRV, Cargo feature flags, minimal quick start, and a "which API should I choose?" guide
 - `cargo add <crate>` install snippet
 - MSRV statement
 - Cargo features table
@@ -92,7 +93,7 @@ Stays only in README (outside markers):
 - repo-relative links to `docs/*.md`, `examples/`, `benches/`, `CHANGELOG.md`
 - GitHub-only markdown (collapsible blocks, alerts, relative images)
 
-The `//!` block targets API readers on docs.rs. Marketing, install instructions, governance, and repo-internal links belong outside the markers.
+The `//!` block targets API readers on docs.rs and becomes the README's detailed API guide. The README still needs a GitHub landing page before that generated block so new users can install, run a minimal example, and pick the right API without scrolling through long-form contract documentation. Governance and repo-internal links belong outside the markers.
 
 ### 3. Restructure `src/lib.rs` `//!`
 
@@ -104,6 +105,7 @@ Apply the [standard lib.rs template](#standard-libsrs-template). Key constraints
 - prefer the intra-doc-link form `[Thing](crate::Thing)` over bare backticked names so cargo-rdme can rewrite the link to docs.rs in the README; reference-style links work too
 - use hidden setup lines (`# use crate::...;`) inside doctests freely — cargo-rdme strips them from the README
 - avoid headings deeper than `#` and `##` inside `//!`; cargo-rdme will bump them based on the README's surrounding heading level
+- **lead with short, punchy sections; defer depth to later sections.** `//!` is the canonical long-form crate documentation and is allowed to be long, but the first screen on docs.rs (and the top of the cargo-rdme region in the README) should be scannable. Order content roughly: (1) one-line crate title, (2) pre-release / status banner if applicable, (3) one-paragraph elevator pitch, (4) audience / "Use this crate when you want" bullets, (5) `# Features` capability list, (6) **then** the deeper contract content — `# Scientific basis and scope`, `# Numerical semantics`, validation hierarchy, invariants stack, long worked examples. A reader who only reads the first scroll should already know what the crate does, who it is for, and what it offers; readers who want depth scroll on. Resist the urge to lead with the heaviest section just because it is the most rigorous — that is the right content in the wrong slot.
 
 If the crate currently has additional hand-written `//!` content beyond what the README needs (e.g. delaunay-style "validation hierarchy" contract docs), keep that content **inside** the same `//!` block — it will appear on both surfaces, which is usually correct since GitHub readers also benefit from it. If you genuinely want content on docs.rs only, move it into a module-level `//!` (e.g. `src/contract.rs` with `//!` docs and `pub mod contract;`).
 
@@ -111,9 +113,10 @@ If the crate currently has additional hand-written `//!` content beyond what the
 
 Apply the [standard README template](#standard-readme-template). Key constraints:
 
-- badges block sits at the top, before any heading or the marker
-- a single `<!-- cargo-rdme -->` marker (no `start`/`end` yet — cargo-rdme inserts those on first run) marks where the `//!` block will be injected
-- everything below the marker is GitHub-only content (install, MSRV, features, examples that need external setup, roadmap, contributing, license)
+- badges block sits at the top, before any landing prose or marker
+- the README should lead like a hand-written GitHub landing page (matching sibling crates such as delaunay when applicable): short pitch, project status, install snippet, MSRV, Cargo features, minimal quick-start example, and a compact API-choice guide
+- a single `<!-- cargo-rdme -->` marker (no `start`/`end` yet — cargo-rdme inserts those on first run) marks where the `//!` block will be injected as the detailed API guide
+- everything below the marker is GitHub-only content that remains useful after the detailed API guide: examples directory links, documentation map, ecosystem, contributing, citation, references, license
 - remove any content from the README that now lives in `//!` — duplicating it defeats the purpose and risks drift between editing rounds
 - repo-relative links (`./docs/workflows.md`, `./CHANGELOG.md`) belong outside the marker because they break on docs.rs
 
@@ -176,6 +179,63 @@ Run all of the following and confirm clean exits:
 
 If `[package.metadata.docs.rs]` enables features that gate items in `//!`, verify those examples still compile with the gated features off.
 
+### 10. Document the generation
+
+Future editors (human and agent) need to know that the README's marker region is generated. Add documentation in three places so this is hard to miss:
+
+- **Inline in `README.md`**, immediately above the cargo-rdme markers — a short HTML comment that explains the region is generated and points at the regenerate command. This is the most local hint and survives even if other docs are skipped.
+
+  ```markdown path=null start=null
+  <!-- The block between the cargo-rdme markers below is generated from src/lib.rs //!.
+       Do not edit it by hand. To update: edit src/lib.rs and run `just docs-readme`. -->
+  <!-- dprint-ignore-start -->
+  <!-- cargo-rdme start -->
+  ```
+
+- **`AGENTS.md`** (or equivalent agent-instruction file): add a `## Documentation generation` section that names cargo-rdme as the generator, defines the marker block, lists the rules (never hand-edit the region; edit `//!` and regenerate; CI runs `cargo rdme --check`), explains why `<!-- dprint-ignore-* -->` markers are present if applicable, and clarifies that outside-markers content is hand-written. Place it adjacent to the existing `## Publishing note` / `## Editing tools policy` sections so doc-related guidance lives together. Also amend the `## Publishing note` section to remind users to run `just docs-readme` before tagging a release.
+
+- **`CONTRIBUTING.md`** (if the repo has one): mirror the `AGENTS.md` rules in shorter form so human contributors see the same guidance during a normal PR flow.
+
+If the repo's `justfile` `help-workflows` or `setup` recipes print a guide, add a one-line mention of `just docs-readme` / `just docs-readme-check` there too.
+
+### 11. Duplication audit
+
+After cargo-rdme has populated the README, scan for facts that now appear both inside the cargo-rdme markers (generated from `//!`) and outside them (hand-written README content). The README is allowed to have a **short hand-written landing summary** before the generated block, but it should not carry long verbatim copies of the same API sections. The goal is: concise orientation before the generated API guide; detailed content in `//!`.
+
+A quick mechanical check: extract the outside-markers content and grep it for keywords that appear in `//!`.
+
+```bash
+awk '/<!-- cargo-rdme end -->/{out=1; next} out{print}' README.md \
+  | grep -nE 'Pre-release|Quickstart|Use this crate|Features|Scientific|Numerical'
+```
+
+Common duplicate patterns to look for and either shorten or remove:
+
+- pre-release / status banners (keep at most a one-line landing banner outside the markers)
+- audience or "Use this crate when you want" bullets (keep a shorter landing list if useful; do not duplicate the full generated list verbatim)
+- feature / capability lists (outside markers should be Cargo feature flags or a short user-facing summary, not a second long capability list)
+- minimal-example code blocks (`//!` carries a runnable doctest; the README may keep a compact common-path quick start, but should not repeat every generated worked example)
+- "What the crate provides" / "What the crate does not prove" framing
+- repeated CITATION / REFERENCES sentences when those already have dedicated sections lower in the README
+- `cargo add <crate>` snippets that double as both Quickstart leadin and Installation
+- Scientific-basis or contract paragraphs that lingered in the README after their content moved into `//!`
+
+**Rule of thumb:** if a long API fact appears twice in the rendered README, delete or shorten the version OUTSIDE the markers — `//!` is the source of truth. If the outside-markers text is a concise landing summary that helps a new GitHub reader orient quickly (pitch, status, install, quick start, API-choice guide), keep it short and link/scroll to the generated API guide for depth. If a section feels valuable on docs.rs but currently only lives outside the markers, move it INTO `//!` instead of duplicating it.
+
+Sections that legitimately stay outside the markers — even if they share keywords with `//!` — are those that serve a different audience or purpose and would be noise or too package-manager/repo-specific on docs.rs:
+
+- hand-written landing pitch / status / quick start / API-choice guide before the marker — concise GitHub orientation, distinct from long-form generated API docs
+- `## Installation` or quick-start `cargo add` snippets — package-manager flavored, addresses installers rather than API readers
+- `## Minimum Supported Rust Version` or brief MSRV sentence
+- `## Cargo features` table/list — explicit feature names with how to enable; distinct from `//!` capability bullets that just note the feature exists
+- `## Examples` directory listing with `examples/foo.rs` repo links — distinct from `//!` doctests, which are inline and runnable
+- `## Documentation` — repo-internal `docs/*.md` and `CHANGELOG.md` links that wouldn't resolve on docs.rs
+- `## Ecosystem`, `## Contributing`, `## Citation`, `## References`, `## AI Agents`, license sections
+
+When you delete an outside-markers section to remove a duplicate, preserve any unique links it carried by folding them into a section that stays — most often `## Documentation`. For example, removing a `## Project status` section that duplicated the pre-release banner is fine, but keep the `CHANGELOG.md` link by adding it to `## Documentation`.
+
+Finally: outside-markers sections should themselves be **short and punchy**. Their job is to orient readers and point them at the right place, not to repeat the long-form content already in `//!`. A few sentences, a compact quick-start example, and a link list per section is usually enough.
+
 ## Standard lib.rs template
 
 ````rust path=null start=null
@@ -229,37 +289,46 @@ Crate attributes (`#![forbid(...)]`, `#![warn(...)]`, etc.) go *after* the `//!`
 [![codecov](https://codecov.io/gh/<owner>/<repo>/graph/badge.svg)](https://codecov.io/gh/<owner>/<repo>)
 [![License](https://img.shields.io/crates/l/crate-name.svg)](./LICENSE)
 
-<!-- cargo-rdme -->
+Short hand-written pitch for GitHub readers.
 
-## Installation
+🚧 **Pre-release (0.x)** — Short status sentence, if applicable.
+
+## 🚀 Quick start
 
 ```sh
 cargo add crate-name
 ```
 
-## Minimum Supported Rust Version
-
 Rust 1.XX or newer.
 
-## Cargo features
+Minimal example focused on the common path.
+
+## 🧭 Choosing an API
+
+- Start with the simplest API for the common path.
+- Escalate to specialized APIs when the user's state or workflow needs them.
+
+## 📦 Cargo features
 
 - `default` — ...
 - `serde` — enable serde support for ...
 
-## Project status
+## 📚 API guide
 
-🚧 Pre-release / Stable / Maintenance — short status sentence.
+<!-- The block between the cargo-rdme markers below is generated from src/lib.rs //!.
+     Do not edit it by hand. To update: edit src/lib.rs and run `just docs-readme`. -->
+<!-- cargo-rdme -->
 
-## Examples
+## 🧪 Examples
 
 See [`examples/`](./examples/) and [`docs/workflows.md`](./docs/workflows.md) for end-to-end recipes that need external setup beyond a single doctest.
 
-## Roadmap
+## 🗺️ Roadmap
 
 - [x] item
 - [ ] item
 
-## Contributing
+## 🤝 Contributing
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md), [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md), and [SECURITY.md](./SECURITY.md).
 
@@ -376,6 +445,19 @@ Common gotchas:
 - **Heading collisions.** If `//!` uses `# Foo` and the README places the marker under a `## Section`, cargo-rdme bumps the injected headings. Use `--heading-base-level` or restructure if the result looks off.
 - **Repo-relative links inside `//!`.** Links like `./docs/workflows.md` resolve on GitHub (after cargo-rdme injects them) but break on docs.rs. Either move those links outside the marker (so they only appear in the README), or convert them to absolute `https://github.com/<owner>/<repo>/blob/main/docs/workflows.md` URLs.
 - **`[package.metadata.docs.rs]` features.** If `//!` examples depend on default-off features, ensure docs.rs metadata enables them so the rendered page compiles.
+- **Unresolvable intra-doc links via re-exports.** cargo-rdme's heuristic intralink resolver does NOT follow `pub use private_mod::Type` re-exports. If your crate root re-exports types from private modules (e.g. `mod traits;` + `pub use traits::Target;`), `[Target](crate::Target)` will emit `warning: Could not resolve definition of crate::Target` and `cargo rdme --check` will exit `4` (warnings). Three workarounds, in order of preference: (a) drop the `(crate::Type)` form for that specific link and use plain backticks (`` `Target<S>` ``); the rustdoc-shortcut form `[`Type`]` elsewhere in `//!` still resolves natively on docs.rs, (b) use an absolute docs.rs URL (`[`Target`](https://docs.rs/<crate>/latest/<crate>/trait.Target.html)`), or (c) make the underlying module `pub mod` so the path is reachable. Run `cargo rdme` once after writing `//!` to see which links fail to resolve, then patch them. The lib.rs intra-doc links remain valid for native rustdoc rendering on docs.rs even when cargo-rdme can't render them in the README.
+- **`cargo rdme` refuses to overwrite a dirty README.** First run after inserting the marker exits with `error: not updating README: it has uncommitted changes (use --force to bypass this check)`. This is intentional. Pass `--force` to seed the marker region the first time. After that, ordinary `cargo rdme` runs work without `--force` against a clean tree.
+- **dprint markdown formatter conflicts with cargo-rdme's preserved line wrapping.** If the repo formats markdown with `dprint` (`dprint.json` with the markdown plugin) and `markdown.textWrap` is set to `"never"` or `"always"`, dprint will rewrap the cargo-rdme region and `cargo rdme --check` will then see drift. Fix by wrapping the cargo-rdme region with `<!-- dprint-ignore-start -->` / `<!-- dprint-ignore-end -->` markers placed around (not inside) the cargo-rdme markers, e.g.:
+
+  ```text
+  <!-- dprint-ignore-start -->
+  <!-- cargo-rdme start -->
+  ...generated content...
+  <!-- cargo-rdme end -->
+  <!-- dprint-ignore-end -->
+  ```
+
+  cargo-rdme leaves both dprint comments alone (they sit outside its own markers); dprint sees its ignore region and skips formatting. The same problem affects `prettier` (`<!-- prettier-ignore-start -->` / `<!-- prettier-ignore-end -->`), `markdownlint` (`<!-- markdownlint-disable --> ... <!-- markdownlint-enable -->`), and other markdown formatters with similar disable directives. Inspect the repo's markdown tooling before running `cargo rdme` for the first time and add the appropriate ignore markers as part of the migration.
 
 ## Per-crate convention sensitivity
 
@@ -384,6 +466,7 @@ Read the existing repo before adopting standard layouts wholesale.
 - some crates already have a `prelude` module; the `//!` quick-start example should use it (`use crate_name::prelude::*;`)
 - some crates ship multiple scoped preludes (e.g. delaunay's `prelude::triangulation`, `prelude::geometry`); pick the smallest one that supports the example
 - if the crate has long-running contract docs (validation hierarchy, invariants stack), preserve them — don't trim contract docs to fit a "minimal landing page" ideal
+- **API contract sections in the README belong in `lib.rs` `//!`, not outside the markers.** If the README has a "Scientific basis", "Scope", "Contract", "What the crate provides", "What the crate does not prove", "Numerical semantics", "Validation and guarantees", or similar section that describes how the public API is meant to be used (acceptance rules, log-space conventions, what's proven vs. caller's responsibility), move it INTO `//!` during the migration. These sections are docs.rs-relevant even when long — leaving them outside the markers means docs.rs readers miss the contract that shapes correct API use. Convert any repo-relative links in the moved content (`./docs/foo.md`) to absolute GitHub URLs so they still resolve on docs.rs.
 - match the badge set used by sibling crates in the same ecosystem (consistency across crates is a goal of this skill)
 
 ## Output Format
@@ -407,10 +490,11 @@ Read the existing repo before adopting standard layouts wholesale.
 ### Changes made
 
 - `src/lib.rs`: attributes removed, `//!` block written/extended
-- `README.md`: API content removed, marker inserted, badges/install/etc. preserved
+- `README.md`: hand-written GitHub landing page added/preserved before the marker, generated API marker inserted, duplicate long-form API content removed outside the markers, inline HTML comment added above the markers
 - `.cargo-rdme.toml`: created (or skipped, with reason)
 - CI workflow: cargo-rdme install + check step added at <line>
 - justfile: `_ensure-cargo-rdme`, `docs-readme`, `docs-readme-check` added; aggregator recipes updated
+- `AGENTS.md` / `CONTRIBUTING.md`: `## Documentation generation` section added explaining the cargo-rdme flow; `## Publishing note` (if present) updated to mention `just docs-readme` before release
 
 ### Validation
 
@@ -418,6 +502,13 @@ Read the existing repo before adopting standard layouts wholesale.
 - `cargo test --doc` — pass / fail (with diagnostics)
 - `cargo rdme --check` — pass / fail (with diff if drift)
 - local docs.rs preview spot-check (intralinks resolve, code blocks render)
+
+### Duplication audit
+
+- duplicates found between marker region and outside-markers content (list each with line numbers)
+- which outside-markers content was shortened or deleted and where any unique links from a removed section were re-homed (typically `## Documentation`)
+- outside-markers sections kept as legitimate non-duplicates or concise landing summaries (pitch/status/install/MSRV/Cargo features/quick start/API-choice guide, Examples directory, Documentation, Ecosystem, Contributing, Citation, References, License)
+- confirmation that `//!` leads with short, punchy sections (pitch → use-cases → features) before deeper contract content
 
 ### Follow-ups
 
