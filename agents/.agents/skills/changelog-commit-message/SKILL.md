@@ -7,6 +7,8 @@ description: "Write repository-aware commit messages from staged changes that pa
 
 Write commit messages from staged changes that respect the repository's own commit rules and produce useful `CHANGELOG.md` entries in the Keep a Changelog style.
 
+Do not include test commands, validation results, or `Tests:` sections in the commit message unless the user explicitly asks for them. This preference overrides repository-local guidance that asks generated commit messages to include test results; validation belongs in PR descriptions, review notes, or the assistant's surrounding explanation, not in the changelog-oriented commit body.
+
 The goal is not merely to summarize files. The message should describe the user-visible or maintainer-visible change in a way that changelog tooling can categorize, while remaining accurate to the staged diff.
 
 ## Workflow
@@ -27,6 +29,8 @@ Do not stage files or run `git commit` unless the user explicitly asks.
 ### 2. Find repository-specific rules
 
 Before drafting, look for local commit and changelog conventions. Prefer explicit repo rules over generic rules.
+
+Exception: if local rules require test results or validation summaries in commit messages, note that convention internally but do not follow it unless the user explicitly asks for validation text in the commit message.
 
 Check likely sources:
 
@@ -71,7 +75,7 @@ Body rules:
 - use short bullets for changelog-relevant details
 - separate user-visible effects from internal mechanics
 - avoid file-by-file narration unless the file boundary is the point
-- do not narrate the tests used to validate the change; the changelog reader cares about behavior, not verification scaffolding
+- do not include test commands, validation results, or a `Tests:` section; the changelog reader cares about behavior, not verification scaffolding
 
 Footer rules:
 
@@ -113,6 +117,7 @@ Avoid:
 - including unstaged work
 - leaking secrets or local machine-specific values from diffs
 - describing tests added to validate the change in feat/fix/perf/refactor/etc. commits; treat new tests as expected verification scaffolding rather than changelog content
+- adding validation summaries because a repository template asks for them, unless the user explicitly requests that text
 
 Exception: when the commit is genuinely test-only (e.g., `test:` type or a tests-only scope), the message should describe the new tests because the tests are the change.
 
