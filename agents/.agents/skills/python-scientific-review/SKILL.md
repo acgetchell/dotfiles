@@ -1,6 +1,6 @@
 ---
 name: python-scientific-review
-description: "Perform rigorous senior-level review of Python scientific-computing scripts and tests that support Rust crates. USE FOR: Python validation scripts, benchmarks, data generation, diagnostics, numerical/geometric algorithms, reproducibility review, deterministic random seeding, NumPy/SciPy correctness, Hypothesis/property testing, Rust interoperability, file format/coordinate/indexing compatibility, scientific test quality, and production-quality Python in Rust repositories. DO NOT USE FOR: general Python web/app code, formatting-only cleanup, non-scientific scripts, Rust code review (use rust-production-review or other Rust skills), or unrelated unchanged code."
+description: "Perform rigorous senior-level review of Python that implements numerical, geometric, statistical, or scientific-computing logic alongside a Rust crate. USE FOR: Python that implements numerical/geometric/statistical/topological algorithms, validates Rust numerical output, checks reproducibility of scientific results, generates scientific fixtures (point clouds, meshes, distributions), audits NumPy/SciPy correctness, reviews Hypothesis property tests over numerical inputs, or checks Rust interoperability for numerical formats (coordinates, indexing, dtypes). DO NOT USE FOR: changelog generators, benchmark runners, release helpers, CI scripts, fixture/diagnostic CLIs, or other Python support tooling (use python-support-scripts); general Python web/app code; formatting-only cleanup; Rust code review (use rust-production-review or other Rust skills); or unrelated unchanged code."
 ---
 
 # python-scientific-review
@@ -13,12 +13,14 @@ These scripts often validate Rust crates, generate datasets, run benchmarks, or 
 
 Focus on newly added or modified Python code that:
 
-- validates or cross-checks a Rust crate
-- generates fixtures, benchmark inputs, plots, reports, or diagnostics
 - implements numerical, geometric, topological, statistical, or linear algebra logic
-- reads or writes files consumed by Rust code
-- tests scientific algorithms or invariants
-- uses NumPy, SciPy, pandas, matplotlib, pytest, Hypothesis, multiprocessing, or random data generation
+- cross-checks Rust numerical output for correctness
+- generates scientific fixtures (point clouds, meshes, distributions, reference data)
+- tests scientific algorithms or invariants over generated inputs
+- uses NumPy, SciPy, pandas, matplotlib, or Hypothesis on numerical data
+- reads or writes numerical files consumed by the Rust crate (coordinates, dtypes, indexing)
+
+If the Python is dev tooling (changelog generators, benchmark runners, release helpers, CI scripts, diagnostic CLIs that don't implement numerical logic), use `python-support-scripts` instead.
 
 Ignore unrelated unchanged code unless needed to understand data formats, invariants, or Rust interoperability.
 

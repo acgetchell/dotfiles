@@ -16,37 +16,79 @@ The goal is not to chase coverage percentages. Use coverage as a signal to find 
 Start by inspecting the repository:
 
 - verify `.github/workflows/codecov.yml` exists
-- read the workflow to identify test commands, coverage generators, artifact names, upload steps, flags, and paths
-- check for `codecov.yml`, `.codecov.yml`, `coverage.xml`, `lcov.info`, `tarpaulin`, `cargo-llvm-cov`, `grcov`, `pytest-cov`, `nyc`, or other coverage tooling
+- read the workflow to identify test commands, the `cargo llvm-cov` invocation, artifact names, upload steps, flags, and paths
+- check for `codecov.yml`, `.codecov.yml`, and the `lcov.info` artifact produced by `cargo-llvm-cov`
 - identify the language test framework from project files instead of assuming one
 
 If the workflow is missing or renamed, search `.github/workflows/` and explain the mismatch before proceeding.
 
-### 2. Fetch the latest Codecov workflow run
+### 2. Audit `codecov.yml` itself
 
-Use GitHub CLI when available:
+`codecov.yml` (or `.codecov.yml`) defines what "good coverage" means for the project. Read it before reviewing the report so findings align with the policy that is actually enforced.
 
-- `gh run list --workflow codecov.yml --limit 5 --json databaseId,status,conclusion,headBranch,headSha,displayTitle,createdAt,url`
-- prefer the latest completed run for the current branch when the task is branch-specific
-- otherwise use the latest completed run for `.github/workflows/codecov.yml`
-- inspect the run with `gh run view <run-id> --log` and `gh run view <run-id> --json artifacts,jobs,conclusion,url`
-- download coverage artifacts with `gh run download <run-id> --dir <tmp-dir>` when artifacts exist
+Check:
 
-If the Codecov report is available through a PR comment or status, inspect it:
+- `coverage.status.project` and `coverage.status.patch` thresholds, including `target`, `threshold`, and `informational`
+- `coverage.range` (the color band shown in the UI)
+- `flags` and per-flag carryforward, used for matrix builds (OS variants, feature combinations)
+- `component_management` definitions when subsystems have different policies
+- `ignore:` blocks that exclude paths from coverage entirely
+- `comment` configuration so the PR comment exposes the right information
 
-- `gh pr view --json comments,statusCheckRollup,headRefName,headRefOid`
-- `gh api repos/:owner/:repo/commits/<sha>/status`
-- Codecov status links or report URLs from workflow logs
+Flag:
+
+- thresholds set so loose that regressions never fail the check
+- `ignore:` entries that hide code which should be tested
+- carryforward that masks broken matrix legs
+- thresholds in `codecov.yml` that disagree with the project's stated policy
+
+When the right answer is to update `codecov.yml` rather than write a low-value test, propose the YAML change explicitly.
+
+### 3. Fetch the relevant Codecov context
+
+Pick the report that matches the task. Prefer most-specific to least-specific:
+
+1. **Open PR for the current branch.** This is the right view for release-prep work because Codecov highlights patch coverage and the project delta against the base.
+   - `gh pr view --json number,headRefName,headRefOid,statusCheckRollup,comments,url`
+   - read the Codecov bot comment for patch coverage, project delta, and per-file gaps
+   - `gh api repos/:owner/:repo/commits/<sha>/status` for the Codecov status check
+2. **Latest completed branch run.** Use this when there is no PR yet.
+   - `gh run list --workflow codecov.yml --branch <branch> --limit 5 --json databaseId,status,conclusion,headBranch,headSha,displayTitle,createdAt,url`
+3. **Latest completed run on `codecov.yml`.** Fall back to this when the task is not branch-specific.
+
+For the chosen run:
+
+- inspect with `gh run view <run-id> --log` and `gh run view <run-id> --json artifacts,jobs,conclusion,url`
+- download coverage artifacts with `gh run download <run-id> --dir <tmp-dir>` when artifacts exist (typically `lcov.info`)
+- record the commit SHA the report was generated from so findings reference the right code
 
 Do not require or print Codecov tokens. If a private Codecov report cannot be accessed, rely on workflow artifacts/logs and ask the user for a report link only if necessary.
 
-### 3. Identify meaningful uncovered code
+### 4. Separate patch coverage from existing gaps
+
+A single coverage percentage hides two different questions. Answer them in order:
+
+1. **Is the patch covered?** New or modified lines on this branch should be exercised by new or existing tests. Patch coverage failures are usually the most actionable and should be addressed before release.
+2. **Are pre-existing gaps worth filling now?** Older uncovered code may or may not be relevant to the current change. Touch it only when:
+   - the release surfaces it as user-facing
+   - the gap is in the same module as the patch
+   - the gap protects an invariant the release affects
+
+Report patch and existing gaps separately so the user can decide where to spend effort.
+
+When reading the report:
+
+- treat "coverage drop X%" and "file at Y%" as separate signals
+- look at branch coverage and partial branches, not just lines
+- partial-branch hits in Rust often come from `match` arms, `?` desugaring, and `if let` fall-throughs; do not chase 100% branch coverage on idiomatic control flow when the missing branch is unreachable for valid inputs
+
+### 5. Identify meaningful uncovered code
 
 Use the report to locate uncovered files, lines, branches, and partial branches.
 
 Prioritize:
 
-- newly changed code
+- newly changed code (patch coverage)
 - public APIs and documented behavior
 - error handling paths
 - boundary conditions
@@ -64,9 +106,15 @@ Deprioritize or skip:
 - platform-specific guards that cannot run in the current environment
 - trivial accessors or boilerplate where a test adds no real confidence
 
-If a gap is not worth testing, say why instead of adding a low-value test.
+Respect existing exclusion markers in the source. With `cargo-llvm-cov` the relevant forms are:
 
-### 4. Design tests from behavior, not lines
+- `// LCOV_EXCL_LINE`
+- `// LCOV_EXCL_START` / `// LCOV_EXCL_STOP`
+- `#[cfg(not(coverage))]` / `#[coverage(off)]` (nightly)
+
+If a gap is not worth testing, say why and recommend either an exclusion marker in the source or a `codecov.yml` `ignore:` entry instead of adding a low-value test.
+
+### 6. Design tests from behavior, not lines
 
 For each worthwhile gap:
 
@@ -80,7 +128,7 @@ For each worthwhile gap:
 
 Do not add tests that merely execute a line without checking behavior.
 
-### 5. Implement only appropriate tests
+### 7. Implement only appropriate tests
 
 Before editing:
 
@@ -92,35 +140,45 @@ Before editing:
 After editing:
 
 - run the targeted tests first
-- run the relevant coverage command if available and reasonably fast
+- run `cargo llvm-cov` (e.g., `cargo llvm-cov --workspace --lcov --output-path lcov.info`) when feasible to mirror CI
 - run the repository's normal validation command when appropriate
 - if coverage cannot be rerun locally, explain what was validated and what remains for CI/Codecov
 
 ## Language-specific guidance
 
-Use the repository's conventions. For common cases:
+- **Rust** is the primary target for this skill; the project uses `cargo-llvm-cov`.
+  - typical artifacts: `target/llvm-cov/` and `lcov.info`
+  - prefer `cargo llvm-cov --workspace --lcov --output-path lcov.info` locally to mirror CI
+  - assert error variants and invariants, not just `is_ok()`
+  - partial branch hits often come from `match` arms, `?` operator desugaring, and `if let` fall-throughs; treat unreachable arms as candidates for `unreachable!()` with a documented invariant or for an exclusion marker rather than a test
+  - prefer doctests on public API to cover the documented contract
+- **Python** when the same workflow also covers Python tests: most Python in this project is support tooling (changelog generators, benchmark runners, CI helpers), so testing should focus on parse/transform logic against committed fixtures, deterministic output, and malformed-input handling rather than numerical tolerances. For genuinely numerical Python, defer to `python-scientific-review`; for support scripts, defer to `python-support-scripts`.
 
-- Rust: prefer meaningful unit/integration/doctests; assert variants and invariants, not just `is_ok()`
-- Python: prefer deterministic pytest/Hypothesis tests; seed randomness; handle numerical tolerances carefully
-- JavaScript/TypeScript: prefer behavior-level tests and branch coverage for user-visible paths
-
-When the coverage gap overlaps a specialized review skill, apply that skill's principles without losing focus on the Codecov report.
+When the coverage gap overlaps a specialized review skill (`rust-test-quality`, `python-scientific-review`, etc.), apply that skill's principles without losing focus on the Codecov report.
 
 ## Output format
 
 ### Coverage source
-- Workflow run URL or ID
-- Commit/branch reviewed
+- Workflow run URL or ID, or PR Codecov comment / status used
+- Commit SHA the report was generated from
+- Branch / PR number reviewed
 - Report/artifact source used
 
-### Findings
-- Uncovered files/lines or branches considered
-- Which gaps are worth testing and why
-- Which gaps were skipped and why
+### Patch coverage
+- Patch coverage percentage and the threshold from `codecov.yml`
+- Uncovered lines/branches in the changed code
+- Whether each gap was filled, excluded, or deferred and why
+
+### Existing coverage gaps reviewed
+- Pre-existing uncovered code touched by this review
+- Why it was in scope for the current task
+- Decision: tested, excluded, or deferred
 
 ### Changes made
 - Tests added or updated
 - Behavior/invariants covered
+- `codecov.yml` updates, if any (with rationale)
+- Source-level exclusion markers added, if any (with rationale)
 
 ### Validation
 - Commands run
@@ -129,4 +187,4 @@ When the coverage gap overlaps a specialized review skill, apply that skill's pr
 
 ### Follow-ups
 - Remaining coverage gaps
-- Suggested future tests or exclusions if applicable
+- Suggested future tests, exclusions, or `codecov.yml` adjustments

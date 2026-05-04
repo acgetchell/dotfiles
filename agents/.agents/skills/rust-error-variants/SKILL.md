@@ -107,7 +107,24 @@ Check that:
 - internal helper errors are converted at module boundaries consistently
 - `anyhow`/string errors are not used in library APIs where typed errors are expected
 
-### 6. Tests
+### 6. `#[non_exhaustive]` for forward compatibility
+
+Public error enums and their variants benefit from `#[non_exhaustive]` so adding variants or fields later is not a breaking change.
+
+Check that:
+
+- public error enums are `#[non_exhaustive]` unless there is a reason to lock the surface
+- variants with public fields are `#[non_exhaustive]` when future fields are likely
+- removing `#[non_exhaustive]` is treated as a breaking change
+- internal error enums consumed only inside the crate are not marked `#[non_exhaustive]` for no reason; the attribute is most useful at the public API boundary
+
+Flag:
+
+- public error enums without `#[non_exhaustive]` that are likely to gain variants
+- mixing exhaustive and non-exhaustive errors inconsistently across the public API
+- callers (or doctests) that pattern-match on `#[non_exhaustive]` errors without a fallback arm
+
+### 7. Tests
 
 When error behavior changes, tests should validate typed behavior.
 

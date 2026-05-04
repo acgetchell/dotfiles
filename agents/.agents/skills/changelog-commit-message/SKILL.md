@@ -71,6 +71,7 @@ Body rules:
 - use short bullets for changelog-relevant details
 - separate user-visible effects from internal mechanics
 - avoid file-by-file narration unless the file boundary is the point
+- do not narrate the tests used to validate the change; the changelog reader cares about behavior, not verification scaffolding
 
 Footer rules:
 
@@ -111,6 +112,9 @@ Avoid:
 - claiming a bug fix, feature, or breaking change not supported by the staged diff
 - including unstaged work
 - leaking secrets or local machine-specific values from diffs
+- describing tests added to validate the change in feat/fix/perf/refactor/etc. commits; treat new tests as expected verification scaffolding rather than changelog content
+
+Exception: when the commit is genuinely test-only (e.g., `test:` type or a tests-only scope), the message should describe the new tests because the tests are the change.
 
 ## Output format
 

@@ -93,7 +93,26 @@ Flag:
 - examples importing from deep internal modules for core use cases
 - benchmarks relying on non-public helpers that downstream users cannot access
 
-### 5. Public API stability and feature boundaries
+### 5. Module organization and visibility
+
+The public re-export surface is only useful if the underlying modules expose the right items at the right scope. Review module organization and visibility together with the prelude.
+
+Check:
+
+- public modules contain items that meaningfully belong together for downstream users
+- internal helpers use `pub(crate)` or `pub(super)` instead of bare `pub` when they should not appear in the public API
+- `pub use` re-exports do not accidentally widen visibility from `pub(crate)` to `pub`
+- `#[cfg(...)]` and feature gates are applied consistently to a module and its re-exports
+- doc-only items (e.g., examples, README-style modules) are not exported into the public surface
+
+Flag:
+
+- `pub fn`/`pub struct` on items that only the crate uses
+- a tightly-scoped module gating items with `pub(crate)` while a sibling re-exports them as `pub`
+- feature-gated items whose re-export is not feature-gated, leaving broken links when the feature is off
+- private modules (`mod foo;`) referenced from doctests or examples that downstream users cannot reach
+
+### 6. Public API stability and feature boundaries
 
 Preludes are part of the crate's user-facing surface.
 
@@ -104,7 +123,7 @@ Check:
 - adding an export does not accidentally stabilize an internal type
 - removing or moving an export is treated as a breaking change when appropriate
 
-### 6. Tests and documentation
+### 7. Tests and documentation
 
 When prelude/export behavior changes, add tests or docs that lock in the intended surface.
 
@@ -131,6 +150,7 @@ Avoid tests that only compile because they live inside the same module as the im
 ### Required Fixes
 - Exports to add
 - Exports to remove or move to a scoped prelude
+- Visibility tightenings (`pub` → `pub(crate)` or `pub(super)`) for items that should not be public
 - Scoped preludes to create or rename
 - Doctests, integration tests, examples, or benchmarks to update
 - Documentation to add for prelude usage
