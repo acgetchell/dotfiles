@@ -81,8 +81,8 @@ Goes in `lib.rs` `//!` (visible on docs.rs *and* in the README API guide):
 Stays only in README (outside markers):
 
 - badges (CI, crates.io, docs.rs, codecov, DOI, license)
-- short hand-written GitHub landing page before the cargo-rdme marker: one-paragraph pitch, status/pre-release note, install snippet, MSRV, Cargo feature flags, minimal quick start, and a "which API should I choose?" guide
-- audience / "Use this crate when you want" bullets and broad capability overview, kept concise
+- short hand-written GitHub landing page before the cargo-rdme marker: one-paragraph pitch, `## Introduction` with status/pre-release note and "Use this crate when you want" bullets, `## Features`, contents for long READMEs, install snippet, MSRV, Cargo feature flags, minimal quick start, and a "which API should I choose?" guide
+- audience / "Use this crate when you want" bullets in `## Introduction`, and broad capability overview in `## Features`, both kept concise
 - `cargo add <crate>` install snippet
 - MSRV statement
 - Cargo features table
@@ -93,7 +93,7 @@ Stays only in README (outside markers):
 - repo-relative links to `docs/*.md`, `examples/`, `benches/`, `CHANGELOG.md`
 - GitHub-only markdown (collapsible blocks, alerts, relative images)
 
-The `//!` block targets API readers on docs.rs and becomes the README's detailed API guide. The README still needs a GitHub landing page before that generated block so new users can install, see status, understand when to use the crate, run a minimal example, and pick the right API without scrolling through long-form contract documentation. Governance and repo-internal links belong outside the markers.
+The `//!` block targets API readers on docs.rs and becomes the README's detailed API guide. The README still needs a GitHub landing page before that generated block so new users can see an introduction, understand when to use the crate, scan features, install, run a minimal example, and pick the right API without scrolling through long-form contract documentation. Governance and repo-internal links belong outside the markers.
 
 ### 3. Restructure `src/lib.rs` `//!`
 
@@ -114,10 +114,10 @@ If the crate currently has additional hand-written `//!` content beyond what the
 Apply the [standard README template](#standard-readme-template). Key constraints:
 
 - badges block sits at the top, before any landing prose or marker
-- the README should lead like a hand-written GitHub landing page (matching sibling crates such as delaunay when applicable): short pitch, project status, install snippet, MSRV, Cargo features, minimal quick-start example, and a compact API-choice guide
+- the README should lead like a hand-written GitHub landing page (matching sibling crates such as delaunay when applicable): short pitch, `## Introduction` with project status and "Use this crate when you want", `## Features`, contents for long READMEs, install snippet, MSRV, Cargo features, minimal quick-start example, and a compact API-choice guide
 - a single `<!-- cargo-rdme -->` marker (no `start`/`end` yet — cargo-rdme inserts those on first run) marks where the `//!` block will be injected as the detailed API guide
 - everything below the marker is GitHub-only content that remains useful after the detailed API guide: examples directory links, documentation map, ecosystem, contributing, citation, references, license
-- remove long API-guide content from the README that now lives in `//!`, but keep a concise hand-written landing page before the marker. Do not move the entire pitch/status/use-case/feature overview into `//!` just because cargo-rdme can generate it.
+- remove long API-guide content from the README that now lives in `//!`, but keep a concise hand-written landing page before the marker. Do not move the entire pitch/status/introduction/use-case/features overview into `//!` just because cargo-rdme can generate it.
 - repo-relative links (`./docs/workflows.md`, `./CHANGELOG.md`) belong outside the marker because they break on docs.rs
 
 ### 5. Run cargo-rdme to populate the README
@@ -291,6 +291,10 @@ Crate attributes (`#![forbid(...)]`, `#![warn(...)]`, etc.) go *after* the `//!`
 
 Short hand-written pitch for GitHub readers.
 
+## 📐 Introduction
+
+One short paragraph for the crate's audience, purpose, and non-goals.
+
 🚧 **Pre-release (0.x)** — Short status sentence, if applicable.
 
 Use this crate when you want:
@@ -298,6 +302,24 @@ Use this crate when you want:
 - concise user-facing fit
 - concise capability summary
 - concise production/validation note
+
+## ✨ Features
+
+- [x] broad capability or API family
+- [x] broad capability or API family
+- [x] broad capability or API family
+
+## Contents
+
+- [📐 Introduction](#-introduction)
+- [✨ Features](#-features)
+- [🚀 Quick start](#-quick-start)
+- [🧭 Choosing an API](#-choosing-an-api)
+- [📦 Cargo features](#-cargo-features)
+- [📚 API guide](#-api-guide)
+- [🧪 Examples](#-examples)
+- [🤝 Contributing](#-contributing)
+- [License](#license)
 
 ## 🚀 Quick start
 
