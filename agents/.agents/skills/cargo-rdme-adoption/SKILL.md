@@ -1,11 +1,11 @@
 ---
 name: cargo-rdme-adoption
-description: "Standardize a Rust crate's docs.rs landing page and README using cargo-rdme, treating src/lib.rs //! as the single source of truth and auto-generating the README's API section. USE FOR: adopting cargo-rdme on a new or existing crate; producing a uniform docs.rs front page across multiple crates; migrating away from #![doc = include_str!(\"../README.md\")] / #![cfg_attr(any(doc, doctest), doc = include_str!(\"../README.md\"))]; restructuring src/lib.rs //! to be the canonical landing page (pitch + minimal doctest + concepts); reformatting README.md to the standard layout (badges → hand-written GitHub landing page → cargo-rdme API guide marker → examples/docs/contributing/citation); adding cargo rdme --check to CI; adding docs-readme/docs-readme-check recipes to a justfile; producing a .cargo-rdme.toml when defaults are not enough. DO NOT USE FOR: writing substantive doc content (use crate-docs-update); commit messages (use changelog-commit-message); reviewing /// public-API doc sections (use rust-api-docs); Cargo.toml / feature flag / MSRV review (use rust-cargo-hygiene); non-Rust repositories; repositories that already correctly use cargo-rdme and only need content edits."
+description: "Standardize a Rust crate's docs.rs API guide and README using cargo-rdme, treating src/lib.rs //! as the single source of truth for the generated README API section while the hand-written README owns the GitHub landing page. USE FOR: adopting cargo-rdme on a new or existing crate; producing a uniform docs.rs API guide across multiple crates; migrating away from #![doc = include_str!(\"../README.md\")] / #![cfg_attr(any(doc, doctest), doc = include_str!(\"../README.md\"))]; restructuring src/lib.rs //! as the generated technical API guide; reformatting README.md to the standard layout (badges → hand-written GitHub landing page → cargo-rdme API guide marker → examples/docs/contributing/citation); adding cargo rdme --check to CI; adding docs-readme/docs-readme-check recipes to a justfile; producing a .cargo-rdme.toml when defaults are not enough. DO NOT USE FOR: writing substantive doc content (use crate-docs-update); commit messages (use changelog-commit-message); reviewing /// public-API doc sections (use rust-api-docs); Cargo.toml / feature flag / MSRV review (use rust-cargo-hygiene); non-Rust repositories; repositories that already correctly use cargo-rdme and only need content edits."
 ---
 
 # cargo-rdme-adoption
 
-Adopt cargo-rdme on a Rust crate so the **`src/lib.rs` `//!` block is the single source of truth** for both the docs.rs landing page and the README's API section, kept in sync by a CI gate.
+Adopt cargo-rdme on a Rust crate so the **`src/lib.rs` `//!` block is the single source of truth for the generated API guide** on docs.rs and in the README, kept in sync by a CI gate. The hand-written README remains the GitHub landing page.
 
 This skill is about the mechanism (markers, `lib.rs` ↔ README sync, CI wiring) and the canonical layout. It is not about writing the substantive prose; for that, defer to `crate-docs-update`.
 
@@ -13,8 +13,8 @@ This skill is about the mechanism (markers, `lib.rs` ↔ README sync, CI wiring)
 
 cargo-rdme reads the crate-level `//!` doc comment from `src/lib.rs` and injects it into the README between cargo-rdme markers. The flow is:
 
-- **Source of truth:** `src/lib.rs` `//!`
-- **Generated artifact:** the marked region of `README.md`
+- **Source of truth:** `src/lib.rs` `//!` for the generated API guide
+- **Generated artifact:** the marked API-guide region of `README.md`
 - **CI gate:** `cargo rdme --check` fails if the marked region drifts from the `//!` block
 
 This is the opposite direction of `#![doc = include_str!("../README.md")]`, which pulls README content into `lib.rs`. Crates that currently use `include_str!` must be migrated; see [Migration](#migration-from-include_str).
@@ -68,21 +68,21 @@ Read every file the migration touches before editing anything.
 
 ### 2. Plan content placement
 
-Decide what belongs in `//!` (the docs.rs landing page) versus elsewhere in the README. Use this rubric:
+Decide what belongs in `//!` (the docs.rs API guide and generated README API section) versus elsewhere in the README. Use this rubric:
 
-Goes in `lib.rs` `//!` (visible on docs.rs *and* in README):
+Goes in `lib.rs` `//!` (visible on docs.rs *and* in the README API guide):
 
-- one-paragraph elevator pitch
-- minimal working example (must compile as a doctest)
-- brief feature/concepts overview
+- concise API-guide opening that explains what the generated section covers
+- minimal working examples that must compile as doctests
+- technical concepts and API relationships
 - pointers to deeper crate items via intra-doc links such as `[Thing](crate::Thing)`
-- audience / when-to-use / when-not-to-use, if short
 - **scientific basis / scope / contract sections**, even when long: acceptance formulae, MCMC/Metropolis-Hastings contract bullets, log-space conventions, "what the crate provides" / "what the crate does not prove", invariants stack, validation hierarchy, numerical-semantics notes, safety/contract pointers — these describe the API contract and belong on docs.rs alongside the API they shape
 
 Stays only in README (outside markers):
 
 - badges (CI, crates.io, docs.rs, codecov, DOI, license)
 - short hand-written GitHub landing page before the cargo-rdme marker: one-paragraph pitch, status/pre-release note, install snippet, MSRV, Cargo feature flags, minimal quick start, and a "which API should I choose?" guide
+- audience / "Use this crate when you want" bullets and broad capability overview, kept concise
 - `cargo add <crate>` install snippet
 - MSRV statement
 - Cargo features table
@@ -93,7 +93,7 @@ Stays only in README (outside markers):
 - repo-relative links to `docs/*.md`, `examples/`, `benches/`, `CHANGELOG.md`
 - GitHub-only markdown (collapsible blocks, alerts, relative images)
 
-The `//!` block targets API readers on docs.rs and becomes the README's detailed API guide. The README still needs a GitHub landing page before that generated block so new users can install, run a minimal example, and pick the right API without scrolling through long-form contract documentation. Governance and repo-internal links belong outside the markers.
+The `//!` block targets API readers on docs.rs and becomes the README's detailed API guide. The README still needs a GitHub landing page before that generated block so new users can install, see status, understand when to use the crate, run a minimal example, and pick the right API without scrolling through long-form contract documentation. Governance and repo-internal links belong outside the markers.
 
 ### 3. Restructure `src/lib.rs` `//!`
 
@@ -105,7 +105,7 @@ Apply the [standard lib.rs template](#standard-libsrs-template). Key constraints
 - prefer the intra-doc-link form `[Thing](crate::Thing)` over bare backticked names so cargo-rdme can rewrite the link to docs.rs in the README; reference-style links work too
 - use hidden setup lines (`# use crate::...;`) inside doctests freely — cargo-rdme strips them from the README
 - avoid headings deeper than `#` and `##` inside `//!`; cargo-rdme will bump them based on the README's surrounding heading level
-- **lead with short, punchy sections; defer depth to later sections.** `//!` is the canonical long-form crate documentation and is allowed to be long, but the first screen on docs.rs (and the top of the cargo-rdme region in the README) should be scannable. Order content roughly: (1) one-line crate title, (2) pre-release / status banner if applicable, (3) one-paragraph elevator pitch, (4) audience / "Use this crate when you want" bullets, (5) `# Features` capability list, (6) **then** the deeper contract content — `# Scientific basis and scope`, `# Numerical semantics`, validation hierarchy, invariants stack, long worked examples. A reader who only reads the first scroll should already know what the crate does, who it is for, and what it offers; readers who want depth scroll on. Resist the urge to lead with the heaviest section just because it is the most rigorous — that is the right content in the wrong slot.
+- **keep the generated API guide scannable but do not duplicate the README landing page.** The top of `//!` should say what the API guide covers, state the core API contract, and then move into deeper sections such as `# Scientific basis and scope`, `# Numerical semantics`, validation hierarchy, invariants stack, and worked examples. Do not copy the README's pre-release banner, "Use this crate when you want" bullets, or broad feature/capability list into `//!` unless the repository has no hand-written landing page. If both surfaces need similar facts, keep the README version short and user-facing, and make the `//!` version technical and contract-focused.
 
 If the crate currently has additional hand-written `//!` content beyond what the README needs (e.g. delaunay-style "validation hierarchy" contract docs), keep that content **inside** the same `//!` block — it will appear on both surfaces, which is usually correct since GitHub readers also benefit from it. If you genuinely want content on docs.rs only, move it into a module-level `//!` (e.g. `src/contract.rs` with `//!` docs and `pub mod contract;`).
 
@@ -117,7 +117,7 @@ Apply the [standard README template](#standard-readme-template). Key constraints
 - the README should lead like a hand-written GitHub landing page (matching sibling crates such as delaunay when applicable): short pitch, project status, install snippet, MSRV, Cargo features, minimal quick-start example, and a compact API-choice guide
 - a single `<!-- cargo-rdme -->` marker (no `start`/`end` yet — cargo-rdme inserts those on first run) marks where the `//!` block will be injected as the detailed API guide
 - everything below the marker is GitHub-only content that remains useful after the detailed API guide: examples directory links, documentation map, ecosystem, contributing, citation, references, license
-- remove any content from the README that now lives in `//!` — duplicating it defeats the purpose and risks drift between editing rounds
+- remove long API-guide content from the README that now lives in `//!`, but keep a concise hand-written landing page before the marker. Do not move the entire pitch/status/use-case/feature overview into `//!` just because cargo-rdme can generate it.
 - repo-relative links (`./docs/workflows.md`, `./CHANGELOG.md`) belong outside the marker because they break on docs.rs
 
 ### 5. Run cargo-rdme to populate the README
@@ -220,7 +220,7 @@ Common duplicate patterns to look for and either shorten or remove:
 - `cargo add <crate>` snippets that double as both Quickstart leadin and Installation
 - Scientific-basis or contract paragraphs that lingered in the README after their content moved into `//!`
 
-**Rule of thumb:** if a long API fact appears twice in the rendered README, delete or shorten the version OUTSIDE the markers — `//!` is the source of truth. If the outside-markers text is a concise landing summary that helps a new GitHub reader orient quickly (pitch, status, install, quick start, API-choice guide), keep it short and link/scroll to the generated API guide for depth. If a section feels valuable on docs.rs but currently only lives outside the markers, move it INTO `//!` instead of duplicating it.
+**Rule of thumb:** if a long API fact appears twice in the rendered README, delete or shorten the version OUTSIDE the markers — `//!` is the source of truth for the generated API guide. If the outside-markers text is a concise landing summary that helps a new GitHub reader orient quickly (pitch, status, install, quick start, API-choice guide), keep it short and link/scroll to the generated API guide for depth. If a section feels valuable on docs.rs but currently only lives outside the markers, move it INTO `//!` instead of duplicating it.
 
 Sections that legitimately stay outside the markers — even if they share keywords with `//!` — are those that serve a different audience or purpose and would be noise or too package-manager/repo-specific on docs.rs:
 
@@ -239,11 +239,20 @@ Finally: outside-markers sections should themselves be **short and punchy**. The
 ## Standard lib.rs template
 
 ````rust path=null start=null
-//! One-paragraph elevator pitch describing what the crate does and the
-//! problem it solves. Name the audience and the core abstraction. Keep
-//! to ~3 sentences.
+//! Generated API guide for crate-name.
 //!
-//! # Quick start
+//! This section documents the crate's public API contracts, core concepts,
+//! examples, and operational semantics. For installation, crate status,
+//! feature flags, and API-selection guidance, see the hand-written README
+//! sections before the cargo-rdme marker.
+//!
+//! # Core contract
+//!
+//! Describe the central trait/type contract that API users must honor.
+//! Keep this technical and link public items with intra-doc links such as
+//! [`Thing`](crate::Thing).
+//!
+//! # Example
 //!
 //! ```
 //! use crate_name::prelude::*;
@@ -257,15 +266,6 @@ Finally: outside-markers sections should themselves be **short and punchy**. The
 //! Brief tour of the main types and how they fit together. Link to
 //! deeper items with intra-doc links so the README points at docs.rs:
 //! [`Thing`](crate::Thing), [`module`](crate::module).
-//!
-//! # When to use this crate
-//!
-//! - bullet describing a fit
-//! - bullet describing another fit
-//!
-//! # When *not* to use this crate
-//!
-//! - bullet describing a non-fit (links to alternatives)
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -273,7 +273,7 @@ Finally: outside-markers sections should themselves be **short and punchy**. The
 #![cfg_attr(docsrs, feature(doc_cfg))]
 ````
 
-If the crate already has long-form contract docs (e.g. validation hierarchy, invariants stack), keep them inside the same `//!` block under additional `# `-level headings, or move them into a module with its own `//!`. Prefer to keep the front-page short — readers who need contract depth will click through.
+If the crate already has long-form contract docs (e.g. validation hierarchy, invariants stack), keep them inside the same `//!` block under additional `# `-level headings, or move them into a module with its own `//!`. Prefer to keep the generated API guide's opening short — readers who need contract depth will scroll.
 
 Crate attributes (`#![forbid(...)]`, `#![warn(...)]`, etc.) go *after* the `//!` block in the file's source order; `//!` must come first to be the crate-level doc. The placement above is a convention; either order works as long as `//!` is the first inner doc comment in the file.
 
@@ -292,6 +292,12 @@ Crate attributes (`#![forbid(...)]`, `#![warn(...)]`, etc.) go *after* the `//!`
 Short hand-written pitch for GitHub readers.
 
 🚧 **Pre-release (0.x)** — Short status sentence, if applicable.
+
+Use this crate when you want:
+
+- concise user-facing fit
+- concise capability summary
+- concise production/validation note
 
 ## 🚀 Quick start
 
@@ -508,7 +514,7 @@ Read the existing repo before adopting standard layouts wholesale.
 - duplicates found between marker region and outside-markers content (list each with line numbers)
 - which outside-markers content was shortened or deleted and where any unique links from a removed section were re-homed (typically `## Documentation`)
 - outside-markers sections kept as legitimate non-duplicates or concise landing summaries (pitch/status/install/MSRV/Cargo features/quick start/API-choice guide, Examples directory, Documentation, Ecosystem, Contributing, Citation, References, License)
-- confirmation that `//!` leads with short, punchy sections (pitch → use-cases → features) before deeper contract content
+- confirmation that `//!` opens as a technical API guide and does not duplicate the README's pitch/status/use-case/feature overview
 
 ### Follow-ups
 

@@ -39,6 +39,9 @@ git clone https://github.com/acgetchell/dotfiles.git ~/projects/dotfiles
 ## Day-to-day stow commands
 
 ```sh
+# Preview changes before applying a package
+stow -d ~/projects/dotfiles -t ~ -n -v -R agents
+
 # Apply or re-apply one package
 stow -d ~/projects/dotfiles -t ~ -R zsh
 
@@ -50,6 +53,8 @@ stow -d ~/projects/dotfiles -t ~ --adopt zsh
 ```
 
 Use `--adopt` only when intentionally moving an existing `$HOME` file into dotfiles. Always inspect the resulting diff before committing.
+
+Always pass both `-d ~/projects/dotfiles` and `-t ~`; otherwise stow targets the parent of the current directory, which can create links in the wrong place.
 
 ## Brewfile workflow
 `Brewfile` is intentionally foundational: core CLI tools, developer casks, and apps expected on every machine.
@@ -156,6 +161,7 @@ To add a skill:
 3. re-stow:
 
 ```sh
+stow -d ~/projects/dotfiles -t ~ -n -v -R agents
 stow -d ~/projects/dotfiles -t ~ -R agents
 ```
 
