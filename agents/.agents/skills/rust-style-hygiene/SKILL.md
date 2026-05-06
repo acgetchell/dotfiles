@@ -72,10 +72,11 @@ Imports must be placed at the **top of the appropriate module**, not inside func
 Flag:
 - `use` statements inside function bodies
 - repeated imports across multiple functions
+- `#[cfg(test)]` imports in production module preambles instead of inside the relevant test module
 
 Exceptions (allowed but should be justified):
 - highly localized imports used to avoid namespace pollution
-- conditional compilation cases (`cfg`)
+- conditional compilation cases (`cfg`) that cannot live in a narrower module
 
 ---
 
