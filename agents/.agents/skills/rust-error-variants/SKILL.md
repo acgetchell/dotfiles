@@ -19,6 +19,11 @@ Focus on newly added or modified Rust code that:
 - changes `Result` return types or `?` propagation
 - adds `thiserror`, `Display`, `From`, `map_err`, or `anyhow` usage
 - returns generic errors such as `ValidationFailed`, `InvalidInput`, or string-only errors
+- uses `Box<dyn std::error::Error>`, `Box<dyn Error>`, or `anyhow::Error`
+  in production code, public doctests, examples, or benchmarks where a typed crate
+  error would preserve caller-visible failure modes
+- uses `&dyn Error` outside `std::error::Error::source`, standard-error trait
+  verification tests, or lint fixtures intentionally exercising generic-error patterns
 
 Ignore unrelated unchanged code unless needed to understand existing error conventions.
 
@@ -46,6 +51,11 @@ Flag:
 - misleading variants that describe the wrong subsystem or invariant
 - `map_err(|e| Error::Other(e.to_string()))` when callers need typed context
 - conversion that loses useful fields from an underlying error
+- generic `Box<dyn std::error::Error>`, `Box<dyn Error>`, or `anyhow::Error`
+  return types in user-facing Rust examples, doctests, benchmarks, or public APIs
+  when the crate has, or should add, a typed error variant
+- `&dyn Error` outside legitimate `std::error::Error::source` implementations,
+  tests that verify the trait behavior, or lint fixtures
 
 Prefer:
 
@@ -118,6 +128,22 @@ Check that:
 - public APIs return stable error types appropriate for callers
 - internal helper errors are converted at module boundaries consistently
 - `anyhow`/string errors are not used in library APIs where typed errors are expected
+- public examples and doctests use the crate's typed result alias where available,
+  mapping lower-level I/O, parser, serialization, and backend errors into narrow
+  variants instead of returning `Box<dyn Error>`
+
+When a `Box<dyn Error>` pattern appears:
+
+- Identify each concrete `?` source hidden behind the boxed return.
+- Reuse an existing typed variant only when its name and fields accurately describe
+  that failure mode.
+- Add a new variant when the hidden source represents a distinct output, checkpoint,
+  parsing, backend, validation, or construction failure.
+- Add or update tests that pattern-match the variant or assert its structured fields
+  when the path is in production code.
+- Leave `&dyn Error` alone in legitimate `std::error::Error::source`
+  implementations, tests that explicitly verify `std::error::Error` behavior, or
+  lint fixtures whose purpose is to exercise the generic error pattern.
 
 ### 6. `#[non_exhaustive]` for forward compatibility
 
