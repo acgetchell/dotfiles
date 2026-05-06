@@ -1,6 +1,6 @@
 ---
 name: rust-api-docs
-description: "Audit Rust public API documentation for required sections, intra-doc links, and crate-level docs. USE FOR: doc comment structure on public API, # Errors / # Panics / # Safety / # Examples sections, intra-doc links, crate-level //! overviews, module-level docs, missing or weak descriptions, deny(missing_docs) and broken_intra_doc_links lint configuration, semver-relevant doc updates, docs.rs feature visibility. DO NOT USE FOR: doctest test quality (use rust-test-quality), private helper /// docs (use rust-test-quality), error variant design (use rust-error-variants), trait bound docs (use rust-trait-bounds), non-Rust code, or unchanged APIs."
+description: "Audit Rust public API documentation for required sections, intra-doc links, and crate-level docs on changed APIs or whole-repo baseline audits when explicitly requested. USE FOR: doc comment structure on public API, # Errors / # Panics / # Safety / # Examples sections, intra-doc links, crate-level //! overviews, module-level docs, missing or weak descriptions, deny(missing_docs) and broken_intra_doc_links lint configuration, semver-relevant doc updates, docs.rs feature visibility. DO NOT USE FOR: doctest test quality (use rust-test-quality), private helper /// docs (use rust-test-quality), error variant design (use rust-error-variants), trait bound docs (use rust-trait-bounds), non-Rust code, or unrelated unchanged APIs unless a baseline audit is requested."
 ---
 
 # rust-api-docs
@@ -19,6 +19,18 @@ Focus on newly added or modified public Rust APIs that:
 - produce items intended to appear in published `cargo doc`
 
 Ignore private items unless reviewing them surfaces a public API documentation gap.
+
+### Scope Modes
+
+Default mode:
+- Audit newly added or modified public APIs.
+- Ignore unrelated unchanged APIs unless they clarify the changed contract.
+
+Whole-repo baseline mode:
+- Use when the user explicitly says "whole repo", "entire repo", "baseline audit", or similar.
+- Audit the full public documentation surface: crate docs, module docs, public items, examples, rustdoc lint configuration, and docs.rs metadata.
+- Prioritize findings by published API risk, broken or missing required sections, misleading contracts, and examples users are likely to copy.
+- Do not require fixing every historical documentation gap in one pass; group lower-risk gaps as follow-ups.
 
 ## Review goals
 

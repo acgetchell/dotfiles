@@ -1,6 +1,6 @@
 ---
 name: codecov-test-gaps
-description: "Review the latest GitHub Actions run for .github/workflows/codecov.yml, inspect the Codecov/coverage report, and add missing tests when the uncovered code represents meaningful behavior. USE FOR: Codecov report review, latest codecov.yml workflow run, coverage regression investigation, uncovered lines/branches, missing tests from CI coverage, GitHub Actions coverage artifacts, adding tests to improve coverage, deciding whether a coverage gap is worth testing. DO NOT USE FOR: generic test review without Codecov data (use language-specific test-quality skills), writing superficial coverage-only tests, changing production code solely to satisfy coverage, unrelated CI failures, or repositories without a Codecov workflow unless the user asks to adapt the workflow."
+description: "Review the latest GitHub Actions run for .github/workflows/codecov.yml, inspect the Codecov/coverage report, and add missing tests when uncovered code represents meaningful behavior; supports whole-repo coverage baseline audits when explicitly requested. USE FOR: Codecov report review, latest codecov.yml workflow run, coverage regression investigation, uncovered lines/branches, missing tests from CI coverage, GitHub Actions coverage artifacts, adding tests to improve coverage, deciding whether a coverage gap is worth testing. DO NOT USE FOR: generic test review without Codecov data (use language-specific test-quality skills), writing superficial coverage-only tests, changing production code solely to satisfy coverage, unrelated CI failures, or repositories without a Codecov workflow unless the user asks to adapt the workflow."
 ---
 
 # codecov-test-gaps
@@ -8,6 +8,19 @@ description: "Review the latest GitHub Actions run for .github/workflows/codecov
 Review the latest `.github/workflows/codecov.yml` run, identify meaningful coverage gaps from the Codecov or coverage report, and add missing tests only when they improve confidence in real behavior.
 
 The goal is not to chase coverage percentages. Use coverage as a signal to find untested behavior, error paths, invariants, and integration boundaries.
+
+## Scope Modes
+
+Default mode:
+- Start from the current branch, PR, or latest relevant Codecov run.
+- Prioritize patch coverage and existing gaps directly related to the current change.
+
+Whole-repo baseline mode:
+- Use when the user explicitly says "whole repo", "entire repo", "baseline audit", or similar.
+- Treat full project coverage as the primary signal, not only patch coverage.
+- Audit uncovered source, tests, examples, benches, and report configuration across the whole repository when artifacts expose them.
+- Prioritize existing gaps by public API risk, invariant/error-path importance, release relevance, and likelihood that a test would improve confidence.
+- Do not require filling every historical coverage gap in one pass; propose focused test batches and skip low-value coverage chasing with a reason.
 
 ## Workflow
 

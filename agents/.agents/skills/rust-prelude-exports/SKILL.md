@@ -1,6 +1,6 @@
 ---
 name: rust-prelude-exports
-description: "Audit Rust prelude modules and public re-export surfaces for minimality, orthogonality, and usability in doctests, integration tests, examples, and benchmarks. USE FOR: Rust review comments asking whether new functionality has appropriate prelude exports, designing crate::prelude modules, scoped preludes (geometry/simulation/testing), public use/re-export decisions, doctest import ergonomics, integration test/example/benchmark import surfaces, avoiding bloated or overlapping preludes. DO NOT USE FOR: Rust naming/import style inside implementation code (use rust-style-hygiene), test quality itself (use rust-test-quality), error design (use rust-error-variants), non-Rust code, or unchanged APIs."
+description: "Audit Rust prelude modules and public re-export surfaces for minimality, orthogonality, and usability in doctests, integration tests, examples, and benchmarks on changed APIs or whole-repo baseline audits when explicitly requested. USE FOR: Rust review comments asking whether new functionality has appropriate prelude exports, designing crate::prelude modules, scoped preludes (geometry/simulation/testing), public use/re-export decisions, doctest import ergonomics, integration test/example/benchmark import surfaces, avoiding bloated or overlapping preludes. DO NOT USE FOR: Rust naming/import style inside implementation code (use rust-style-hygiene), test quality itself (use rust-test-quality), error design (use rust-error-variants), non-Rust code, or unrelated unchanged APIs unless a baseline audit is requested."
 ---
 
 # rust-prelude-exports
@@ -22,6 +22,18 @@ Focus on newly added or modified Rust public APIs that affect:
 - new types/functions/traits that users need to access from outside the crate
 
 Ignore private implementation imports unless they reveal a missing or confused public export.
+
+### Scope Modes
+
+Default mode:
+- Audit newly added or modified public APIs, preludes, `pub use` exports, and downstream-style imports.
+- Ignore unrelated unchanged exports unless they define the boundary the changed API should follow.
+
+Whole-repo baseline mode:
+- Use when the user explicitly says "whole repo", "entire repo", "baseline audit", or similar.
+- Audit the complete public export surface, all prelude modules, doctest imports, integration tests, examples, and benchmark imports.
+- Prioritize findings by accidental API stabilization, bloated or overlapping preludes, missing ergonomic exports for common workflows, and examples that require internal paths.
+- Do not require fixing every historical export nit in one pass; separate breaking cleanup from additive ergonomic fixes.
 
 ## Review goals
 

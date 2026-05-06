@@ -1,6 +1,6 @@
 ---
 name: rust-trait-bounds
-description: "Audit Rust trait bounds, generic constraints, and where clauses for simplification, idiomatic placement, and API clarity. USE FOR: Rust review comments asking whether trait bounds or where clauses can be simplified, redundant bounds, overly broad generic constraints, associated type constraints, HRTBs, impl/function generic cleanup, public API bound ergonomics, moving bounds from structs to impls/methods, choosing inline bounds vs where clauses. DO NOT USE FOR: Rust naming/import style (use rust-style-hygiene), error design (use rust-error-variants), test/doctest coverage (use rust-test-quality), prelude/export decisions (use rust-prelude-exports), non-Rust code, or unchanged code."
+description: "Audit Rust trait bounds, generic constraints, and where clauses for simplification, idiomatic placement, and API clarity on changed code or whole-repo baseline audits when explicitly requested. USE FOR: Rust review comments asking whether trait bounds or where clauses can be simplified, redundant bounds, overly broad generic constraints, associated type constraints, HRTBs, impl/function generic cleanup, public API bound ergonomics, moving bounds from structs to impls/methods, choosing inline bounds vs where clauses. DO NOT USE FOR: Rust naming/import style (use rust-style-hygiene), error design (use rust-error-variants), test/doctest coverage (use rust-test-quality), prelude/export decisions (use rust-prelude-exports), non-Rust code, or unrelated unchanged code unless a baseline audit is requested."
 ---
 
 # rust-trait-bounds
@@ -21,6 +21,18 @@ Focus on newly added or modified Rust code that includes:
 - repeated bounds across multiple impls or methods
 
 Ignore unrelated unchanged code unless needed to understand existing generic conventions.
+
+### Scope Modes
+
+Default mode:
+- Audit newly added or modified generics, trait bounds, associated type constraints, and `where` clauses.
+- Ignore unrelated unchanged bounds unless they define local generic conventions for the changed code.
+
+Whole-repo baseline mode:
+- Use when the user explicitly says "whole repo", "entire repo", "baseline audit", or similar.
+- Audit public generic APIs and complex internal generic code across Rust source, tests, examples, and benches.
+- Prioritize findings by downstream API ergonomics, unnecessary public bounds, leaked implementation details, duplicated constraints, and bounds that obscure ownership or Send/Sync intent.
+- Do not require fixing every historical generic cleanup in one pass; separate semver-sensitive API changes from internal simplifications.
 
 ## Review goals
 

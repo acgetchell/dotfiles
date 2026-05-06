@@ -1,6 +1,6 @@
 ---
 name: rust-iter-control-flow
-description: "Audit Rust iterator, closure, and pattern-matching control-flow idioms for clarity, allocation discipline, and exhaustiveness. USE FOR: iterator chain review, collect/try_fold/flat_map decisions, avoiding intermediate Vec collects, closure capture clarity, Fn/FnMut/FnOnce choice, match vs if let vs let else, while let, matches! macro, exhaustive matching, @ bindings, slice patterns, refutable/irrefutable patterns, when imperative loops are clearer than iterator chains. DO NOT USE FOR: trait bounds (use rust-trait-bounds), error variants (use rust-error-variants), async patterns (use rust-concurrency-async), prelude/export decisions (use rust-prelude-exports), non-Rust code, or unchanged code."
+description: "Audit Rust iterator, closure, and pattern-matching control-flow idioms for clarity, allocation discipline, and exhaustiveness on changed code or whole-repo baseline audits when explicitly requested. USE FOR: iterator chain review, collect/try_fold/flat_map decisions, avoiding intermediate Vec collects, closure capture clarity, Fn/FnMut/FnOnce choice, match vs if let vs let else, while let, matches! macro, exhaustive matching, @ bindings, slice patterns, refutable/irrefutable patterns, when imperative loops are clearer than iterator chains. DO NOT USE FOR: trait bounds (use rust-trait-bounds), error variants (use rust-error-variants), async patterns (use rust-concurrency-async), prelude/export decisions (use rust-prelude-exports), non-Rust code, or unrelated unchanged code unless a baseline audit is requested."
 ---
 
 # rust-iter-control-flow
@@ -19,6 +19,18 @@ Focus on newly added or modified Rust code that:
 - uses `match`, `if let`, `let else`, `while let`, or `matches!`
 - pattern-matches structs, enums, slices, references, or tuples
 - mixes loops and iterator chains for the same data
+
+### Scope Modes
+
+Default mode:
+- Audit newly added or modified iterator chains, closures, loops, and pattern matches.
+- Ignore unrelated unchanged control flow unless it defines local style or invariants for the changed code.
+
+Whole-repo baseline mode:
+- Use when the user explicitly says "whole repo", "entire repo", "baseline audit", or similar.
+- Audit iterator/control-flow idioms across Rust source, tests, examples, and benches.
+- Prioritize findings by correctness/exhaustiveness risk, avoidable hot-path allocation, misleading closure capture, and control flow that hides invariants.
+- Do not require fixing every style preference in one pass; report low-risk readability cleanup separately.
 
 ## Review goals
 

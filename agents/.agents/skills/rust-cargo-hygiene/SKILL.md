@@ -1,6 +1,6 @@
 ---
 name: rust-cargo-hygiene
-description: "Audit Cargo.toml, feature flags, MSRV, lints, and crate-level configuration for release readiness. USE FOR: Cargo.toml review, feature flag design, default-features gating, dev/build/runtime dependency placement, dependency version specifiers, MSRV pin, edition, [lints] table, clippy.toml/rustfmt.toml, crate-level deny/warn lints (including unsafe_code = forbid), workspace inheritance, [package.metadata.docs.rs] config, semver-sensitive Cargo manifest changes, preparing a crate release. DO NOT USE FOR: source-level Rust review (use rust-production-review or other Rust skills), CI/CD workflow logic, non-Rust packaging, or unchanged manifests."
+description: "Audit Cargo.toml, feature flags, MSRV, lints, and crate-level configuration for release readiness on changed manifests or whole-repo baseline audits when explicitly requested. USE FOR: Cargo.toml review, feature flag design, default-features gating, dev/build/runtime dependency placement, dependency version specifiers, MSRV pin, edition, [lints] table, clippy.toml/rustfmt.toml, crate-level deny/warn lints (including unsafe_code = forbid), workspace inheritance, [package.metadata.docs.rs] config, semver-sensitive Cargo manifest changes, preparing a crate release. DO NOT USE FOR: source-level Rust review (use rust-production-review or other Rust skills), CI/CD workflow logic, non-Rust packaging, or unrelated unchanged manifests unless a baseline audit is requested."
 ---
 
 # rust-cargo-hygiene
@@ -18,6 +18,18 @@ Focus on newly added or modified files such as:
 - `clippy.toml`, `rustfmt.toml`, `.cargo/config.toml`
 - crate-root attributes (`#![deny(...)]`, `#![warn(...)]`, `#![forbid(...)]`)
 - `rust-toolchain.toml`
+
+### Scope Modes
+
+Default mode:
+- Audit newly added or modified manifests, toolchain files, lint configuration, and crate-root attributes.
+- Ignore unrelated unchanged configuration unless it affects the changed manifest surface.
+
+Whole-repo baseline mode:
+- Use when the user explicitly says "whole repo", "entire repo", "baseline audit", or similar.
+- Audit all workspace manifests, committed lockfile policy, toolchain files, Cargo config, lint configuration, docs.rs metadata, and crate-root lint attributes.
+- Prioritize findings by release risk, semver impact, MSRV drift, feature breakage, unsafe/lint policy enforcement, and dependency correctness.
+- Do not require fixing every historical hygiene issue in one pass; separate release blockers from cleanup follow-ups.
 
 ## Review goals
 

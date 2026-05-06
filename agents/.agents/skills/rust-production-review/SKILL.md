@@ -1,6 +1,6 @@
 ---
 name: rust-production-review
-description: "Perform a senior-level Rust review for production-quality, performance-critical libraries with strong invariants. USE FOR: comprehensive Rust code review, systems programming review, computational geometry, topology, linear algebra, numerical algorithms, invariant-heavy data structures, public library API design, semver-sensitive changes, performance-critical correctness review, numerical robustness, ownership/mutability design, concurrency safety, and maintainability. DO NOT USE FOR: surface-only style/naming/import cleanup (use rust-style-hygiene), focused error variant audits (use rust-error-variants), focused test/doctest audits (use rust-test-quality), focused prelude/export audits (use rust-prelude-exports), focused trait-bound cleanup (use rust-trait-bounds), non-Rust code, generated code, or unrelated unchanged code."
+description: "Perform a senior-level Rust review for production-quality, performance-critical libraries with strong invariants on changed code or whole-repo baseline audits when explicitly requested. USE FOR: comprehensive Rust code review, systems programming review, computational geometry, topology, linear algebra, numerical algorithms, invariant-heavy data structures, public library API design, semver-sensitive changes, performance-critical correctness review, numerical robustness, ownership/mutability design, concurrency safety, and maintainability. DO NOT USE FOR: surface-only style/naming/import cleanup (use rust-style-hygiene), focused error variant audits (use rust-error-variants), focused test/doctest audits (use rust-test-quality), focused prelude/export audits (use rust-prelude-exports), focused trait-bound cleanup (use rust-trait-bounds), non-Rust code, generated code, or unrelated unchanged code unless a baseline audit is requested."
 ---
 
 # rust-production-review
@@ -22,6 +22,18 @@ Focus on newly added or modified Rust code that affects:
 - safety-critical code paths, especially panics or any `unsafe`
 
 Use related focused Rust skills when the review narrows to a specialized concern, but keep this skill for broad production readiness and design review.
+
+### Scope Modes
+
+Default mode:
+- Review newly added or modified Rust code and nearby invariants needed to assess it.
+- Ignore unrelated unchanged code unless it defines the invariant, API, or performance contract the change relies on.
+
+Whole-repo baseline mode:
+- Use when the user explicitly says "whole repo", "entire repo", "baseline audit", or similar.
+- Review the full Rust library surface: public APIs, core invariants, mutation paths, numerical algorithms, hot paths, panic/error boundaries, and semver-relevant module organization.
+- Prioritize findings by correctness, invariant preservation, numerical robustness, recoverable panics, API misuse risk, and performance complexity.
+- Do not require fixing every historical issue in one pass; produce a prioritized remediation plan with focused follow-up patches.
 
 ## Review posture
 

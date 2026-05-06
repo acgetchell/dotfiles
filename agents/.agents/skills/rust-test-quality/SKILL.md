@@ -1,6 +1,6 @@
 ---
 name: rust-test-quality
-description: "Evaluate Rust code for test coverage, doctests, public API panic behavior, and documentation quality on changed code. USE FOR: Rust test review, public functions that panic for recoverable conditions, missing or trivial doctests on public APIs, missing /// docs on private helpers, weak assertions, missing boundary/error/negative cases, brittle or duplicated tests, doctest correctness vs actual behavior. DO NOT USE FOR: style/naming/import critique (use rust-style-hygiene), non-Rust code, or unchanged files."
+description: "Evaluate Rust code for test coverage, doctests, public API panic behavior, and documentation quality on changed code or whole-repo baseline audits when explicitly requested. USE FOR: Rust test review, public functions that panic for recoverable conditions, missing or trivial doctests on public APIs, missing /// docs on private helpers, weak assertions, missing boundary/error/negative cases, brittle or duplicated tests, doctest correctness vs actual behavior. DO NOT USE FOR: style/naming/import critique (use rust-style-hygiene), non-Rust code, or unrelated unchanged files unless a baseline audit is requested."
 ---
 
 # rust-test-quality
@@ -15,6 +15,18 @@ Focus on:
 - supporting private helper functions
 
 Ignore unrelated, unchanged code.
+
+### Scope Modes
+
+Default mode:
+- Focus on newly added or modified Rust code.
+- Ignore unrelated, unchanged code.
+
+Whole-repo baseline mode:
+- Use when the user explicitly says "whole repo", "entire repo", "baseline audit", or similar.
+- Evaluate all Rust source, tests, examples, benches, and doctests.
+- Prioritize actionable gaps by public API risk, panic behavior, missing doctests, weak tests, and untested invariants.
+- Do not require fixing every historical issue in one pass; report findings by priority and recommend focused follow-up patches.
 
 ---
 

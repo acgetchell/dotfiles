@@ -1,6 +1,6 @@
 ---
 name: python-support-scripts
-description: "Review Python support scripts and dev tooling that live alongside Rust crates: changelog generators, benchmark runners, release helpers, CI scripts, and fixture/diagnostic utilities. USE FOR: Python that parses commit messages, runs cargo bench/Criterion and aggregates results, generates CHANGELOG.md, scrapes GitHub Actions logs, prepares release artifacts, runs subprocess commands, manipulates Cargo metadata, validates fixtures, or stitches together CI workflows. Focus on transform/parse correctness, determinism, fixture-driven tests, malformed-input handling, subprocess discipline, and CLI ergonomics. DO NOT USE FOR: numerical/geometric/scientific algorithms, NumPy/SciPy correctness, or scientific reproducibility (use python-scientific-review); Rust code review (use rust-production-review or other Rust skills); generic Python web/app code; formatting-only cleanup."
+description: "Review Python support scripts and dev tooling that live alongside Rust crates on changed code or whole-repo baseline audits when explicitly requested: changelog generators, benchmark runners, release helpers, CI scripts, and fixture/diagnostic utilities. USE FOR: Python that parses commit messages, runs cargo bench/Criterion and aggregates results, generates CHANGELOG.md, scrapes GitHub Actions logs, prepares release artifacts, runs subprocess commands, manipulates Cargo metadata, validates fixtures, or stitches together CI workflows. Focus on transform/parse correctness, determinism, fixture-driven tests, malformed-input handling, subprocess discipline, and CLI ergonomics. DO NOT USE FOR: numerical/geometric/scientific algorithms, NumPy/SciPy correctness, or scientific reproducibility (use python-scientific-review); Rust code review (use rust-production-review or other Rust skills); generic Python web/app code; formatting-only cleanup; unrelated unchanged code unless a baseline audit is requested."
 ---
 
 # python-support-scripts
@@ -23,6 +23,18 @@ Focus on newly added or modified Python that:
 - stitches together CI workflows or pre-commit checks
 
 Ignore unrelated unchanged code unless reviewing it surfaces a real bug in the changed surface.
+
+### Scope Modes
+
+Default mode:
+- Review newly added or modified Python support scripts, fixtures, tests, and CI-facing utilities.
+- Ignore unrelated unchanged tooling unless it defines conventions or helper APIs used by the changed code.
+
+Whole-repo baseline mode:
+- Use when the user explicitly says "whole repo", "entire repo", "baseline audit", or similar.
+- Audit all Python support scripts, their tests, fixtures, command-line entry points, subprocess boundaries, and committed generated-output paths.
+- Prioritize findings by release/CI breakage risk, parser/renderer correctness, nondeterminism, unsafe subprocess behavior, malformed-input handling, and weak fixture coverage.
+- Do not require fixing every historical tooling issue in one pass; separate release blockers from maintainability cleanup.
 
 ## Review posture
 

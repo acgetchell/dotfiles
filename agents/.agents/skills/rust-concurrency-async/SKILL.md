@@ -1,6 +1,6 @@
 ---
 name: rust-concurrency-async
-description: "Audit Rust concurrency and async code for correctness, Send/Sync discipline, blocking hazards, and lock/channel design. USE FOR: async/await review, Tokio/async-std runtime usage, Send/Sync bounds, spawn_blocking, cancellation safety, Mutex/RwLock/parking_lot/tokio::sync use, atomics ordering, channel discipline (mpsc/oneshot/broadcast/watch), lock ordering, deadlocks, deterministic ordering of side effects, structured concurrency, async trait bounds, async lifetimes, futures and streams. DO NOT USE FOR: synchronous correctness only (use rust-production-review), error design (use rust-error-variants), trait bound cleanup (use rust-trait-bounds), iterator/pattern idioms (use rust-iter-control-flow), non-Rust code, or unchanged code."
+description: "Audit Rust concurrency and async code for correctness, Send/Sync discipline, blocking hazards, and lock/channel design on changed code or whole-repo baseline audits when explicitly requested. USE FOR: async/await review, Tokio/async-std runtime usage, Send/Sync bounds, spawn_blocking, cancellation safety, Mutex/RwLock/parking_lot/tokio::sync use, atomics ordering, channel discipline (mpsc/oneshot/broadcast/watch), lock ordering, deadlocks, deterministic ordering of side effects, structured concurrency, async trait bounds, async lifetimes, futures and streams. DO NOT USE FOR: synchronous correctness only (use rust-production-review), error design (use rust-error-variants), trait bound cleanup (use rust-trait-bounds), iterator/pattern idioms (use rust-iter-control-flow), non-Rust code, or unrelated unchanged code unless a baseline audit is requested."
 ---
 
 # rust-concurrency-async
@@ -21,6 +21,18 @@ Focus on newly added or modified Rust code that:
 - adds atomics or memory orderings
 - changes `Send`/`Sync` bounds on public APIs
 - adds `spawn_blocking` or thread pool offloading
+
+### Scope Modes
+
+Default mode:
+- Audit newly added or modified async, threaded, synchronized, atomic, or Send/Sync-affecting code.
+- Ignore unrelated unchanged concurrency code unless it defines the scheduling or synchronization contract for the changed code.
+
+Whole-repo baseline mode:
+- Use when the user explicitly says "whole repo", "entire repo", "baseline audit", or similar.
+- Audit all async/concurrent Rust code, including public Send/Sync contracts, tasks, locks, channels, atomics, global caches, and tests that rely on ordering.
+- Prioritize findings by deadlock risk, cancellation unsafety, blocking in async contexts, hidden nondeterminism, and public Send/Sync API surprises.
+- If the repo has little or no concurrency, say so explicitly instead of inventing findings.
 
 ## Review goals
 

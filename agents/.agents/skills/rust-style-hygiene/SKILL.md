@@ -1,6 +1,6 @@
 ---
 name: rust-style-hygiene
-description: "Enforce idiomatic Rust naming, import usage, and path clarity on changed code. USE FOR: Rust style review, function/method naming critique, import placement and grouping, fully-qualified path simplification, redundant prefix removal (get_, process_, handle_), use-statement organization. DO NOT USE FOR: behavior/correctness review (use rust-test-quality), non-Rust code, generated code, or unchanged files."
+description: "Enforce idiomatic Rust naming, import usage, and path clarity on changed code or whole-repo baseline audits when explicitly requested. USE FOR: Rust style review, function/method naming critique, import placement and grouping, fully-qualified path simplification, redundant prefix removal (get_, process_, handle_), use-statement organization. DO NOT USE FOR: behavior/correctness review (use rust-test-quality), non-Rust code, generated code, or unrelated unchanged files unless a baseline audit is requested."
 ---
 
 # rust-style-hygiene
@@ -15,6 +15,18 @@ Focus on:
 - import usage and placement
 
 Ignore unrelated, unchanged files.
+
+### Scope Modes
+
+Default mode:
+- Audit newly added or modified Rust code for naming, imports, and path clarity.
+- Ignore unrelated unchanged files.
+
+Whole-repo baseline mode:
+- Use when the user explicitly says "whole repo", "entire repo", "baseline audit", or similar.
+- Audit naming, import placement, import grouping, redundant prefixes, and path clarity across Rust source, tests, examples, and benches.
+- Prioritize findings that affect public API names, repeated import/path friction, generated warnings, or readability in core modules.
+- Do not require fixing every historical style issue in one pass; group low-risk cleanup separately.
 
 ---
 

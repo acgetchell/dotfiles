@@ -1,6 +1,6 @@
 ---
 name: python-scientific-review
-description: "Perform rigorous senior-level review of Python that implements numerical, geometric, statistical, or scientific-computing logic alongside a Rust crate. USE FOR: Python that implements numerical/geometric/statistical/topological algorithms, validates Rust numerical output, checks reproducibility of scientific results, generates scientific fixtures (point clouds, meshes, distributions), audits NumPy/SciPy correctness, reviews Hypothesis property tests over numerical inputs, or checks Rust interoperability for numerical formats (coordinates, indexing, dtypes). DO NOT USE FOR: changelog generators, benchmark runners, release helpers, CI scripts, fixture/diagnostic CLIs, or other Python support tooling (use python-support-scripts); general Python web/app code; formatting-only cleanup; Rust code review (use rust-production-review or other Rust skills); or unrelated unchanged code."
+description: "Perform rigorous senior-level review of Python that implements numerical, geometric, statistical, or scientific-computing logic alongside a Rust crate on changed code or whole-repo baseline audits when explicitly requested. USE FOR: Python that implements numerical/geometric/statistical/topological algorithms, validates Rust numerical output, checks reproducibility of scientific results, generates scientific fixtures (point clouds, meshes, distributions), audits NumPy/SciPy correctness, reviews Hypothesis property tests over numerical inputs, or checks Rust interoperability for numerical formats (coordinates, indexing, dtypes). DO NOT USE FOR: changelog generators, benchmark runners, release helpers, CI scripts, fixture/diagnostic CLIs, or other Python support tooling (use python-support-scripts); general Python web/app code; formatting-only cleanup; Rust code review (use rust-production-review or other Rust skills); or unrelated unchanged code unless a baseline audit is requested."
 ---
 
 # python-scientific-review
@@ -23,6 +23,18 @@ Focus on newly added or modified Python code that:
 If the Python is dev tooling (changelog generators, benchmark runners, release helpers, CI scripts, diagnostic CLIs that don't implement numerical logic), use `python-support-scripts` instead.
 
 Ignore unrelated unchanged code unless needed to understand data formats, invariants, or Rust interoperability.
+
+### Scope Modes
+
+Default mode:
+- Review newly added or modified scientific Python, numerical fixtures, tests, and Rust cross-check scripts.
+- Ignore unrelated unchanged scientific code unless it defines the data format or invariant used by the changed code.
+
+Whole-repo baseline mode:
+- Use when the user explicitly says "whole repo", "entire repo", "baseline audit", or similar.
+- Audit all scientific Python scripts, tests, fixtures, generated reference data paths, and Rust interoperability assumptions.
+- Prioritize findings by numerical correctness, reproducibility, malformed/degenerate input handling, fixture realism, dtype/indexing compatibility, and weak invariant tests.
+- Do not require fixing every historical scientific-code issue in one pass; separate correctness risks from cleanup.
 
 ## Review posture
 

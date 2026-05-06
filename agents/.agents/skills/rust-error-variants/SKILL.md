@@ -1,6 +1,6 @@
 ---
 name: rust-error-variants
-description: "Audit Rust error enums and error pathways for correctness, debuggability, and orthogonality. USE FOR: Rust review comments asking whether appropriate Error variants were added/used, error enum design, thiserror/Display messages, anyhow/Result mapping, preserving typed errors, adding missing variants, replacing generic validation errors, checking error pathway correctness, ensuring variants are mutually exclusive and actionable. DO NOT USE FOR: general Rust style/naming review (use rust-style-hygiene), test/doctest coverage review (use rust-test-quality), non-Rust code, or unchanged code."
+description: "Audit Rust error enums and error pathways for correctness, debuggability, and orthogonality on changed code or whole-repo baseline audits when explicitly requested. USE FOR: Rust review comments asking whether appropriate Error variants were added/used, error enum design, thiserror/Display messages, anyhow/Result mapping, preserving typed errors, adding missing variants, replacing generic validation errors, checking error pathway correctness, ensuring variants are mutually exclusive and actionable. DO NOT USE FOR: general Rust style/naming review (use rust-style-hygiene), test/doctest coverage review (use rust-test-quality), non-Rust code, or unrelated unchanged code unless a baseline audit is requested."
 ---
 
 # rust-error-variants
@@ -21,6 +21,18 @@ Focus on newly added or modified Rust code that:
 - returns generic errors such as `ValidationFailed`, `InvalidInput`, or string-only errors
 
 Ignore unrelated unchanged code unless needed to understand existing error conventions.
+
+### Scope Modes
+
+Default mode:
+- Audit newly added or modified error types, fallible paths, and error conversions.
+- Ignore unrelated unchanged errors unless they define the convention the changed code should follow.
+
+Whole-repo baseline mode:
+- Use when the user explicitly says "whole repo", "entire repo", "baseline audit", or similar.
+- Audit public error types, fallible public APIs, validation paths, backend/library error mappings, and common internal error conversion boundaries.
+- Prioritize findings by caller-visible ambiguity, lost typed context, misleading variants, missing `#[non_exhaustive]`, and tests that cannot assert structured errors.
+- Do not require fixing every historical error-design issue in one pass; separate API-breaking fixes from internal cleanup.
 
 ## Review goals
 
