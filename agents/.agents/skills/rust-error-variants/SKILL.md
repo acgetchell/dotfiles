@@ -19,6 +19,10 @@ Focus on newly added or modified Rust code that:
 - changes `Result` return types or `?` propagation
 - adds `thiserror`, `Display`, `From`, `map_err`, or `anyhow` usage
 - returns generic errors such as `ValidationFailed`, `InvalidInput`, or string-only errors
+- stores finite, caller-visible categories in `String`, `&str`, or `&'static str`
+  fields instead of enums, especially fields named `kind`, `reason`, `level`,
+  `check`, `operation`, `format`, `target`, `mode`, `type`, `source`, or
+  subsystem-specific category names
 - uses `Box<dyn std::error::Error>`, `Box<dyn Error>`, or `anyhow::Error`
   in production code, public doctests, examples, or benchmarks where a typed crate
   error would preserve caller-visible failure modes
@@ -97,6 +101,38 @@ Flag:
 - multiple variants that could both apply to the same failure without a clear priority
 - variants whose names imply one invariant but whose fields/messages describe another
 - broad variants that become dumping grounds for unrelated failures
+
+### 3.5. Enum-able categories
+
+Finite, caller-visible categories should be typed as enums instead of strings.
+
+Flag string fields when:
+
+- the value comes from a fixed or nearly fixed set of literals
+- tests compare the field to a string literal
+- callers may branch on the value
+- the field identifies a validation check, invariant level, resume reason,
+  output/checkpoint operation, topology, move type, mode, format, or subsystem
+- a typed enum already exists for the concept and the error stores `format!("{x:?}")`
+  or `x.to_string()` instead
+
+Prefer:
+
+- small enums with `Display` implementations that preserve user-facing wording
+- reusing existing domain enums such as topology, move type, output format, or
+  validation level
+- `#[non_exhaustive]` on public category enums when downstream exhaustive
+  matching would be semver-hostile
+- tests that pattern-match enum values instead of comparing strings
+
+Leave string fields alone when:
+
+- the value is genuinely open-ended context such as a path, identifier, handle,
+  lower-level diagnostic, or free-form detail
+- the value names a private helper operation used only for debugging and callers
+  should not branch on it
+- enum variants would mirror unbounded upstream errors without adding useful
+  structure
 
 ### 4. Debuggable messages
 
