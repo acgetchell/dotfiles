@@ -17,6 +17,7 @@ echo "==> Brewfile"
 if brew bundle check --file="$DOTFILES_DIR/Brewfile" >/dev/null 2>&1; then
   pass "brew bundle check"
 else
+  brew bundle check --verbose --file="$DOTFILES_DIR/Brewfile" || true
   fail "brew bundle check (run: brew bundle install --file=$DOTFILES_DIR/Brewfile)"
 fi
 
@@ -79,9 +80,9 @@ for f in "$HOME/.zshrc" "$HOME/.gitconfig"; do
 done
 
 if [[ -d "$HOME/.agents/skills" ]]; then
-  pass "~/.agents/skills present"
+  pass "$HOME/.agents/skills present"
 else
-  fail "~/.agents/skills missing"
+  fail "$HOME/.agents/skills missing"
 fi
 
 echo "==> Homebrew health"
