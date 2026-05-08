@@ -207,7 +207,24 @@ Flag:
 - missing tests for operation sequences that could break global invariants
 - no benchmark coverage for performance-sensitive changes
 
-### 9. Documentation and maintainability
+### 9. Diagnostics and observability
+
+Committed diagnostics should be structured and filterable.
+
+Check:
+
+- library, test, example, and benchmark diagnostics use `tracing` or a project-approved structured logging facade instead of direct `stdout`/`stderr` writes
+- benchmark and test diagnostics are feature-gated when the project has diagnostic flags such as `bench-logging` or `diagnostics`
+- logging, formatting, allocation, or error-wrapping helpers are kept out of benchmark hot loops and measured closures
+- diagnostics preserve useful typed context without replacing returned errors
+
+Flag:
+
+- committed `println!`, `eprintln!`, or direct `std::io::{stdout, stderr}` writes used for diagnostics instead of tracing
+- logging in Criterion-measured closures or performance-critical kernels
+- feature-gated diagnostics that silently change non-diagnostic behavior
+
+### 10. Documentation and maintainability
 
 Complex code needs maintainable explanations at the invariant and algorithm level.
 
