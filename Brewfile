@@ -43,8 +43,9 @@ brew "powershell"                      # PowerShell shell (`pwsh`)
 brew "pylint"                          # Python linter
 brew "python@3.13"                     # Python 3 interpreter (`python3`)
 brew "pytorch"                         # machine learning tensor library
-brew "ripgrep"                         # fast text search (`rg`)
-brew "rustup"                          # Rust toolchain manager
+brew "ripgrep"                        # fast text search (`rg`)
+brew "rumdl"                          # fast Markdown linter (Rust)
+brew "rustup"                         # Rust toolchain manager
 brew "shfmt"                           # shell script formatter
 brew "stow"                            # GNU Stow symlink manager
 brew "taplo"                           # TOML formatter and language server
