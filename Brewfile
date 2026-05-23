@@ -17,7 +17,6 @@ brew "ansible"                         # configuration management and automation
 brew "autoconf-archive"                # extra GNU Autoconf macros
 brew "automake"                        # GNU Makefile generator
 brew "azure-cli"                       # Azure CLI (`az`)
-brew "cargo-nextest"                   # Rust test runner
 brew "ccache"                          # compiler cache for C/C++ builds
 brew "clang-format"                    # C/C++/Objective-C code formatter
 brew "cmake"                           # cross-platform build system
