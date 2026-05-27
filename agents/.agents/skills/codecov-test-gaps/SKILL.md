@@ -29,8 +29,8 @@ Whole-repo baseline mode:
 Start by inspecting the repository:
 
 - verify `.github/workflows/codecov.yml` exists
-- read the workflow to identify test commands, the `cargo llvm-cov` invocation, artifact names, upload steps, flags, and paths
-- check for `codecov.yml`, `.codecov.yml`, and the `lcov.info` artifact produced by `cargo-llvm-cov`
+- read the workflow to identify test commands, coverage tool invocation, artifact/report names, upload steps, flags, and paths
+- check for `codecov.yml`, `.codecov.yml`, and coverage reports or artifacts such as `coverage.xml`, `lcov.info`, or HTML coverage output
 - identify the language test framework from project files instead of assuming one
 
 If the workflow is missing or renamed, search `.github/workflows/` and explain the mismatch before proceeding.
@@ -71,8 +71,8 @@ Pick the report that matches the task. Prefer most-specific to least-specific:
 
 For the chosen run:
 
-- inspect with `gh run view <run-id> --log` and `gh run view <run-id> --json artifacts,jobs,conclusion,url`
-- download coverage artifacts with `gh run download <run-id> --dir <tmp-dir>` when artifacts exist (typically `lcov.info`)
+- inspect with `gh run view <run-id> --log` and `gh run view <run-id> --json jobs,conclusion,url`; request additional JSON fields only after confirming `gh run view --json` supports them in the installed CLI
+- download coverage artifacts with `gh run download <run-id> --dir <tmp-dir>` when artifacts exist (for example `coverage.xml`, `lcov.info`, or a named coverage artifact)
 - record the commit SHA the report was generated from so findings reference the right code
 
 Do not require or print Codecov tokens. If a private Codecov report cannot be accessed, rely on workflow artifacts/logs and ask the user for a report link only if necessary.
@@ -93,7 +93,7 @@ When reading the report:
 
 - treat "coverage drop X%" and "file at Y%" as separate signals
 - look at branch coverage and partial branches, not just lines
-- partial-branch hits in Rust often come from `match` arms, `?` desugaring, and `if let` fall-throughs; do not chase 100% branch coverage on idiomatic control flow when the missing branch is unreachable for valid inputs
+- partial-branch hits can come from language/runtime constructs rather than meaningful behavior. For example, Rust often reports partial branches from `match` arms, `?` desugaring, and `if let` fall-throughs; Python often reports narrow exception or platform branches. Do not chase 100% branch coverage when the missing branch is unreachable for valid inputs or would require brittle tests.
 
 ### 5. Identify meaningful uncovered code
 
@@ -119,11 +119,13 @@ Deprioritize or skip:
 - platform-specific guards that cannot run in the current environment
 - trivial accessors or boilerplate where a test adds no real confidence
 
-Respect existing exclusion markers in the source. With `cargo-llvm-cov` the relevant forms are:
+Respect existing exclusion markers in the source. Use the marker syntax supported by the repository's coverage tool. Common forms include:
 
 - `// LCOV_EXCL_LINE`
 - `// LCOV_EXCL_START` / `// LCOV_EXCL_STOP`
 - `#[cfg(not(coverage))]` / `#[coverage(off)]` (nightly)
+- `# pragma: no cover`
+- `# pragma: no branch`
 
 If a gap is not worth testing, say why and recommend either an exclusion marker in the source or a `codecov.yml` `ignore:` entry instead of adding a low-value test.
 
@@ -153,19 +155,24 @@ Before editing:
 After editing:
 
 - run the targeted tests first
-- run `cargo llvm-cov` (e.g., `cargo llvm-cov --workspace --lcov --output-path lcov.info`) when feasible to mirror CI
+- rerun the repository's coverage command when feasible to mirror CI, such as `cargo llvm-cov --workspace --lcov --output-path lcov.info` for Rust or `pytest --cov --cov-report=xml` for Python
 - run the repository's normal validation command when appropriate
 - if coverage cannot be rerun locally, explain what was validated and what remains for CI/Codecov
 
 ## Language-specific guidance
 
-- **Rust** is the primary target for this skill; the project uses `cargo-llvm-cov`.
+- **Rust** projects commonly use `cargo-llvm-cov`.
   - typical artifacts: `target/llvm-cov/` and `lcov.info`
   - prefer `cargo llvm-cov --workspace --lcov --output-path lcov.info` locally to mirror CI
   - assert error variants and invariants, not just `is_ok()`
   - partial branch hits often come from `match` arms, `?` operator desugaring, and `if let` fall-throughs; treat unreachable arms as candidates for `unreachable!()` with a documented invariant or for an exclusion marker rather than a test
   - prefer doctests on public API to cover the documented contract
-- **Python** when the same workflow also covers Python tests: most Python in this project is support tooling (changelog generators, benchmark runners, CI helpers), so testing should focus on parse/transform logic against committed fixtures, deterministic output, and malformed-input handling rather than numerical tolerances. For genuinely numerical Python, defer to `python-scientific-review`; for support scripts, defer to `python-support-scripts`.
+- **Python** projects commonly use `coverage.py`, `pytest-cov`, and `coverage.xml`.
+  - prefer the repository's declared command, such as `just coverage`, `uv run pytest --cov`, or `coverage run -m pytest && coverage xml`
+  - use `coverage report -m` or the terminal output from `pytest-cov` to map uncovered lines before editing tests
+  - prioritize parser, CLI, file I/O, serialization, date/time, and error-path behavior over tests that merely execute branches
+  - use `# pragma: no cover` or `# pragma: no branch` only for genuinely unreachable, platform-specific, or defensive code after explaining why a behavior test would be brittle
+  - for genuinely numerical Python, defer to `python-scientific-review`; for support scripts, defer to `python-support-scripts`
 
 When the coverage gap overlaps a specialized review skill (`rust-test-quality`, `python-scientific-review`, etc.), apply that skill's principles without losing focus on the Codecov report.
 
