@@ -266,6 +266,27 @@ Prefer tests that:
 
 If a repository has a property-test placement convention, follow it.
 
+### 8. Semgrep Guardrails
+
+When a repo already uses Semgrep or similar project rules, consider adding
+narrow guardrails for recurring parse-don't-validate regressions.
+
+Good rule targets include:
+
+- public `*_unchecked` APIs in production code
+- infallible raw-value ingestion for known invariant-bearing types
+- refined fields regressing from `NonZero*`, newtypes, or enums back to raw
+  primitives
+- public `validate_* -> Result<(), _>` APIs where a constructor/parser/newtype
+  should carry the proof
+- direct `Deserialize` derives on invariant-bearing domain types without a raw
+  DTO plus fallible conversion step
+
+Keep these rules repo-specific and low-noise. Semgrep should catch known bad
+shapes and protect established invariants; it should not try to infer every Rust
+invariant. If the repo has Semgrep fixtures, add positive and negative examples
+for new rules.
+
 ## Common Findings
 
 Flag these patterns:

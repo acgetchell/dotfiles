@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub Issue Planning"
+  short_description: "Manage issue dependency metadata."
+  default_prompt: "Use $github-issue-planning to inspect and update GitHub issue ordering, Blocking/Is blocked by relationships, labels, milestones, and project metadata safely."
