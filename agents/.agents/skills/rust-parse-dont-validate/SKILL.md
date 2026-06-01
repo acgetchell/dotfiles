@@ -104,6 +104,8 @@ Examples:
 - enum-like string must be one of a fixed set
 - dimensions must agree
 - checkpoint counters must be internally consistent
+- `Option<T>` must represent true absence rather than deferred initialization or
+  a state-specific payload that belongs in an enum variant
 
 If no invariant exists, do not force smart constructors or private fields.
 
@@ -172,6 +174,55 @@ Consider:
 
 Do not introduce a new type if it only adds ceremony and the invariant is local,
 obvious, and already impossible to violate.
+
+#### Algebraic Domain Modeling
+
+Use Rust's algebraic data types to encode domain states, alternatives, and
+proofs directly in the type system when invalid combinations are otherwise
+representable.
+
+Prefer enums, tuple structs, newtypes, and variant-specific payloads when:
+
+- a set of fields is only valid for some modes or outcomes
+- `bool` plus `Option<T>` combinations can represent impossible states
+- a raw primitive has domain meaning beyond its machine type
+- a computation branches repeatedly to rediscover a value's domain category
+- a validated value should carry proof into later infallible computation
+
+Flag patterns such as:
+
+- `accepted: bool` plus `action_after: Option<f64>` when accepted steps must
+  always have an action-after value and rejected steps must never have one
+- enum-like strings or integers used in core domain state
+- structs where several fields are mutually dependent but publicly mutable
+- `Option<T>` used for values that are required in one domain state and forbidden
+  in another
+- parallel fields whose valid combinations are documented in comments instead of
+  encoded in variants
+- repeated matches or checks that could be eliminated by variant-specific
+  payloads
+
+Prefer shapes like:
+
+- `enum StepTelemetry { Accepted { ... }, RejectedProposal { ... }, NoProposal { ... } }`
+- `struct FiniteAction(f64)` instead of storing raw `f64` actions
+- `struct MeasurementCount(NonZeroU32)` or domain-specific count newtypes when
+  the invariant is stronger than nonzero
+- private fields plus smart constructors for variant payloads with numeric
+  constraints
+
+For simple positive integer invariants, apply the dedicated `NonZero*` guidance
+below before inventing a domain newtype.
+
+Do not over-model:
+
+- keep passive DTOs raw at serialization and configuration boundaries
+- avoid replacing simple public wire or report shapes with rich ADTs when
+  consumers need stable, flat serialization; parse into ADTs internally instead
+- avoid typestate or deeply generic encodings when a small enum or newtype is
+  enough
+- prefer clear runtime validation at true external boundaries, then convert into
+  refined domain types
 
 #### NonZero* Primitive Checks
 
@@ -339,6 +390,8 @@ Flag these patterns:
 - `Default` producing placeholder invalid values
 - derived deserialization bypassing smart constructors
 - getters returning `Result` because invalid data was stored
+- parallel fields whose valid combinations are enforced by comments or later
+  validation instead of variant-specific payloads
 
 Accept these patterns when justified:
 
