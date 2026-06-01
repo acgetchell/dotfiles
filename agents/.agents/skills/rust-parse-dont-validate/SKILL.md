@@ -173,6 +173,44 @@ Consider:
 Do not introduce a new type if it only adds ceremony and the invariant is local,
 obvious, and already impossible to violate.
 
+#### NonZero* Primitive Checks
+
+Explicitly check whether positive integer invariants should be carried by
+standard `NonZero*` types.
+
+Prefer `NonZeroU32`, `NonZeroUsize`, `NonZeroU64`, and their signed/integer
+siblings when:
+
+- a stored domain value, validated configuration, metadata field, count, period,
+  retry limit, capacity, or sampling parameter has the invariant `value > 0`
+- a fallible constructor/parser has already proven nonzero-ness and downstream
+  code currently stores the raw integer
+- an API accepts a value that must be nonzero and has no more specific invariant
+  than nonzero
+- the value participates in `Option<NonZero*>`, where Rust's niche optimization
+  keeps absence and nonzero value compact while making `Some(0)` impossible
+
+Flag patterns such as:
+
+- `u32`, `usize`, or `u64` fields accompanied by checks like `== 0`, `> 0`,
+  `>= 1`, or `"at least one"` after construction
+- getters returning raw positive counts from validated domain objects when a
+  `NonZero*` getter would preserve the proof
+- converting `NonZero*` back to raw integers too early, then rechecking for zero
+  in later computation
+- public setters or constructors that accept raw positive counts and mutate state
+  before preserving the nonzero proof
+- `Option<u32>` or sentinel `0` values used to mean "absent" when
+  `Option<NonZeroU32>` would encode the distinction directly
+
+Do not recommend `NonZero*` by reflex. Keep raw integers at input boundaries such
+as CLI/config DTOs, wire formats, passive reports, and tests that deliberately
+model invalid input before rejection. Use a domain-specific newtype instead when
+the invariant is stronger than nonzero, such as `>= 3`, a bounded range,
+topology-dependent constraints, or a count that must match another field. In
+those cases, `NonZero*` may be an internal building block, but it is not the full
+proof.
+
 For example, prefer a smart constructor that returns a refined value:
 
 ```rust
