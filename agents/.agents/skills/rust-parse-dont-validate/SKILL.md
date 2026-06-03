@@ -8,8 +8,8 @@ description: "Audit Rust code for parse-don't-validate design, invariant-bearing
 Audit Rust code for invalid-state prevention and parse-don't-validate design.
 
 The goal is to reject bad input at the boundary, store only valid values, and let
-later computation operate on invariant-bearing types without repeated defensive
-checks.
+later computation operate on proof-bearing / validated domain types without
+repeated defensive checks.
 
 ## Scope
 
@@ -30,10 +30,12 @@ Depending on the requested scope, inspect Rust code that:
 Ignore passive report/DTO structs with no meaningful invariants unless public
 fields can be fed back into invariant-bearing APIs.
 
-DTO means data transfer object: a passive shape used to carry data across a
+DTO means data transfer object: a passive shape used to carry raw data across a
 boundary, such as a wire format, config-file representation, API response, test
 fixture, or report. DTOs are useful at boundaries, but they are not a substitute
-for invariant-bearing domain types.
+for proof-bearing / validated domain types. Prefer terms like
+`proof-bearing type`, `validated domain type`, `refined type`, or
+`validated wrapper` for the parsed value that carries validation evidence inward.
 
 ## Rust Idiom Guardrails
 
@@ -43,13 +45,14 @@ Prefer idiomatic Rust boundaries:
 
 - prefer parsing into a more precise type over validating and returning `()`;
   if a check proves something, ask what type should carry that proof
-- parse raw inputs at public boundaries, then pass the refined/proof-bearing
-  value inward; do not trust a public wrapper type merely because its normal
-  constructor validates, because crate-internal unchecked constructors, tests,
-  deserialization, or future changes may still create invalid stored state
-- avoid the opposite failure mode too: once a refined/proof-bearing value exists,
-  internal helpers should accept that type and trust its invariant rather than
-  repeatedly reparsing or rescanning the same object
+- parse raw inputs at public boundaries into a proof-bearing / validated domain
+  type, then pass that value inward; do not trust a public wrapper type merely
+  because its normal constructor validates, because crate-internal unchecked
+  constructors, tests, deserialization, or future changes may still create
+  invalid stored state
+- avoid the opposite failure mode too: once a proof-bearing / validated domain
+  value exists, internal helpers should accept that type and trust its invariant
+  rather than repeatedly reparsing or rescanning the same object
 - public fields are fine for passive data with no invariants
 - private fields plus accessors are appropriate when fields carry invariants
 - use `TryFrom`, `FromStr`, fallible constructors, or builder `build` methods for
@@ -150,14 +153,17 @@ Prefer:
 
 DTOs are appropriate for raw transport and passive reporting. They should not be
 the type that core algorithms trust when fields have semantic constraints.
+Do not call the parsed valid value a DTO; use `proof-bearing type`,
+`validated domain type`, `refined type`, or `validated wrapper`.
 
 Prefer a two-layer design:
 
 - raw DTOs with simple fields for deserialization, serialization, fixtures, or
   passive reports
-- fallible conversion from raw DTOs into refined domain types
-- domain types with private invariant-bearing fields and infallible accessors
-- computation over the refined domain types, not over raw DTOs
+- fallible conversion from raw DTOs into proof-bearing / validated domain types
+- validated domain types with private invariant-bearing fields and infallible
+  accessors
+- computation over proof-bearing / validated domain types, not over raw DTOs
 
 Flag:
 
@@ -171,7 +177,8 @@ Flag:
 Accept:
 
 - public fields on passive reports/results that callers only inspect
-- raw config/wire structs that are immediately parsed into validated types
+- raw config/wire structs that are immediately parsed into proof-bearing /
+  validated domain types
 - test fixtures that deliberately model invalid input before rejection
 
 ### 3. Make Invalid States Unrepresentable
@@ -424,8 +431,8 @@ Flag these patterns:
   invariants without first converting to a private proof type, when unchecked
   internal construction can bypass the public constructor
 - internal helpers that accept raw/public wrapper types and revalidate them
-  repeatedly instead of accepting the refined/proof-bearing type produced at the
-  boundary
+  repeatedly instead of accepting the proof-bearing / validated domain type
+  produced at the boundary
 - `validate_*(&self)` required before normal use
 - `is_valid` boolean APIs whose result is not encoded in the returned type
 - delayed validation in `run`, `compute`, `sample`, `step`, or `finish`
@@ -440,8 +447,8 @@ Flag these patterns:
 Accept these patterns when justified:
 
 - public fields on passive reports with no invariants
-- raw DTO structs used only at input/output boundaries and parsed into domain
-  types before computation
+- raw DTO structs used only at input/output boundaries and parsed into
+  proof-bearing / validated domain types before computation
 - infallible constructors from refined types
 - crate-private or test-only infallible constructors for literals/fixtures whose
   invariant is visible at the call site, especially when the public raw
