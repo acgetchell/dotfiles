@@ -43,6 +43,13 @@ Prefer idiomatic Rust boundaries:
 
 - prefer parsing into a more precise type over validating and returning `()`;
   if a check proves something, ask what type should carry that proof
+- parse raw inputs at public boundaries, then pass the refined/proof-bearing
+  value inward; do not trust a public wrapper type merely because its normal
+  constructor validates, because crate-internal unchecked constructors, tests,
+  deserialization, or future changes may still create invalid stored state
+- avoid the opposite failure mode too: once a refined/proof-bearing value exists,
+  internal helpers should accept that type and trust its invariant rather than
+  repeatedly reparsing or rescanning the same object
 - public fields are fine for passive data with no invariants
 - private fields plus accessors are appropriate when fields carry invariants
 - use `TryFrom`, `FromStr`, fallible constructors, or builder `build` methods for
@@ -342,7 +349,10 @@ Flag compute functions that revalidate object invariants every time they run.
 
 Prefer:
 
-- a single validation/parsing step at the boundary
+- a single validation/parsing step at each public raw-input boundary
+- public methods that accept invariant-bearing public wrapper types but can be
+  reached by crate-internal unchecked construction should re-parse into a
+  private proof type before computation, then pass that proof type inward
 - private unchecked helpers only reachable with validated values
 - infallible computation over refined types
 - documented internal debug assertions only for impossible invariant violations
@@ -353,6 +363,10 @@ Keep runtime checks when:
 - the invariant is too expensive to preserve eagerly and the API documents the
   trade-off
 - the function accepts raw input directly and is itself the boundary
+- the function is a public boundary and receives a public type whose invariant is
+  normally maintained but not impossible to bypass internally; in that case,
+  parse once into a private proof type, then avoid revalidating after the proof is
+  carried inward
 
 ### 7. Tests
 
@@ -368,6 +382,12 @@ Prefer tests that:
   values can be generated systematically
 - verify failed setters/builders leave the original value unchanged
 - verify downstream compute functions are infallible on accepted values
+- when a crate-private unchecked constructor exists, add focused regression tests
+  that build invalid storage through that unchecked path and assert public
+  methods reject it before computation; this proves the public boundary parses
+  even when normal public constructors would have rejected the value earlier
+- add companion tests or code review checks that internal proof-type helpers do
+  not re-parse the same object after the boundary has already produced the proof
 
 If a repository has a property-test placement convention, follow it.
 
@@ -400,6 +420,12 @@ Flag these patterns:
 - `new(...) -> Self` that accepts raw invalidable values
 - public infallible `new` / `from_*` constructors for raw invalidable values when
   callers should receive `Result<_, Error>` instead
+- public compute methods that accept public wrapper types and trust their stored
+  invariants without first converting to a private proof type, when unchecked
+  internal construction can bypass the public constructor
+- internal helpers that accept raw/public wrapper types and revalidate them
+  repeatedly instead of accepting the refined/proof-bearing type produced at the
+  boundary
 - `validate_*(&self)` required before normal use
 - `is_valid` boolean APIs whose result is not encoded in the returned type
 - delayed validation in `run`, `compute`, `sample`, `step`, or `finish`
