@@ -38,10 +38,16 @@ Whole-repo baseline mode:
 Check:
 
 - `name`, `version`, `edition`, `rust-version`, `description`, `license`, `repository`, `documentation`, `homepage`, `categories`, `keywords`, and `readme` are populated where appropriate for a published crate
-- `version` follows semver and matches the changelog entry being prepared
+- `version` follows semver and matches the changelog entry being prepared, when the task is explicitly release-preparation work
 - `edition` is set explicitly and matches the rest of the workspace
 - `rust-version` is present for any published crate that wants a meaningful MSRV
 - `license` field agrees with `LICENSE`/`LICENSE-*` files in the repository
+
+Version-change policy:
+
+- Do not automatically bump `Cargo.toml` package versions, lockfile package versions, README dependency snippets, or related version references during ordinary cargo-hygiene, feature, fix, or review work.
+- Treat version bumps as maintainer-driven release work. Only recommend or perform them when the user explicitly asks for release/version-bump work or is following the repository's release procedure.
+- If changed code appears semver-sensitive, report the semver implication as a finding or release note. Leave the actual version update to the maintainer unless explicitly instructed otherwise.
 
 Flag:
 
@@ -133,6 +139,7 @@ Before a release, also check:
 
 - `CHANGELOG.md` has an entry that matches the manifest version
 - documentation has been updated to match the new version before publishing; crates.io does not allow republishing documentation without a version bump
+- version references are consistent only within an explicit release workflow; do not introduce the version bump yourself unless the user requested that release step
 - `cargo publish --dry-run` would succeed with the current manifest
 - yanked or deprecated dependencies are not present
 - MSRV declared in `Cargo.toml` matches the value tested in CI
