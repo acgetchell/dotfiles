@@ -48,6 +48,12 @@ Prefer idiomatic Rust boundaries:
 - use `TryFrom`, `FromStr`, fallible constructors, or builder `build` methods for
   raw-to-refined conversion
 - use `From` only when conversion cannot fail
+- name public raw-to-refined constructors fallibly (`try_new`, `try_from_*`,
+  `parse`, `FromStr`, or `TryFrom`); reserve infallible `new` / `from_*` for
+  already-refined inputs, crate-private literals, or internal validated paths
+- design public APIs so any operation with caller-observable failure returns
+  `Result` or `Option`; public functions that return plain values should be
+  genuinely total for all representable inputs, not panic-based validation paths
 - use `Option` for absence, not for explaining invalid input
 - use `Result` when callers need to know why raw input was rejected
 - keep getters and borrowed accessors infallible whenever stored data is already
@@ -125,6 +131,9 @@ Check:
 Prefer:
 
 - fallible constructors/parsers for raw input
+- public raw-to-refined constructors named to signal fallibility; infallible
+  raw-value helpers should normally be private, `pub(crate)`, test-only, or
+  explicitly `*_unchecked`
 - private fields for invariant-bearing data
 - validation before mutation, with atomic accept/reject behavior
 - custom `Deserialize`, `TryFrom`, or builder `build` methods when raw serialized
@@ -308,6 +317,13 @@ Prefer:
 Fallible constructors, parsers, builders, and raw-value setters should return
 `Result<_, Error>` with an appropriate typed error.
 
+As a public API rule, a function should either be genuinely infallible for all
+representable inputs or make its fallibility visible with `Result` / `Option`.
+Panics, `assert!`, `unwrap`, and `expect` should not be used as recoverable
+validation paths in public APIs. If a panic is intentionally reserved for an
+impossible internal invariant, keep that path private/crate-private where
+possible and document any remaining public panic behavior explicitly.
+
 Check that:
 
 - each rejection reason maps to a useful error variant
@@ -382,6 +398,8 @@ Flag these patterns:
 
 - public invariant-bearing fields
 - `new(...) -> Self` that accepts raw invalidable values
+- public infallible `new` / `from_*` constructors for raw invalidable values when
+  callers should receive `Result<_, Error>` instead
 - `validate_*(&self)` required before normal use
 - `is_valid` boolean APIs whose result is not encoded in the returned type
 - delayed validation in `run`, `compute`, `sample`, `step`, or `finish`
@@ -399,6 +417,9 @@ Accept these patterns when justified:
 - raw DTO structs used only at input/output boundaries and parsed into domain
   types before computation
 - infallible constructors from refined types
+- crate-private or test-only infallible constructors for literals/fixtures whose
+  invariant is visible at the call site, especially when the public raw
+  constructor is fallible
 - `unsafe` or unchecked internal constructors that are private, documented, and
   only called after validation
 - lazy validation when preserving the invariant eagerly is measurably too
