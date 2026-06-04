@@ -77,5 +77,6 @@ cask "steam"                          # Steam game launcher
 cask "tailscale-app"                  # Tailscale VPN client (`tailscale`)
 cask "visual-studio-code"             # Visual Studio Code editor (`code`)
 cask "warp"                           # Warp terminal
+cask "windows-app"                    # Microsoft Windows App (RDP client)
 cask "zed"                            # Zed code editor
 cask "zotero"                         # citation and reference manager

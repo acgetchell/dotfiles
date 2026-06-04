@@ -1,0 +1,7 @@
+interface:
+  display_name: "Python Parse Don’t Validate"
+  short_description: "Audit Python boundary parsing."
+  default_prompt: "Use $python-parse-dont-validate to review the changed Python code for parse-don't-validate design and type-checkable invariants."
+
+policy:
+  allow_implicit_invocation: true
