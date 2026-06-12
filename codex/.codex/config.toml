@@ -20,12 +20,9 @@ writable_roots = [ "/Users/adam/.cache/codex/uv" ]
 set = { PATH = "/opt/homebrew/bin:/usr/local/bin:/Users/adam/.local/bin:/Users/adam/.cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Applications/Codex.app/Contents/Resources", UV_CACHE_DIR = "/Users/adam/.cache/codex/uv" }
 
 [marketplaces.openai-bundled]
-last_updated = "2026-06-12T19:05:21Z"
+last_updated = "2026-06-12T20:25:20Z"
 source_type = "local"
 source = "/Users/adam/.codex/.tmp/bundled-marketplaces/openai-bundled"
-
-[plugins."browser@openai-bundled"]
-enabled = true
 
 [features]
 js_repl = false
@@ -48,3 +45,9 @@ NODE_REPL_INSTRUCTIONS_USE_CASE_CHROME = "Control the Chrome browser in conjunct
 BROWSER_USE_CODEX_APP_BUILD_FLAVOR = "prod"
 BROWSER_USE_CODEX_APP_VERSION = "26.609.30741"
 CODEX_CLI_PATH = "/Applications/Codex.app/Contents/Resources/codex"
+
+[desktop]
+followUpQueueMode = "steer"
+
+[plugins."browser@openai-bundled"]
+enabled = true
