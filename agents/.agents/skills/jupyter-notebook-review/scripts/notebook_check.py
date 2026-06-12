@@ -4,12 +4,20 @@ from __future__ import annotations
 
 import argparse
 import ast
-from dataclasses import dataclass
 import json
 import os
+import re
+import shutil
+import subprocess
 import sys
+import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+RUFF_EXTEND_IGNORE = "INP001,S603"
+RUFF_LOCATION_RE = re.compile(r"\s*-->\s+.+?:(?P<line>\d+):(?P<column>\d+)")
+TY_LOCATION_RE = re.compile(r"^.+?:(?P<line>\d+):(?P<column>\d+): (?P<message>.+)$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,6 +27,26 @@ class Diagnostic:
     severity: str
     cell: int
     message: str
+
+
+@dataclass(frozen=True, slots=True)
+class CodeSnapshot:
+    """Notebook code extracted into a Python-like source string."""
+
+    source: str
+    line_to_cell: dict[int, int]
+
+
+@dataclass(frozen=True, slots=True)
+class LintOptions:
+    """Options that control notebook linting."""
+
+    allow_outputs: bool = False
+    strict: bool = False
+    run_ruff: bool = True
+    run_format: bool = True
+    run_ty: bool = True
+    project_root: Path | None = None
 
 
 def cell_source(cell: dict[str, Any]) -> str:
@@ -182,9 +210,152 @@ def has_wait_timeout(node: ast.Call) -> bool:
     return has_keyword(node, "timeout")
 
 
-def lint(path: Path, *, allow_outputs: bool = False, strict: bool = False) -> int:
-    """Validate notebook JSON and compile code cells."""
-    notebook = load_notebook(path)
+def extract_code(notebook: dict[str, Any]) -> CodeSnapshot:
+    """Extract code cells into one source string and retain line-to-cell mapping."""
+    chunks: list[str] = []
+    line_to_cell: dict[int, int] = {}
+    current_line = 1
+    cells = code_cells(notebook)
+    for cell_position, (index, _cell, source) in enumerate(cells):
+        chunks.append(f"# %% notebook cell {index}\n")
+        line_to_cell[current_line] = index
+        current_line += 1
+        source_lines = source.splitlines(keepends=True)
+        if not source_lines:
+            chunks.append("\n")
+            line_to_cell[current_line] = index
+            current_line += 1
+        for source_line in source_lines:
+            chunks.append(source_line)
+            line_to_cell[current_line] = index
+            current_line += 1
+        if source_lines and not source_lines[-1].endswith(("\n", "\r")):
+            chunks.append("\n")
+            line_to_cell[current_line] = index
+            current_line += 1
+        if cell_position < len(cells) - 1:
+            chunks.append("\n")
+            line_to_cell[current_line] = index
+            current_line += 1
+    return CodeSnapshot(source="".join(chunks), line_to_cell=line_to_cell)
+
+
+def ruff_lint_diagnostics(path: Path, notebook: dict[str, Any]) -> list[Diagnostic]:
+    """Run Ruff lint checks on extracted notebook code when Ruff is available."""
+    snapshot = extract_code(notebook)
+    command = [
+        "ruff",
+        "check",
+        "--stdin-filename",
+        f"{path.stem}_notebook.py",
+        "--extend-ignore",
+        RUFF_EXTEND_IGNORE,
+        "-",
+    ]
+    try:
+        result = subprocess.run(  # noqa: S603 - command is fixed and receives notebook code through stdin.
+            command,
+            input=snapshot.source,
+            text=True,
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as error:
+        return [Diagnostic("error", 0, f"ruff timed out after {error.timeout} seconds")]
+
+    output = "\n".join(part for part in (result.stdout, result.stderr) if part)
+    if result.returncode == 0:
+        return []
+    if result.returncode != 1:
+        return [Diagnostic("error", 0, f"ruff failed with exit code {result.returncode}:\n{output}")]
+
+    diagnostics: list[Diagnostic] = []
+    for block in output.split("\n\n"):
+        lines = [line for line in block.splitlines() if line.strip()]
+        if not lines or lines[0].startswith("Found "):
+            continue
+        cell = 0
+        for line in lines:
+            match = RUFF_LOCATION_RE.match(line)
+            if match is not None:
+                cell = snapshot.line_to_cell.get(int(match.group("line")), 0)
+                break
+        diagnostics.append(Diagnostic("error", cell, f"ruff check: {lines[0]}"))
+    return diagnostics
+
+
+def ruff_format_diagnostics(path: Path, notebook: dict[str, Any]) -> list[Diagnostic]:
+    """Run Ruff format check on extracted notebook code when Ruff is available."""
+    snapshot = extract_code(notebook)
+    command = ["ruff", "format", "--check", "--stdin-filename", f"{path.stem}_notebook.py", "-"]
+    try:
+        result = subprocess.run(  # noqa: S603 - command is fixed and receives notebook code through stdin.
+            command,
+            input=snapshot.source,
+            text=True,
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as error:
+        return [Diagnostic("error", 0, f"ruff format timed out after {error.timeout} seconds")]
+
+    output = "\n".join(part for part in (result.stdout, result.stderr) if part).strip()
+    if result.returncode == 0:
+        return []
+    if result.returncode != 1:
+        return [Diagnostic("error", 0, f"ruff format failed with exit code {result.returncode}:\n{output}")]
+    return [Diagnostic("error", 0, f"ruff format: extracted notebook code is not formatted\n{output}")]
+
+
+def ty_diagnostics(path: Path, notebook: dict[str, Any], project_root: Path) -> list[Diagnostic]:
+    """Run ty on extracted notebook code when ty is available."""
+    snapshot = extract_code(notebook)
+    with tempfile.TemporaryDirectory(prefix="notebook-check-") as temporary_directory:
+        extracted_path = Path(temporary_directory) / f"{path.stem}_notebook.py"
+        extracted_path.write_text(snapshot.source, encoding="utf-8")
+        command = [
+            "ty",
+            "check",
+            "--project",
+            str(project_root),
+            "--output-format",
+            "concise",
+            str(extracted_path),
+        ]
+        try:
+            result = subprocess.run(  # noqa: S603 - command is fixed and operates on generated notebook code.
+                command,
+                text=True,
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as error:
+            return [Diagnostic("error", 0, f"ty timed out after {error.timeout} seconds")]
+
+    output = "\n".join(part for part in (result.stdout, result.stderr) if part)
+    if result.returncode == 0:
+        return []
+    if result.returncode not in {1, 2}:
+        return [Diagnostic("error", 0, f"ty failed with exit code {result.returncode}:\n{output}")]
+
+    diagnostics: list[Diagnostic] = []
+    for line in output.splitlines():
+        if not line.strip() or line.startswith("Found ") or line == "All checks passed!":
+            continue
+        match = TY_LOCATION_RE.match(line)
+        if match is None:
+            diagnostics.append(Diagnostic("error", 0, f"ty: {line}"))
+            continue
+        cell = snapshot.line_to_cell.get(int(match.group("line")), 0)
+        diagnostics.append(Diagnostic("error", cell, f"ty: {match.group('message')}"))
+    return diagnostics
+
+
+def code_cell_diagnostics(path: Path, notebook: dict[str, Any], options: LintOptions) -> list[Diagnostic]:
+    """Return diagnostics from AST parsing and notebook output hygiene."""
     diagnostics: list[Diagnostic] = []
     for index, cell, source in code_cells(notebook):
         try:
@@ -196,18 +367,48 @@ def lint(path: Path, *, allow_outputs: bool = False, strict: bool = False) -> in
         visitor.visit(tree)
         diagnostics.extend(visitor.diagnostics)
         outputs = cell.get("outputs", [])
-        if outputs and not allow_outputs:
+        if outputs and not options.allow_outputs:
             diagnostics.append(Diagnostic("error", index, f"has {len(outputs)} output block(s); clear outputs before committing"))
-        if cell.get("execution_count") is not None and not allow_outputs:
+        if cell.get("execution_count") is not None and not options.allow_outputs:
             diagnostics.append(Diagnostic("error", index, f"execution_count={cell.get('execution_count')}; clear execution counts"))
+    return diagnostics
+
+
+def external_tool_diagnostics(path: Path, notebook: dict[str, Any], options: LintOptions) -> list[Diagnostic]:
+    """Return diagnostics from Ruff and ty checks over extracted notebook code."""
+    diagnostics: list[Diagnostic] = []
+    if options.run_ruff or options.run_format:
+        if shutil.which("ruff") is None:
+            diagnostics.append(Diagnostic("error", 0, "ruff is required for notebook linting; run through `uv run` or install Ruff"))
+        else:
+            if options.run_ruff:
+                diagnostics.extend(ruff_lint_diagnostics(path, notebook))
+            if options.run_format:
+                diagnostics.extend(ruff_format_diagnostics(path, notebook))
+    if options.run_ty:
+        if shutil.which("ty") is None:
+            diagnostics.append(Diagnostic("error", 0, "ty is required for notebook linting; run through `uv run` or install ty"))
+        else:
+            diagnostics.extend(ty_diagnostics(path, notebook, options.project_root or Path.cwd()))
+    return diagnostics
+
+
+def lint(path: Path, options: LintOptions) -> int:
+    """Validate notebook JSON, compile code cells, and run Python lint checks."""
+    notebook = load_notebook(path)
+    diagnostics = [
+        *code_cell_diagnostics(path, notebook, options),
+        *external_tool_diagnostics(path, notebook, options),
+    ]
 
     for diagnostic in diagnostics:
         stream = sys.stderr if diagnostic.severity == "error" else sys.stdout
-        print(f"{path}: cell {diagnostic.cell}: {diagnostic.severity}: {diagnostic.message}", file=stream)
+        location = f"cell {diagnostic.cell}" if diagnostic.cell > 0 else "notebook"
+        print(f"{path}: {location}: {diagnostic.severity}: {diagnostic.message}", file=stream)
 
     if any(diagnostic.severity == "error" for diagnostic in diagnostics):
         return 1
-    if strict and diagnostics:
+    if options.strict and diagnostics:
         return 1
     return 0
 
@@ -235,11 +436,18 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--summary", action="store_true", help="print a compact cell inventory")
-    mode.add_argument("--lint", action="store_true", help="validate JSON, compile code cells, and report common notebook issues")
+    mode.add_argument(
+        "--lint",
+        action="store_true",
+        help="validate JSON, compile code cells, run Ruff and ty when available, and report common notebook issues",
+    )
     mode.add_argument("--execute", action="store_true", help="execute the notebook in memory")
     parser.add_argument("notebook", type=Path)
     parser.add_argument("--allow-outputs", action="store_true", help="do not fail lint when code cells contain outputs or execution counts")
     parser.add_argument("--strict", action="store_true", help="treat warning diagnostics as lint failures")
+    parser.add_argument("--no-ruff", action="store_true", help="skip Ruff lint checks for extracted notebook code")
+    parser.add_argument("--no-format", action="store_true", help="skip Ruff format checks for extracted notebook code")
+    parser.add_argument("--no-ty", action="store_true", help="skip ty checks for extracted notebook code")
     parser.add_argument("--repo-root", type=Path, default=Path.cwd(), help="working directory for execution")
     parser.add_argument("--timeout", type=int, default=120, help="per-cell execution timeout in seconds")
     return parser.parse_args(argv)
@@ -252,7 +460,17 @@ def main(argv: list[str] | None = None) -> int:
         summarize(args.notebook)
         return 0
     if args.lint:
-        return lint(args.notebook, allow_outputs=args.allow_outputs, strict=args.strict)
+        return lint(
+            args.notebook,
+            LintOptions(
+                allow_outputs=args.allow_outputs,
+                strict=args.strict,
+                run_ruff=not args.no_ruff,
+                run_format=not args.no_format,
+                run_ty=not args.no_ty,
+                project_root=args.repo_root,
+            ),
+        )
     execute(args.notebook, args.repo_root, args.timeout)
     return 0
 

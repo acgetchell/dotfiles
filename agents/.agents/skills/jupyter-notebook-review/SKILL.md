@@ -15,7 +15,9 @@ CLIs, or examples; notebooks should orchestrate those APIs and analyze generated
 3. Read code cells through `jq` or `notebook_check.py --summary`; avoid dumping large outputs into context.
 4. Review for reproducibility, data handling, plotting, path hygiene, outputs, secrets, and environment setup.
 5. Edit notebooks with `nbformat` or the helper scripts; do not hand-edit large notebook JSON by string substitution.
-6. Validate with `scripts/notebook_check.py --lint NOTEBOOK.ipynb`; execute with `--execute` when dependencies and runtime are reasonable.
+6. Validate with `uv run scripts/notebook_check.py --lint NOTEBOOK.ipynb` when the helper is copied into a repo, or with the skill-local script through
+   `uv run`. The lint path compiles cells, runs notebook-specific AST checks, and requires Ruff lint, Ruff format, and ty on extracted notebook code unless a
+   check is explicitly disabled. Execute with `--execute` when dependencies and runtime are reasonable.
 7. Clear outputs before finalizing unless the repository intentionally tracks rendered notebook outputs.
 
 ## Related Python Skills
@@ -278,7 +280,8 @@ def run_command(command: list[str], *, cwd: Path, timeout: int = 120) -> subproc
 Use bundled scripts from this skill when useful:
 
 - `scripts/notebook_check.py --summary NOTEBOOK.ipynb` prints a compact cell inventory.
-- `scripts/notebook_check.py --lint NOTEBOOK.ipynb` validates JSON, compiles code cells, and reports output counts.
+- `scripts/notebook_check.py --lint NOTEBOOK.ipynb` validates JSON, compiles code cells, requires Ruff lint, Ruff format, and ty by default, and reports output
+  counts.
 - `scripts/notebook_check.py --execute NOTEBOOK.ipynb --repo-root PATH` executes in memory without writing outputs back.
 - `scripts/clear_outputs.py NOTEBOOK.ipynb` clears outputs and execution counts in place.
 
