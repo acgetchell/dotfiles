@@ -18,7 +18,8 @@ CLIs, or examples; notebooks should orchestrate those APIs and analyze generated
 6. Validate with `uv run scripts/notebook_check.py --lint NOTEBOOK.ipynb` when the helper is copied into a repo, or with the skill-local script through
    `uv run`. The lint path compiles cells, runs notebook-specific AST checks, and requires Ruff lint, Ruff format, and ty on extracted notebook code unless a
    check is explicitly disabled. Execute with `--execute` when dependencies and runtime are reasonable.
-7. Clear outputs before finalizing unless the repository intentionally tracks rendered notebook outputs.
+7. Ensure each cell has a stable, descriptive `id` that names its purpose, such as `setup-code`, `load-data`, or `render-plot`.
+8. Clear outputs before finalizing unless the repository intentionally tracks rendered notebook outputs.
 
 ## Related Python Skills
 
@@ -128,6 +129,7 @@ Check:
 
 Flag:
 - committed cell outputs or execution counts unless the project explicitly wants rendered notebooks
+- missing cell ids, random-looking generated cell ids, or ids that churn across saves
 - huge base64 images, binary blobs, widgets, or stale errors in outputs
 - secrets, tokens, local absolute paths, usernames, or private data in source or outputs
 - hidden imports in later cells that should be in setup
@@ -135,6 +137,7 @@ Flag:
 
 Prefer:
 - short markdown context that explains interpretation, not implementation trivia
+- stable, descriptive cell ids that summarize the cell's role and make diffs, nbformat validation, and review comments easier to follow
 - functions for repeated notebook-local operations
 - imports grouped in the first code cell
 - concise cells with one clear purpose
