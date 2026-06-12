@@ -144,6 +144,7 @@ Prefer:
 When notebooks run binaries or CLIs:
 - use argument lists, never `shell=True` with interpolated values
 - include a timeout or documented reason not to use one
+- justify intentional subprocess wrappers with a narrow `# noqa: S603` comment rather than globally ignoring subprocess diagnostics
 - surface command, exit code, stdout, and stderr when failures matter
 - keep machine-parseable command output separate from tutorial/log text when downstream cells parse it
 - avoid printing secrets, tokens, or raw private records
