@@ -59,7 +59,7 @@ else
 fi
 
 echo "==> Stow symlinks"
-for f in "$HOME/.zshrc" "$HOME/.gitconfig"; do
+for f in "$HOME/.zshrc" "$HOME/.gitconfig" "$HOME/.codex/config.toml"; do
   if [[ -L "$f" ]]; then
     target="$(readlink "$f")"
     case "$target" in

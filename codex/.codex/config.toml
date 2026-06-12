@@ -1,0 +1,11 @@
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+service_tier = "priority"
+
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+writable_roots = ["/Users/adam/.cache/codex/uv"]
+
+[shell_environment_policy]
+set = { PATH = "/opt/homebrew/bin:/usr/local/bin:/Users/adam/.local/bin:/Users/adam/.cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Applications/Codex.app/Contents/Resources", UV_CACHE_DIR = "/Users/adam/.cache/codex/uv" }

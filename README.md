@@ -16,6 +16,8 @@ dotfiles/
 │   └── .gitconfig          # stows to ~/.gitconfig
 ├── zsh/
 │   └── .zshrc              # stows to ~/.zshrc
+├── codex/
+│   └── .codex/config.toml  # stows to ~/.codex/config.toml
 └── agents/
     └── .agents/skills/     # stows to ~/.agents/skills/
         └── */SKILL.md
@@ -33,7 +35,7 @@ git clone https://github.com/acgetchell/dotfiles.git ~/projects/dotfiles
 
 1. installs Homebrew if missing;
 2. runs `brew bundle install --file=Brewfile`;
-3. stows `git`, `zsh`, and `agents`;
+3. stows `git`, `zsh`, `agents`, and `codex`;
 4. runs `bin/verify.sh`.
 
 ## Day-to-day stow commands
@@ -44,6 +46,7 @@ stow -d ~/projects/dotfiles -t ~ -n -v -R agents
 
 # Apply or re-apply one package
 stow -d ~/projects/dotfiles -t ~ -R zsh
+stow -d ~/projects/dotfiles -t ~ -R codex
 
 # Remove one package's symlinks
 stow -d ~/projects/dotfiles -t ~ -D zsh
@@ -107,7 +110,40 @@ Expected symlink shape:
 ```text
 ~/.zshrc                  -> projects/dotfiles/zsh/.zshrc
 ~/.gitconfig              -> projects/dotfiles/git/.gitconfig
+~/.codex/config.toml      -> ../../projects/dotfiles/codex/.codex/config.toml
 ~/.agents/skills/*        -> ../../projects/dotfiles/agents/.agents/skills/*
+```
+
+## Codex config
+The `codex` stow package tracks shared, public-safe Codex defaults in
+`~/.codex/config.toml`. It keeps the sandbox in `workspace-write` mode while
+granting Codex a narrow uv cache exception:
+
+```toml
+[sandbox_workspace_write]
+writable_roots = ["/Users/adam/.cache/codex/uv"]
+
+[shell_environment_policy]
+set = { UV_CACHE_DIR = "/Users/adam/.cache/codex/uv" }
+```
+
+This lets Rust/Python workflows use `uv run`, `uv lock`, and notebook execution
+without giving Codex write access to all of `~/.cache` or disabling sandboxing.
+
+Keep secrets and mutable runtime state out of this public repo. Do not commit
+`~/.codex/auth.json`, logs, caches, sqlite state, marketplace cache state,
+connector tokens, machine-local project trust entries, or opaque app-generated
+identifiers. If Codex rewrites `~/.codex/config.toml` with local runtime state
+after stowing, review the diff and keep only durable non-secret defaults.
+
+When first moving an existing live Codex config into stow, keep a backup before
+replacing it with the package symlink:
+
+```sh
+cp ~/.codex/config.toml ~/.codex/config.toml.pre-stow
+mv ~/.codex/config.toml ~/.codex/config.toml.live-before-stow
+stow -d ~/projects/dotfiles -t ~ -n -v -R codex
+stow -d ~/projects/dotfiles -t ~ -R codex
 ```
 
 ## Local override files
