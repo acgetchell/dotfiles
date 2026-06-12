@@ -117,10 +117,12 @@ Expected symlink shape:
 ## Codex config
 The `codex` stow package tracks shared, public-safe Codex defaults in
 `~/.codex/config.toml`. It keeps the sandbox in `workspace-write` mode while
-granting Codex a narrow uv cache exception:
+granting Codex a narrow uv cache exception and enabling sandboxed local network
+access for tools such as Jupyter kernels:
 
 ```toml
 [sandbox_workspace_write]
+network_access = true
 writable_roots = ["/Users/adam/.cache/codex/uv"]
 
 [shell_environment_policy]
@@ -129,13 +131,8 @@ set = { UV_CACHE_DIR = "/Users/adam/.cache/codex/uv" }
 
 This lets Rust/Python workflows use `uv run`, `uv lock`, and notebook execution
 without giving Codex write access to all of `~/.cache` or disabling sandboxing.
-
-The package also tracks narrow Codex command rules in `~/.codex/rules/`.
-Notebook launch and execution recipes such as `just notebook` and
-`just notebook-check` are allowed outside the sandbox because Jupyter kernels
-need local socket binding. Keep these exceptions scoped to the repository
-`just` recipes rather than enabling full access or broad network/local-host
-permissions.
+The network exception is intentionally attached to `workspace-write`; it is
+needed for local kernel sockets such as Jupyter's loopback ports.
 
 Keep secrets and mutable runtime state out of this public repo. Do not commit
 `~/.codex/auth.json`, logs, caches, sqlite state, marketplace cache state,

@@ -14,15 +14,11 @@ sandbox_mode = "workspace-write"
 notify = ["/Users/adam/.codex/computer-use/Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient", "turn-ended"]
 
 [sandbox_workspace_write]
+network_access = true
 writable_roots = [ "/Users/adam/.cache/codex/uv" ]
 
 [shell_environment_policy]
 set = { PATH = "/opt/homebrew/bin:/usr/local/bin:/Users/adam/.local/bin:/Users/adam/.cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Applications/Codex.app/Contents/Resources", UV_CACHE_DIR = "/Users/adam/.cache/codex/uv" }
-
-[marketplaces.openai-bundled]
-last_updated = "2026-06-12T20:25:20Z"
-source_type = "local"
-source = "/Users/adam/.codex/.tmp/bundled-marketplaces/openai-bundled"
 
 [features]
 js_repl = false
@@ -38,12 +34,10 @@ NODE_REPL_NODE_MODULE_DIRS = "/Applications/Codex.app/Contents/Resources/cua_nod
 NODE_REPL_NODE_PATH = "/Applications/Codex.app/Contents/Resources/cua_node/bin/node"
 NODE_REPL_TRUSTED_CODE_PATHS = "/Users/adam/.codex"
 CODEX_HOME = "/Users/adam/.codex"
-NODE_REPL_TRUSTED_BROWSER_CLIENT_SHA256S = "a3f3ca79fe2bff56076b895f1f13a8f673168160bd79d880cc34b4500e08a71c"
 BROWSER_USE_AVAILABLE_BACKENDS = "chrome,iab"
 NODE_REPL_INSTRUCTIONS_USE_CASE_BROWSER = "Control the in-app browser in conjunction with the Browser Plugin."
 NODE_REPL_INSTRUCTIONS_USE_CASE_CHROME = "Control the Chrome browser in conjunction with the Chrome Plugin. Prefer this method of controlling Chrome over alternatives (such as Computer Use) unless the user explicitly mentions an alternative."
 BROWSER_USE_CODEX_APP_BUILD_FLAVOR = "prod"
-BROWSER_USE_CODEX_APP_VERSION = "26.609.30741"
 CODEX_CLI_PATH = "/Applications/Codex.app/Contents/Resources/codex"
 
 [desktop]
