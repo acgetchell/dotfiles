@@ -179,7 +179,7 @@ Example:
 [coderabbit]
 	machineId = cli/example
 [user]
-	signingkey = ABCDEF123456
+	signingkey = YOUR_SIGNING_KEY_ID
 ```
 
 When checking included values with `git config`, pass `--includes`:
