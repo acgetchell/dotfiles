@@ -8,9 +8,6 @@
 # Keep this file foundational. Per-machine extras belong in Brewfile.local
 # (which should NOT be committed).
 
-# ---- Taps ----
-tap "codacy/tap"                       # Codacy formula tap
-
 # ---- CLI tools (formulae) ----
 brew "actionlint"                      # GitHub Actions workflow linter
 brew "ansible"                         # configuration management and automation
@@ -20,7 +17,6 @@ brew "azure-cli"                       # Azure CLI (`az`)
 brew "ccache"                          # compiler cache for C/C++ builds
 brew "clang-format"                    # C/C++/Objective-C code formatter
 brew "cmake"                           # cross-platform build system
-brew "codacy/tap/codacy-analysis-cli"  # Codacy local analysis CLI
 brew "dotnet"                          # .NET SDK/runtime CLI (`dotnet`)
 brew "gh"                              # GitHub CLI
 brew "git"                             # modern Git version control
