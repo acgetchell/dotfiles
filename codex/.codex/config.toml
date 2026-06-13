@@ -52,12 +52,15 @@ global = "zed"
 "/Users/adam/projects/causal-triangulations" = "zed"
 
 [marketplaces.openai-bundled]
-last_updated = "2026-06-12T23:39:29Z"
+last_updated = "2026-06-13T13:03:57Z"
 source_type = "local"
 source = "/Users/adam/.codex/.tmp/bundled-marketplaces/openai-bundled"
 
-[plugins."browser@openai-bundled"]
-enabled = true
-
 [projects."/Users/adam/projects/causal-triangulations"]
 trust_level = "trusted"
+
+[projects."/Users/adam/projects/delaunay"]
+trust_level = "trusted"
+
+[plugins."browser@openai-bundled"]
+enabled = true
