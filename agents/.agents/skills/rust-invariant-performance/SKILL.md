@@ -210,11 +210,21 @@ retune, or narrow the change before moving on. Do not rely on subjective
 complexity arguments, Criterion reports from unrelated benches, or "should be
 faster" reasoning when a representative proxy exists.
 
+Interpret benchmark evidence statistically and honestly. Small per-case timing
+wobbles can be normal for local smoke tests, especially when the aggregate proxy
+and correctness checks still look healthy. Clear regressions in a representative
+case or in the aggregate proxy should block the change. Do not game mixed
+benchmark evidence by adding dimension-, size-, or fixture-specific branches
+unless the algorithm is genuinely different for that domain case and the code
+would still be justified without the benchmark noise.
+
 Prefer:
 
 - naming an existing benchmark to run
 - measuring before editing, changing one bounded performance surface, then
   measuring the same proxy afterward
+- judging noisy local benchmark proxies by direction, size, and aggregate impact
+  rather than demanding every subcase improve
 - recommending a focused benchmark when no existing one covers the hot path
 - checking allocation counts when heap traffic is the concern
 - comparing invariant-preserving alternatives, not under-validated shortcuts
@@ -227,6 +237,11 @@ Prefer:
 Flag:
 
 - performance claims without before/after measurements from the same command
+- dimension-, input-size-, seed-, or fixture-specific code paths added only to
+  rescue mixed benchmark output rather than because the domain algorithm requires
+  them
+- clear representative-proxy regressions that are dismissed as noise without
+  rerunning, reverting, or explaining why the benchmark is no longer relevant
 - benchmark fixtures that are too clean, too small, or unrelated to the claimed
   improvement
 - benchmark code that logs, allocates, parses config, or constructs heavy inputs

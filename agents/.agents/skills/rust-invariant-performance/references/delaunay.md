@@ -53,6 +53,12 @@ crate or closely related computational-geometry code.
   If only one dimension is under investigation, the dimension-specific
   large-scale debug recipes can support diagnosis, but they do not replace the
   full smoke proxy when the claim is broad.
+- Treat small dimension-by-dimension timing movement as statistical noise unless
+  it is repeatable or large enough to matter. Do not add dimension-specific
+  branches just to make the smoke table look cleaner; only specialize by
+  dimension when Delaunay geometry/topology genuinely needs a different
+  algorithmic path. Clear regressions in 3D or in the overall smoke proxy should
+  block the change.
 - Construction and topology-guarantee benchmarks for insertion/retry changes.
 - Predicate cold-path benchmarks for numerical fallback changes.
 - Hilbert/order benchmarks for preprocessing and deduplication changes.
