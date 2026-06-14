@@ -199,19 +199,34 @@ Flag:
 
 ### 7. Benchmark Accountability
 
-Every meaningful performance recommendation should say how to validate it.
+Every meaningful performance recommendation or implementation must be measured,
+not inferred. Before changing performance-sensitive code, run the smallest
+representative benchmark, smoke test, or allocation check that covers the
+claimed hot path and record the command and result. After each bounded change,
+rerun the same command before calling the change a performance improvement.
+
+If the after measurement regresses, treat that as a failed optimization: revert,
+retune, or narrow the change before moving on. Do not rely on subjective
+complexity arguments, Criterion reports from unrelated benches, or "should be
+faster" reasoning when a representative proxy exists.
 
 Prefer:
 
 - naming an existing benchmark to run
+- measuring before editing, changing one bounded performance surface, then
+  measuring the same proxy afterward
 - recommending a focused benchmark when no existing one covers the hot path
 - checking allocation counts when heap traffic is the concern
 - comparing invariant-preserving alternatives, not under-validated shortcuts
 - considering realistic dimensions, sample counts, triangulation sizes, matrix
   shapes, or move counts for the crate
+- using crate-specific smoke tests documented in `references/` when doing
+  repo-wide or user-visible performance work; use analogous repo-local smoke
+  tests when the exact command differs by crate
 
 Flag:
 
+- performance claims without before/after measurements from the same command
 - benchmark fixtures that are too clean, too small, or unrelated to the claimed
   improvement
 - benchmark code that logs, allocates, parses config, or constructs heavy inputs
@@ -264,6 +279,13 @@ Use these when they fit the codebase:
 
 ### Benchmark Gaps
 - Benchmarks to run or add, and what each should measure.
+
+### Benchmark Evidence
+- For performance implementations or claims, list the representative command,
+  before result, after result, and whether the same proxy improved, held steady,
+  or regressed.
+- If no representative benchmark or smoke test exists, say so explicitly and
+  recommend adding one before claiming a performance win.
 
 ### Not Worth Optimizing
 - Cold paths or cosmetic changes that should not distract from real hot paths.
