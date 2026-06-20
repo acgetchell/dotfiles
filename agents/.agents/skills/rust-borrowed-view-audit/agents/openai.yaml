@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust Borrowed View Audit"
+  short_description: "Audit Rust APIs for lifetime-bound views"
+  default_prompt: "Use $rust-borrowed-view-audit to review Rust snapshot and cache APIs for places where borrowed views should replace owned clones."
