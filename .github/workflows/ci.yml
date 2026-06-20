@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify
+    runs-on: macos-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+
+      - name: Check shell syntax
+        run: bash -n bin/bootstrap.sh bin/verify.sh
+
+      - name: Parse Git config
+        run: git config --file git/.gitconfig --list >/dev/null
+
+      - name: Parse Codex config
+        run: |
+          python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          with Path("codex/.codex/config.toml").open("rb") as config:
+              tomllib.load(config)
+          PY
+
+      - name: Parse YAML
+        run: |
+          ruby <<'RUBY'
+          require "psych"
+
+          paths = Dir.glob([
+            ".coderabbit.yml",
+            ".github/workflows/*.{yaml,yml}",
+            "agents/.agents/skills/**/agents/*.{yaml,yml}",
+          ])
+
+          paths.sort.each do |path|
+            Psych.safe_load(File.read(path), permitted_classes: [], aliases: false)
+          end
+          RUBY

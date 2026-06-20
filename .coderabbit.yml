@@ -1,0 +1,138 @@
+---
+language: en-US
+early_access: false
+enable_free_tier: true
+
+reviews:
+  profile: chill
+  request_changes_workflow: true
+  high_level_summary: false
+  review_status: true
+  commit_status: true
+  fail_commit_status: false
+  changed_files_summary: true
+  estimate_code_review_effort: true
+  suggested_labels: true
+  auto_apply_labels: true
+  path_instructions:
+    - path: "agents/.agents/skills/**/SKILL.md"
+      instructions: |
+        These files are Codex skill instructions. Focus on accidental disclosure
+        of private context, credentials, internal-only paths, or personal data;
+        prompt clarity; scope control; and whether the skill asks agents to use
+        safe, reviewable workflows.
+    - path: "agents/.agents/skills/**/agents/*.{yaml,yml}"
+      instructions: |
+        These files expose skills to agent surfaces. Verify the YAML remains
+        minimal, parseable, non-secret, and aligned with the corresponding
+        skill instructions.
+    - path: "codex/.codex/config.toml"
+      instructions: |
+        Treat this as personal tool configuration. Look especially for secrets,
+        tokens, private endpoints, broad trusted paths, and surprising plugin or
+        runtime enablement.
+    - path: ".github/workflows/*.{yaml,yml}"
+      instructions: |
+        Audit GitHub Actions for pinned actions, least-privilege permissions,
+        shell injection risks, credential persistence, and unnecessary network
+        or write access.
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: true
+    base_branches:
+      - main
+  tools:
+    shellcheck:
+      enabled: true
+    markdownlint:
+      enabled: true
+    github-checks:
+      enabled: true
+      timeout_ms: 90000
+    gitleaks:
+      enabled: true
+    actionlint:
+      enabled: true
+    yamllint:
+      enabled: true
+    languagetool:
+      enabled: true
+
+    ast-grep:
+      enabled: false
+    biome:
+      enabled: false
+    brakeman:
+      enabled: false
+    buf:
+      enabled: false
+    checkmake:
+      enabled: false
+    checkov:
+      enabled: false
+    circleci:
+      enabled: false
+    clippy:
+      enabled: false
+    cppcheck:
+      enabled: false
+    detekt:
+      enabled: false
+    dotenvLint:
+      enabled: false
+    eslint:
+      enabled: false
+    flake8:
+      enabled: false
+    golangci-lint:
+      enabled: false
+    hadolint:
+      enabled: false
+    htmlhint:
+      enabled: false
+    luacheck:
+      enabled: false
+    oxc:
+      enabled: false
+    phpmd:
+      enabled: false
+    phpcs:
+      enabled: false
+    phpstan:
+      enabled: false
+    pmd:
+      enabled: false
+    prismaLint:
+      enabled: false
+    pylint:
+      enabled: false
+    regal:
+      enabled: false
+    rubocop:
+      enabled: false
+    ruff:
+      enabled: false
+    semgrep:
+      enabled: false
+    shopifyThemeCheck:
+      enabled: false
+    sqlfluff:
+      enabled: false
+    swiftlint:
+      enabled: false
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  opt_out: false
+  web_search:
+    enabled: true
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "agents/.agents/skills/**"
+      - ".github/workflows/**"
+      - "codex/.codex/config.toml"
+      - "git/.gitconfig"
