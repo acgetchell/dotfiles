@@ -30,7 +30,7 @@ echo "==> Installing Brewfile bundle"
 brew bundle install --file="$DOTFILES_DIR/Brewfile"
 
 # 3. Stow packages
-PACKAGES=(git zsh agents codex)
+PACKAGES=(git zsh agents)
 echo "==> Stowing packages: ${PACKAGES[*]}"
 for pkg in "${PACKAGES[@]}"; do
   if [[ -d "$DOTFILES_DIR/$pkg" ]]; then

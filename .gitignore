@@ -5,3 +5,4 @@
 Brewfile.local
 *.gitconfig.local
 *.zshrc.local
+codex/.codex/config.toml

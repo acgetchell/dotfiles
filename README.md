@@ -16,8 +16,6 @@ dotfiles/
 │   └── .gitconfig          # stows to ~/.gitconfig
 ├── zsh/
 │   └── .zshrc              # stows to ~/.zshrc
-├── codex/
-│   └── .codex/config.toml  # stows to ~/.codex/config.toml
 └── agents/
     └── .agents/skills/     # stows to ~/.agents/skills/
         └── */SKILL.md
@@ -35,7 +33,7 @@ git clone https://github.com/acgetchell/dotfiles.git ~/projects/dotfiles
 
 1. installs Homebrew if missing;
 2. runs `brew bundle install --file=Brewfile`;
-3. stows `git`, `zsh`, `agents`, and `codex`;
+3. stows `git`, `zsh`, and `agents`;
 4. runs `bin/verify.sh`.
 
 ## Day-to-day stow commands
@@ -46,7 +44,6 @@ stow -d ~/projects/dotfiles -t ~ -n -v -R agents
 
 # Apply or re-apply one package
 stow -d ~/projects/dotfiles -t ~ -R zsh
-stow -d ~/projects/dotfiles -t ~ -R codex
 
 # Remove one package's symlinks
 stow -d ~/projects/dotfiles -t ~ -D zsh
@@ -110,15 +107,17 @@ Expected symlink shape:
 ```text
 ~/.zshrc                  -> projects/dotfiles/zsh/.zshrc
 ~/.gitconfig              -> projects/dotfiles/git/.gitconfig
-~/.codex/config.toml      -> ../../projects/dotfiles/codex/.codex/config.toml
 ~/.agents/skills/*        -> ../../projects/dotfiles/agents/.agents/skills/*
 ```
 
 ## Codex config
-The `codex` stow package tracks shared, public-safe Codex defaults in
-`~/.codex/config.toml`. It keeps the sandbox in `workspace-write` mode while
-granting Codex a narrow uv cache exception and enabling sandboxed local network
-access for tools such as Jupyter kernels:
+Codex rewrites `~/.codex/config.toml` with app runtime state, local absolute
+paths, project trust entries, plugin metadata, and other machine-specific
+values. Keep that file local rather than stowing it from this public repo.
+
+Useful non-secret defaults to keep in the local file include the sandbox mode, a
+narrow uv cache exception, and sandboxed local network access for tools such as
+Jupyter kernels:
 
 ```toml
 [sandbox_workspace_write]
@@ -137,18 +136,7 @@ needed for local kernel sockets such as Jupyter's loopback ports.
 Keep secrets and mutable runtime state out of this public repo. Do not commit
 `~/.codex/auth.json`, logs, caches, sqlite state, marketplace cache state,
 connector tokens, machine-local project trust entries, or opaque app-generated
-identifiers. If Codex rewrites `~/.codex/config.toml` with local runtime state
-after stowing, review the diff and keep only durable non-secret defaults.
-
-When first moving an existing live Codex config into stow, keep a backup before
-replacing it with the package symlink:
-
-```sh
-cp ~/.codex/config.toml ~/.codex/config.toml.pre-stow
-mv ~/.codex/config.toml ~/.codex/config.toml.live-before-stow
-stow -d ~/projects/dotfiles -t ~ -n -v -R codex
-stow -d ~/projects/dotfiles -t ~ -R codex
-```
+identifiers.
 
 ## Local override files
 Local override files are not tracked and should not be committed.
