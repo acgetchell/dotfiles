@@ -1,0 +1,4 @@
+interface:
+  display_name: "Scientific Citation Audit"
+  short_description: "Validate scientific references and credit"
+  default_prompt: "Use $scientific-citation-audit to audit REFERENCES.md against this repository's algorithms and citation claims."
