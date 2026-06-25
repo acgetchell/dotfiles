@@ -9,6 +9,10 @@ Audit Rust error variants and error pathways for correctness, debuggability, and
 
 Correct error design is part of correctness: callers need to distinguish failure modes, developers need useful messages, and tests should be able to pattern-match meaningful variants instead of parsing strings.
 
+Default stance: semantic error data is typed. Use strings only for genuinely
+open-ended explanatory context that callers must not parse, branch on, or treat
+as compatibility-relevant schema.
+
 ## Scope
 
 Focus on newly added or modified Rust code that:
@@ -105,6 +109,11 @@ Flag:
 ### 3.5. Enum-able categories
 
 Finite, caller-visible categories should be typed as enums instead of strings.
+Treat string fields as display/detail payloads, not semantic schema. A string
+field in an error is acceptable only when the value is genuinely unbounded or
+opaque, no caller should branch on it, tests do not need exact string matching
+for behavior, and no importer/exporter, retry path, diagnostics aggregator, or
+compatibility check will parse it later.
 
 Flag string fields when:
 
