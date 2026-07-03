@@ -67,10 +67,7 @@ def build_fixture_config(fixture_path: Path, source_config_path: Path) -> str:
 
 def write_fixture_config(fixture_path: Path, source_config_path: Path, output_config_path: Path) -> None:
     """Write the minimal Semgrep config needed to test one annotated fixture."""
-    output_config_path.write_text(
-        build_fixture_config(fixture_path, source_config_path),
-        encoding=UTF8,
-    )
+    output_config_path.write_text(build_fixture_config(fixture_path, source_config_path), encoding=UTF8)
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:

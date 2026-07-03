@@ -92,7 +92,7 @@ rules:
         - "/tests/semgrep/.github/workflows/**/*.yml"
         - "/tests/semgrep/.github/workflows/**/*.yaml"
     patterns:
-      - pattern-regex: '(?m)^[ \t]*(?:-[ \t]*)?uses:[ \t]*actions/checkout@[a-fA-F0-9]{40}[^\n]*\n(?!(?:[ \t]*with:\n)?(?:[ \t]{10,}\S[^\n]*\n){0,8}[ \t]{10,}persist-credentials:[ \t]*false\b)'
+      - pattern-regex: '(?m)^[ \t]*(?:-[ \t]*)?uses:[ \t]*actions/checkout@[a-fA-F0-9]{40}[^\n]*(?:\n(?![ \t]*-[ \t]+[A-Za-z_-]+:)(?![ \t]*persist-credentials:[ \t]*false\b)[^\n]*)*(?=\n[ \t]*-[ \t]+[A-Za-z_-]+:|\z)'
 
   - id: dotfiles.github-actions.no-pull-request-target
     languages:

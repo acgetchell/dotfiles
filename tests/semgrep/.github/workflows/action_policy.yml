@@ -21,6 +21,26 @@ jobs:
         # ruleid: dotfiles.github-actions.checkout-persist-credentials-false
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      # ruleid: dotfiles.github-actions.checkout-persist-credentials-false
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Checkout with long credential-safe options
+        # ok: dotfiles.github-actions.checkout-persist-credentials-false
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          clean: true
+          fetch-depth: 0
+          fetch-tags: false
+          filter: blob:none
+          lfs: false
+          path: fixture
+          ref: main
+          repository: owner/repo
+          show-progress: true
+          sparse-checkout-cone-mode: true
+          submodules: false
+          persist-credentials: false
+
       - name: Moving tag action
         # ruleid: dotfiles.github-actions.external-action-sha-pinned
         uses: actions/checkout@v7

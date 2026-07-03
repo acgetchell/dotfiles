@@ -53,7 +53,7 @@ if command -v cargo >/dev/null 2>&1; then
     fi
     if [[ "$installed_version" != "$version" ]]; then
       echo "==> Installing $tool $version"
-      cargo install --locked "$tool" --version "$version"
+      cargo install --locked --force "$tool" --version "$version"
     else
       echo "==> $tool already installed: $installed_version"
     fi

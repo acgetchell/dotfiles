@@ -150,8 +150,8 @@ stow-delete package:
 test-python: _ensure-uv
     uv run pytest
 
-toml-check:
-    python3 -c 'import subprocess, tomllib; from pathlib import Path; [tomllib.load(Path(path).open("rb")) for path in subprocess.run(["git", "ls-files", "*.toml"], check=True, capture_output=True, text=True).stdout.splitlines()]'
+toml-check: _ensure-uv
+    uv run python -c 'import subprocess, tomllib; from pathlib import Path; [tomllib.load(Path(path).open("rb")) for path in subprocess.run(["git", "ls-files", "*.toml"], check=True, capture_output=True, text=True).stdout.splitlines()]'
 
 yaml-check:
     ruby -e 'require "psych"; paths = Dir.glob([".coderabbit.yml", ".github/*.{yaml,yml}", ".github/workflows/*.{yaml,yml}", "agents/.agents/skills/**/agents/*.{yaml,yml}"]); paths.sort.each { |path| Psych.safe_load(File.read(path), permitted_classes: [], aliases: false) }'

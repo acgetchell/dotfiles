@@ -38,10 +38,7 @@ def test_build_fixture_config_keeps_unique_annotated_rules(tmp_path: Path) -> No
     """Duplicate fixture annotations are emitted once and in fixture order."""
     fixture = tmp_path / "fixture.sh"
     source_config = tmp_path / "semgrep.yaml"
-    fixture.write_text(
-        "# ruleid: dotfiles.one\n# ok: dotfiles.one, dotfiles.two\n",
-        encoding="utf-8",
-    )
+    fixture.write_text("# ruleid: dotfiles.one\n# ok: dotfiles.one, dotfiles.two\n", encoding="utf-8")
     write_source_config(source_config)
 
     generated = fixture_config.build_fixture_config(fixture, source_config)
