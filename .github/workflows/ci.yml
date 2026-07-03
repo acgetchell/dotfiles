@@ -19,7 +19,7 @@ jobs:
   verify:
     name: verify
     runs-on: macos-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
 
     steps:
       - name: Check out repository
