@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust Fluent API Design"
+  short_description: "Review fluent Rust workflow APIs"
+  default_prompt: "Use $rust-fluent-api-design to review whether this Rust public API should be fluent."

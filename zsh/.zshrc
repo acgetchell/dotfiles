@@ -103,6 +103,9 @@ fi
 # Add Command Line Tools (system path; safe everywhere)
 export PATH="/Library/Developer/CommandLineTools/usr/bin:$PATH"
 
+# ---- Brewfile location (used by `brew bundle` from any directory) ----
+export HOMEBREW_BUNDLE_FILE="$HOME/projects/dotfiles/Brewfile"
+
 # ---- LLVM via Homebrew (optional) ----
 if [[ -n "${HOMEBREW_PREFIX:-}" && -d "$HOMEBREW_PREFIX/opt/llvm/bin" ]]; then
   export PATH="$HOMEBREW_PREFIX/opt/llvm/bin:$PATH"

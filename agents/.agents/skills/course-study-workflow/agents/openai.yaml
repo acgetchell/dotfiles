@@ -1,0 +1,4 @@
+interface:
+  display_name: "Course Study Workflow"
+  short_description: "Maintain course study artifacts"
+  default_prompt: "Use $course-study-workflow to build lecture outlines, study summaries, practice quizzes, repairs, and exam sheets from course materials."
