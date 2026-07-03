@@ -9,6 +9,12 @@ on:
 permissions:
   contents: read
 
+env:
+  UV_CACHE_DIR: ".uv-cache"
+  JUST_VERSION: "1.55.1"
+  UV_VERSION: "0.11.26"
+  ZIZMOR_VERSION: "1.26.1"
+
 jobs:
   verify:
     name: verify
@@ -17,38 +23,33 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
-      - name: Check shell syntax
-        run: bash -n bin/bootstrap.sh bin/verify.sh
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version-file: ".python-version"
 
-      - name: Parse Git config
-        run: git config --file git/.gitconfig --list >/dev/null
+      - name: Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
 
-      - name: Parse Codex config
-        run: |
-          python3 - <<'PY'
-          import tomllib
-          from pathlib import Path
+      - name: Sync Python tooling
+        run: uv sync --locked --group dev
 
-          with Path("codex/.codex/config.toml").open("rb") as config:
-              tomllib.load(config)
-          PY
+      - name: Install just
+        uses: taiki-e/cache-cargo-install-action@417450f3c33ee20393705369577571770643d4c7 # v3.0.7
+        with:
+          tool: just@${{ env.JUST_VERSION }}
 
-      - name: Parse YAML
-        run: |
-          ruby <<'RUBY'
-          require "psych"
+      - name: Install zizmor
+        uses: taiki-e/cache-cargo-install-action@417450f3c33ee20393705369577571770643d4c7 # v3.0.7
+        with:
+          tool: zizmor@${{ env.ZIZMOR_VERSION }}
 
-          paths = Dir.glob([
-            ".coderabbit.yml",
-            ".github/workflows/*.{yaml,yml}",
-            "agents/.agents/skills/**/agents/*.{yaml,yml}",
-          ])
-
-          paths.sort.each do |path|
-            Psych.safe_load(File.read(path), permitted_classes: [], aliases: false)
-          end
-          RUBY
+      - name: Run CI checks
+        run: just ci

@@ -9,9 +9,16 @@ Each top-level directory is a stow package. Package contents mirror paths under 
 ```text
 dotfiles/
 ├── Brewfile                # foundational formulae + casks
+├── justfile                # local setup, stow, and CI recipes
+├── pyproject.toml          # uv-managed Python tooling
+├── semgrep.yaml            # repository-owned guardrail rules
 ├── bin/
 │   ├── bootstrap.sh        # fresh-machine provisioner
 │   └── verify.sh           # health check / sanity check
+├── scripts/
+│   └── semgrep_fixture_config.py
+├── tests/
+│   └── semgrep/            # Semgrep rule fixtures
 ├── git/
 │   └── .gitconfig          # stows to ~/.gitconfig
 ├── zsh/
@@ -34,27 +41,43 @@ git clone https://github.com/acgetchell/dotfiles.git ~/projects/dotfiles
 1. installs Homebrew if missing;
 2. runs `brew bundle install --file=Brewfile`;
 3. stows `git`, `zsh`, and `agents`;
-4. runs `bin/verify.sh`.
+4. installs pinned cargo tools such as `just` and `zizmor`;
+5. runs `bin/verify.sh`.
 
-## Day-to-day stow commands
+After bootstrap, the equivalent discoverable setup entry point is:
 
 ```sh
-# Preview changes before applying a package
-stow -d ~/projects/dotfiles -t ~ -n -v -R agents
-
-# Apply or re-apply one package
-stow -d ~/projects/dotfiles -t ~ -R zsh
-
-# Remove one package's symlinks
-stow -d ~/projects/dotfiles -t ~ -D zsh
-
-# Adopt an existing live file into the repo (overwrites the package copy)
-stow -d ~/projects/dotfiles -t ~ --adopt zsh
+cd ~/projects/dotfiles
+just setup
 ```
 
-Use `--adopt` only when intentionally moving an existing `$HOME` file into dotfiles. Always inspect the resulting diff before committing.
+`just setup` runs `bin/bootstrap.sh` with `DOTFILES_DIR` pointed at the current checkout, then syncs the uv-managed developer tools.
 
-Always pass both `-d ~/projects/dotfiles` and `-t ~`; otherwise stow targets the parent of the current directory, which can create links in the wrong place.
+## Day-to-day stow commands
+Supported stow packages are `git`, `zsh`, and `agents`.
+
+```sh
+# Preview changes before applying a package.
+just stow-check agents
+
+# Apply or re-apply one package after the dry-run check passes.
+just stow-apply zsh
+
+# Apply all managed packages.
+just stow-all
+
+# Remove one package's symlinks.
+just stow-delete zsh
+
+# Adopt an existing live file into the repo (overwrites the package copy).
+just stow-adopt zsh
+```
+
+Use `--adopt` only when intentionally moving an existing `$HOME` file into dotfiles. Always inspect the resulting package file changes before committing.
+
+The `just` stow recipes always pass both `-d "$PWD"` and `-t "$HOME"`. If running raw `stow`, pass both paths explicitly; otherwise stow targets the parent of the current directory, which can create links in the wrong place.
+
+For new package-owned files such as Codex skills, create the file under the package, run `just stow-check <package>`, then run `just stow-apply <package>` when the dry run looks right. Stow recipes do not stage, commit, or print source-control status.
 
 ## Brewfile workflow
 `Brewfile` is intentionally foundational: core CLI tools, developer casks, and apps expected on every machine.
@@ -76,12 +99,16 @@ brew bundle dump --file=~/projects/dotfiles/Brewfile.local --force --describe
 Run the main check:
 
 ```sh
-~/projects/dotfiles/bin/verify.sh
+cd ~/projects/dotfiles
+just ci
 ```
 
 Manual checks that should pass:
 
 ```sh
+# bootstrap health check
+~/projects/dotfiles/bin/verify.sh
+
 # stow symlinks point into this repo
 ls -la ~/.zshrc ~/.gitconfig
 readlink ~/.zshrc
@@ -186,12 +213,14 @@ To add a skill:
 
 1. create `agents/.agents/skills/<skill-id>/SKILL.md`;
 2. add YAML frontmatter with `name` and a triggering `description`;
-3. re-stow:
+3. validate and re-stow the package:
 
 ```sh
-stow -d ~/projects/dotfiles -t ~ -n -v -R agents
-stow -d ~/projects/dotfiles -t ~ -R agents
+just stow-check agents
+just stow-apply agents
 ```
+
+Review the changed skill files separately before including them in a commit.
 
 Recommended frontmatter style:
 

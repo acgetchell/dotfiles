@@ -1,0 +1,160 @@
+[project]
+name = "dotfiles-support-scripts"
+version = "0.1.0"
+description = "Python support tooling for dotfiles-managed Codex skills"
+readme = "README.md"
+requires-python = ">=3.14"
+license = { text = "BSD-3-Clause" }
+authors = [ { name = "Adam Getchell", email = "adam@adamgetchell.org" } ]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 160
+src = [
+    "agents/.agents/skills/jupyter-notebook-review/scripts",
+    "agents/.agents/skills/scientific-citation-audit/scripts",
+    "scripts",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "W",
+    "ANN201",
+    "ANN202",
+    "ANN204",
+    "C90",
+    "I",
+    "N",
+    "UP",
+    "YTT",
+    "ASYNC",
+    "S",
+    "BLE",
+    "FBT",
+    "B",
+    "A",
+    "COM",
+    "C4",
+    "DTZ",
+    "FA",
+    "T10",
+    "EM",
+    "EXE",
+    "FIX",
+    "FLY",
+    "FURB",
+    "ISC",
+    "ICN",
+    "LOG",
+    "G",
+    "INP",
+    "PERF",
+    "PIE",
+    "T20",
+    "PYI",
+    "PT",
+    "Q",
+    "RSE",
+    "RET",
+    "SLF",
+    "SIM",
+    "SLOT",
+    "TC",
+    "TID",
+    "TD",
+    "ARG",
+    "PTH",
+    "ERA",
+    "PD",
+    "PGH",
+    "PL",
+    "TRY",
+    "NPY",
+    "RUF",
+    "D100",
+    "D101",
+    "D102",
+    "D103",
+    "D104",
+    "D105",
+    "D106",
+    "D107",
+]
+fixable = [ "ALL" ]
+unfixable = [  ]
+ignore = [
+    # Formatter conflicts
+    "COM812",
+    "ISC001",
+
+    # Standalone support-script patterns
+    "INP001",
+    "PLR2004",
+    "FBT001",
+    "FBT002",
+    "T201",
+    "TRY300",
+    "TRY301",
+    "ARG001",
+    "ERA001",
+    "EXE001",
+    "PTH123",
+    "N806",
+    "F841",
+    "EM102",
+    "TRY003",
+    "PLW2901",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/scripts/test_*.py" = [ "S101", "SLF001", "D101", "D102", "D103" ]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "clear_outputs",
+    "notebook_check",
+    "validate_reference_dois",
+]
+force-single-line = false
+split-on-trailing-comma = true
+combine-as-imports = true
+order-by-type = true
+section-order = [
+    "future",
+    "standard-library",
+    "third-party",
+    "first-party",
+    "local-folder",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = [ "-ra", "--strict-markers", "--strict-config", "--color=yes" ]
+testpaths = [ "agents/.agents/skills" ]
+python_files = [ "test_*.py", "*_test.py" ]
+python_classes = [ "Test*" ]
+python_functions = [ "test_*" ]
+
+[dependency-groups]
+dev = [
+    "actionlint-py==1.7.12.24",
+    "nbclient>=0.11.0",
+    "nbformat>=5.10.4",
+    "pytest==9.1.1",
+    "ruff==0.15.20",
+    "semgrep==1.168.0",
+    "ty==0.0.56",
+]

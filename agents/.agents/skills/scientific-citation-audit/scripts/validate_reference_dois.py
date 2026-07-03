@@ -321,11 +321,7 @@ def author_families(value: object) -> tuple[str, ...]:
 
 def tokens(text: str) -> set[str]:
     """Tokenize text for a conservative metadata-overlap check."""
-    return {
-        token
-        for token in re.findall(r"[a-z0-9]+", text.lower())
-        if len(token) > 2 and token not in STOPWORDS
-    }
+    return {token for token in re.findall(r"[a-z0-9]+", text.lower()) if len(token) > 2 and token not in STOPWORDS}
 
 
 def title_score(title: str, entry: str) -> float:
