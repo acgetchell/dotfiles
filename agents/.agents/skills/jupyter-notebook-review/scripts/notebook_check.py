@@ -15,9 +15,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, override
 
-import nbclient
-import nbformat
-
 RUFF_EXTEND_IGNORE = "INP001"
 RUFF_LOCATION_RE = re.compile(r"\s*-->\s+.+?:(?P<line>\d+):(?P<column>\d+)")
 TY_LOCATION_RE = re.compile(r"^.+?:(?P<line>\d+):(?P<column>\d+): (?P<message>.+)$")
@@ -415,8 +412,15 @@ def lint(path: Path, options: LintOptions) -> int:
     return 0
 
 
-def execute(path: Path, repo_root: Path, timeout: int) -> None:
+def execute(path: Path, repo_root: Path, timeout: int) -> int:
     """Execute a notebook in memory without modifying it on disk."""
+    try:
+        import nbclient  # noqa: PLC0415 - optional dependency used only by --execute.
+        import nbformat  # noqa: PLC0415 - optional dependency used only by --execute.
+    except ImportError as exc:
+        print(f"--execute requires nbclient and nbformat; run through `uv run` or install them: {exc}", file=sys.stderr)
+        return 1
+
     os.environ.setdefault("MPLBACKEND", "Agg")
     with path.open(encoding="utf-8") as handle:
         notebook = nbformat.read(handle, as_version=4)
@@ -428,6 +432,7 @@ def execute(path: Path, repo_root: Path, timeout: int) -> None:
     )
     client.execute()
     print(f"OK executed {path}")
+    return 0
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -470,8 +475,7 @@ def main(argv: list[str] | None = None) -> int:
                 project_root=args.repo_root,
             ),
         )
-    execute(args.notebook, args.repo_root, args.timeout)
-    return 0
+    return execute(args.notebook, args.repo_root, args.timeout)
 
 
 if __name__ == "__main__":
