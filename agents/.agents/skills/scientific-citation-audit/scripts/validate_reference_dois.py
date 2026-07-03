@@ -25,27 +25,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
 
-STOPWORDS = {
-    "a",
-    "an",
-    "and",
-    "are",
-    "as",
-    "by",
-    "for",
-    "from",
-    "in",
-    "into",
-    "is",
-    "it",
-    "of",
-    "on",
-    "or",
-    "the",
-    "to",
-    "using",
-    "with",
-}
+STOPWORDS = {"a", "an", "and", "are", "as", "by", "for", "from", "in", "into", "is", "it", "of", "on", "or", "the", "to", "using", "with"}
 
 
 class AuditStatus(StrEnum):
@@ -262,11 +242,7 @@ def collect_entry(lines: Sequence[str], doi_idx: int) -> str:
 def fetch_csl_json(doi: Doi, timeout: float) -> dict[str, Any]:
     """Resolve one DOI through content negotiation."""
     request = urllib.request.Request(
-        f"https://doi.org/{doi.value}",
-        headers={
-            "Accept": "application/vnd.citationstyles.csl+json",
-            "User-Agent": "scientific-citation-audit/1.0",
-        },
+        f"https://doi.org/{doi.value}", headers={"Accept": "application/vnd.citationstyles.csl+json", "User-Agent": "scientific-citation-audit/1.0"}
     )
     context = ssl.create_default_context()
     with urllib.request.urlopen(request, timeout=timeout, context=context) as response:  # noqa: S310
@@ -321,11 +297,7 @@ def author_families(value: object) -> tuple[str, ...]:
 
 def tokens(text: str) -> set[str]:
     """Tokenize text for a conservative metadata-overlap check."""
-    return {
-        token
-        for token in re.findall(r"[a-z0-9]+", text.lower())
-        if len(token) > 2 and token not in STOPWORDS
-    }
+    return {token for token in re.findall(r"[a-z0-9]+", text.lower()) if len(token) > 2 and token not in STOPWORDS}
 
 
 def title_score(title: str, entry: str) -> float:
@@ -346,24 +318,11 @@ def author_score(author_names: Iterable[str], entry: str) -> float | None:
     return len(author_tokens & entry_tokens) / len(author_tokens)
 
 
-def validate_entry(
-    entry: DoiEntry,
-    timeout: float,
-    min_title_score: float,
-    fetcher: Callable[[Doi, float], dict[str, Any]] = fetch_csl_json,
-) -> DoiResult:
+def validate_entry(entry: DoiEntry, timeout: float, min_title_score: float, fetcher: Callable[[Doi, float], dict[str, Any]] = fetch_csl_json) -> DoiResult:
     """Validate one DOI and compare metadata with the bibliography entry."""
     try:
         metadata = CslMetadata.parse(fetcher(entry.doi, timeout))
-    except (
-        urllib.error.HTTPError,
-        urllib.error.URLError,
-        TimeoutError,
-        OSError,
-        ValueError,
-        json.JSONDecodeError,
-        ssl.SSLError,
-    ) as exc:
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError, ValueError, json.JSONDecodeError, ssl.SSLError) as exc:
         return DoiResult(
             doi=entry.doi.value,
             line=entry.line,
@@ -404,10 +363,7 @@ def validate_entry(
 
 
 def validate_entries(
-    entries: Iterable[DoiEntry],
-    timeout: float,
-    min_title_score: float,
-    fetcher: Callable[[Doi, float], dict[str, Any]] = fetch_csl_json,
+    entries: Iterable[DoiEntry], timeout: float, min_title_score: float, fetcher: Callable[[Doi, float], dict[str, Any]] = fetch_csl_json
 ) -> list[DoiResult]:
     """Validate parsed DOI entries."""
     cache: dict[str, dict[str, Any]] = {}
@@ -439,12 +395,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("markdown", type=Path, help="Markdown bibliography file to audit")
     parser.add_argument("--timeout", type=parse_positive_timeout, default=20.0, help="per-DOI request timeout in seconds")
-    parser.add_argument(
-        "--min-title-score",
-        type=parse_unit_interval,
-        default=0.45,
-        help="minimum resolved-title token overlap for OK",
-    )
+    parser.add_argument("--min-title-score", type=parse_unit_interval, default=0.45, help="minimum resolved-title token overlap for OK")
     parser.add_argument("--allow-empty", action="store_true", help="exit successfully when no DOI references are found")
     parser.add_argument("--json", action="store_true", help="emit JSON instead of text")
     return parser

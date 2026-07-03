@@ -1,0 +1,193 @@
+---
+# Repository-owned Semgrep rules.
+#
+# Keep this file small and project-specific. Broad default/community rules
+# duplicate CodeRabbit, actionlint, zizmor, Ruff, ty, ShellCheck, and gitleaks.
+
+rules:
+  - id: dotfiles.docs.check-before-fix-command-order
+    languages:
+      - regex
+    severity: WARNING
+    message: "Document non-mutating just checks before mutating just fixers."
+    metadata:
+      category: maintainability
+      rationale: >-
+        Workflow examples should show non-mutating checks before mutating
+        fixers so drift is inspected before files are rewritten.
+    paths:
+      include:
+        - "/**/*.md"
+        - "/justfile"
+        - "/tests/semgrep/docs/**/*.sh"
+    pattern-either:
+      - pattern-regex: '(?ms)^\s*(?:@echo\s+"?\s*)?just\s+fix\b[^\n]*(?:\n\s*(?:#[^\n]*)?)*?\n\s*(?:@echo\s+"?\s*)?just\s+check\b'
+      - pattern-regex: '(?ms)^\s*(?:@echo\s+"?\s*)?just\s+python-fix\b[^\n]*(?:\n\s*(?:#[^\n]*)?)*?\n\s*(?:@echo\s+"?\s*)?just\s+python-check\b'
+
+  - id: dotfiles.github-actions.external-action-sha-pinned
+    languages:
+      - regex
+    severity: WARNING
+    message: "Pin external GitHub Actions to a full 40-character commit SHA."
+    metadata:
+      category: security
+      rationale: "Moving tags can change workflow behavior without review."
+    paths:
+      include:
+        - "/.github/workflows/**/*.yml"
+        - "/.github/workflows/**/*.yaml"
+        - "/tests/semgrep/.github/workflows/**/*.yml"
+        - "/tests/semgrep/.github/workflows/**/*.yaml"
+    patterns:
+      - pattern-regex: '(?m)^\s*uses:\s*(?!\./)(?!docker://)[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)?@(?![a-fA-F0-9]{40}(?:\s+#|$))[^\s#]+'
+
+  - id: dotfiles.github-actions.external-action-approved-allowlist
+    languages:
+      - regex
+    severity: WARNING
+    message: "Use only approved external GitHub Actions, or update the repository allowlist deliberately."
+    metadata:
+      category: security
+      rationale: "A small allowlist catches disallowed Actions locally before GitHub rejects the workflow."
+    paths:
+      include:
+        - "/.github/workflows/**/*.yml"
+        - "/.github/workflows/**/*.yaml"
+        - "/tests/semgrep/.github/workflows/**/*.yml"
+        - "/tests/semgrep/.github/workflows/**/*.yaml"
+    patterns:
+      - pattern-regex: '(?m)^\s*uses:\s*(?!\./)(?!docker://)(?!(?:actions/checkout|actions/setup-python|actions/cache|astral-sh/setup-uv|github/codeql-action/upload-sarif|taiki-e/cache-cargo-install-action|zizmorcore/zizmor-action)@)[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)?@'
+
+  - id: dotfiles.github-actions.external-action-version-comment
+    languages:
+      - regex
+    severity: WARNING
+    message: "Keep a readable version comment next to external GitHub Action SHA pins."
+    metadata:
+      category: maintainability
+      rationale: "Version comments make action updates and human review manageable."
+    paths:
+      include:
+        - "/.github/workflows/**/*.yml"
+        - "/.github/workflows/**/*.yaml"
+        - "/tests/semgrep/.github/workflows/**/*.yml"
+        - "/tests/semgrep/.github/workflows/**/*.yaml"
+    patterns:
+      - pattern-regex: '(?m)^\s*uses:\s*(?!\./)(?!docker://)[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)?@[a-fA-F0-9]{40}\s*$'
+
+  - id: dotfiles.github-actions.checkout-persist-credentials-false
+    languages:
+      - regex
+    severity: WARNING
+    message: "Set persist-credentials: false on actions/checkout steps."
+    metadata:
+      category: security
+      rationale: >-
+        Checkout credentials should not remain available to later workflow
+        steps unless a job explicitly needs them.
+    paths:
+      include:
+        - "/.github/workflows/**/*.yml"
+        - "/.github/workflows/**/*.yaml"
+        - "/tests/semgrep/.github/workflows/**/*.yml"
+        - "/tests/semgrep/.github/workflows/**/*.yaml"
+    patterns:
+      - pattern-regex: '(?m)^[ \t]*(?:-[ \t]*)?uses:[ \t]*actions/checkout@[a-fA-F0-9]{40}[^\n]*(?:\n(?![ \t]*-[ \t]+[A-Za-z_-]+:)(?![ \t]*persist-credentials:[ \t]*false\b)[^\n]*)*(?=\n[ \t]*-[ \t]+[A-Za-z_-]+:|\z)'
+
+  - id: dotfiles.github-actions.no-pull-request-target
+    languages:
+      - regex
+    severity: WARNING
+    message: "Avoid pull_request_target; use pull_request unless a workflow has a documented security review."
+    metadata:
+      category: security
+      rationale: >-
+        pull_request_target runs with base-repository privileges and is risky
+        for workflows that touch untrusted PR content.
+    paths:
+      include:
+        - "/.github/workflows/**/*.yml"
+        - "/.github/workflows/**/*.yaml"
+        - "/tests/semgrep/.github/workflows/**/*.yml"
+        - "/tests/semgrep/.github/workflows/**/*.yaml"
+    pattern-regex: '(?m)^\s*pull_request_target\s*:'
+
+  - id: dotfiles.github-actions.github-script-no-expression-interpolation
+    languages:
+      - regex
+    severity: WARNING
+    message: "Pass GitHub expression values to actions/github-script through env instead of interpolating inside script blocks."
+    metadata:
+      category: security
+      rationale: >-
+        Interpolating ${{ ... }} directly into JavaScript can turn workflow
+        context strings into executable code.
+    paths:
+      include:
+        - "/.github/workflows/**/*.yml"
+        - "/.github/workflows/**/*.yaml"
+        - "/tests/semgrep/.github/workflows/**/*.yml"
+        - "/tests/semgrep/.github/workflows/**/*.yaml"
+    patterns:
+      - pattern-regex: '(?ms)^\s*script:\s*\|\n(?:(?!^\s*-\s+(?:name|uses):).)*\$\{\{'
+
+  - id: dotfiles.github-actions.uv-sync-locked-in-workflows
+    languages:
+      - regex
+    severity: WARNING
+    message: "Use uv sync --locked in GitHub Actions workflows."
+    metadata:
+      category: reproducibility
+      rationale: "Workflow dependency installs should fail on lockfile drift instead of silently resolving new versions."
+    paths:
+      include:
+        - "/.github/workflows/**/*.yml"
+        - "/.github/workflows/**/*.yaml"
+        - "/tests/semgrep/.github/workflows/**/*.yml"
+        - "/tests/semgrep/.github/workflows/**/*.yaml"
+    patterns:
+      - pattern-regex: '(?m)^\s*(?:run:\s*)?uv\s+sync\b(?![^\n]*\s--locked\b)[^\n]*$'
+
+  - id: dotfiles.brewfile.no-cargo-installed-tools
+    languages:
+      - regex
+    severity: WARNING
+    message: "Install just and zizmor through cargo, not Homebrew."
+    metadata:
+      category: maintainability
+      rationale: "Bootstrap pins these Rust tools with cargo install --locked, matching the other Rust repos."
+    paths:
+      include:
+        - "/Brewfile"
+        - "/tests/semgrep/Brewfile"
+    pattern-regex: '(?m)^brew\s+"(?:just|zizmor)"(?:\s|$)'
+
+  - id: dotfiles.shell.no-unreviewed-curl-shell
+    languages:
+      - regex
+    severity: WARNING
+    message: "Avoid curl-to-shell install patterns unless the line is the reviewed Homebrew installer bootstrap."
+    metadata:
+      category: security
+      rationale: "Shelling directly into downloaded code should remain a scarce, reviewed bootstrap exception."
+    paths:
+      include:
+        - "/bin/**/*.sh"
+        - "/tests/semgrep/bin/**/*.sh"
+    patterns:
+      - pattern-regex: '(?m)^.*(?:(?:/bin/)?(?:bash|sh|zsh)\s+-c\s+["'']?\$\(curl\b.*|\bcurl\b[^\n|]*\|\s*(?:/bin/)?(?:bash|sh|zsh)\b.*)$'
+      - pattern-not-regex: 'raw\.githubusercontent\.com/Homebrew/install/HEAD/install\.sh'
+
+  - id: dotfiles.bootstrap.no-codex-stow-package
+    languages:
+      - regex
+    severity: WARNING
+    message: "Do not stow Codex config from this public dotfiles repo."
+    metadata:
+      category: security
+      rationale: "Codex configuration is per-machine and may include private paths, plugins, or trusted roots."
+    paths:
+      include:
+        - "/bin/bootstrap.sh"
+        - "/tests/semgrep/bin/**/*.sh"
+    pattern-regex: '(?m)^PACKAGES=\([^)]*\bcodex\b'

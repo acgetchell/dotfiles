@@ -1,0 +1,8 @@
+# ruleid: dotfiles.brewfile.no-cargo-installed-tools
+brew "just"
+
+# ruleid: dotfiles.brewfile.no-cargo-installed-tools
+brew "zizmor"
+
+# ok: dotfiles.brewfile.no-cargo-installed-tools
+brew "uv"

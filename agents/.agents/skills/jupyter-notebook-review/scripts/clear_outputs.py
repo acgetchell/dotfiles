@@ -20,14 +20,7 @@ def clear_outputs(path: Path) -> None:
             cell["outputs"] = []
             cell["execution_count"] = None
 
-    with tempfile.NamedTemporaryFile(
-        "w",
-        encoding="utf-8",
-        dir=path.parent,
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-        delete=False,
-    ) as handle:
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False) as handle:
         temp_path = Path(handle.name)
         nbformat.write(notebook, handle)
     temp_path.replace(path)

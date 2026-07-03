@@ -13,7 +13,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, override
 
 RUFF_EXTEND_IGNORE = "INP001"
 RUFF_LOCATION_RE = re.compile(r"\s*-->\s+.+?:(?P<line>\d+):(?P<column>\d+)")
@@ -102,58 +102,59 @@ class NotebookVisitor(ast.NodeVisitor):
     """Collect notebook-specific Python quality diagnostics."""
 
     def __init__(self, cell: int) -> None:
+        """Create a visitor that reports diagnostics against one notebook cell."""
         self.cell = cell
         self.diagnostics: list[Diagnostic] = []
 
+    @override
     def visit_Import(self, node: ast.Import) -> None:
+        """Flag imports that conflict with notebook style guidance."""
         for alias in node.names:
             if alias.name == "pandas":
-                self.diagnostics.append(
-                    Diagnostic("warning", self.cell, "imports pandas; prefer Polars unless pandas is required")
-                )
+                self.diagnostics.append(Diagnostic("warning", self.cell, "imports pandas; prefer Polars unless pandas is required"))
             if alias.name == "csv":
-                self.diagnostics.append(
-                    Diagnostic("warning", self.cell, "imports csv; prefer Polars for dataframe-shaped CSV analysis")
-                )
+                self.diagnostics.append(Diagnostic("warning", self.cell, "imports csv; prefer Polars for dataframe-shaped CSV analysis"))
         self.generic_visit(node)
 
+    @override
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        """Flag from-imports that conflict with notebook style guidance."""
         if node.module == "pandas":
-            self.diagnostics.append(
-                Diagnostic("warning", self.cell, "imports pandas; prefer Polars unless pandas is required")
-            )
+            self.diagnostics.append(Diagnostic("warning", self.cell, "imports pandas; prefer Polars unless pandas is required"))
         if node.module == "csv":
-            self.diagnostics.append(
-                Diagnostic("warning", self.cell, "imports csv; prefer Polars for dataframe-shaped CSV analysis")
-            )
+            self.diagnostics.append(Diagnostic("warning", self.cell, "imports csv; prefer Polars for dataframe-shaped CSV analysis"))
         self.generic_visit(node)
 
+    @override
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        """Check synchronous function annotations."""
         self._check_function_annotations(node)
         self.generic_visit(node)
 
+    @override
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        """Check asynchronous function annotations."""
         self._check_function_annotations(node)
         self.generic_visit(node)
 
+    @override
     def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        """Flag broad exception handlers in notebook code."""
         if node.type is None:
             self.diagnostics.append(Diagnostic("warning", self.cell, "uses bare except; catch specific exceptions"))
         elif isinstance(node.type, ast.Name) and node.type.id in {"Exception", "BaseException"}:
-            self.diagnostics.append(
-                Diagnostic("warning", self.cell, f"catches broad {node.type.id}; catch specific recoverable errors")
-            )
+            self.diagnostics.append(Diagnostic("warning", self.cell, f"catches broad {node.type.id}; catch specific recoverable errors"))
         self.generic_visit(node)
 
+    @override
     def visit_Call(self, node: ast.Call) -> None:
+        """Flag risky subprocess calls in notebook code."""
         call_name = dotted_name(node.func)
         if call_name in {"subprocess.run", "subprocess.Popen"}:
             if keyword_bool(node, "shell"):
                 self.diagnostics.append(Diagnostic("error", self.cell, f"{call_name} uses shell=True"))
             if call_name == "subprocess.run" and not has_keyword(node, "timeout"):
-                self.diagnostics.append(
-                    Diagnostic("warning", self.cell, "subprocess.run lacks timeout; add one or document why it can run unbounded")
-                )
+                self.diagnostics.append(Diagnostic("warning", self.cell, "subprocess.run lacks timeout; add one or document why it can run unbounded"))
             if call_name == "subprocess.Popen" and not has_wait_timeout(node):
                 self.diagnostics.append(
                     Diagnostic("warning", self.cell, "subprocess.Popen stream lacks timeout; ensure tutorial commands cannot hang indefinitely")
@@ -171,9 +172,7 @@ class NotebookVisitor(ast.NodeVisitor):
         if node.args.kwarg is not None and node.args.kwarg.annotation is None:
             missing_args.append(f"**{node.args.kwarg.arg}")
         if missing_args:
-            self.diagnostics.append(
-                Diagnostic("warning", self.cell, f"function {node.name} lacks parameter annotations: {', '.join(missing_args)}")
-            )
+            self.diagnostics.append(Diagnostic("warning", self.cell, f"function {node.name} lacks parameter annotations: {', '.join(missing_args)}"))
         if node.returns is None:
             self.diagnostics.append(Diagnostic("warning", self.cell, f"function {node.name} lacks return annotation"))
 
@@ -243,23 +242,10 @@ def extract_code(notebook: dict[str, Any]) -> CodeSnapshot:
 def ruff_lint_diagnostics(path: Path, notebook: dict[str, Any]) -> list[Diagnostic]:
     """Run Ruff lint checks on extracted notebook code when Ruff is available."""
     snapshot = extract_code(notebook)
-    command = [
-        "ruff",
-        "check",
-        "--stdin-filename",
-        f"{path.stem}_notebook.py",
-        "--extend-ignore",
-        RUFF_EXTEND_IGNORE,
-        "-",
-    ]
+    command = ["ruff", "check", "--stdin-filename", f"{path.stem}_notebook.py", "--extend-ignore", RUFF_EXTEND_IGNORE, "-"]
     try:
         result = subprocess.run(  # noqa: S603 - command is fixed and receives notebook code through stdin.
-            command,
-            input=snapshot.source,
-            text=True,
-            capture_output=True,
-            timeout=30,
-            check=False,
+            command, input=snapshot.source, text=True, capture_output=True, timeout=30, check=False
         )
     except subprocess.TimeoutExpired as error:
         return [Diagnostic("error", 0, f"ruff timed out after {error.timeout} seconds")]
@@ -291,12 +277,7 @@ def ruff_format_diagnostics(path: Path, notebook: dict[str, Any]) -> list[Diagno
     command = ["ruff", "format", "--check", "--stdin-filename", f"{path.stem}_notebook.py", "-"]
     try:
         result = subprocess.run(  # noqa: S603 - command is fixed and receives notebook code through stdin.
-            command,
-            input=snapshot.source,
-            text=True,
-            capture_output=True,
-            timeout=30,
-            check=False,
+            command, input=snapshot.source, text=True, capture_output=True, timeout=30, check=False
         )
     except subprocess.TimeoutExpired as error:
         return [Diagnostic("error", 0, f"ruff format timed out after {error.timeout} seconds")]
@@ -315,22 +296,10 @@ def ty_diagnostics(path: Path, notebook: dict[str, Any], project_root: Path) -> 
     with tempfile.TemporaryDirectory(prefix="notebook-check-") as temporary_directory:
         extracted_path = Path(temporary_directory) / f"{path.stem}_notebook.py"
         extracted_path.write_text(snapshot.source, encoding="utf-8")
-        command = [
-            "ty",
-            "check",
-            "--project",
-            str(project_root),
-            "--output-format",
-            "concise",
-            str(extracted_path),
-        ]
+        command = ["ty", "check", "--project", str(project_root), "--output-format", "concise", str(extracted_path)]
         try:
             result = subprocess.run(  # noqa: S603 - command is fixed and operates on generated notebook code.
-                command,
-                text=True,
-                capture_output=True,
-                timeout=30,
-                check=False,
+                command, text=True, capture_output=True, timeout=30, check=False
             )
         except subprocess.TimeoutExpired as error:
             return [Diagnostic("error", 0, f"ty timed out after {error.timeout} seconds")]
@@ -396,10 +365,7 @@ def external_tool_diagnostics(path: Path, notebook: dict[str, Any], options: Lin
 def lint(path: Path, options: LintOptions) -> int:
     """Validate notebook JSON, compile code cells, and run Python lint checks."""
     notebook = load_notebook(path)
-    diagnostics = [
-        *code_cell_diagnostics(path, notebook, options),
-        *external_tool_diagnostics(path, notebook, options),
-    ]
+    diagnostics = [*code_cell_diagnostics(path, notebook, options), *external_tool_diagnostics(path, notebook, options)]
 
     for diagnostic in diagnostics:
         stream = sys.stderr if diagnostic.severity == "error" else sys.stdout
@@ -413,22 +379,22 @@ def lint(path: Path, options: LintOptions) -> int:
     return 0
 
 
-def execute(path: Path, repo_root: Path, timeout: int) -> None:
+def execute(path: Path, repo_root: Path, timeout: int) -> int:
     """Execute a notebook in memory without modifying it on disk."""
-    import nbclient
-    import nbformat
+    try:
+        import nbclient  # noqa: PLC0415 - optional dependency used only by --execute.
+        import nbformat  # noqa: PLC0415 - optional dependency used only by --execute.
+    except ImportError as exc:
+        print(f"--execute requires nbclient and nbformat; run through `uv run` or install them: {exc}", file=sys.stderr)
+        return 1
 
     os.environ.setdefault("MPLBACKEND", "Agg")
     with path.open(encoding="utf-8") as handle:
         notebook = nbformat.read(handle, as_version=4)
-    client = nbclient.NotebookClient(
-        notebook,
-        timeout=timeout,
-        kernel_name="python3",
-        resources={"metadata": {"path": str(repo_root)}},
-    )
+    client = nbclient.NotebookClient(notebook, timeout=timeout, kernel_name="python3", resources={"metadata": {"path": str(repo_root)}})
     client.execute()
     print(f"OK executed {path}")
+    return 0
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -437,9 +403,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--summary", action="store_true", help="print a compact cell inventory")
     mode.add_argument(
-        "--lint",
-        action="store_true",
-        help="validate JSON, compile code cells, run Ruff and ty when available, and report common notebook issues",
+        "--lint", action="store_true", help="validate JSON, compile code cells, run Ruff and ty when available, and report common notebook issues"
     )
     mode.add_argument("--execute", action="store_true", help="execute the notebook in memory")
     parser.add_argument("notebook", type=Path)
@@ -471,8 +435,7 @@ def main(argv: list[str] | None = None) -> int:
                 project_root=args.repo_root,
             ),
         )
-    execute(args.notebook, args.repo_root, args.timeout)
-    return 0
+    return execute(args.notebook, args.repo_root, args.timeout)
 
 
 if __name__ == "__main__":

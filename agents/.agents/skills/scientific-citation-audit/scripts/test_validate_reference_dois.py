@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Fixture tests for validate_reference_dois.py."""
 
-# ruff: noqa: S101
-
 from __future__ import annotations
 
 import contextlib
@@ -14,22 +12,17 @@ from pathlib import Path
 
 SCRIPT = Path(__file__).with_name("validate_reference_dois.py")
 SPEC = importlib.util.spec_from_file_location("validate_reference_dois", SCRIPT)
-MODULE = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = MODULE
-if SPEC.loader is None:
+if SPEC is None or SPEC.loader is None:
     message = "validate_reference_dois.py could not be loaded"
     raise RuntimeError(message)
+MODULE = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
 
 
 def metadata(title: str, *, family: str = "Shewchuk", year: int = 1997) -> dict[str, object]:
     """Return a minimal CSL-shaped metadata fixture."""
-    return {
-        "title": title,
-        "author": [{"family": family, "given": "J. R."}],
-        "issued": {"date-parts": [[year]]},
-        "container-title": "Fixture Journal",
-    }
+    return {"title": title, "author": [{"family": family, "given": "J. R."}], "issued": {"date-parts": [[year]]}, "container-title": "Fixture Journal"}
 
 
 def test_extracts_doi_label_with_parentheses_and_angle_tokens() -> None:
@@ -78,9 +71,7 @@ def test_validation_flags_author_mismatch() -> None:
         1.0,
         0.45,
         fetcher=lambda _doi, _timeout: metadata(
-            "Adaptive Precision Floating-Point Arithmetic and Fast Robust Geometric Predicates",
-            family="Shewchuk",
-            year=1997,
+            "Adaptive Precision Floating-Point Arithmetic and Fast Robust Geometric Predicates", family="Shewchuk", year=1997
         ),
     )
 
@@ -102,9 +93,7 @@ def test_validation_accepts_matching_title_author_and_year() -> None:
         1.0,
         0.45,
         fetcher=lambda _doi, _timeout: metadata(
-            "Adaptive Precision Floating-Point Arithmetic and Fast Robust Geometric Predicates",
-            family="Shewchuk",
-            year=1997,
+            "Adaptive Precision Floating-Point Arithmetic and Fast Robust Geometric Predicates", family="Shewchuk", year=1997
         ),
     )
 
@@ -137,7 +126,7 @@ def test_invalid_threshold_is_rejected_by_argparse() -> None:
             try:
                 MODULE.run(["--min-title-score", "nan", str(path)])
             except SystemExit as exc:
-                code = int(exc.code)
+                code = exc.code if isinstance(exc.code, int) else 1
             else:
                 code = 0
     finally:

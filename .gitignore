@@ -1,6 +1,29 @@
 .DS_Store
 *.swp
 *.bak
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.uv-cache/
+.tox/
+.nox/
+.venv/
+venv/
+env/
+build/
+dist/
+*.egg-info/
+.eggs/
+
 # Per-machine overrides (do not commit)
 Brewfile.local
 *.gitconfig.local

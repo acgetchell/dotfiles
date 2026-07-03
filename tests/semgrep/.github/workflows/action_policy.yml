@@ -1,0 +1,104 @@
+name: Action policy fixtures
+on:
+  workflow_dispatch:
+  # ruleid: dotfiles.github-actions.no-pull-request-target
+  pull_request_target:
+
+jobs:
+  fixtures:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Allowed pinned action
+        # ok: dotfiles.github-actions.external-action-sha-pinned
+        # ok: dotfiles.github-actions.external-action-approved-allowlist
+        # ok: dotfiles.github-actions.external-action-version-comment
+        # ok: dotfiles.github-actions.checkout-persist-credentials-false
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Checkout without explicit credential persistence
+        # ruleid: dotfiles.github-actions.checkout-persist-credentials-false
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # ruleid: dotfiles.github-actions.checkout-persist-credentials-false
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Checkout with long credential-safe options
+        # ok: dotfiles.github-actions.checkout-persist-credentials-false
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          clean: true
+          fetch-depth: 0
+          fetch-tags: false
+          filter: blob:none
+          lfs: false
+          path: fixture
+          ref: main
+          repository: owner/repo
+          show-progress: true
+          sparse-checkout-cone-mode: true
+          submodules: false
+          persist-credentials: false
+
+      - name: Moving tag action
+        # ruleid: dotfiles.github-actions.external-action-sha-pinned
+        uses: actions/checkout@v7
+
+      - name: Unapproved external action
+        # ruleid: dotfiles.github-actions.external-action-approved-allowlist
+        uses: unapproved/example-action@1111111111111111111111111111111111111111 # v1.0.0
+
+      - name: Missing readable version comment
+        # ruleid: dotfiles.github-actions.external-action-version-comment
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+
+      - name: Allowed setup-uv action
+        # ok: dotfiles.github-actions.external-action-approved-allowlist
+        # ok: dotfiles.github-actions.external-action-sha-pinned
+        # ok: dotfiles.github-actions.external-action-version-comment
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+
+      - name: Allowed required cache action
+        # ok: dotfiles.github-actions.external-action-approved-allowlist
+        # ok: dotfiles.github-actions.external-action-sha-pinned
+        # ok: dotfiles.github-actions.external-action-version-comment
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+
+      - name: Allowed required SARIF upload action
+        # ok: dotfiles.github-actions.external-action-approved-allowlist
+        # ok: dotfiles.github-actions.external-action-sha-pinned
+        # ok: dotfiles.github-actions.external-action-version-comment
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
+
+      - name: Local action
+        # ok: dotfiles.github-actions.external-action-sha-pinned
+        # ok: dotfiles.github-actions.external-action-approved-allowlist
+        # ok: dotfiles.github-actions.external-action-version-comment
+        uses: ./.github/actions/local-action
+
+      - name: Interpolated github-script
+        # ruleid: dotfiles.github-actions.external-action-approved-allowlist
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          # ruleid: dotfiles.github-actions.github-script-no-expression-interpolation
+          script: |
+            core.info("${{ github.ref_name }}");
+
+      - name: Env-backed github-script
+        # ruleid: dotfiles.github-actions.external-action-approved-allowlist
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          SAFE_REF_NAME: ${{ github.ref_name }}
+        with:
+          # ok: dotfiles.github-actions.github-script-no-expression-interpolation
+          script: |
+            core.info(process.env.SAFE_REF_NAME);
+
+      - name: Unlocked uv sync
+        # ruleid: dotfiles.github-actions.uv-sync-locked-in-workflows
+        run: uv sync
+
+      - name: Locked uv sync
+        # ok: dotfiles.github-actions.uv-sync-locked-in-workflows
+        run: uv sync --locked

@@ -23,8 +23,9 @@ fi
 
 echo "==> CLI tools"
 TOOLS=(
-  ansible az cargo docker dotnet gh git helm
-  kubectl node op pwsh python3 rustc ssh stow tailscale
+  actionlint ansible az cargo docker dotnet gh git helm
+  just kubectl node op pwsh python3 rustc ssh stow tailscale
+  zizmor
 )
 for tool in "${TOOLS[@]}"; do
   if command -v "$tool" >/dev/null 2>&1; then

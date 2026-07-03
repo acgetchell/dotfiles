@@ -6,6 +6,8 @@
 set -euo pipefail
 
 DOTFILES_DIR="${DOTFILES_DIR:-$HOME/projects/dotfiles}"
+JUST_VERSION="${JUST_VERSION:-1.55.1}"
+ZIZMOR_VERSION="${ZIZMOR_VERSION:-1.26.1}"
 
 if [[ ! -d "$DOTFILES_DIR" ]]; then
   echo "==> Dotfiles directory not found at $DOTFILES_DIR" >&2
@@ -40,7 +42,27 @@ for pkg in "${PACKAGES[@]}"; do
   fi
 done
 
-# 4. Verify
+# 4. Cargo-installed tools
+if command -v cargo >/dev/null 2>&1; then
+  for tool_spec in "just:$JUST_VERSION" "zizmor:$ZIZMOR_VERSION"; do
+    tool="${tool_spec%%:*}"
+    version="${tool_spec##*:}"
+    installed_version=""
+    if command -v "$tool" >/dev/null 2>&1; then
+      installed_version="$("$tool" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+    fi
+    if [[ "$installed_version" != "$version" ]]; then
+      echo "==> Installing $tool $version"
+      cargo install --locked --force "$tool" --version "$version"
+    else
+      echo "==> $tool already installed: $installed_version"
+    fi
+  done
+else
+  echo "==> Skipping cargo-installed tools: cargo not on PATH" >&2
+fi
+
+# 5. Verify
 if [[ -x "$DOTFILES_DIR/bin/verify.sh" ]]; then
   echo "==> Running verify.sh"
   "$DOTFILES_DIR/bin/verify.sh"
