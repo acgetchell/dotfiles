@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust CLI Design"
+  short_description: "Design and review optional Rust CLIs"
+  default_prompt: "Use $rust-cli-design to build or review a Rust CLI with optional-feature packaging and parse-don't-validate boundaries."
