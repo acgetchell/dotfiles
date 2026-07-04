@@ -1,13 +1,13 @@
 ---
 name: rust-concurrency-async
-description: "Audit Rust concurrency and async code for correctness, Send/Sync discipline, blocking hazards, and lock/channel design on changed code or whole-repo baseline audits when explicitly requested. USE FOR: async/await review, Tokio/async-std runtime usage, Send/Sync bounds, spawn_blocking, cancellation safety, Mutex/RwLock/parking_lot/tokio::sync use, atomics ordering, channel discipline (mpsc/oneshot/broadcast/watch), lock ordering, deadlocks, deterministic ordering of side effects, structured concurrency, async trait bounds, async lifetimes, futures and streams. DO NOT USE FOR: synchronous correctness only (use rust-production-review), error design (use rust-error-variants), trait bound cleanup (use rust-trait-bounds), iterator/pattern idioms (use rust-iter-control-flow), non-Rust code, or unrelated unchanged code unless a baseline audit is requested."
+description: "Audit Rust concurrency, async, and transactional mutation code for Send/Sync discipline, blocking hazards, lock/channel design, cancellation safety, transaction guard design, and failure atomicity on changed code or whole-repo baseline audits. USE FOR: async/await, Tokio/async-std, Send/Sync bounds, spawn_blocking, cancellation safety, owner-bound transaction guards, rollback-on-drop, rollback-preserving snapshots, restore-before-retry, failure-atomic mutation windows, Mutex/RwLock/parking_lot/tokio::sync, atomics, channels, lock ordering, deadlocks, deterministic side effects, structured concurrency, async traits/lifetimes, futures, and streams. DO NOT USE FOR: synchronous correctness without concurrency/cancellation/transaction concerns (use rust-production-review), error design (use rust-error-variants), trait bounds (use rust-trait-bounds), iterators (use rust-iter-control-flow), non-Rust code, or unrelated unchanged code unless a baseline audit is requested."
 ---
 
 # rust-concurrency-async
 
-Audit Rust concurrency and async code for correctness under realistic scheduling, with attention to `Send`/`Sync` discipline, blocking hazards, lock and channel design, and cancellation safety.
+Audit Rust concurrency, async, and transactional mutation code for correctness under realistic scheduling and failure modes, with attention to `Send`/`Sync` discipline, blocking hazards, lock and channel design, cancellation safety, and rollback atomicity.
 
-The compiler enforces only the minimum. A review must reason about scheduling, ordering, contention, and cancellation explicitly.
+The compiler enforces only the minimum. A review must reason about scheduling, ordering, contention, cancellation, and partially completed mutations explicitly. Treat synchronous transactions as in scope when fallible mutation, retry, cancellation, or drop can leave coupled state inconsistent.
 
 ## Scope
 
@@ -21,17 +21,21 @@ Focus on newly added or modified Rust code that:
 - adds atomics or memory orderings
 - changes `Send`/`Sync` bounds on public APIs
 - adds `spawn_blocking` or thread pool offloading
+- adds or changes transaction guards, rollback guards, snapshots, rollback-on-drop, `commit`/`rollback`/`restore`, or restore-on-failure mechanisms
+- introduces fallible mutation APIs that should use a transaction even if no transaction abstraction exists yet
+- mutates coupled storage, indexes, caches, hints, identities, handles, telemetry, or generation counters across a fallible or cancellable window
+- adds fallback or retry flows after partial mutation
 
 ### Scope Modes
 
 Default mode:
-- Audit newly added or modified async, threaded, synchronized, atomic, or Send/Sync-affecting code.
+- Audit newly added or modified async, threaded, synchronized, atomic, transactional, or Send/Sync-affecting code.
 - Ignore unrelated unchanged concurrency code unless it defines the scheduling or synchronization contract for the changed code.
 
 Whole-repo baseline mode:
 - Use when the user explicitly says "whole repo", "entire repo", "baseline audit", or similar.
-- Audit all async/concurrent Rust code, including public Send/Sync contracts, tasks, locks, channels, atomics, global caches, and tests that rely on ordering.
-- Prioritize findings by deadlock risk, cancellation unsafety, blocking in async contexts, hidden nondeterminism, and public Send/Sync API surprises.
+- Audit all async/concurrent Rust code, including public Send/Sync contracts, tasks, locks, channels, atomics, transaction guards, global caches, and tests that rely on ordering.
+- Prioritize findings by deadlock risk, cancellation unsafety, failure-atomicity gaps, blocking in async contexts, hidden nondeterminism, and public Send/Sync API surprises.
 - If the repo has little or no concurrency, say so explicitly instead of inventing findings.
 
 ## Review goals
@@ -73,6 +77,7 @@ Check:
 
 - futures can be dropped at any `.await` point without leaving inconsistent state
 - partially completed work releases resources cleanly
+- transactional mutation windows are rollback-safe if cancellation can interrupt them
 - `select!` arms are cancellation-safe (or wrapped to be)
 - timeouts and cancellation tokens propagate correctly through nested calls
 
@@ -83,7 +88,47 @@ Flag:
 - assumptions that an async function runs to completion
 - `select!` arms calling cancellation-unsafe operations such as buffered reads
 
-### 4. Locks and channels
+### 4. Transactional mutation windows
+
+Use this section for synchronous code too when a fallible sequence mutates canonical state.
+
+Preferred pattern:
+
+- start the transaction at the highest owner that owns all state affected by the mutation
+- snapshot canonical storage plus coupled auxiliary state such as indexes, caches, hints, identities, handles, diagnostics, telemetry, and generation counters
+- expose mutation through the guard so callers cannot accidentally mutate outside the failure boundary
+- restore on `Drop` unless the guard is finished; use `commit(self)` to close without restore, `rollback(self)` to restore and close, and `restore(&mut self)` to restore while keeping the window open for retry
+- use rollback-preserving snapshot semantics when ordinary `Clone` would allocate fresh owner identity, generations, handle provenance, or borrowed-view provenance
+- keep raw low-level primitives no-rollback when a higher-level API owns the transaction; name or document them as raw primitives and keep them non-public unless a primitive layer is intentional
+- prevalidate impossible cases before mutation when possible, then validate and repair/canonicalize postconditions inside the transaction before commit
+- roll back with typed diagnostic errors on validation, repair, or canonicalization failure
+
+Check:
+
+- fallible mutation sequences are protected by an owner-bound transaction guard, rollback guard, or prevalidated no-fail proof
+- rollback restores all coupled state, including indexes, caches, hints, identities, counters, and topology generations
+- guards roll back on `Drop` unless explicitly committed, and commit/rollback paths are idempotence-aware
+- fallback strategies restore the original state before trying an alternate mutation path
+- snapshot/restore does not leave borrowed views, cached keys, handles, or generation checks stale by accident
+- raw low-level primitives do not take their own snapshots when a higher-level transaction owns the failure boundary
+- transaction guards are not held across `.await`, blocking calls, or callbacks unless the invariant is documented and safe
+- nested transactions are intentional and do not double-snapshot expensive state by accident
+- tests force failure after mutation and assert the original storage plus auxiliary state is restored; cover drop rollback, explicit rollback, restore-and-retry, and commit paths
+
+Flag:
+
+- manual clone/restore snapshots when a local transaction abstraction exists or should be introduced
+- ordinary `Clone` used for rollback where owner identity, provenance, generations, or cache invalidation matters
+- partial rollback that restores primary storage but leaves derived indexes, hints, or generation counters stale
+- fallible mutation followed by validation without rollback on validation failure
+- commit before validation, repair, or canonicalization establishes the postcondition
+- low-level primitives snapshotting under a high-level transaction boundary
+- public/top-level mutation APIs that start the transaction below the owner of affected auxiliary state
+- transaction guards crossing `.await` points, lock acquisitions, or external callbacks
+- fallback code that attempts a second mutation without restoring after the first failure
+- tests that cover only successful transactions and never inject post-mutation failure
+
+### 5. Locks and channels
 
 Check:
 
@@ -106,7 +151,7 @@ Flag:
 - ignoring `try_send` errors as if they were transient
 - swallowed `JoinError`/`RecvError`
 
-### 5. Atomics and memory ordering
+### 6. Atomics and memory ordering
 
 Check:
 
@@ -121,7 +166,7 @@ Flag:
 - mixing relaxed atomics with non-atomic state expecting happens-before guarantees
 - ABA hazards in lock-free code without mitigation
 
-### 6. Determinism and ordering
+### 7. Determinism and ordering
 
 Check:
 
@@ -135,7 +180,7 @@ Flag:
 - nondeterministic shutdown that drops in-flight work
 - joins that are ignored, leaving detached tasks
 
-### 7. API surface
+### 8. API surface
 
 Check:
 
@@ -160,6 +205,7 @@ Check:
 - Send/Sync corrections
 - Blocking offloads
 - Cancellation safety repairs
+- Transaction guard design/reuse, rollback-preserving snapshot repairs, validation-before-commit repairs, and failure-injection tests
 - Lock/channel changes
 - Atomic ordering changes
 
