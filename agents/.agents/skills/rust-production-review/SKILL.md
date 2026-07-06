@@ -23,6 +23,11 @@ Focus on newly added or modified Rust code that affects:
 
 Use related focused Rust skills when the review narrows to a specialized concern, but keep this skill for broad production readiness and design review.
 
+## Project References
+
+- For `delaunay` or closely related computational-geometry work, read
+  [`references/delaunay.md`](references/delaunay.md) before reviewing.
+
 ### Scope Modes
 
 Default mode:

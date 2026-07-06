@@ -17,6 +17,7 @@ Focus on newly added or modified Python that:
 - generates `CHANGELOG.md` or release notes
 - runs `cargo bench` / Criterion and aggregates JSON results
 - prepares release artifacts (tarballs, signed assets, docs uploads)
+- prepares reproducible paper, PDF, figure, or generated documentation artifacts
 - manipulates `Cargo.toml`, `Cargo.lock`, or workspace metadata
 - runs subprocess commands such as `cargo`, `gh`, `git`, or `rsync`
 - generates fixtures or diagnostic reports for the Rust crate
@@ -70,12 +71,14 @@ Check:
 - absolute paths and machine-specific values do not leak into committed output
 - random seeds, if any, are explicit
 - subprocess output is parsed deterministically (`--porcelain`, `--json`, `LC_ALL=C` when relevant)
+- dates used in committed artifacts come from explicit inputs and are parsed/formatted without relying on the process locale
 
 Flag:
 
 - `os.listdir`, `Path.glob`, or `set` iteration feeding committed output without sorting
 - timestamps in changelog entries that change between runs
 - locale-sensitive sorting or formatting on user-facing output
+- `datetime.strptime(..., "%B ...")` or similar locale-dependent parsing for English month names in CI/reproducible artifact paths; prefer ISO dates or an explicit month-name map plus UTC-aware datetimes
 
 ### 3. Error and edge handling
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Changelog Commit Message"
+  short_description: "Changelog-ready commit messages"
+  default_prompt: "Use $changelog-commit-message to write a changelog-ready commit message from my staged changes."

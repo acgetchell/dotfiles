@@ -46,6 +46,7 @@ A test suite is insufficient if it:
 Prefer:
 - unit tests for core logic
 - integration tests where behavior crosses modules
+- layer-specific tests for validation hierarchies, including negative cases that prove the expected error variant for malformed topology, invalid embedding, or failed geometric predicates
 
 ---
 
@@ -103,6 +104,7 @@ Evaluate whether tests:
 - assert meaningful outcomes (not just execution)
 - validate invariants and correctness
 - include negative / failure cases
+- exercise public fast-fail wrappers and the canonical validation functions they delegate to, so duplicate API surfaces cannot drift
 - avoid duplication without abstraction
 - are readable and maintainable
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust Invariant Performance"
+  short_description: "Optimize Rust without losing invariants"
+  default_prompt: "Use $rust-invariant-performance to review Rust performance while preserving invariants, typed errors, and validation boundaries."

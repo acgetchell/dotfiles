@@ -114,10 +114,13 @@ stow-adopt package:
     package='{{package}}'
     case "$package" in git|zsh|agents) ;; *) echo "Unsupported stow package: $package" >&2; exit 2 ;; esac
     [ -d "$package" ] || { echo "Unknown stow package: $package" >&2; exit 2; }
-    stow -d "$PWD" -t "$HOME" --adopt -R "$package"
+    stow -d "$PWD" -t "$HOME" --adopt -v -R "$package"
     just stow-check "$package"
 
 stow-all:
+    just stow-apply-all
+
+stow-apply-all:
     #!/usr/bin/env bash
     set -euo pipefail
     for package in git zsh agents; do
@@ -128,8 +131,9 @@ stow-apply package:
     #!/usr/bin/env bash
     set -euo pipefail
     package='{{package}}'
-    just stow-check "$package"
-    stow -d "$PWD" -t "$HOME" -R "$package"
+    case "$package" in git|zsh|agents) ;; *) echo "Unsupported stow package: $package" >&2; exit 2 ;; esac
+    [ -d "$package" ] || { echo "Unknown stow package: $package" >&2; exit 2; }
+    stow -d "$PWD" -t "$HOME" -v -S "$package"
 
 stow-check package:
     #!/usr/bin/env bash
@@ -137,7 +141,22 @@ stow-check package:
     package='{{package}}'
     case "$package" in git|zsh|agents) ;; *) echo "Unsupported stow package: $package" >&2; exit 2 ;; esac
     [ -d "$package" ] || { echo "Unknown stow package: $package" >&2; exit 2; }
-    stow -d "$PWD" -t "$HOME" -n -v -R "$package"
+    stow -d "$PWD" -t "$HOME" -n -v -S "$package"
+
+stow-restow package:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    package='{{package}}'
+    case "$package" in git|zsh|agents) ;; *) echo "Unsupported stow package: $package" >&2; exit 2 ;; esac
+    [ -d "$package" ] || { echo "Unknown stow package: $package" >&2; exit 2; }
+    stow -d "$PWD" -t "$HOME" -v -R "$package"
+
+stow-restow-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for package in git zsh agents; do
+        just stow-restow "$package"
+    done
 
 stow-delete package:
     #!/usr/bin/env bash
@@ -145,7 +164,7 @@ stow-delete package:
     package='{{package}}'
     case "$package" in git|zsh|agents) ;; *) echo "Unsupported stow package: $package" >&2; exit 2 ;; esac
     [ -d "$package" ] || { echo "Unknown stow package: $package" >&2; exit 2; }
-    stow -d "$PWD" -t "$HOME" -D "$package"
+    stow -d "$PWD" -t "$HOME" -v -D "$package"
 
 test-python: _ensure-uv
     uv run pytest

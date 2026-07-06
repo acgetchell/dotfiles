@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codecov Test Gaps"
+  short_description: "Find meaningful coverage gaps"
+  default_prompt: "Use $codecov-test-gaps to inspect the latest coverage report and add meaningful missing tests."

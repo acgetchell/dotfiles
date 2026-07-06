@@ -1,6 +1,6 @@
 ---
 name: crate-docs-update
-description: "Update the multi-file documentation suite for a scientific Rust crate, keeping README, REFERENCES, CITATION.cff, AGENTS, and docs/* consistent across changes. USE FOR: updating documentation after code/algorithm/release changes; syncing version metadata across Cargo.toml, CITATION.cff, README, and CHANGELOG; adding REFERENCES entries when new methods or papers are introduced; updating per-topic docs (api_design.md, invariants.md, scientific_basis.md, foliation.md, metropolis.md, moves.md, proposal_validation.md, BENCHMARKING.md, COVERAGE.md, PERFORMANCE.md, roadmap.md, KNOWN_ISSUES_*.md, TODO.md); adjusting AGENTS.md/CONTRIBUTING.md/CODE_OF_CONDUCT.md/SECURITY.md/RELEASING.md; preparing release-day doc edits. DO NOT USE FOR: writing commit messages (use changelog-commit-message); reviewing /// doc comments inside Rust source (use rust-api-docs); reviewing Cargo.toml/feature/MSRV/lints (use rust-cargo-hygiene); generating CHANGELOG.md content (delegate to git-cliff); making code changes; non-documentation chores."
+description: "Update documentation suites for scientific Rust crates, keeping README, REFERENCES, CITATION.cff, AGENTS, docs/*, and paper/process docs consistent. USE FOR: docs after code/algorithm/release changes; version metadata sync across Cargo.toml, CITATION.cff, README, and CHANGELOG; REFERENCES entries for new methods or papers; per-topic docs such as api_design.md, invariants.md, scientific_basis.md, validation.md, moves.md, proposal_validation.md, BENCHMARKING.md, COVERAGE.md, PERFORMANCE.md, roadmap.md, TODO.md; AGENTS/CONTRIBUTING/SECURITY/RELEASING updates; release-day doc edits. DO NOT USE FOR: commit messages (use changelog-commit-message); Rust /// docs (use rust-api-docs); Cargo/features/MSRV/lints (use rust-cargo-hygiene); generated CHANGELOG content (delegate to git-cliff); manuscript prose under Adam's name (use academic-authorship-boundary); code changes; non-documentation chores."
 ---
 
 # crate-docs-update
@@ -16,6 +16,7 @@ Use this skill to update existing documentation files, including:
 - **Top-level**: `README.md`, `REFERENCES.md`, `CITATION.cff`, `AGENTS.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`
 - **`docs/` topic files**: `api_design.md`, `invariants.md`, `numerical_robustness_guide.md`, `topology.md`, `validation.md`, `code_organization.md`, `scientific_basis.md`, `foliation.md`, `metropolis.md`, `moves.md`, `proposal_validation.md`, `roadmap.md`, `KNOWN_ISSUES_*.md`, `TODO.md`, `BENCHMARKING.md`, `COVERAGE.md`, `PERFORMANCE.md`, `ORIENTATION_SPEC.md`, etc.
 - **`docs/RELEASING.md`** when the release process itself changes
+- **Paper/process docs** such as `docs/dev/docs.md`, paper build workflows, and paper artifact guidance, while respecting the academic authorship boundary for manuscript prose.
 
 Do not hand-edit `CHANGELOG.md`. These crates use `git-cliff` (`cliff.toml`) to generate it from commit history. See [Changelog handling](#changelog-handling).
 
@@ -47,6 +48,8 @@ Use the staged or recent change as the source of truth and decide which docs are
 - **Process or policy changes** → `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `AGENTS.md`, `docs/RELEASING.md`
 
 If the relevant topic doc does not exist, prefer extending a related existing doc over creating a new file. Only add a new doc when the topic is genuinely new and persistent.
+
+If the change touches manuscript or publication material under `papers/`, use `academic-authorship-boundary` as the governing constraint. You may update paper build tooling, artifact freshness checks, bibliography wiring, outline/TODO scaffolds, and repository guidance, but do not write substantive paper prose for Adam.
 
 ### 3. Maintain cross-document consistency
 
@@ -80,6 +83,7 @@ These crates use `git-cliff` driven by `cliff.toml`. Do not hand-edit changelog 
 
 - never edit files marked auto-generated (e.g., `cargo-readme` output, `mdbook` build artifacts, generated API docs)
 - if a generated file looks wrong, fix the source instead
+- when a workflow checks generated paper/PDF/figure artifacts, document the source command and freshness check rather than patching generated outputs by hand
 
 ### 5. Per-repo convention sensitivity
 
