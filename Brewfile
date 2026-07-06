@@ -25,6 +25,7 @@ brew "gitleaks"                        # secret scanner
 brew "gnupg"                           # GPG encryption and signing tools
 brew "gnuplot"                         # plotting utility
 brew "helm"                            # Kubernetes package manager
+brew "icu4c"                           # ICU Unicode libraries (keg-only; alias of latest icu4c@XX)
 brew "jq"                              # JSON command-line processor
 brew "kubernetes-cli"                  # Kubernetes CLI (`kubectl`)
 brew "libtool"                         # GNU library build helper
