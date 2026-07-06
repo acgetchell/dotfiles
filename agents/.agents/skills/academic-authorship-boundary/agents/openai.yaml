@@ -1,0 +1,4 @@
+interface:
+  display_name: "Academic Authorship Boundary"
+  short_description: "Protects human-authored scholarly prose"
+  default_prompt: "Use $academic-authorship-boundary to help outline or review my academic writing without generating prose under my name."

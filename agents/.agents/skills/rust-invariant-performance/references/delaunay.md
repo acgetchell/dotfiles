@@ -9,8 +9,9 @@ crate or closely related computational-geometry code.
   deterministic degeneracy handling.
 - Delaunay, PL-manifold, adjacency, Euler characteristic, ridge-link, and
   topology-guarantee invariants.
-- Validation layering: element/structure/topology checks must not be replaced by
-  Level-4 predicate work or skipped for speed.
+- Validation layering: Level 1 element validity, Level 2 combinatorial
+  consistency, and Level 3 intrinsic topology must not be replaced by Level 4
+  embedding checks, Level 5 geometric predicates, or skipped for speed.
 - Parse-don't-validate boundaries such as coordinate ranges, positive values,
   Hilbert bit depths, validated quantized batches, topology guarantees, and
   typed budgets.
@@ -26,6 +27,8 @@ crate or closely related computational-geometry code.
 - Hilbert ordering, quantization, deduplication, and construction preprocessing.
 - Topology validation and Delaunay validation, especially when run during repair
   or construction retries.
+- Spherical and toroidal backend validation where intrinsic dimension, ambient
+  embedding dimension, and predicate dimension can diverge.
 - Query and locate traversal, adjacency/ridge/facet iteration, and boundary
   extraction.
 - Benchmark fixture construction when it is inside measured closures.

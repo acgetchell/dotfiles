@@ -60,13 +60,19 @@ Supported stow packages are `git`, `zsh`, and `agents`.
 # Preview changes before applying a package.
 just stow-check agents
 
-# Apply or re-apply one package after the dry-run check passes.
+# Apply one package and print the symlink operations performed.
 just stow-apply zsh
 
-# Apply all managed packages.
-just stow-all
+# Apply all managed packages and print their symlink operations.
+just stow-apply-all
 
-# Remove one package's symlinks.
+# Restow one package, refreshing existing links with explicit unlink/link output.
+just stow-restow agents
+
+# Restow all managed packages.
+just stow-restow-all
+
+# Remove one package's symlinks and print the removals.
 just stow-delete zsh
 
 # Adopt an existing live file into the repo (overwrites the package copy).
@@ -77,7 +83,7 @@ Use `--adopt` only when intentionally moving an existing `$HOME` file into dotfi
 
 The `just` stow recipes always pass both `-d "$PWD"` and `-t "$HOME"`. If running raw `stow`, pass both paths explicitly; otherwise stow targets the parent of the current directory, which can create links in the wrong place.
 
-For new package-owned files such as Codex skills, create the file under the package, run `just stow-check <package>`, then run `just stow-apply <package>` when the dry run looks right. Stow recipes do not stage, commit, or print source-control status.
+For new package-owned files such as Codex skills, create the file under the package, run `just stow-check <package>`, then run `just stow-apply <package>` when the dry run looks right. `stow-check` is the only simulation-mode recipe; `stow-apply` and `stow-apply-all` stow missing or new links, while `stow-restow` and `stow-restow-all` perform full unlink/link refreshes. Mutating recipes print the Stow link operations they perform. `just stow-all` remains as an alias for `just stow-apply-all`. Stow recipes do not stage, commit, or print source-control status.
 
 ## Brewfile workflow
 `Brewfile` is intentionally foundational: core CLI tools, developer casks, and apps expected on every machine.

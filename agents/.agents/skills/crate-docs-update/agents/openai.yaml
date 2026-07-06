@@ -1,0 +1,4 @@
+interface:
+  display_name: "Crate Docs Update"
+  short_description: "Sync scientific crate docs"
+  default_prompt: "Use $crate-docs-update to update this scientific Rust crate documentation after the current changes."

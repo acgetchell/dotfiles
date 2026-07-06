@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust Production Review"
+  short_description: "Senior Rust production review"
+  default_prompt: "Use $rust-production-review to review changed Rust code for invariants, correctness, API stability, and maintainability."
