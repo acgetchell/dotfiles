@@ -45,7 +45,7 @@ action-lint: _ensure-actionlint
         echo "No workflow files found to lint."
     fi
 
-check: shell-check git-config-check toml-check yaml-check github-actions-check semgrep semgrep-test python-ci
+check: shell-check git-config-check toml-check yaml-check github-actions-check check-skills semgrep semgrep-test python-ci
     @echo "Checks complete!"
 
 ci: check
@@ -107,6 +107,25 @@ semgrep-test: _ensure-uv
 
 shell-check:
     bash -n bin/bootstrap.sh bin/verify.sh
+
+skill-check skill: _ensure-uv
+    uv run python scripts/skill_validate.py "{{skill}}"
+
+check-skills: _ensure-uv
+    #!/usr/bin/env bash
+    set -euo pipefail
+    failed=0
+    while IFS= read -r skill_file; do
+        skill_dir="${skill_file%/SKILL.md}"
+        if ! just skill-check "$skill_dir"; then
+            failed=1
+        fi
+    done < <(find agents/.agents/skills -mindepth 2 -maxdepth 2 -name SKILL.md -print | sort)
+    if (( failed )); then
+        echo "One or more skill checks failed." >&2
+        exit 1
+    fi
+    echo "Skill checks complete!"
 
 stow-adopt package:
     #!/usr/bin/env bash

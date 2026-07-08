@@ -266,6 +266,50 @@ Use these when they fit the codebase:
 - make cache invalidation explicit before adding caches
 - add or update benchmarks before claiming a win
 
+## Command Taxonomy
+
+When a repo provides standardized benchmark recipes, distinguish routine
+correctness validation, performance evidence, release evidence, and docs
+promotion. Do not recommend expensive release-comparison commands as a default
+pre-commit step.
+
+When a repository provides `benches/README.md`, read it before running or
+recommending benchmark commands. Use its final or PR-ready checks for
+benchmark-affecting or performance-sensitive changes, but do not promote
+expensive benchmark suites into routine correctness gates unless the repository
+explicitly says to.
+
+Prefer this order:
+
+- Run the repo's normal correctness gate before committing or handing off work.
+  In many Rust crates this is `just ci`, but defer to the repo's own
+  development docs.
+- For performance-sensitive code, run the smallest representative benchmark or
+  smoke proxy before and after the change.
+- For PR-ready performance work, run the repo's local regression guard when one
+  exists.
+- For release prep, run the curated release-signal suite and release-comparison
+  report commands.
+- For already-published releases, compare stored release benchmark artifacts
+  instead of rerunning old code locally when the repo supports that workflow.
+
+Common command roles:
+
+- Correctness gate: compile, lint, test, doc, example, and benchmark-harness
+  validation. This should be the routine pre-commit check.
+- Focused benchmark: targeted Criterion or domain-specific benchmark for the
+  hot path under review.
+- Smoke proxy: broad but relatively cheap wall-clock or allocation proxy used
+  before pushing performance-sensitive changes.
+- Regression guard: local branch-vs-baseline comparison used for PR-ready
+  performance evidence.
+- Release-signal suite: curated benchmark set for release-to-release evidence,
+  usually slower and not a routine commit gate.
+- Release artifact comparison: compares benchmark data already attached to
+  published releases.
+- Release docs promotion: updates curated performance documentation and archives
+  the previous report; this is a release-maintenance task, not an audit default.
+
 ## Output Format
 
 ### Scope

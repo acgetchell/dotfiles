@@ -103,6 +103,11 @@ fi
 # Add Command Line Tools (system path; safe everywhere)
 export PATH="/Library/Developer/CommandLineTools/usr/bin:$PATH"
 
+# Add MacTeX/BasicTeX tools when present.
+if [[ -d /Library/TeX/texbin && ":$PATH:" != *":/Library/TeX/texbin:"* ]]; then
+  export PATH="/Library/TeX/texbin:$PATH"
+fi
+
 # ---- Brewfile location (used by `brew bundle` from any directory) ----
 export HOMEBREW_BUNDLE_FILE="$HOME/projects/dotfiles/Brewfile"
 
@@ -142,7 +147,6 @@ fi
 # Example aliases
 # alias zshconfig="mate ~/.zshrc"
 # alias ohmyzsh="mate ~/.oh-my-zsh"
-alias farm="ssh adam@farm.hpc.ucdavis.edu"
 alias cup='cargo install-update -a'
 alias cupl='cargo install-update -a -l'
 # ---- 1Password SSH agent (optional) ----

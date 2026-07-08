@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust Review Orchestrator"
+  short_description: "Coordinate focused Rust review passes"
+  default_prompt: "Use $rust-review-orchestrator to review and fix changed Rust code pass by pass, then run focused validators."
