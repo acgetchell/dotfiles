@@ -226,9 +226,12 @@ To add a skill:
 3. validate and re-stow the package:
 
 ```sh
+just skill-check agents/.agents/skills/<skill-id>
 just stow-check agents
 just stow-apply agents
 ```
+
+Run `just check-skills` to validate every skill in `agents/.agents/skills/`.
 
 Review the changed skill files separately before including them in a commit.
 

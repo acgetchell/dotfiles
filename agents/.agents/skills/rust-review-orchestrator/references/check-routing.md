@@ -45,6 +45,12 @@ Classify files by path and effect:
 
 Use the repository's documented commands when available. If no local guidance exists, use the generic Cargo fallbacks in this table.
 
+If `benches/README.md` exists and changed files touch `benches/**`, benchmark
+fixtures, hot paths, allocation-sensitive Rust, or performance claims, read it
+before choosing benchmark validators. Treat its final or PR-ready checks as
+repo-local guidance for benchmark-affecting work, not as a blanket final step
+for unrelated Rust changes.
+
 | Files touched | Validator |
 |---|---|
 | Rust library source affecting core behavior | documented focused Rust check; fallback `cargo test --lib` plus `cargo clippy --all-targets --all-features -- -D warnings` |

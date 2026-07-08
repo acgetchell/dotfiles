@@ -108,6 +108,18 @@ semgrep-test: _ensure-uv
 shell-check:
     bash -n bin/bootstrap.sh bin/verify.sh
 
+skill-check skill: _ensure-uv
+    uv run --with PyYAML python "$HOME/.codex/skills/.system/skill-creator/scripts/quick_validate.py" "{{skill}}"
+
+check-skills: _ensure-uv
+    #!/usr/bin/env bash
+    set -euo pipefail
+    while IFS= read -r skill_file; do
+        skill_dir="${skill_file%/SKILL.md}"
+        uv run --with PyYAML python "$HOME/.codex/skills/.system/skill-creator/scripts/quick_validate.py" "$skill_dir"
+    done < <(find agents/.agents/skills -mindepth 2 -maxdepth 2 -name SKILL.md -print | sort)
+    echo "Skill checks complete!"
+
 stow-adopt package:
     #!/usr/bin/env bash
     set -euo pipefail

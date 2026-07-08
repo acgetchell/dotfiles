@@ -4,13 +4,20 @@ Use this reference after reading the requested scope and before selecting focuse
 
 ## Scope Discovery
 
-Choose read-only discovery commands that match the request:
+Default to branch scope. The normal workflow is to make a branch, review the whole branch, and include any staged, unstaged, or untracked work still sitting on top of it.
 
-- Staged review: `git --no-pager diff --cached --name-status` and `git --no-pager diff --cached`.
-- Changed worktree review: `git --no-pager status --short`, `git --no-pager diff --name-status`, and `git --no-pager diff`.
-- Branch or PR-style review: inspect the branch diff against the appropriate base without mutating git state.
+Use read-only discovery commands:
 
-If scope is ambiguous, prefer the current changed files over a whole-repo baseline.
+- Identify the branch: `git --no-pager branch --show-current`.
+- Use an explicit user-provided or PR-provided base when available.
+- Otherwise infer the default-branch base from `origin/HEAD`, `origin/main`, `origin/master`, `main`, or `master`, in that order when present.
+- Do not use the branch's same-name tracking upstream as the review base; that narrows a pushed feature branch to only unpushed local changes.
+- Find the merge base: `git --no-pager merge-base HEAD <base>`.
+- Inspect committed branch changes: `git --no-pager diff --name-status <merge-base>...HEAD` and `git --no-pager diff <merge-base>...HEAD`.
+- Inspect the full local branch state, including staged and unstaged work: `git --no-pager diff --name-status <merge-base>` and `git --no-pager diff <merge-base>`.
+- Include untracked files with `git --no-pager status --short` and `git ls-files --others --exclude-standard`.
+
+Use staged-only, changed-worktree-only, or whole-repo baseline scope only when the user explicitly asks for that scope. If the branch base cannot be inferred, report the ambiguity and fall back to the current changed files only after making that limitation visible.
 
 ## Surface Matrix
 
@@ -56,6 +63,8 @@ Use the smallest order that preserves validation integrity:
 3. Python next when Python-owned behavior, notebooks, or Python config changed.
 4. Project tooling again only when the language passes changed commands, workflow files, lockfiles, or docs.
 5. Final synthesis after all selected validators pass or known blockers are documented.
+
+Pass the same branch-scope file list and diff to every selected orchestrator. Do not let a focused orchestrator silently re-scope the review to only staged or unstaged changes unless the user requested that narrower scope.
 
 ## Validation Choice
 

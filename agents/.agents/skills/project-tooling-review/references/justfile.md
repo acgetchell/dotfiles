@@ -11,6 +11,19 @@ Use this reference for `justfile` changes, command-surface docs, and recipes tha
 - Separate fast local checks from full CI and slow/performance/release checks.
 - Preserve recipe composability. Prefer recipes that call other recipes over copy-pasted command sequences when the same workflow appears in multiple places.
 
+## Tool Install Recipes
+
+If `justfile` installs, upgrades, checks, or asserts versions for tools managed by `uv tool`, `cargo install`, Homebrew, or another manager, keep those recipes synchronized with the updated managed-tool versions.
+
+Check for:
+
+- recipe variables such as `<tool>_version` or `<tool>-version`
+- inline install specs such as `cargo install --version`, `uv tool install name@version`, `brew install`, `pipx install name==version`, or setup helper arguments
+- ensure/check recipes that compare `tool --version` output against a pinned value
+- recipes that call bootstrap scripts or workflows with version arguments
+
+When `project-tooling-review` updates a managed tool, update matching `justfile` pins in the same pass before validating workflows. The local command surface should install and assert the same version that GitHub Actions and bootstrap scripts use.
+
 ## Safety Checks
 
 - Destructive recipes require explicit arguments and should not hide behind friendly names.
@@ -27,6 +40,7 @@ Compare `justfile` against:
 - `README.md`, `AGENTS.md`, `CONTRIBUTING.md`, and `docs/dev/**`
 - `.github/workflows/**`
 - language-specific config such as `pyproject.toml`, `Cargo.toml`, `rust-toolchain.toml`, and lockfiles
+- managed tool inventories from `uv tool list`, `cargo install --list`, and `cargo install-update -l`
 - scripts that are invoked by recipes
 
 Flag docs or workflows that mention deleted/renamed recipes, skip new required recipes, or describe different command arguments than the recipe actually accepts.
@@ -41,4 +55,3 @@ Use repository guidance first. Otherwise prefer:
 - The narrow changed recipe's check command when it is safe and local.
 
 Do not run destructive, publishing, release, or update recipes unless the user explicitly asks.
-

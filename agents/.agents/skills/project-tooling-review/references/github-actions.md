@@ -20,6 +20,22 @@ Use this reference for `.github/workflows/**`, reusable workflow calls, Actions-
 - Prefer commit SHA pins for high-security/release/signing workflows when that policy exists, and document the update path.
 - Keep action versions consistent across workflows unless a workflow intentionally needs a different major version.
 
+## Managed Tool Version Propagation
+
+When `project-tooling-review` updates a tool managed by `uv tool` or `cargo install`, check whether GitHub Actions installs or invokes that tool. Update workflow pins in the same pass when the workflow depends on the updated version.
+
+Check for:
+
+- workflow `env` pins such as `UV_VERSION`, `JUST_VERSION`, `ZIZMOR_VERSION`, or other `<TOOL>_VERSION` values
+- setup action inputs such as `version: ${{ env.UV_VERSION }}` or literal version strings
+- cargo-install cache actions with `tool: name@version`
+- inline `cargo install --version`, `uv tool install name@version`, `pipx install name==version`, or equivalent install commands
+- comments next to pinned tool versions when they are used as human-readable version markers
+
+Keep the action pin and managed tool pin separate. For example, updating `zizmor` should update `ZIZMOR_VERSION` or `tool: zizmor@...`; it should not update `taiki-e/cache-cargo-install-action@...` unless that action itself is stale. Updating `uv` should update the setup action's requested `uv` version; it should not update `astral-sh/setup-uv@...` unless the setup action itself is stale.
+
+If the workflow reads the version from a single env var or bootstrap script constant, update that source of truth rather than duplicating literal versions throughout the workflow. Keep local bootstrap pins, workflow pins, and command docs synchronized.
+
 ## Drift Checks
 
 Compare workflows against:
@@ -27,6 +43,7 @@ Compare workflows against:
 - `justfile` recipe names and arguments
 - `README.md`, `AGENTS.md`, `CONTRIBUTING.md`, and `docs/dev/**`
 - `Brewfile`, `pyproject.toml`, `uv.lock`, `Cargo.toml`, `rust-toolchain.toml`, and other toolchain files
+- `uv tool` and `cargo install` managed CLI inventories and updated local versions
 - branch protection or required check naming when available
 
 Flag workflows that run stale recipes, bypass canonical local checks, silently skip failures, or publish artifacts without matching release docs.
@@ -41,4 +58,3 @@ Use repository guidance first. Otherwise prefer:
 - A targeted dry run with `act` only when the repository already supports it and local secrets are not required.
 
 Do not trigger remote workflow runs, publish releases, upload artifacts, or mutate repository settings unless the user explicitly asks.
-

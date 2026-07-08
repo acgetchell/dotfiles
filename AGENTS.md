@@ -8,7 +8,14 @@ machine-portable, and scoped to reproducible defaults.
 - Prefer `uv run` over bare `python3` for Python tooling in this repository.
 - Do not install packages into system or Homebrew Python just to run a repo
   check.
-- For Codex skill validation, run:
+- For Codex skill validation, prefer the repository recipes:
+
+```sh
+just skill-check agents/.agents/skills/<skill-id>
+just check-skills
+```
+
+- If `just` is unavailable, run the underlying validator directly:
 
 ```sh
 uv run --with PyYAML python "$HOME/.codex/skills/.system/skill-creator/scripts/quick_validate.py" <skill-dir>

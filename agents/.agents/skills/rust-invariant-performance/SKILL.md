@@ -273,6 +273,12 @@ correctness validation, performance evidence, release evidence, and docs
 promotion. Do not recommend expensive release-comparison commands as a default
 pre-commit step.
 
+When a repository provides `benches/README.md`, read it before running or
+recommending benchmark commands. Use its final or PR-ready checks for
+benchmark-affecting or performance-sensitive changes, but do not promote
+expensive benchmark suites into routine correctness gates unless the repository
+explicitly says to.
+
 Prefer this order:
 
 - Run the repo's normal correctness gate before committing or handing off work.
