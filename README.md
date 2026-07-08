@@ -155,16 +155,18 @@ Jupyter kernels:
 ```toml
 [sandbox_workspace_write]
 network_access = true
-writable_roots = ["/Users/adam/.cache/codex/uv"]
+writable_roots = ["/Users/<username>/.cache/codex/uv"]
 
 [shell_environment_policy]
-set = { UV_CACHE_DIR = "/Users/adam/.cache/codex/uv" }
+set = { UV_CACHE_DIR = "/Users/<username>/.cache/codex/uv" }
 ```
 
 This lets Rust/Python workflows use `uv run`, `uv lock`, and notebook execution
 without giving Codex write access to all of `~/.cache` or disabling sandboxing.
 The network exception is intentionally attached to `workspace-write`; it is
 needed for local kernel sockets such as Jupyter's loopback ports.
+Replace `/Users/<username>` with the absolute home path on the local machine;
+keep the resulting machine-specific `~/.codex/config.toml` out of this repo.
 
 Keep secrets and mutable runtime state out of this public repo. Do not commit
 `~/.codex/auth.json`, logs, caches, sqlite state, marketplace cache state,
@@ -176,6 +178,8 @@ Local override files are not tracked and should not be committed.
 
 ### `~/.zshrc.local`
 Use for machine-specific shell paths, aliases, and experiments. It is sourced last by `zsh/.zshrc`.
+Keep host-specific SSH aliases and work/institution endpoints here rather than
+in the tracked `zsh/.zshrc`.
 
 Example:
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Repo Review"
+  short_description: "Route repo-wide review passes"
+  default_prompt: "Use $repo-review to review and fix changed Rust, Python, and tooling surfaces with the focused orchestrators."
