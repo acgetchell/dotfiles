@@ -109,7 +109,7 @@ shell-check:
     bash -n bin/bootstrap.sh bin/verify.sh
 
 skill-check skill: _ensure-uv
-    uv run python "$HOME/.codex/skills/.system/skill-creator/scripts/quick_validate.py" "{{skill}}"
+    uv run python scripts/skill_validate.py "{{skill}}"
 
 check-skills: _ensure-uv
     #!/usr/bin/env bash
