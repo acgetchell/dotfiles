@@ -18,7 +18,7 @@ just check-skills
 - If `just` is unavailable, run the underlying validator directly:
 
 ```sh
-uv run --with PyYAML python "$HOME/.codex/skills/.system/skill-creator/scripts/quick_validate.py" <skill-dir>
+uv run python "$HOME/.codex/skills/.system/skill-creator/scripts/quick_validate.py" <skill-dir>
 ```
 
 - Use `uv run --with <package> ...` for one-off Python helper dependencies that

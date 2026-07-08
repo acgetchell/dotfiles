@@ -17,6 +17,19 @@ Coordinate focused Rust review skills without copying their content. This skill 
 - When the user says "fix all", implement actionable findings as you go. Do not merely collect them for later unless the fix is blocked or unsafe.
 - Do not run blanket full-CI validators by default. Select focused validators from changed and touched files. Run full CI only when repository rules require it for the touched surface or when changes cross broad core Rust behavior.
 
+## Review Trace
+
+When invoked by `repo-review`, begin with a handoff receipt that names:
+
+- the parent branch scope and Rust-owned file list or file count handed off
+- selected Rust skill groups and why they apply
+- skipped Rust skill groups when a maintainer might reasonably expect them
+- routing or crate-specific reference files that will be loaded
+
+For every selected group, announce the group and focused skills before loading the first skill. After loading each focused skill or reference file, keep its name in the running trace for the final summary. This trace is required evidence that the orchestrator ran the selected Rust skills rather than only summarizing their names.
+
+When invoked by `repo-review`, provide table-ready evidence for the parent `Review Evidence` table: selected groups, focused skill files loaded, reference files loaded, validators run, and any skipped groups that might otherwise look missing.
+
 ## Required Skill Loading
 
 This orchestrator must actually load the named skill files it selects. Do not summarize their names from memory.
@@ -112,6 +125,8 @@ End with a concise summary that helps the maintainer review unstaged changes by 
 
 - each file changed and why
 - which skill groups ran
+- focused skill files and reference files actually loaded
+- table-ready evidence for `repo-review` when invoked by the meta-orchestrator
 - validators run and their results
 - issues fixed while moving between skills
 - anything intentionally deferred or not run

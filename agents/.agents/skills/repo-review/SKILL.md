@@ -16,6 +16,24 @@ Route mixed repository review work to the focused orchestrators. This skill esta
 - When the user asks to fix issues, implement actionable findings as each selected orchestrator discovers them. Do not merely collect findings unless the fix is blocked or unsafe.
 - Keep this skill thin. Do not duplicate the detailed review rules from Rust, Python, or tooling skills; load those skills and follow them.
 
+## Review Trace
+
+Make orchestration visible while working. Before running focused orchestrators, emit a compact dispatch note with:
+
+- scope: branch, base, whether staged/unstaged/untracked work is included, and either the file count or file list when small
+- selected orchestrators, each with one reason tied to changed files
+- skipped orchestrators, each with one reason
+- planned run order
+
+Before each selected orchestrator starts, emit a handoff note naming the orchestrator and the branch-scope files or diff slice being handed to it. After each orchestrator finishes, record the focused skill groups, skill files, reference files, fixes, and validators it actually used. Treat this trace as the user's audit trail that the child skill was really run, not as optional narration.
+
+The final summary must include a Markdown table headed `Review Evidence` with these columns:
+
+| Orchestrator | Status | Why selected or skipped | Scope handed off | Skills/references actually loaded | Validators |
+| --- | --- | --- | --- | --- | --- |
+
+Include one row for each of `project-tooling-review`, `rust-review-orchestrator`, and `python-review-orchestrator`. Use `selected`, `skipped`, or `blocked` in the Status column. For selected orchestrators, do not leave the skills/references cell blank; name the loaded files, or write `none loaded` only with a reason.
+
 ## Required Skill Loading
 
 This meta-orchestrator must actually load every selected orchestrator's `SKILL.md` completely before applying it.
@@ -27,11 +45,12 @@ After establishing branch scope:
    - `project-tooling-review`
    - `rust-review-orchestrator`
    - `python-review-orchestrator`
-3. For each selected orchestrator, open and read its `SKILL.md` completely.
-4. Follow that orchestrator's directly referenced files when they apply.
-5. Give the orchestrator the established branch file list and diff as its scope. This branch-scope handoff overrides a focused orchestrator's changed-file default for the current meta-review.
-6. Let the orchestrator run its own pass order, fix loop, and focused validation before moving to the next selected orchestrator.
-7. Record validators, changes, unresolved risks, and any cross-surface handoffs for the final summary.
+3. Emit the review dispatch note from [Review Trace](#review-trace), including selected and skipped orchestrators.
+4. For each selected orchestrator, open and read its `SKILL.md` completely.
+5. Follow that orchestrator's directly referenced files when they apply.
+6. Give the orchestrator the established branch file list and diff as its scope. This branch-scope handoff overrides a focused orchestrator's changed-file default for the current meta-review.
+7. Let the orchestrator run its own pass order, fix loop, and focused validation before moving to the next selected orchestrator.
+8. Record validators, changes, unresolved risks, and any cross-surface handoffs for the final summary.
 
 ## Review Order
 
@@ -56,7 +75,9 @@ Treat build and validation files as shared ownership:
 
 End with a concise summary that helps the maintainer review unstaged changes by surface. Include:
 
-- orchestrators selected and why
+- the `Review Evidence` table described above
+- orchestrators selected and skipped, with reasons
+- focused skill groups, skill files, and reference files actually loaded by each selected orchestrator
 - files changed and what was fixed
 - validators run and their results
 - cross-surface risks resolved or deferred

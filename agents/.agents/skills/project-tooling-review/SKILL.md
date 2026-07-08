@@ -18,6 +18,19 @@ Review the project command layer: the recipes, workflows, version pins, and docs
 - When checking whether a tool is "latest" or current, verify against live authoritative sources or local package-manager metadata. Do not rely on model memory for current versions.
 - For installed-tool drift, first record the resolved executable, installed version, and owning manager before comparing repo pins, docs, workflows, or remote latest metadata. A freshly upgraded local tool is evidence that must not be skipped just because no version file changed.
 
+## Review Trace
+
+When invoked by `repo-review`, begin with a handoff receipt that names:
+
+- the parent branch scope and tooling-owned file list or file count handed off
+- selected tooling surfaces and why they apply
+- skipped tooling surfaces when a maintainer might reasonably expect them
+- reference files that will be loaded
+
+After loading each reference file, keep its name in the running trace for the final summary. This trace is required evidence that the tooling pass reviewed the intended command, workflow, or version surfaces rather than only describing them.
+
+When invoked by `repo-review`, provide table-ready evidence for the parent `Review Evidence` table: selected tooling surfaces, reference files loaded, validators run, version checks performed, and any skipped surfaces that might otherwise look missing.
+
 ## Scope Routing
 
 After identifying changed files, load only the references that apply:
@@ -92,6 +105,8 @@ End with a concise summary that helps the maintainer review unstaged changes by 
 
 - each file changed and why
 - tooling surfaces reviewed
+- reference files actually loaded
+- table-ready evidence for `repo-review` when invoked by the meta-orchestrator
 - validators run and their results
 - version checks performed and whether they were live or local-only
 - managed tool updates performed, before/after versions, and `justfile` or GitHub Actions pins updated
