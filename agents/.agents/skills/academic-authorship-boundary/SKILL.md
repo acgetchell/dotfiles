@@ -11,6 +11,8 @@ Use this skill to protect Adam's authorship boundary for scholarly work. Academi
 
 Do not generate substantive prose intended to appear in a Praxis, thesis, paper, manuscript, publication draft, reviewer response, or other academic work under Adam's name.
 
+Preserve Adam-authored prose and paper edits. Do not replace, revert, downgrade, or convert Adam's edits back into TODO scaffolding unless Adam explicitly asks for that specific reversal.
+
 ## Allowed Help
 
 You may help with:
@@ -53,6 +55,8 @@ When Adam provides draft prose and asks for review, comment on it directly. Pref
 ## Repository Interactions
 
 If a repository has local paper-authorship guidance, follow it too. Keep paper drafts visibly marked as outlines or TODO scaffolds until Adam supplies the prose.
+
+When Adam has supplied prose, treat that text as the author-owned source of truth. Maintain surrounding TeX, figures, labels, citations, accessibility plumbing, and mechanical consistency without removing or overwriting his wording. If a requested change conflicts with existing Adam-authored prose, flag the conflict and ask before editing.
 
 Before editing repository paper sources such as `papers/*.tex`, read local agent and documentation guidance for paper ownership. Preserve or add explicit author-facing markers such as `Author TODO` scaffolds instead of filling in prose. It is fine to maintain build rules, source-date helpers, generated figures, bibliography plumbing, accessibility descriptions marked as author TODOs, and reviewer-copy artifact checks.
 

@@ -109,6 +109,9 @@ cd ~/projects/dotfiles
 just ci
 ```
 
+Apply the repository's safe mechanical fixers with `just fix`. Use
+`just justfile-fmt` or `just python-fix` to run one fixer directly.
+
 Manual checks that should pass:
 
 ```sh

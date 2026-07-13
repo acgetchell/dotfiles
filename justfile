@@ -45,21 +45,42 @@ action-lint: _ensure-actionlint
         echo "No workflow files found to lint."
     fi
 
-check: shell-check git-config-check toml-check yaml-check github-actions-check check-skills semgrep semgrep-test python-ci
+check: shell-check git-config-check justfile-fmt-check toml-check yaml-check github-actions-check check-skills semgrep semgrep-test python-ci
     @echo "Checks complete!"
+
+check-skills: _ensure-uv
+    #!/usr/bin/env bash
+    set -euo pipefail
+    failed=0
+    while IFS= read -r skill_file; do
+        skill_dir="${skill_file%/SKILL.md}"
+        if ! just skill-check "$skill_dir"; then
+            failed=1
+        fi
+    done < <(find agents/.agents/skills -mindepth 2 -maxdepth 2 -name SKILL.md -print | sort)
+    if (( failed )); then
+        echo "One or more skill checks failed." >&2
+        exit 1
+    fi
+    echo "Skill checks complete!"
 
 ci: check
     @echo "CI checks complete!"
 
-setup:
-    DOTFILES_DIR="$PWD" bin/bootstrap.sh
-    just python-sync
+fix: justfile-fmt python-fix
+    @echo "Fixes complete!"
+
+git-config-check:
+    git config --file git/.gitconfig --list >/dev/null
 
 github-actions-check: action-lint zizmor
     @echo "GitHub Actions checks complete!"
 
-git-config-check:
-    git config --file git/.gitconfig --list >/dev/null
+justfile-fmt:
+    just --fmt
+
+justfile-fmt-check:
+    just --fmt --check
 
 python-check: _ensure-uv
     uv run ruff format --check {{ python_paths }}
@@ -105,32 +126,20 @@ semgrep-test: _ensure-uv
         SEMGREP_SEND_METRICS=off SEMGREP_SETTINGS_FILE="$state_dir/settings.yml" uv run semgrep scan --test --strict --config "$config_path" "$fixture"
     done < <(find tests/semgrep -type f ! -name '*.fixed' -print0)
 
+setup:
+    DOTFILES_DIR="$PWD" bin/bootstrap.sh
+    just python-sync
+
 shell-check:
     bash -n bin/bootstrap.sh bin/verify.sh
 
 skill-check skill: _ensure-uv
-    uv run python scripts/skill_validate.py "{{skill}}"
-
-check-skills: _ensure-uv
-    #!/usr/bin/env bash
-    set -euo pipefail
-    failed=0
-    while IFS= read -r skill_file; do
-        skill_dir="${skill_file%/SKILL.md}"
-        if ! just skill-check "$skill_dir"; then
-            failed=1
-        fi
-    done < <(find agents/.agents/skills -mindepth 2 -maxdepth 2 -name SKILL.md -print | sort)
-    if (( failed )); then
-        echo "One or more skill checks failed." >&2
-        exit 1
-    fi
-    echo "Skill checks complete!"
+    uv run python scripts/skill_validate.py "{{ skill }}"
 
 stow-adopt package:
     #!/usr/bin/env bash
     set -euo pipefail
-    package='{{package}}'
+    package='{{ package }}'
     case "$package" in git|zsh|agents) ;; *) echo "Unsupported stow package: $package" >&2; exit 2 ;; esac
     [ -d "$package" ] || { echo "Unknown stow package: $package" >&2; exit 2; }
     stow -d "$PWD" -t "$HOME" --adopt -v -R "$package"
@@ -139,6 +148,14 @@ stow-adopt package:
 stow-all:
     just stow-apply-all
 
+stow-apply package:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    package='{{ package }}'
+    case "$package" in git|zsh|agents) ;; *) echo "Unsupported stow package: $package" >&2; exit 2 ;; esac
+    [ -d "$package" ] || { echo "Unknown stow package: $package" >&2; exit 2; }
+    stow -d "$PWD" -t "$HOME" -v -S "$package"
+
 stow-apply-all:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -146,26 +163,26 @@ stow-apply-all:
         just stow-apply "$package"
     done
 
-stow-apply package:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    package='{{package}}'
-    case "$package" in git|zsh|agents) ;; *) echo "Unsupported stow package: $package" >&2; exit 2 ;; esac
-    [ -d "$package" ] || { echo "Unknown stow package: $package" >&2; exit 2; }
-    stow -d "$PWD" -t "$HOME" -v -S "$package"
-
 stow-check package:
     #!/usr/bin/env bash
     set -euo pipefail
-    package='{{package}}'
+    package='{{ package }}'
     case "$package" in git|zsh|agents) ;; *) echo "Unsupported stow package: $package" >&2; exit 2 ;; esac
     [ -d "$package" ] || { echo "Unknown stow package: $package" >&2; exit 2; }
     stow -d "$PWD" -t "$HOME" -n -v -S "$package"
 
+stow-delete package:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    package='{{ package }}'
+    case "$package" in git|zsh|agents) ;; *) echo "Unsupported stow package: $package" >&2; exit 2 ;; esac
+    [ -d "$package" ] || { echo "Unknown stow package: $package" >&2; exit 2; }
+    stow -d "$PWD" -t "$HOME" -v -D "$package"
+
 stow-restow package:
     #!/usr/bin/env bash
     set -euo pipefail
-    package='{{package}}'
+    package='{{ package }}'
     case "$package" in git|zsh|agents) ;; *) echo "Unsupported stow package: $package" >&2; exit 2 ;; esac
     [ -d "$package" ] || { echo "Unknown stow package: $package" >&2; exit 2; }
     stow -d "$PWD" -t "$HOME" -v -R "$package"
@@ -176,14 +193,6 @@ stow-restow-all:
     for package in git zsh agents; do
         just stow-restow "$package"
     done
-
-stow-delete package:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    package='{{package}}'
-    case "$package" in git|zsh|agents) ;; *) echo "Unsupported stow package: $package" >&2; exit 2 ;; esac
-    [ -d "$package" ] || { echo "Unknown stow package: $package" >&2; exit 2; }
-    stow -d "$PWD" -t "$HOME" -v -D "$package"
 
 test-python: _ensure-uv
     uv run pytest
