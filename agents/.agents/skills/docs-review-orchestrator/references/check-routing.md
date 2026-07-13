@@ -35,7 +35,9 @@ This is the default documentation owner for scientific and non-scientific reposi
 Add only when the scope materially includes a scientific Rust crate concern:
 
 - Cargo/README/CITATION version, authorship, license, or repository metadata coupling
-- `CITATION.cff`, `REFERENCES.md`, scientific crate release metadata, or `cliff.toml`
+  that explicitly describes a scientific or research crate or artifact
+- `CITATION.cff`, `REFERENCES.md`, or `cliff.toml` when coupled to scientific or
+  research release metadata or provenance
 - scientific algorithm, invariant, numerical, validation, benchmark, provenance, or
   research-artifact docs tied to Rust crate behavior
 
