@@ -37,7 +37,7 @@ done
 
 echo "==> Casks"
 CASKS=(
-  1password 1password-cli codex-app gitkraken mactex notion
+  1password 1password-cli gitkraken mactex notion
   obsidian slack visual-studio-code warp zed zotero
 )
 for c in "${CASKS[@]}"; do

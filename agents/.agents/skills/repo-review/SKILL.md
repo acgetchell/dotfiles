@@ -68,7 +68,7 @@ Use this order unless the requested scope makes a different order clearly safer:
 1. Run `project-tooling-review` first when tool versions, `justfile`, workflows, or command docs changed enough to affect which validators should run, or when baseline inventory contains tooling surfaces.
 2. Run `rust-review-orchestrator` when Rust source, tests, examples, benches, Cargo metadata, Rust docs, or Rust-facing workflows changed or are present in baseline scope.
 3. Run `python-review-orchestrator` when Python source, notebooks, pytest fixtures, Python config, lockfiles, or Python-facing workflows changed or are present in baseline scope.
-4. Run `docs-review-orchestrator` after the source-owning passes when coupled scientific-crate documentation, Rust API docs, release metadata, scientific claims, references, or publication/release process docs changed or are present in baseline scope.
+4. Run `docs-review-orchestrator` after the source-owning passes whenever release-readiness mode is active, or when coupled scientific-crate documentation, Rust API docs, release metadata, scientific claims, references, or publication/release process docs changed or are present in baseline scope.
 5. Revisit tooling only when language or documentation fixes require recipe, workflow, lockfile, or command-doc updates.
 6. Synthesize final validation across all surfaces, preferring the strongest focused validator already justified by the touched files.
 

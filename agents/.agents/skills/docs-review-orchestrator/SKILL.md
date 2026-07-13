@@ -9,7 +9,7 @@ Coordinate documentation specialists without blending their ownership. Establish
 
 ## Ground Rules
 
-- Do not mutate git state.
+- Do not perform git state mutations. Do not stage, commit, push, tag, checkout, reset, or stash unless the user explicitly asks in the current turn.
 - Preserve generated-file ownership. In particular, do not hand-edit generated changelogs or benchmark artifacts.
 - Prefer branch scope unless the user explicitly requests staged-only, changed-file-only, release-readiness, or whole-repo baseline scope.
 - In release-readiness mode, inventory and inspect the scientific crate's complete tracked active documentation suite, including unchanged files; the branch diff is context, not the documentation boundary. Exclude `docs/archive/**` and equivalent designated archive trees unless archive maintenance is explicitly requested.
