@@ -54,8 +54,7 @@ cask "1password"                      # password manager
 cask "1password-cli"                  # 1Password CLI (`op`)
 cask "anki"                           # spaced-repetition flashcards
 cask "battle-net"                     # Blizzard game launcher
-cask "chatgpt"                        # ChatGPT desktop app (Apple Silicon/macOS 14+)
-cask "codex-app"                      # Codex desktop app
+cask "chatgpt"                        # ChatGPT desktop app (replaces deprecated codex-app cask)
 cask "docker-desktop"                 # Docker Desktop (docker, buildx, compose)
 cask "gitkraken"                      # Git GUI client
 cask "jetbrains-toolbox"              # JetBrains IDE manager

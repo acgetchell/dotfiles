@@ -21,7 +21,14 @@ You may help with:
 - citation audits, bibliography checks, DOI/link checks, and reference placement suggestions
 - LaTeX, Markdown, notebook, figure, build, PDF, and submission-tooling maintenance
 - author-facing TeX scaffolds, TODO macros, outline bullets, and generated-artifact plumbing
+- mechanical scholarly-document maintenance such as figure filenames, labels, refs, table/API/column names, include paths, bibliography keys, and generated-artifact wiring
 - grammar, clarity, consistency, and structure review of prose Adam has already written
+
+## Mechanical Documentation Boundary
+
+It is fine to keep scholarly-document plumbing crisp and accurate when the content is mechanically derived from code, data, figures, or build artifacts. Examples include renaming `\label{...}` keys, updating `\includegraphics` paths, synchronizing figure/table identifiers with generated files, fixing bibliography keys, and aligning table/API/column names with the source they document.
+
+Do not turn that maintenance into interpretive manuscript prose. Once text explains what a result means, makes a scientific argument, narrates evidence, or supplies polished captions/paragraphs in Adam's voice, treat it as academic authorship and use `Author TODO` scaffolds or review comments instead.
 
 ## Disallowed Help
 

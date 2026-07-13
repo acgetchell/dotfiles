@@ -1,11 +1,13 @@
 ---
 name: rust-review-orchestrator
-description: "Coordinate a structured Rust code-review-and-fix workflow by loading named Rust skills in sequence, grouping them by API, invariant, implementation, validation, and synthesis concerns, applying fixes pass by pass, and choosing focused validators from changed files. Use when the user asks for a Rust review suite, repo-wide Rust review, whole-repo baseline audit, staged/changed Rust review, or 'fix all' across multiple Rust review skills. Also use when the user wants focused Rust skills applied in order with fixes and validation before moving to the next skill. Do not use when there is no Rust code, Rust API docs, Cargo/test/example/benchmark surface, or Rust workflow impact; for single-purpose reviews that name only one focused Rust skill; or for requests to commit, stage, push, tag, or otherwise mutate git state."
+description: "Coordinate a structured Rust code-review-and-fix workflow by loading named Rust skills in sequence, grouping them by API, invariant, scientific correctness, implementation, validation, and synthesis concerns, applying fixes pass by pass, and choosing focused validators from changed files. Use when the user asks for a Rust review suite, repo-wide Rust review, whole-repo baseline audit, staged/changed Rust review, or 'fix all' across multiple Rust review skills. Also use when the user wants focused Rust skills applied in order with fixes and validation before moving to the next skill. Do not use when there is no Rust code, Rust API docs, Cargo/test/example/benchmark surface, or Rust workflow impact; for single-purpose reviews that name only one focused Rust skill; or for requests to commit, stage, push, tag, or otherwise mutate git state."
 ---
 
 # rust-review-orchestrator
 
-Coordinate focused Rust review skills without copying their content. This skill is an execution plan: load each selected named skill file, apply it to the current scope, fix actionable issues, validate the touched surface, and only then continue to the next selected skill.
+Coordinate focused Rust review skills without copying their content. This skill is an execution plan: load each selected named skill file, apply selected skills in logical pass groups, fix actionable issues, validate the touched surface for that group, and only then continue to the next group.
+
+The intent is to replace a maintainer manually running the relevant Rust review passes one by one. Do not collapse API, invariant, scientific correctness, implementation, validation, and synthesis concerns into one blended review and report it as orchestrated work.
 
 ## Ground Rules
 
@@ -28,20 +30,13 @@ When invoked by `repo-review`, begin with a handoff receipt that names:
 
 For every selected group, announce the group and focused skills before loading the first skill. After loading each focused skill or reference file, keep its name in the running trace for the final summary. This trace is required evidence that the orchestrator ran the selected Rust skills rather than only summarizing their names.
 
+Evidence is grouped by pass, not by memory. A group is complete only when the final summary can name the group status (`selected` or `skipped`), the focused skill files loaded for that group, the changed files inspected, the findings or explicit no-finding result, fixes applied, and the focused validator run for that group. Loading skill files, remembering prior context, or running full CI does not by itself count as applying a group.
+
 When invoked by `repo-review`, provide table-ready evidence for the parent `Review Evidence` table: selected groups, focused skill files loaded, reference files loaded, validators run, and any skipped groups that might otherwise look missing.
 
 ## Required Skill Loading
 
-This orchestrator must actually load the named skill files it selects. Do not summarize their names from memory.
-
-For each selected skill:
-
-1. Open and read that skill's `SKILL.md` completely.
-2. Follow any directly referenced, task-relevant reference files from that skill.
-3. Apply that skill to the current changed-file scope.
-4. Fix actionable issues before moving on.
-5. Run the focused validator for files touched by that skill's fixes.
-6. If validation fails, fix and rerun the same validator before loading the next selected skill.
+Load every selected skill's `SKILL.md` completely and follow its directly relevant references. Load skills at the start of their logical group, not before earlier groups have findings, fixes, and validator evidence. Use the [Per-Group Fix Loop](#per-group-fix-loop) as the single execution procedure.
 
 ## Scope Routing
 
@@ -81,7 +76,15 @@ Use for constructors, validation boundaries, mutation APIs, snapshots/views, own
 - `rust-borrowed-view-audit`
 - `rust-concurrency-async` when async, threads, locks, channels, atomics, cancellation, or Send/Sync boundaries changed
 
-### 3. Implementation Pass
+### 3. Scientific Correctness Pass
+
+Use when scientific or numerical behavior is in scope: mathematical models, formulas, predicates, solvers, exact or approximate arithmetic, tolerances, error bounds, stochastic methods, scientific fixtures, reproducibility, or the validity of scientific benchmark inputs and claims.
+
+- `rust-scientific-correctness`
+
+This pass establishes that the code answers the stated scientific question before implementation cleanup or optimization. If a later pass changes formulas, arithmetic order, tolerances, precision or fallback behavior, RNG semantics, or scientific fixtures, rerun the affected scientific checks before closing Validation/Test.
+
+### 4. Implementation Pass
 
 Use for Rust implementation edits, simplification, iterator/control-flow choices, naming/import hygiene, allocation behavior, and invariant-preserving performance.
 
@@ -90,32 +93,35 @@ Use for Rust implementation edits, simplification, iterator/control-flow choices
 - `rust-simplification-review`
 - `rust-invariant-performance` when changed code is hot, allocation-sensitive, numerical/geometric, validation-heavy, or performance-adjacent
 
-### 4. Validation/Test Pass
+### 5. Validation/Test Pass
 
 Use for tests, doctests, proptests, integration tests, benchmark fixtures, examples that double as public samples, and Cargo or feature changes.
 
 - `rust-test-quality`
 - `rust-cargo-hygiene` when manifests, lockfiles, features, lints, MSRV, package metadata, or Cargo workflows changed
 
-### 5. Final Synthesis Pass
+### 6. Final Synthesis Pass
 
 Use for broad Rust changes, invariant-heavy code, scientific or numerical algorithms, topology, mutation workflows, or whole-repo review requests.
 
 - `rust-production-review`
 
-This pass reconciles findings from earlier groups, removes duplicates, checks severity, and decides whether remaining issues are blockers, follow-ups, or acceptable residual risk.
+This pass reconciles findings from earlier groups, including scientific-correctness evidence when selected, removes duplicates, checks severity, and decides whether remaining issues are blockers, follow-ups, or acceptable residual risk.
 
 ## Per-Group Fix Loop
 
 For each selected group:
 
 1. Announce the group and selected skills briefly.
-2. Load the next selected skill file.
+2. Load every selected focused skill file for that group, plus directly relevant references.
 3. Inspect only relevant changed files and nearby invariant owners unless whole-repo mode is active.
-4. Implement minimal fixes for real findings.
-5. Run the focused validator from `references/check-routing.md`.
-6. Fix validator failures before continuing.
-7. Record what changed per file for the final summary.
+4. Apply the selected skills as one logical group, keeping findings tied to the group and file references.
+5. Implement minimal fixes for real findings.
+6. Run the focused validator from `references/check-routing.md` for the group.
+7. Fix validator failures before continuing.
+8. Record what changed per file and the group outcome for the final summary.
+
+Do not report a Rust orchestrator run as complete if the work was performed as one undifferentiated review across multiple groups. In that case, label it as preliminary context and rerun the applicable grouped passes.
 
 If a validator is expensive, blocked, or needs approval, use the repository's focused cheaper validator while iterating, then run the strongest relevant validator available before final handoff.
 

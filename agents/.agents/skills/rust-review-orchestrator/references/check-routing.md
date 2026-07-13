@@ -32,14 +32,16 @@ Classify files by path and effect:
 | Public items, `pub` signatures, trait impls, re-exports, prelude modules, builders, doctests | Surface/API, Validation/Test, Final Synthesis |
 | Constructors, validation APIs, invariant-bearing types, mutation workflows, rollback, snapshots, borrowed views | Invariant/Error, Implementation, Validation/Test, Final Synthesis |
 | Error enums, error conversions, `Result` boundaries, diagnostic/report types | Invariant/Error, Surface/API, Validation/Test |
-| Algorithmic geometry/topology/numerical code | Invariant/Error, Implementation, Validation/Test, Final Synthesis |
+| Algorithmic geometry/topology/numerical/probabilistic code | Invariant/Error, Scientific Correctness, Implementation, Validation/Test, Final Synthesis |
+| Scientific tests, reference fixtures, tolerances, error bounds, or benchmark inputs/results | Scientific Correctness, Validation/Test; add Surface/API or Implementation when production behavior or public claims changed |
 | Iterator/control-flow rewrites, allocation changes, naming/import cleanup | Implementation, Validation/Test |
 | Tests/proptests/doctests only | Validation/Test, Implementation only if tests duplicate or obscure production behavior |
 | Examples or benchmarks | Surface/API, Implementation, Validation/Test |
 | Cargo manifests, features, lints, MSRV, package metadata | Validation/Test with `rust-cargo-hygiene`; Surface/API if feature-gated API changed |
 | CLI binary, clap args, command output, CLI docs/examples | Surface/API with `rust-cli-design`, Validation/Test |
 | Workflow/config only | No Rust skill group unless Rust behavior changed; run config validators |
-| Docs-only repository prose | No Rust skill group unless Rust API docs changed; run docs validators |
+| Docs-only scientific/numerical claims about methods, exactness, bounds, supported regimes, or benchmark results | Scientific Correctness; add Surface/API for Rust API docs; run docs validators |
+| Other docs-only repository prose | No Rust skill group unless Rust API docs changed; run docs validators |
 
 ## Focused Validators
 
@@ -54,6 +56,7 @@ for unrelated Rust changes.
 | Files touched | Validator |
 |---|---|
 | Rust library source affecting core behavior | documented focused Rust check; fallback `cargo test --lib` plus `cargo clippy --all-targets --all-features -- -D warnings` |
+| Scientific or numerical behavior | focused known-value, property, adversarial, and independent-oracle tests across affected dimensions/features; add the repository's numerical validator when documented |
 | Rust unit tests only | documented narrow unit-test recipe; fallback `cargo test --lib` |
 | Rust integration tests only | documented integration-test recipe; fallback `cargo test --tests` |
 | Doctests or Rust API docs | documented doctest/docs recipe; fallback `cargo test --doc` |
@@ -95,6 +98,7 @@ Changed files:
 Review passes:
 - Surface/API: skills run and notable outcomes
 - Invariant/Error: skills run and notable outcomes
+- Scientific Correctness: skills run and notable outcomes
 - Implementation: skills run and notable outcomes
 - Validation/Test: skills run and notable outcomes
 - Final Synthesis: remaining risk or none

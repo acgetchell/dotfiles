@@ -29,6 +29,8 @@ When invoked by `repo-review`, begin with a handoff receipt that names:
 
 After loading each reference file, keep its name in the running trace for the final summary. This trace is required evidence that the tooling pass reviewed the intended command, workflow, or version surfaces rather than only describing them.
 
+Evidence is grouped by tooling surface. A surface is complete only when the final summary can name the surface status (`selected` or `skipped`), reference files loaded for that surface, changed files or command owners inspected, findings or explicit no-finding result, fixes applied, and the focused validator run for that surface. Running a broad validator does not by itself count as reviewing every tooling surface.
+
 When invoked by `repo-review`, provide table-ready evidence for the parent `Review Evidence` table: selected tooling surfaces, reference files loaded, validators run, version checks performed, and any skipped surfaces that might otherwise look missing.
 
 ## Scope Routing
@@ -86,16 +88,21 @@ Start with the local installed version for tools that are invoked directly from 
 
 When tooling changes alter Rust or Python validation behavior, identify the affected language surface and call out whether `rust-review-orchestrator` or `python-review-orchestrator` should also run. Do not duplicate their source-code review inside this skill.
 
+When command, release, or process changes affect a wider documentation suite, hand off cross-document consistency, citation metadata, references, Rust API docs, and scientific claims to `docs-review-orchestrator`. Keep command-surface documentation in this skill; do not absorb the broader documentation review here.
+
 ## Fix Loop
 
 For each applicable tooling surface:
 
 1. Read the relevant reference file.
 2. Inspect changed files and nearby command owners.
-3. Implement minimal fixes for real tooling drift, safety, or validation issues.
-4. Run the focused validator for the surface when available.
-5. If validation fails, fix and rerun the same validator before moving on.
-6. Record changed files and commands for the final summary.
+3. Record explicit findings or a no-finding result for that surface.
+4. Implement minimal fixes for real tooling drift, safety, or validation issues.
+5. Run the focused validator for the surface when available.
+6. If validation fails, fix and rerun the same validator before moving on.
+7. Record changed files, commands, and the surface outcome for the final summary.
+
+Do not report a tooling review as complete if command recipes, workflow wiring, docs, and version surfaces were blended into one undifferentiated pass. Group them logically using the order above, skipping surfaces that do not apply.
 
 If a validator needs network, installation, or other approval, use the strongest read-only/local check available and document the remaining verification.
 

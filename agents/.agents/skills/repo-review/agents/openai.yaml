@@ -1,4 +1,4 @@
 interface:
   display_name: "Repo Review"
-  short_description: "Route repo-wide review passes"
-  default_prompt: "Use $repo-review to review and fix changed Rust, Python, and tooling surfaces with the focused orchestrators."
+  short_description: "Route code, tooling, and documentation reviews"
+  default_prompt: "Use $repo-review to review and fix branch changes or run a whole-repo baseline checkpoint across Rust, Python, tooling, and documentation surfaces."

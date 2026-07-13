@@ -1,0 +1,4 @@
+interface:
+  display_name: "Documentation Review Orchestrator"
+  short_description: "Route coupled docs, Rust API docs, and citations"
+  default_prompt: "Use $docs-review-orchestrator to review and fix documentation across coupled crate docs, Rust API docs, scientific citations, and publication boundaries."
