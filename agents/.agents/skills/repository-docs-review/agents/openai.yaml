@@ -1,0 +1,4 @@
+interface:
+  display_name: "Repository Docs Review"
+  short_description: "Review and synchronize repository documentation"
+  default_prompt: "Use $repository-docs-review to review and fix this repository’s active documentation suite."

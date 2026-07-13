@@ -1,0 +1,4 @@
+interface:
+  display_name: "Scientific Crate Docs Review"
+  short_description: "Review scientific Rust crate documentation"
+  default_prompt: "Use $scientific-crate-docs-review to audit scientific Rust crate metadata, release claims, and documentation coupling."

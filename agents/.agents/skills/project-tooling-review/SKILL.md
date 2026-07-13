@@ -82,13 +82,21 @@ Keep fast local checks, full CI, slow/performance checks, release checks, and fi
 
 Check that tool versions are intentional, documented where needed, and consistent across local installers, lockfiles, workflows, and docs. When latest-version claims matter, verify them live before recommending changes.
 
+When a `justfile` is the repository's pin source, resolve its declared values with
+`just --evaluate <variable>` in consumers that already have `just`; do not duplicate
+the literal or scrape the file with ad hoc text parsing. Treat bootstrapping `just`
+itself as the explicit exception because that pin must be read before `just` exists.
+When several workflows need that bootstrap, prefer one repository-local composite
+action or helper that validates the declaration, installs `just`, and exposes the
+resolved version over repeated workflow parsers.
+
 Start with the local installed version for tools that are invoked directly from the command surface, especially `uv`, `uv tool` managed CLIs, `cargo install` managed binaries, `rustup`, and Homebrew-managed CLIs. Then compare that local state against repository pins and authoritative latest-version sources. If a managed tool is stale and version updates are in scope, update it first, then update any matching repository pins, `justfile` install recipes, bootstrap scripts, docs, and GitHub Actions workflow versions.
 
 ### 5. Cross-Language Coordination
 
 When tooling changes alter Rust or Python validation behavior, identify the affected language surface and call out whether `rust-review-orchestrator` or `python-review-orchestrator` should also run. Do not duplicate their source-code review inside this skill.
 
-When command, release, or process changes affect a wider documentation suite, hand off cross-document consistency, citation metadata, references, Rust API docs, and scientific claims to `docs-review-orchestrator`. Keep command-surface documentation in this skill; do not absorb the broader documentation review here.
+When command, release, or process changes affect a wider documentation suite, hand off navigation, cross-document consistency, generated-document ownership, and any applicable specialist documentation to `docs-review-orchestrator`. Keep command truth in this skill; do not absorb the broader documentation review here.
 
 ## Fix Loop
 

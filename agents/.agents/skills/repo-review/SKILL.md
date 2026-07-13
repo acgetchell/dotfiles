@@ -15,7 +15,7 @@ The intent is to replace the maintainer running the selected orchestrators manua
 - Prefer branch review by default: compare the current branch to its PR/default-branch base, and include staged, unstaged, and untracked work on top of that branch.
 - Use staged-only, changed-file-only, or whole-repo baseline scope only when the user explicitly asks for that narrower or broader scope.
 - In whole-repo baseline mode, review the repository as it exists now, even when the worktree is clean and no branch diff exists. Select orchestrators from tracked repository surfaces, not from changed files.
-- In release-readiness mode, expand the documentation handoff to the scientific crate's complete tracked active documentation suite, including unchanged files; do not infer documentation completeness from the branch diff. Exclude `docs/archive/**` and equivalent designated archive trees unless explicitly requested.
+- In release-readiness mode, expand the documentation handoff to the repository's complete tracked active documentation suite, including unchanged files; do not infer documentation completeness from the branch diff. Exclude `docs/archive/**` and equivalent designated archive trees unless explicitly requested.
 - If the request clearly targets one surface, use the focused orchestrator directly instead of this meta-skill.
 - When the user asks to fix issues, implement actionable findings as each selected orchestrator discovers them. Do not merely collect findings unless the fix is blocked or unsafe.
 - Keep this skill thin. Do not duplicate the detailed review rules from Rust, Python, or tooling skills; load those skills and follow them.
@@ -68,7 +68,7 @@ Use this order unless the requested scope makes a different order clearly safer:
 1. Run `project-tooling-review` first when tool versions, `justfile`, workflows, or command docs changed enough to affect which validators should run, or when baseline inventory contains tooling surfaces.
 2. Run `rust-review-orchestrator` when Rust source, tests, examples, benches, Cargo metadata, Rust docs, or Rust-facing workflows changed or are present in baseline scope.
 3. Run `python-review-orchestrator` when Python source, notebooks, pytest fixtures, Python config, lockfiles, or Python-facing workflows changed or are present in baseline scope.
-4. Run `docs-review-orchestrator` after the source-owning passes whenever release-readiness mode is active, or when coupled scientific-crate documentation, Rust API docs, release metadata, scientific claims, references, or publication/release process docs changed or are present in baseline scope.
+4. Run `docs-review-orchestrator` after the source-owning passes whenever release-readiness mode is active, or when substantive repository documentation, generated-doc ownership, Rust API docs, release metadata, scientific claims, references, or publication material changed or are present in baseline scope.
 5. Revisit tooling only when language or documentation fixes require recipe, workflow, lockfile, or command-doc updates.
 6. Synthesize final validation across all surfaces, preferring the strongest focused validator already justified by the touched files.
 
@@ -78,8 +78,8 @@ Treat build and validation files as shared ownership:
 
 - `Cargo.toml`, `Cargo.lock`, `pyproject.toml`, `uv.lock`, and toolchain files can require both language and tooling review.
 - `justfile` and `.github/workflows/**` belong to project tooling, but route to Rust or Python too when they change the language checks that run.
-- `README.md`, `AGENTS.md`, `CONTRIBUTING.md`, and `docs/**` belong to project tooling when they describe commands, CI, tool versions, or maintainer workflow. Route to language orchestrators when they document public API, examples, notebooks, or behavior.
-- Coupled crate docs, Rust API docs, release metadata, provenance, and scientific claims belong to `docs-review-orchestrator`, which routes them to the smallest applicable documentation skills.
+- `README.md`, `AGENTS.md`, `CONTRIBUTING.md`, and `docs/**` belong to project tooling when they describe commands, CI, tool versions, or maintainer workflow. Route substantive documentation to `docs-review-orchestrator` for suite-level consistency, and route to language orchestrators when it documents public API, examples, notebooks, or behavior.
+- Active repository docs, generated-document boundaries, Rust API docs, scientific crate metadata, provenance, and publication boundaries belong to `docs-review-orchestrator`, which routes them to the generic reviewer and only the applicable specialist overlays.
 - Generated files, fixtures, benchmarks, and support scripts should be reviewed by the language orchestrator that owns their behavior plus project tooling when command wiring changed.
 
 ## Final Summary

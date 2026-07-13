@@ -36,6 +36,16 @@ Keep the action pin and managed tool pin separate. For example, updating `zizmor
 
 If the workflow reads the version from a single env var or bootstrap script constant, update that source of truth rather than duplicating literal versions throughout the workflow. Keep local bootstrap pins, workflow pins, and command docs synchronized.
 
+When the repository declares pins as `justfile` variables, resolve them after `just`
+installation with `just --evaluate <variable>` and publish the results through step
+outputs or environment files as needed. Avoid copying those values into workflow-level
+`env` entries or parsing the Justfile with `grep`/`cut`. A workflow may use a dedicated
+pre-Just resolver only for the `just` version required to bootstrap the evaluator.
+When multiple workflows need it, prefer a checked-in composite action that parses and
+validates the declaration, installs the pinned `just`, exposes the resolved version as
+an output, and keeps the bootstrap logic in one place. After that action, export all
+other evaluated pins together through `$GITHUB_OUTPUT` or `$GITHUB_ENV`.
+
 ## Drift Checks
 
 Compare workflows against:

@@ -24,6 +24,15 @@ Check for:
 
 When `project-tooling-review` updates a managed tool, update matching `justfile` pins in the same pass before validating workflows. The local command surface should install and assert the same version that GitHub Actions and bootstrap scripts use.
 
+When the `justfile` owns a pin, prefer `just --evaluate <variable>` wherever `just` is
+already available. This preserves Just's parsing and interpolation semantics and avoids
+independent workflow variables, duplicated literals, or brittle `grep`/`cut` parsing.
+Bootstrapping `just` itself is the exception: a consumer that must install `just`
+before it can evaluate the file needs a documented pre-Just extraction path. Centralize
+that path in a repository-local helper or composite action when multiple consumers need
+it, and make it tolerate the Justfile's supported whitespace, comments, and quoting
+while failing clearly on a missing or empty value.
+
 ## Safety Checks
 
 - Destructive recipes require explicit arguments and should not hide behind friendly names.
