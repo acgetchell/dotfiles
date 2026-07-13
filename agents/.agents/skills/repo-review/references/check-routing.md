@@ -21,7 +21,7 @@ Use read-only discovery commands:
 
 Use staged-only, changed-worktree-only, or whole-repo baseline scope only when the user explicitly asks for that scope. If the branch base cannot be inferred, report the ambiguity and fall back to the current changed files only after making that limitation visible.
 
-For release-readiness review, keep branch scope for code and tooling but expand the documentation slice to every tracked active document in the scientific crate. Exclude `docs/archive/**` and equivalent designated archive trees unless explicitly requested, classify generated or otherwise excluded non-archive documentation, and do not let an unchanged active file escape release review merely because it is absent from the diff.
+For release-readiness review, keep branch scope for code and tooling but expand the documentation slice to every tracked active document in the repository. Exclude `docs/archive/**` and equivalent designated archive trees unless explicitly requested, classify generated or otherwise excluded non-archive documentation, and do not let an unchanged active file escape release review merely because it is absent from the diff.
 
 ## Whole-Repo Baseline Inventory
 
@@ -61,9 +61,10 @@ Select `project-tooling-review` for:
 
 Select `docs-review-orchestrator` for:
 
-- coupled scientific-crate documentation such as `README.md`, `REFERENCES.md`, `CITATION.cff`, `AGENTS.md`, `CONTRIBUTING.md`, `SECURITY.md`, and `docs/**`
+- substantive active repository documentation such as `README.md`, `AGENTS.md`, `CONTRIBUTING.md`, `SECURITY.md`, runbooks, architecture guides, ADRs, and `docs/**`
+- navigation, cross-document consistency, generated-document ownership, source-backed tables, and release or migration guidance
 - Rust API or module docs when documentation is a material review surface, especially in a docs-only request
-- release metadata, version/documentation synchronization, algorithm or invariant descriptions, benchmark/coverage documentation, roadmap state, and scientific-crate publication/release guidance
+- scientific Rust crate metadata, version synchronization, algorithm or invariant descriptions, benchmark/coverage documentation, and research-artifact guidance when those surfaces exist
 - references, DOI or source links, algorithm provenance, scientific claims, or citation metadata
 - whole-repo baseline mode when the tracked inventory contains an active documentation suite
 
@@ -79,7 +80,7 @@ Route shared files to all affected owners:
 - `justfile`: project tooling first; add Rust or Python when recipe semantics change which language checks run.
 - `.github/workflows/**`: project tooling first; add Rust or Python when matrices, toolchains, or validation coverage change.
 - Docs with commands and examples: project tooling for command truth, language orchestrators for API or behavior truth.
-- Coupled scientific-crate docs and release metadata: docs review for cross-document truth; retain tooling and language owners for the commands and behavior those docs describe. Generic skill, command, CI, and maintainer-process documentation remains with project tooling.
+- Active repository docs: docs review owns suite-level consistency and generated-document boundaries; retain tooling and language owners for the commands and behavior those docs describe. Add scientific, citation, Rust API, or academic overlays only when their actual surfaces are present.
 
 ## Ordering
 

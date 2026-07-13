@@ -47,6 +47,14 @@ For managed CLI tool updates, reconcile versions in this order:
 
 Avoid creating duplicate independent pins. If one tracked file can read or call the repository's source of truth, prefer that over repeating literal versions. Keep project dependency lockfiles separate from managed CLI pins unless the user explicitly asks for dependency updates.
 
+If the `justfile` is the pin source, resolve a variable with
+`just --evaluate <variable>` after `just` is available. Do not infer its effective
+value with `grep`, `cut`, or a second workflow `env` literal. The `just` version is a
+bootstrapping exception: installation code needs a deliberately narrow, validated
+resolver for that one value before the command exists, then should use
+`just --evaluate` for the remaining pins. Prefer a single reusable bootstrap helper
+over copied parsers when more than one workflow needs `just`.
+
 ## Managed Tool Update Flow
 
 Use this flow for `uv tool` and `cargo install` managed CLIs:
