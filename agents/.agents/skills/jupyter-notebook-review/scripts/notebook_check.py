@@ -18,6 +18,11 @@ from typing import Any, override
 RUFF_EXTEND_IGNORE = "INP001"
 RUFF_LOCATION_RE = re.compile(r"\s*-->\s+.+?:(?P<line>\d+):(?P<column>\d+)")
 TY_LOCATION_RE = re.compile(r"^.+?:(?P<line>\d+):(?P<column>\d+): (?P<message>.+)$")
+CELL_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+GENERATED_CELL_ID_RE = re.compile(
+    r"^(?:(?i:[a-f0-9]{8}|[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})|"
+    r"(?:cell|code|markdown|raw|section|step)-?[0-9]+)$"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +87,26 @@ def code_cells(notebook: dict[str, Any]) -> list[tuple[int, dict[str, Any], str]
     return cells
 
 
+def cell_id_diagnostics(notebook: dict[str, Any]) -> list[Diagnostic]:
+    """Return diagnostics for stable, unique nbformat cell identifiers."""
+    diagnostics: list[Diagnostic] = []
+    first_cell_by_id: dict[str, int] = {}
+    for index, cell in enumerate(notebook.get("cells", []), start=1):
+        cell_id = cell.get("id")
+        if not isinstance(cell_id, str) or not cell_id:
+            diagnostics.append(Diagnostic("error", index, "missing cell id; add a stable descriptive identifier"))
+            continue
+        if CELL_ID_RE.fullmatch(cell_id) is None:
+            diagnostics.append(Diagnostic("error", index, f"cell id {cell_id!r} must be 1-64 ASCII letters, digits, underscores, or hyphens"))
+            continue
+        first_cell = first_cell_by_id.setdefault(cell_id, index)
+        if first_cell != index:
+            diagnostics.append(Diagnostic("error", index, f"cell id {cell_id!r} duplicates cell {first_cell}"))
+        if GENERATED_CELL_ID_RE.fullmatch(cell_id) is not None:
+            diagnostics.append(Diagnostic("warning", index, f"cell id {cell_id!r} looks generated or positional; name the cell's purpose"))
+    return diagnostics
+
+
 def summarize(path: Path) -> None:
     """Print a compact notebook inventory."""
     notebook = load_notebook(path)
@@ -92,8 +117,9 @@ def summarize(path: Path) -> None:
         first_line = next((line.strip() for line in source.splitlines() if line.strip()), "")
         outputs = len(cell.get("outputs", [])) if cell.get("cell_type") == "code" else 0
         execution_count = cell.get("execution_count") if cell.get("cell_type") == "code" else ""
+        cell_id = cell.get("id", "<missing>")
         print(
-            f"  cell {index:03d} {cell.get('cell_type', 'unknown'):<8} "
+            f"  cell {index:03d} {cell.get('cell_type', 'unknown'):<8} id={cell_id!s:<24} "
             f"lines={len(source.splitlines()):<3} outputs={outputs:<2} exec={execution_count!s:<4} {first_line[:100]}"
         )
 
@@ -365,7 +391,7 @@ def external_tool_diagnostics(path: Path, notebook: dict[str, Any], options: Lin
 def lint(path: Path, options: LintOptions) -> int:
     """Validate notebook JSON, compile code cells, and run Python lint checks."""
     notebook = load_notebook(path)
-    diagnostics = [*code_cell_diagnostics(path, notebook, options), *external_tool_diagnostics(path, notebook, options)]
+    diagnostics = [*cell_id_diagnostics(notebook), *code_cell_diagnostics(path, notebook, options), *external_tool_diagnostics(path, notebook, options)]
 
     for diagnostic in diagnostics:
         stream = sys.stderr if diagnostic.severity == "error" else sys.stdout

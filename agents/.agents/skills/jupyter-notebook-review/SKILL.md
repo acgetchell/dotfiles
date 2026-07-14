@@ -17,9 +17,14 @@ CLIs, or examples; notebooks should orchestrate those APIs and analyze generated
 5. Edit notebooks with `nbformat` or the helper scripts; do not hand-edit large notebook JSON by string substitution.
 6. Validate with `uv run scripts/notebook_check.py --lint NOTEBOOK.ipynb` when the helper is copied into a repo, or with the skill-local script through
    `uv run`. The lint path compiles cells, runs notebook-specific AST checks, and requires Ruff lint, Ruff format, and ty on extracted notebook code unless a
-   check is explicitly disabled. Execute with `--execute` when dependencies and runtime are reasonable.
-7. Ensure each cell has a stable, descriptive `id` that names its purpose, such as `setup-code`, `load-data`, or `render-plot`.
+   check is explicitly disabled. Execute only when runtime behavior or a generated artifact is part of the task; do not treat execution as routine lint.
+7. Ensure every code, markdown, and raw cell has a unique, stable, descriptive `id` that names its purpose, such as `setup-code`, `load-data`, or
+   `render-plot`. Follow repository naming rules; otherwise prefer lowercase kebab-case.
 8. Clear outputs before finalizing unless the repository intentionally tracks rendered notebook outputs.
+
+## Project References
+
+- For the `delaunay` repository, read [`references/delaunay.md`](references/delaunay.md) after the repository's `AGENTS.md` and routed development guidance.
 
 ## Related Python Skills
 
@@ -64,6 +69,18 @@ Prefer:
 - a headless recipe such as `just notebook-execute` for CI, remote servers, and HPC jobs
 - data and generated artifacts under `target/`, `runs/`, or another documented output directory
 - fresh-kernel execution through `nbconvert`, `nbclient`, or a repository notebook check recipe
+
+Treat notebook cost as parameter-dependent. Do not create permanent `slow/` notebook categories or an aggregate execute-all recipe unless the repository
+explicitly requires one. Routine checks should remain lint-only when notebooks may become expensive under altered parameters.
+
+### Generated And Tracked Artifacts
+
+Keep ordinary execution scratch-only. Write executed notebooks and generated files under `target/`, `$SCRATCH`, or another repository-designated disposable
+directory. Refresh tracked figures or reports only when the task includes that artifact and through a named repository workflow.
+
+When documentation and papers consume the same generated figure, prefer one canonical tracked asset over duplicate copies. Notebook code should default to a
+scratch destination; let the named refresh recipe supply a tracked path through a validated parameter or environment variable instead of hard-coding a direct
+`savefig` or `write_image` call into a tracked documentation directory.
 
 ### Boundary Parsing And Invariants
 
@@ -283,9 +300,9 @@ def run_command(command: list[str], *, cwd: Path, timeout: int = 120) -> subproc
 
 Use bundled scripts from this skill when useful:
 
-- `scripts/notebook_check.py --summary NOTEBOOK.ipynb` prints a compact cell inventory.
-- `scripts/notebook_check.py --lint NOTEBOOK.ipynb` validates JSON, compiles code cells, requires Ruff lint, Ruff format, and ty by default, and reports output
-  counts.
+- `scripts/notebook_check.py --summary NOTEBOOK.ipynb` prints a compact cell inventory including cell IDs.
+- `scripts/notebook_check.py --lint NOTEBOOK.ipynb` validates JSON and cell IDs, compiles code cells, requires Ruff lint, Ruff format, and ty by default, and
+  reports output counts.
 - `scripts/notebook_check.py --execute NOTEBOOK.ipynb --repo-root PATH` executes in memory without writing outputs back.
 - `scripts/clear_outputs.py NOTEBOOK.ipynb` clears outputs and execution counts in place.
 

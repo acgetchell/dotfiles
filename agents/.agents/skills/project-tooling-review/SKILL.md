@@ -1,6 +1,6 @@
 ---
 name: project-tooling-review
-description: "Review and fix repository tooling surfaces that define how maintainers run, validate, and update a project. Use for justfile recipe design, GitHub Actions workflows, CI command drift, tool-version and installer drift, uv tool and cargo-install managed CLI updates, Brewfile and uv/cargo/rustup tooling configuration, lint/format/type-check command surfaces, release/support scripts wiring, docs that describe project commands, and cross-language validation recipes. Use when the user asks to review project tooling, just recipes, CI workflows, GitHub Actions, tool versions, command consistency, or repository workflow ergonomics. Do not use for Rust or Python source review except where tooling invokes those validators; use the language orchestrators for code behavior. Do not use for requests to commit, stage, push, tag, or otherwise mutate git state."
+description: "Review and fix repository tooling surfaces that define how maintainers run, validate, and update a project. Use for justfile recipe design, GitHub Actions workflows, CI command drift, repository-owned Semgrep/static-analysis rules and fixtures, tool-version and installer drift, uv tool and cargo-install managed CLI updates, Brewfile and uv/cargo/rustup tooling configuration, lint/format/type-check command surfaces, release/support scripts wiring, docs that describe project commands, and cross-language validation recipes. Use when the user asks to review project tooling, just recipes, CI workflows, GitHub Actions, static analysis, tool versions, command consistency, or repository workflow ergonomics. Do not use for Rust or Python source review except where tooling invokes those validators; use the language orchestrators for code behavior. Do not use for requests to commit, stage, push, tag, or otherwise mutate git state."
 ---
 
 # project-tooling-review
@@ -40,13 +40,17 @@ After identifying changed files, load only the references that apply:
 - [`references/justfile.md`](references/justfile.md) for `justfile`, command recipes, local validator tiers, recipe naming, and docs that describe `just` commands.
 - [`references/github-actions.md`](references/github-actions.md) for `.github/workflows/**`, Actions permissions/triggers/caches/matrices, CI use of `just`, and workflow validation.
 - [`references/tool-versions.md`](references/tool-versions.md) for `Brewfile`, `uv`, `cargo install`, `rustup`, lockfiles, action versions, language toolchains, and version drift.
+- [`references/static-analysis.md`](references/static-analysis.md) for repository-owned Semgrep/Opengrep rules, fixtures, path scoping, and validation.
+- [`references/delaunay.md`](references/delaunay.md) in the `delaunay` repository for its Semgrep fixture harness, notebook execution policy, and generated-asset
+  ownership.
 
 If multiple surfaces changed, review them in this order:
 
 1. Tool versions and installers, so commands use the intended tools.
 2. `justfile` recipes and local command contracts.
-3. GitHub Actions and remote CI wiring.
-4. Docs and handoff summaries that describe the command surface.
+3. Repository-owned static-analysis rules, fixtures, and scan scope.
+4. GitHub Actions and remote CI wiring.
+5. Docs and handoff summaries that describe the command surface.
 
 ## Review Goals
 
