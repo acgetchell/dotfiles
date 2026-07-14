@@ -40,16 +40,18 @@ def test_cell_id_diagnostics_accepts_unique_nbformat_ids() -> None:
 
 def test_cell_id_diagnostics_rejects_missing_malformed_and_duplicate_ids() -> None:
     """Presence, nbformat shape, and uniqueness are hard requirements."""
-    diagnostics = MODULE.cell_id_diagnostics(notebook_with_ids(None, "bad id", "load-data", "load-data"))
+    diagnostics = MODULE.cell_id_diagnostics(notebook_with_ids(None, "", 123, "bad id", "load-data", "load-data", "a" * 64, "a" * 65))
 
-    assert [(item.severity, item.cell) for item in diagnostics] == [("error", 1), ("error", 2), ("error", 4)]
+    assert [(item.severity, item.cell) for item in diagnostics] == [("error", 1), ("error", 2), ("error", 3), ("error", 4), ("error", 6), ("error", 8)]
 
 
 def test_cell_id_diagnostics_warns_on_generated_and_positional_ids() -> None:
     """Generated and positional IDs should prompt descriptive replacements."""
-    diagnostics = MODULE.cell_id_diagnostics(notebook_with_ids("abcdef12", "123e4567-e89b-42d3-a456-426614174000", "cell-3", "load-data"))
+    diagnostics = MODULE.cell_id_diagnostics(
+        notebook_with_ids("abcdef12", "123e4567-e89b-42d3-a456-426614174000", "ABCDEF12", "123E4567-e89B-42d3-A456-426614174000", "cell-3", "load-data")
+    )
 
-    assert [(item.severity, item.cell) for item in diagnostics] == [("warning", 1), ("warning", 2), ("warning", 3)]
+    assert [(item.severity, item.cell) for item in diagnostics] == [("warning", 1), ("warning", 2), ("warning", 3), ("warning", 4), ("warning", 5)]
 
 
 def test_lint_enforces_cell_id_diagnostics(tmp_path: Path) -> None:

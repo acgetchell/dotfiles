@@ -20,7 +20,8 @@ RUFF_LOCATION_RE = re.compile(r"\s*-->\s+.+?:(?P<line>\d+):(?P<column>\d+)")
 TY_LOCATION_RE = re.compile(r"^.+?:(?P<line>\d+):(?P<column>\d+): (?P<message>.+)$")
 CELL_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 GENERATED_CELL_ID_RE = re.compile(
-    r"^(?:[a-f0-9]{8}|[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}|(?:cell|code|markdown|raw|section|step)-?[0-9]+)$"
+    r"^(?:(?i:[a-f0-9]{8}|[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})|"
+    r"(?:cell|code|markdown|raw|section|step)-?[0-9]+)$"
 )
 
 
