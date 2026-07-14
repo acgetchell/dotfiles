@@ -1,4 +1,4 @@
 interface:
   display_name: "Project Tooling Review"
-  short_description: "Review just, CI, and tool versions"
-  default_prompt: "Use $project-tooling-review to review and fix project tooling, just recipes, CI workflows, and tool-version drift."
+  short_description: "Review just, CI, static analysis, and tools"
+  default_prompt: "Use $project-tooling-review to review and fix project tooling, just recipes, CI workflows, repository-owned static analysis, and tool-version drift."
