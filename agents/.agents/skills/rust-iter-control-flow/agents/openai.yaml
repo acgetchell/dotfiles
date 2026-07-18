@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust Iterator Control Flow"
+  short_description: "Audit Rust iterator and pattern control flow"
+  default_prompt: "Use $rust-iter-control-flow to review this Rust iterator, closure, loop, and pattern-matching control flow for clarity and allocation discipline."

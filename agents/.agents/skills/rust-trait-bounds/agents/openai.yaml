@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust Trait Bounds"
+  short_description: "Audit Rust generic constraints and bounds"
+  default_prompt: "Use $rust-trait-bounds to audit these Rust trait bounds and generic constraints for minimality, placement, and public API clarity."

@@ -1,6 +1,6 @@
 ---
 name: rust-invariant-performance
-description: "Audit Rust code for best practical performance while preserving correctness invariants, parse-don't-validate boundaries, typed errors, safety, and API orthogonality. USE FOR: performance-sensitive Rust crates such as delaunay, la-stack, markov-chain-monte-carlo, and causal-triangulations; hot-path review for numerical, geometric, topological, linear-algebra, probabilistic, sampler, construction, validation, and repair code; allocation and complexity audits; benchmark-guided optimization reviews; PR or whole-repo performance baseline audits where correctness constraints must remain intact. DO NOT USE FOR: performance suggestions that ignore invariants, generic style/import cleanup (use rust-style-hygiene), general production correctness review without a performance focus (use rust-production-review), parse-don't-validate review without a performance focus (use rust-parse-dont-validate), or non-Rust code."
+description: "Audit performance-sensitive Rust while preserving invariants, boundary parsing, typed errors, safety, and API orthogonality. Use for hot numerical, geometric, topological, linear-algebra, probabilistic, construction, validation, and repair paths; allocation and complexity analysis; benchmark-guided optimization; and performance/correctness tradeoffs."
 ---
 
 # rust-invariant-performance

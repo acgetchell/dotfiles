@@ -1,6 +1,6 @@
 ---
 name: academic-authorship-boundary
-description: Preserve human authorship for scholarly writing. Use when working on Adam's Praxis, theses, papers, manuscripts, publication drafts, academic sections, reviewer responses, or any request that involves text intended to appear under Adam's name. Also use when asked to outline, critique, review, proofread, cite-check, structure, or build academic writing while avoiding AI-authored prose.
+description: "Preserve human authorship for scholarly work. Use for Adam's Praxis, theses, papers, manuscripts, publication drafts, reviewer responses, or requests to outline, critique, proofread, cite-check, or structure academic writing without generating prose that will appear under Adam's name."
 ---
 
 # Academic Authorship Boundary

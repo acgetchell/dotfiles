@@ -1,6 +1,6 @@
 ---
 name: codecov-test-gaps
-description: "Review the latest GitHub Actions run for .github/workflows/codecov.yml, inspect the Codecov/coverage report, and add missing tests when uncovered code represents meaningful behavior; supports whole-repo coverage baseline audits when explicitly requested. USE FOR: Codecov report review, latest codecov.yml workflow run, coverage regression investigation, uncovered lines/branches, missing tests from CI coverage, GitHub Actions coverage artifacts, adding tests to improve coverage, deciding whether a coverage gap is worth testing. DO NOT USE FOR: generic test review without Codecov data (use language-specific test-quality skills), writing superficial coverage-only tests, changing production code solely to satisfy coverage, unrelated CI failures, or repositories without a Codecov workflow unless the user asks to adapt the workflow."
+description: "Inspect the latest .github/workflows/codecov.yml run and coverage report, then add tests for meaningful uncovered behavior. Use for Codecov regressions, uncovered lines or branches, CI coverage artifacts, and deciding whether a gap deserves a test. Do not write superficial coverage-only tests or alter production behavior solely for coverage."
 ---
 
 # codecov-test-gaps

@@ -1,6 +1,6 @@
 ---
 name: rust-prelude-exports
-description: "Audit Rust prelude modules and public re-export surfaces for minimality, orthogonality, and usability in doctests, integration tests, examples, and benchmarks on changed APIs or whole-repo baseline audits when explicitly requested. USE FOR: Rust review comments asking whether new functionality has appropriate prelude exports, designing crate::prelude modules, scoped preludes (geometry/simulation/testing), public use/re-export decisions, doctest import ergonomics, integration test/example/benchmark import surfaces, avoiding bloated or overlapping preludes. DO NOT USE FOR: Rust naming/import style inside implementation code (use rust-style-hygiene), test quality itself (use rust-test-quality), error design (use rust-error-variants), non-Rust code, or unrelated unchanged APIs unless a baseline audit is requested."
+description: "Audit Rust prelude modules and public re-exports for minimality, orthogonality, and usability. Use for crate or scoped preludes, public use decisions, doctest and example imports, integration-test or benchmark ergonomics, and avoiding bloated or overlapping export surfaces. Route implementation import style to rust-style-hygiene."
 ---
 
 # rust-prelude-exports

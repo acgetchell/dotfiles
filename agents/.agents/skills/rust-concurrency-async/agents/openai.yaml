@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust Concurrency and Async"
+  short_description: "Audit Rust concurrency and async safety"
+  default_prompt: "Use $rust-concurrency-async to audit this Rust concurrency or async code for blocking, cancellation, synchronization, and failure-atomicity hazards."

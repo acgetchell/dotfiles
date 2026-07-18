@@ -1,6 +1,6 @@
 ---
 name: changelog-commit-message
-description: "Write repository-aware commit messages from staged changes that parse into useful Keep a Changelog entries. USE FOR: generating a commit message, writing a changelog-friendly commit, summarizing staged changes, Conventional Commits, git-cliff/release-plz/cocogitto-compatible messages, semver-sensitive commit messages, deciding commit type/scope/body/footer from staged diffs. DO NOT USE FOR: making code changes, staging files, committing unless explicitly asked, generic prose summaries, PR descriptions, or repositories without staged changes unless the user explicitly asks to draft from unstaged changes."
+description: "Write repository-aware commit messages from staged changes that produce useful Keep a Changelog entries. Use for Conventional Commits, semver-sensitive type/scope/body/footer decisions, and git-cliff, release-plz, or cocogitto compatibility. Do not stage or commit unless explicitly asked."
 ---
 
 # changelog-commit-message

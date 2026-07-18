@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust Simplification Review"
+  short_description: "Simplify Rust without weakening behavior"
+  default_prompt: "Use $rust-simplification-review to find safe Rust deletions, deduplication, and simplifications without weakening behavior or coverage."

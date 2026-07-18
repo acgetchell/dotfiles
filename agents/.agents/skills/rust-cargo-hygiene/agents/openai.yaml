@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust Cargo Hygiene"
+  short_description: "Audit Cargo manifests and crate configuration"
+  default_prompt: "Use $rust-cargo-hygiene to audit this crate's Cargo manifests, features, dependencies, MSRV, lints, and release metadata."

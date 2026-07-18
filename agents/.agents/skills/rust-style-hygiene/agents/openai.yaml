@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust Style Hygiene"
+  short_description: "Audit Rust naming, imports, and paths"
+  default_prompt: "Use $rust-style-hygiene to audit this Rust code for idiomatic naming, import organization, and path clarity."

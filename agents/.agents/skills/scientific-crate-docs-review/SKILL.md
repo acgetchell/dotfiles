@@ -1,6 +1,6 @@
 ---
 name: scientific-crate-docs-review
-description: "Review and fix the scientific Rust crate documentation overlay that couples Cargo metadata, README release claims, CITATION.cff, REFERENCES.md, scientific topic docs, release guidance, and generated changelog ownership. Use with repository-docs-review for scientific Rust documentation suites, release-readiness checks, version and credit synchronization, algorithm provenance, or scientific validation documentation. Do not use for generic repository docs, ordinary operational runbooks, Rust /// docs, Cargo feature design, or scholarly manuscript prose."
+description: "Review the scientific Rust documentation layer coupling Cargo metadata, README release claims, CITATION.cff, REFERENCES.md, scientific topic docs, release guidance, and generated changelogs. Use for scientific crate release readiness, version and credit synchronization, algorithm provenance, and validation documentation alongside repository-docs-review."
 ---
 
 # Scientific Crate Documentation Review

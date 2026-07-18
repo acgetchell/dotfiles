@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python Scientific Review"
+  short_description: "Review scientific Python correctness"
+  default_prompt: "Use $python-scientific-review to review this Python scientific code for numerical correctness, reproducibility, and robust validation."

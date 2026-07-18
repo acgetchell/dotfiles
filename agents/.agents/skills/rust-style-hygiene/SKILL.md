@@ -1,6 +1,6 @@
 ---
 name: rust-style-hygiene
-description: "Enforce idiomatic Rust naming, import usage, and path clarity on changed code or whole-repo baseline audits when explicitly requested. USE FOR: Rust style review, function/method naming critique, import placement and grouping, fully-qualified path simplification, redundant prefix removal (get_, process_, handle_), use-statement organization. DO NOT USE FOR: behavior/correctness review (use rust-test-quality), non-Rust code, generated code, or unrelated unchanged files unless a baseline audit is requested."
+description: "Audit Rust code for idiomatic naming, import placement and grouping, path clarity, redundant prefixes, and unnecessary fully qualified paths. Use for focused style and hygiene reviews; route behavior, correctness, documentation, and test-quality concerns to their focused skills."
 ---
 
 # rust-style-hygiene

@@ -1,6 +1,6 @@
 ---
 name: python-cli-review
-description: "Review general Python CLI and application code for correctness, user-facing behavior, privacy-sensitive output, parsing robustness, filesystem safety, and pytest coverage. USE FOR: Python command-line tools, single-file apps, parsers, date/time handling, local file import/export, stdout/stderr behavior, argparse/Click/Typer interfaces, and non-scientific application logic. DO NOT USE FOR: Python support tooling such as changelog/release/CI scripts (use python-support-scripts); numerical, geometric, statistical, or scientific code (use python-scientific-review); test-only quality audits (use python-test-quality); Rust code review; formatting-only cleanup; or unrelated unchanged code unless a baseline audit is requested."
+description: "Review Python CLI and application code for correctness, user-visible behavior, privacy-sensitive output, parsing, date/time handling, filesystem safety, and pytest coverage. Use for argparse, Click, Typer, local import or export, stdout/stderr contracts, and non-scientific application logic. Route scientific code and development support scripts to their focused skills."
 ---
 
 # python-cli-review

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust API Docs"
+  short_description: "Audit Rust API documentation quality"
+  default_prompt: "Use $rust-api-docs to audit this Rust public API for complete documentation, required sections, and valid intra-doc links."

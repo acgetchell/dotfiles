@@ -1,6 +1,6 @@
 ---
 name: rust-review-orchestrator
-description: "Coordinate a structured Rust code-review-and-fix workflow by loading named Rust skills in sequence, grouping them by API, invariant, scientific correctness, implementation, validation, and synthesis concerns, applying fixes pass by pass, and choosing focused validators from changed files. Use when the user asks for a Rust review suite, repo-wide Rust review, whole-repo baseline audit, staged/changed Rust review, or 'fix all' across multiple Rust review skills. Also use when the user wants focused Rust skills applied in order with fixes and validation before moving to the next skill. Do not use when there is no Rust code, Rust API docs, Cargo/test/example/benchmark surface, or Rust workflow impact; for single-purpose reviews that name only one focused Rust skill; or for requests to commit, stage, push, tag, or otherwise mutate git state."
+description: "Coordinate multi-pass Rust reviews by selecting focused skills for APIs, invariants and errors, scientific correctness, implementation, tests, Cargo, and final synthesis. Use for changed, staged, PR, release-readiness, repository-wide, or fix-all Rust work spanning multiple concerns. Use a focused Rust skill directly for single-concern reviews."
 ---
 
 # rust-review-orchestrator

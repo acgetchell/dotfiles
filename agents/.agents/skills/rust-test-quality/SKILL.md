@@ -1,6 +1,6 @@
 ---
 name: rust-test-quality
-description: "Evaluate Rust code for test coverage, doctests, public API panic behavior, and documentation quality on changed code or whole-repo baseline audits when explicitly requested. USE FOR: Rust test review, public functions that panic for recoverable conditions, missing or trivial doctests on public APIs, missing /// docs on private helpers, weak assertions, missing boundary/error/negative cases, brittle or duplicated tests, doctest correctness vs actual behavior. DO NOT USE FOR: style/naming/import critique (use rust-style-hygiene), non-Rust code, or unrelated unchanged files unless a baseline audit is requested."
+description: "Review Rust tests, doctests, public panic behavior, and supporting documentation for meaningful risk coverage. Use for weak assertions, missing boundary, error, or negative cases, brittle or duplicated tests, public API examples, doctest correctness, recoverable panics, and private helper docs that explain public behavior."
 ---
 
 # rust-test-quality

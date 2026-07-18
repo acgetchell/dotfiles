@@ -1,6 +1,6 @@
 ---
 name: python-review-orchestrator
-description: "Coordinate a structured Python code-review-and-fix workflow by loading named Python skills in sequence, grouping them by notebook, boundary, scientific, support-tooling, validation, and synthesis concerns, applying fixes pass by pass, and choosing focused validators from changed files. Use when the user asks for a Python review suite, repo-wide Python review, whole-repo baseline audit, staged/changed Python review, notebook-and-script cleanup, or 'fix all' across multiple Python review skills. Also use when the user wants focused Python skills applied in order with fixes and validation before moving to the next skill. Do not use when there is no Python code, notebook, pytest, Python config, data fixture, or Python workflow impact; for single-purpose reviews that name only one focused Python skill; or for requests to commit, stage, push, tag, or otherwise mutate git state."
+description: "Coordinate multi-pass Python reviews by selecting focused skills for notebooks, CLI and boundary behavior, scientific code, support tooling, and tests. Use for changed, staged, PR, release-readiness, repository-wide, or fix-all Python work spanning multiple concerns. Use a focused Python skill directly for single-concern reviews."
 ---
 
 # python-review-orchestrator

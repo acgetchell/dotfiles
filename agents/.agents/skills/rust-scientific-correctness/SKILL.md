@@ -1,6 +1,6 @@
 ---
 name: rust-scientific-correctness
-description: "Audit Rust scientific and numerical code for mathematical validity, numerical robustness, independent validation, reproducibility, and truthful scientific claims on changed code or whole-repo baseline audits when explicitly requested. USE FOR: scientific Rust crates such as delaunay, la-stack, markov-chain-monte-carlo, and causal-triangulations; floating-point and exact arithmetic; linear algebra; computational geometry or topology; numerical predicates and solvers; probabilistic algorithms; tolerances and error bounds; scientific fixtures; and scientific benchmark validity. DO NOT USE FOR: general production review without a scientific correctness focus (use rust-production-review), performance optimization or benchmark mechanics (use rust-invariant-performance), test mechanics alone (use rust-test-quality), citation metadata or credit completeness (use scientific-citation-audit), or non-Rust scientific code (use python-scientific-review)."
+description: "Audit Rust scientific and numerical code for mathematical validity, numerical robustness, independent validation, reproducibility, and truthful claims. Use for floating-point or exact arithmetic, linear algebra, computational geometry and topology, predicates, solvers, stochastic algorithms, tolerances, error bounds, scientific fixtures, and benchmark validity."
 ---
 
 # Rust Scientific Correctness

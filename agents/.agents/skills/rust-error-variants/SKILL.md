@@ -1,6 +1,6 @@
 ---
 name: rust-error-variants
-description: "Audit Rust error enums and error pathways for correctness, debuggability, and orthogonality on changed code or whole-repo baseline audits when explicitly requested. USE FOR: Rust review comments asking whether appropriate Error variants were added/used, error enum design, thiserror/Display messages, anyhow/Result mapping, preserving typed errors, adding missing variants, replacing generic validation errors, checking error pathway correctness, ensuring variants are mutually exclusive and actionable. DO NOT USE FOR: general Rust style/naming review (use rust-style-hygiene), test/doctest coverage review (use rust-test-quality), non-Rust code, or unrelated unchanged code unless a baseline audit is requested."
+description: "Audit Rust error enums and pathways for correctness, debuggability, and orthogonality. Use for typed variants, thiserror and Display messages, anyhow or Result mapping, missing or overly generic errors, preserved error evidence, and mutually exclusive actionable failure categories. Route naming-only issues and general test coverage to their focused skills."
 ---
 
 # rust-error-variants

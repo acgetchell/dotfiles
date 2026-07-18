@@ -1,0 +1,4 @@
+interface:
+  display_name: "C++ Production Review"
+  short_description: "Senior C++23 production review"
+  default_prompt: "Use $cpp-production-review to review C++23 code for correctness, safety, invariants, performance, portability, and test quality."
