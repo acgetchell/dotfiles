@@ -1,6 +1,6 @@
 ---
 name: python-test-quality
-description: "Evaluate Python tests and Python code for meaningful pytest coverage, behavior assertions, fixture quality, CLI/file I/O boundaries, parser/date-time edge cases, and error-path testing on changed code or whole-repo baseline audits when explicitly requested. USE FOR: Python test review, missing pytest cases, weak assertions, brittle fixtures, coverage gaps that need behavior tests, CLI output capture, tmp_path/monkeypatch/capsys usage, parametrized boundary tests, exception and malformed-input coverage. DO NOT USE FOR: numerical/scientific correctness (use python-scientific-review); Rust-adjacent support scripts and release tooling (use python-support-scripts); Codecov report triage itself (use codecov-test-gaps); formatting-only cleanup; unrelated unchanged code unless a baseline audit is requested."
+description: "Review Python tests for meaningful behavior coverage, assertion quality, fixtures, CLI and file-I/O boundaries, parser and date/time edge cases, and error paths. Use for pytest, parametrization, tmp_path, monkeypatch, capsys, malformed inputs, and focused coverage gaps. Route Codecov report triage to codecov-test-gaps."
 ---
 
 # python-test-quality

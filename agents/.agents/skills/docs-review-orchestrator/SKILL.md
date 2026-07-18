@@ -1,6 +1,6 @@
 ---
 name: docs-review-orchestrator
-description: "Coordinate documentation review and fixes for software, infrastructure, operations, and scientific repositories. Use for branch, staged, changed-file, release-readiness, or whole-repo reviews that span an active documentation suite, generated-doc ownership, Rust API docs, scientific crate metadata, citations, or publication boundaries. Always route generic repository documentation to repository-docs-review; add scientific-crate-docs-review, rust-api-docs, scientific-citation-audit, or academic-authorship-boundary only when their actual files or claims are in scope."
+description: "Coordinate multi-pass documentation reviews across active repository docs, generated-doc ownership, Rust API docs, scientific crate metadata, citations, and academic publication boundaries. Use for branch, staged, release-readiness, or repository-wide documentation work requiring more than one focused documentation skill."
 ---
 
 # Documentation Review Orchestrator

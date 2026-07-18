@@ -1,6 +1,6 @@
 ---
 name: rust-concurrency-async
-description: "Audit Rust concurrency, async, and transactional mutation code for Send/Sync discipline, blocking hazards, lock/channel design, cancellation safety, transaction guard design, and failure atomicity on changed code or whole-repo baseline audits. USE FOR: async/await, Tokio/async-std, Send/Sync bounds, spawn_blocking, cancellation safety, owner-bound transaction guards, rollback-on-drop, rollback-preserving snapshots, restore-before-retry, failure-atomic mutation windows, Mutex/RwLock/parking_lot/tokio::sync, atomics, channels, lock ordering, deadlocks, deterministic side effects, structured concurrency, async traits/lifetimes, futures, and streams. DO NOT USE FOR: synchronous correctness without concurrency/cancellation/transaction concerns (use rust-production-review), error design (use rust-error-variants), trait bounds (use rust-trait-bounds), iterators (use rust-iter-control-flow), non-Rust code, or unrelated unchanged code unless a baseline audit is requested."
+description: "Audit Rust concurrency, async, and transactional mutation for Send/Sync discipline, blocking hazards, locks, channels, atomics, cancellation safety, structured concurrency, rollback guards, and failure atomicity. Use for Tokio or async-std, task lifetimes, lock ordering, deadlocks, async traits, futures, streams, and owner-bound transactions."
 ---
 
 # rust-concurrency-async

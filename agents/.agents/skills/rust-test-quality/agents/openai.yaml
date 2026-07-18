@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust Test Quality"
+  short_description: "Review Rust tests, doctests, and panics"
+  default_prompt: "Use $rust-test-quality to review these Rust tests and doctests for meaningful risk coverage, strong assertions, and appropriate panic behavior."

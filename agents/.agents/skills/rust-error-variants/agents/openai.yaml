@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust Error Variants"
+  short_description: "Audit Rust error enums and pathways"
+  default_prompt: "Use $rust-error-variants to audit these Rust error enums and pathways for typed, actionable, and orthogonal failures."

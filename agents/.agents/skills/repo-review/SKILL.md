@@ -1,6 +1,6 @@
 ---
 name: repo-review
-description: "Coordinate a repo review-and-fix workflow by routing branch changes or explicit whole-repo baseline checkpoints to rust-review-orchestrator, python-review-orchestrator, project-tooling-review, and docs-review-orchestrator as needed, then synthesizing cross-surface validation. Use when the user asks for branch, PR, repo-wide, staged, changed, clean-repo checkpoint, full repo review as-is, whole-repo baseline, or mixed Rust/Python/tooling/documentation review; repository review suites; release-readiness reviews; or fix-all work across code, tooling, and documentation. Do not use for single-surface requests that clearly name only Rust, Python, notebooks, documentation, citations, Justfile, GitHub Actions, or tool-version review; use the focused skill directly. Do not use for commit, stage, push, tag, checkout, reset, stash, or other git-state mutations."
+description: "Coordinate review-and-fix work across Rust, Python, project tooling, and documentation. Use for branch, PR, staged, release-readiness, repository-wide, or fix-all reviews spanning multiple surfaces, and route each surface to its focused orchestrator. Use a focused skill directly for single-language or single-surface reviews."
 ---
 
 # repo-review

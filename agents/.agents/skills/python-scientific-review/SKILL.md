@@ -1,6 +1,6 @@
 ---
 name: python-scientific-review
-description: "Perform rigorous senior-level review of Python that implements numerical, geometric, statistical, or scientific-computing logic alongside a Rust crate on changed code or whole-repo baseline audits when explicitly requested. USE FOR: Python that implements numerical/geometric/statistical/topological algorithms, validates Rust numerical output, checks reproducibility of scientific results, generates scientific fixtures (point clouds, meshes, distributions), audits NumPy/SciPy correctness, reviews Hypothesis property tests over numerical inputs, or checks Rust interoperability for numerical formats (coordinates, indexing, dtypes). DO NOT USE FOR: changelog generators, benchmark runners, release helpers, CI scripts, fixture/diagnostic CLIs, or other Python support tooling (use python-support-scripts); general Python web/app code; formatting-only cleanup; Rust code review (use rust-production-review or other Rust skills); or unrelated unchanged code unless a baseline audit is requested."
+description: "Review Python numerical, geometric, statistical, or scientific-computing code for correctness, reproducibility, robust NumPy or SciPy use, scientific fixtures, property tests, and Rust interoperability. Use for scientific algorithms and validation code; route release helpers, benchmark runners, and other development tooling to python-support-scripts."
 ---
 
 # python-scientific-review

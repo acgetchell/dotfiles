@@ -1,6 +1,6 @@
 ---
 name: project-tooling-review
-description: "Review and fix repository tooling surfaces that define how maintainers run, validate, and update a project. Use for justfile recipe design, GitHub Actions workflows, CI command drift, repository-owned Semgrep/static-analysis rules and fixtures, tool-version and installer drift, uv tool and cargo-install managed CLI updates, Brewfile and uv/cargo/rustup tooling configuration, lint/format/type-check command surfaces, release/support scripts wiring, docs that describe project commands, and cross-language validation recipes. Use when the user asks to review project tooling, just recipes, CI workflows, GitHub Actions, static analysis, tool versions, command consistency, or repository workflow ergonomics. Do not use for Rust or Python source review except where tooling invokes those validators; use the language orchestrators for code behavior. Do not use for requests to commit, stage, push, tag, or otherwise mutate git state."
+description: "Review and fix repository tooling: just recipes, GitHub Actions, CI command drift, repository-owned static analysis, tool versions, installers, linters, formatters, type checks, support scripts, and command documentation. Use for tooling workflow correctness and maintainer ergonomics; route application behavior to the appropriate language reviewer."
 ---
 
 # project-tooling-review

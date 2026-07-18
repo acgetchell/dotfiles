@@ -1,6 +1,6 @@
 ---
 name: rust-simplification-review
-description: "Review Rust code and tests for safe simplification, deletion, deduplication, and redundancy removal in invariant-heavy libraries. USE FOR: Rust review passes focused on simplifying code, deleting dead or redundant helpers, consolidating duplicate tests, shrinking public or crate-internal surfaces, and removing accidental complexity without weakening correctness, domain invariants, API orthogonality, performance, diagnostics, or regression coverage. DO NOT USE FOR: broad production-readiness review (use rust-production-review), surface-only naming/import cleanup (use rust-style-hygiene), focused test coverage audits without simplification goals (use rust-test-quality), non-Rust code, generated code, or unrelated unchanged code unless a baseline simplification audit is requested."
+description: "Review Rust code and tests for safe deletion, deduplication, and simplification without weakening behavior, invariants, API orthogonality, performance, diagnostics, or regression coverage. Use for dead or redundant helpers, duplicate tests, accidental complexity, and unnecessarily broad public or crate-internal surfaces."
 ---
 
 # rust-simplification-review

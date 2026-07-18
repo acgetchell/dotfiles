@@ -226,7 +226,11 @@ To add a skill:
 
 1. create `agents/.agents/skills/<skill-id>/SKILL.md`;
 2. add YAML frontmatter with `name` and a triggering `description`;
-3. validate and re-stow the package:
+3. add `agents/.agents/skills/<skill-id>/agents/openai.yaml` with a required
+   `interface` mapping containing `display_name`, a 25–64 character
+   `short_description`, and a `default_prompt` that explicitly mentions
+   `$skill-id`;
+4. validate and re-stow the package:
 
 ```sh
 just skill-check agents/.agents/skills/<skill-id>

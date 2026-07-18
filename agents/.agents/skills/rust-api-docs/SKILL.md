@@ -1,6 +1,6 @@
 ---
 name: rust-api-docs
-description: "Audit Rust API documentation for required sections, intra-doc links, crate-level docs, and API-supporting private helper docs on changed APIs or whole-repo baseline audits when explicitly requested. USE FOR: doc comment structure on public API, # Errors / # Panics / # Safety / # Examples sections, intra-doc links, crate-level //! overviews, module-level docs, changed private helpers that encode public API behavior, missing or weak descriptions, deny(missing_docs) and broken_intra_doc_links lint configuration, semver-relevant doc updates, docs.rs feature visibility. DO NOT USE FOR: doctest test quality (use rust-test-quality), broad private helper documentation audits unrelated to API behavior (use rust-test-quality), error variant design (use rust-error-variants), trait bound docs (use rust-trait-bounds), non-Rust code, or unrelated unchanged APIs unless a baseline audit is requested."
+description: "Audit Rust API documentation for completeness, required Errors, Panics, Safety, and Examples sections, intra-doc links, crate and module docs, docs.rs visibility, and API-supporting private helper docs. Use for public documentation coverage and semver-relevant doc changes; route doctest behavior to rust-test-quality."
 ---
 
 # rust-api-docs

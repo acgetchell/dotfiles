@@ -1,6 +1,6 @@
 ---
 name: python-support-scripts
-description: "Review Python support scripts and dev tooling that live alongside Rust crates on changed code or whole-repo baseline audits when explicitly requested: changelog generators, benchmark runners, release helpers, CI scripts, and fixture/diagnostic utilities. USE FOR: Python that parses commit messages, runs cargo bench/Criterion and aggregates results, generates CHANGELOG.md, scrapes GitHub Actions logs, prepares release artifacts, runs subprocess commands, manipulates Cargo metadata, validates fixtures, or stitches together CI workflows. Focus on transform/parse correctness, determinism, fixture-driven tests, malformed-input handling, subprocess discipline, and CLI ergonomics. DO NOT USE FOR: numerical/geometric/scientific algorithms, NumPy/SciPy correctness, or scientific reproducibility (use python-scientific-review); Rust code review (use rust-production-review or other Rust skills); generic Python web/app code; formatting-only cleanup; unrelated unchanged code unless a baseline audit is requested."
+description: "Review Python development and release tooling for transform correctness, determinism, malformed-input handling, subprocess discipline, fixture-driven tests, and CLI ergonomics. Use for changelog generators, benchmark runners, release helpers, CI scripts, Cargo metadata tools, GitHub Actions diagnostics, and fixture utilities. Route scientific algorithms to python-scientific-review."
 ---
 
 # python-support-scripts

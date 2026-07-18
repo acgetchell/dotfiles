@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python Support Scripts"
+  short_description: "Review Python development tooling"
+  default_prompt: "Use $python-support-scripts to review these Python development scripts for deterministic behavior, robust parsing, and safe subprocess use."

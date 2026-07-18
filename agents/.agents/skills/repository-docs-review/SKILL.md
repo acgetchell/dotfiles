@@ -1,6 +1,6 @@
 ---
 name: repository-docs-review
-description: "Review and fix an active repository documentation suite without assuming a programming language or scientific domain. Use for branch, staged, changed-file, release-readiness, or whole-repo reviews spanning README, AGENTS, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT, docs/**, runbooks, architecture guides, ADRs, navigation, support docs, generated-document ownership, and cross-document consistency. Route command truth, language behavior, Rust API docs, scientific citations, scientific Rust release metadata, and scholarly manuscript prose to their focused owners when those surfaces are actually present."
+description: "Review and fix an active repository documentation suite for navigation, operational clarity, generated-file ownership, and cross-document consistency. Use for README, AGENTS, CONTRIBUTING, SECURITY, codes of conduct, docs/**, runbooks, architecture guides, and ADRs. Route command truth, language behavior, citations, Rust API docs, and scholarly prose to their focused owners."
 ---
 
 # Repository Documentation Review
@@ -100,6 +100,13 @@ validator when the repository already defines one.
 
 If a check needs unavailable network access or installation, run the strongest local
 substitute and report the remaining gap.
+
+For LaTeX paper checks on macOS, when a repository recipe reports `chktex` as
+missing, check `/Library/TeX/texbin/chktex` before installing another TeX
+distribution. MacTeX may provide the binary outside the inherited `PATH`; when
+present, run the repository recipe with `PATH=/Library/TeX/texbin:$PATH`. Keep
+this to mechanical source/build validation and route manuscript prose through
+the academic-authorship boundary.
 
 ## Specialist Handoffs
 

@@ -1,6 +1,6 @@
 ---
 name: github-issue-planning
-description: "Plan and maintain GitHub issue ordering with native dependency metadata, Projects v2 fields, labels, and milestones. USE FOR: reordering issues, fixing Blocking/Is blocked by relationships, dependency graphs, milestone triage, label hygiene, project metadata, release planning, roadmap sequencing, blocked-by cycles, GitHub issue planning. DO NOT USE FOR: editing code, pull request review, CI debugging, generic issue body edits, or dependency notes that should remain plain markdown unless the user explicitly asks for body text."
+description: "Plan and maintain GitHub issues using native dependency metadata, Projects v2 fields, labels, and milestones. Use for ordering work, Blocking/Is blocked by relationships, dependency cycles, milestone triage, roadmap sequencing, and project metadata. Do not edit code or substitute body prose for native metadata."
 ---
 
 # github-issue-planning
@@ -19,7 +19,9 @@ bodies; inspect the source of truth before editing.
 - If the user mentions "blocked", "blocking", "is blocked by", or issue
   ordering, assume native GitHub issue dependencies may be involved.
 
-Use `gh` only for repository metadata. Do not edit issue bodies unless the user
+Use `gh` only for repository and issue metadata, including the dependency,
+label, and milestone operations described below. Do not edit code. Do not edit
+issue bodies or substitute body prose for native metadata unless the user
 explicitly asks for text changes.
 
 ### 2. Inspect current issue metadata

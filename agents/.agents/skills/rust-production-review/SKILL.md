@@ -1,6 +1,6 @@
 ---
 name: rust-production-review
-description: "Perform a senior-level Rust review for production-quality, performance-critical libraries with strong invariants on changed code or whole-repo baseline audits when explicitly requested. USE FOR: comprehensive Rust code review, systems programming review, computational geometry, topology, linear algebra, numerical algorithms, invariant-heavy data structures, public library API design, semver-sensitive changes, performance-critical correctness review, numerical robustness, ownership/mutability design, concurrency safety, and maintainability. DO NOT USE FOR: surface-only style/naming/import cleanup (use rust-style-hygiene), focused error variant audits (use rust-error-variants), focused test/doctest audits (use rust-test-quality), focused prelude/export audits (use rust-prelude-exports), focused trait-bound cleanup (use rust-trait-bounds), non-Rust code, generated code, or unrelated unchanged code unless a baseline audit is requested."
+description: "Perform a comprehensive production review of Rust libraries with strong invariants or performance requirements. Use for correctness, ownership and mutation design, public API and semver stability, numerical robustness, concurrency safety, performance, and maintainability. Use narrower Rust skills for single-concern style, error, test, export, trait-bound, or documentation reviews."
 ---
 
 # rust-production-review

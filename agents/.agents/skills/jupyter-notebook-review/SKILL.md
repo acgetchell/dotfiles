@@ -1,6 +1,6 @@
 ---
 name: jupyter-notebook-review
-description: "Review and fix Jupyter notebooks for reproducible execution, sound Python style, Polars-first dataframe workflows, and reliable Plotly/Matplotlib visualization. USE FOR: .ipynb review, notebook cleanup, hidden-state fixes, clearing outputs, headless execution failures, uv/Jupyter environment setup, converting pandas-style notebook code to Polars, improving CSV/Parquet/JSON loading, plotting diagnostics, notebook CI checks, and notebook front ends that wrap binaries or APIs. DO NOT USE FOR: ordinary Python package review without notebooks; scientific/numerical correctness review beyond notebook hygiene; slide/document/spreadsheet artifacts."
+description: "Review and fix Jupyter notebooks for reproducible execution, Python quality, Polars-first data workflows, and reliable Plotly or Matplotlib output. Use for .ipynb cleanup, hidden state, output clearing, headless execution, notebook environments, data loading, plotting diagnostics, and notebook CI. Route reusable scientific logic to its focused reviewer."
 ---
 
 # jupyter-notebook-review

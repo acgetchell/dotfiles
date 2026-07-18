@@ -1,6 +1,6 @@
 ---
 name: course-study-workflow
-description: "Create and maintain course study artifacts from lectures, slides, textbooks, readings, assignments, notes, and practice questions. USE FOR: lecture outlines, topic outlines, study summaries, quiz or exam prep, practice quizzes/exams, grading responses, repair notes for weak concepts, cumulative midterm/final review, allowed exam sheets, formula sheets, topic sheets, oral exam review, and course-specific source-to-summary workflows. Use when Codex needs to preserve a Markdown outline as the source of truth and derive LaTeX, PDF, DOCX, slide, quiz, or exam-sheet artifacts from it."
+description: "Create and maintain Markdown-first course study artifacts from lectures, slides, readings, assignments, notes, and practice questions. Use for outlines, summaries, quiz or exam preparation, practice assessments, repair notes, formula sheets, and derived LaTeX, PDF, DOCX, or slide materials."
 ---
 
 # Course Study Workflow

@@ -1,6 +1,6 @@
 ---
 name: rust-trait-bounds
-description: "Audit Rust trait bounds, generic constraints, and where clauses for simplification, idiomatic placement, and API clarity on changed code or whole-repo baseline audits when explicitly requested. USE FOR: Rust review comments asking whether trait bounds or where clauses can be simplified, redundant bounds, overly broad generic constraints, associated type constraints, HRTBs, impl/function generic cleanup, public API bound ergonomics, moving bounds from structs to impls/methods, choosing inline bounds vs where clauses. DO NOT USE FOR: Rust naming/import style (use rust-style-hygiene), error design (use rust-error-variants), test/doctest coverage (use rust-test-quality), prelude/export decisions (use rust-prelude-exports), non-Rust code, or unrelated unchanged code unless a baseline audit is requested."
+description: "Audit Rust trait bounds, generic constraints, associated types, HRTBs, and where clauses for minimality and API clarity. Use for redundant or overly broad bounds, moving constraints from types to impls or methods, choosing inline versus where-clause placement, and public generic ergonomics."
 ---
 
 # rust-trait-bounds

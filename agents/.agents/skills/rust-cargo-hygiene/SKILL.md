@@ -1,6 +1,6 @@
 ---
 name: rust-cargo-hygiene
-description: "Audit Cargo.toml, feature flags, MSRV, lints, and crate-level configuration for release readiness on changed manifests or whole-repo baseline audits when explicitly requested. USE FOR: Cargo.toml review, feature flag design, default-features gating, dev/build/runtime dependency placement, dependency version specifiers, MSRV pin, edition, [lints] table, clippy.toml/rustfmt.toml, crate-level deny/warn lints (including unsafe_code = forbid), workspace inheritance, [package.metadata.docs.rs] config, semver-sensitive Cargo manifest changes, preparing a crate release. DO NOT USE FOR: source-level Rust review (use rust-production-review or other Rust skills), CI/CD workflow logic, non-Rust packaging, or unrelated unchanged manifests unless a baseline audit is requested."
+description: "Audit Cargo manifests and crate configuration for release readiness. Use for feature flags, default-features gating, dependency placement and versions, MSRV, edition, workspace inheritance, lints, rustfmt or clippy configuration, docs.rs metadata, crate-level lint policy, and semver-sensitive manifest changes. Route CI workflow logic to project-tooling-review."
 ---
 
 # rust-cargo-hygiene

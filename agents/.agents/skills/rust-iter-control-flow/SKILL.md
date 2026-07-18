@@ -1,6 +1,6 @@
 ---
 name: rust-iter-control-flow
-description: "Audit Rust iterator, closure, and pattern-matching control-flow idioms for clarity, allocation discipline, and exhaustiveness on changed code or whole-repo baseline audits when explicitly requested. USE FOR: iterator chain review, collect/try_fold/flat_map decisions, avoiding intermediate Vec collects, closure capture clarity, Fn/FnMut/FnOnce choice, match vs if let vs let else, while let, matches! macro, exhaustive matching, @ bindings, slice patterns, refutable/irrefutable patterns, when imperative loops are clearer than iterator chains. DO NOT USE FOR: trait bounds (use rust-trait-bounds), error variants (use rust-error-variants), async patterns (use rust-concurrency-async), prelude/export decisions (use rust-prelude-exports), non-Rust code, or unrelated unchanged code unless a baseline audit is requested."
+description: "Audit Rust iterator, closure, loop, and pattern-matching control flow for clarity, allocation discipline, and exhaustiveness. Use for collect versus try_fold or flat_map, intermediate allocations, closure capture and Fn traits, match, if-let, or let-else choices, slice patterns, and cases where an imperative loop is clearer."
 ---
 
 # rust-iter-control-flow

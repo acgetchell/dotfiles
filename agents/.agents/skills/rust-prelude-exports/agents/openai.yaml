@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust Prelude Exports"
+  short_description: "Audit Rust preludes and public re-exports"
+  default_prompt: "Use $rust-prelude-exports to audit this crate's preludes and public re-exports for minimality, orthogonality, and usability."

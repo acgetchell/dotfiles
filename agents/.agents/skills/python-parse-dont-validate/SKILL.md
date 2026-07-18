@@ -1,6 +1,6 @@
 ---
 name: python-parse-dont-validate
-description: "Audit Python code for parse-don't-validate design, type-checkable invariants, boundary parsing, typed configuration/report models, dataclasses/attrs/Pydantic validation, Enum/Literal/NewType/refined wrappers, and mypy/pyright-friendly invalid-state prevention. Use for Python reviews asking whether raw dicts, strings, floats, counts, paths, subprocess output, JSON/CSV/TOML/YAML, CLI args, or optional fields should be parsed into validated domain types before computation. Do not use for general Python style, test quality, or scientific numerical correctness unless the issue is invariant storage or discarded validation evidence."
+description: "Audit Python boundary parsing and invalid-state prevention. Use for raw dictionaries, strings, counts, paths, optionals, CLI arguments, environment variables, subprocess output, JSON, CSV, TOML, YAML, dataclasses, attrs, Pydantic, Enum, Literal, NewType wrappers, and type-checkable domain invariants. Do not use for general style or numerical correctness."
 ---
 
 # Python Parse Don't Validate

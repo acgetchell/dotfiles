@@ -1,6 +1,6 @@
 ---
 name: rust-parse-dont-validate
-description: "Audit Rust code for parse-don't-validate design, invariant-bearing types, smart constructors, fallible setters, infallible getters, private fields, and invalid-state prevention on changed code, whole repositories, or pull requests when requested. USE FOR: Rust reviews asking whether invalid values can be stored, whether constructors/builders/setters validate immediately, whether computations can become infallible after validation, whether public fields bypass invariants, whether refined newtypes should encode constraints, whether validation is delayed until use, whole-repo parse-don't-validate baseline audits, or PR audits focused on invariant boundaries. DO NOT USE FOR: general Rust style/import review (use rust-style-hygiene), generic test-quality review (use rust-test-quality), error enum design alone (use rust-error-variants), or non-Rust code."
+description: "Audit Rust for parse-don't-validate design and invalid-state prevention. Use for invariant-bearing types, smart constructors, private fields, fallible setters, infallible getters, refined newtypes, validation evidence, mutation boundaries, and questions about whether invalid values can be stored or delayed validation remains reachable."
 ---
 
 # rust-parse-dont-validate

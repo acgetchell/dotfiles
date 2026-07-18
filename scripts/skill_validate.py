@@ -16,6 +16,8 @@ if TYPE_CHECKING:
 
 UTF8 = "utf-8"
 MAX_SKILL_NAME_LENGTH = 64
+MIN_SHORT_DESCRIPTION_LENGTH = 25
+MAX_SHORT_DESCRIPTION_LENGTH = 64
 ALLOWED_FRONTMATTER_KEYS = frozenset({"name", "description", "license", "allowed-tools", "metadata"})
 FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---", re.DOTALL)
 SKILL_NAME_RE = re.compile(r"^[a-z0-9-]+$")
@@ -94,7 +96,57 @@ def validate_skill(skill_path: Path | str) -> tuple[bool, str]:
     frontmatter, message = load_frontmatter(skill_path)
     if frontmatter is None:
         return False, message
-    return validate_frontmatter(frontmatter)
+
+    valid_frontmatter, frontmatter_message = validate_frontmatter(frontmatter)
+    if not valid_frontmatter:
+        return False, frontmatter_message
+
+    openai_metadata, metadata_message = load_openai_metadata(skill_path)
+    if openai_metadata is None:
+        return False, metadata_message
+
+    return validate_openai_metadata(openai_metadata, cast("str", frontmatter["name"]))
+
+
+def load_openai_metadata(skill_path: Path | str) -> tuple[dict[str, object] | None, str]:
+    """Load product UI metadata from one skill directory."""
+    metadata_path = Path(skill_path) / "agents" / "openai.yaml"
+    if not metadata_path.exists():
+        return None, "agents/openai.yaml not found"
+
+    try:
+        loaded_metadata: Any = yaml.safe_load(metadata_path.read_text(encoding=UTF8))
+    except yaml.YAMLError as exc:
+        return None, f"Invalid YAML in agents/openai.yaml: {exc}"
+
+    if not isinstance(loaded_metadata, dict):
+        return None, "agents/openai.yaml must be a YAML dictionary"
+
+    return cast("dict[str, object]", loaded_metadata), ""
+
+
+def validate_openai_metadata(metadata: dict[str, object], skill_name: str) -> tuple[bool, str]:
+    """Validate required user-facing skill metadata."""
+    loaded_interface = metadata.get("interface")
+    if not isinstance(loaded_interface, dict):
+        return False, "agents/openai.yaml must contain an 'interface' dictionary"
+    interface = cast("dict[str, object]", loaded_interface)
+
+    for field in ("display_name", "short_description", "default_prompt"):
+        value = interface.get(field)
+        if not isinstance(value, str) or not value.strip():
+            return False, f"interface.{field} must be a non-empty string"
+
+    short_description = cast("str", interface["short_description"]).strip()
+    if not MIN_SHORT_DESCRIPTION_LENGTH <= len(short_description) <= MAX_SHORT_DESCRIPTION_LENGTH:
+        return False, (f"interface.short_description must be {MIN_SHORT_DESCRIPTION_LENGTH}-{MAX_SHORT_DESCRIPTION_LENGTH} characters")
+
+    default_prompt = cast("str", interface["default_prompt"])
+    invocation = f"${skill_name}"
+    if re.search(rf"{re.escape(invocation)}(?![a-z0-9-])", default_prompt) is None:
+        return False, f"interface.default_prompt must mention {invocation}"
+
+    return True, "Skill is valid!"
 
 
 def validate_name(name_value: object) -> tuple[bool, str]:
