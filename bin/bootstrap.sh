@@ -6,7 +6,7 @@
 set -euo pipefail
 
 DOTFILES_DIR="${DOTFILES_DIR:-$HOME/projects/dotfiles}"
-JUST_VERSION="${JUST_VERSION:-1.55.1}"
+JUST_VERSION="${JUST_VERSION:-1.56.0}"
 ZIZMOR_VERSION="${ZIZMOR_VERSION:-1.26.1}"
 
 if [[ ! -d "$DOTFILES_DIR" ]]; then

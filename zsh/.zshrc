@@ -111,11 +111,6 @@ fi
 # ---- Brewfile location (used by `brew bundle` from any directory) ----
 export HOMEBREW_BUNDLE_FILE="$HOME/projects/dotfiles/Brewfile"
 
-# ---- LLVM via Homebrew (optional) ----
-if [[ -n "${HOMEBREW_PREFIX:-}" && -d "$HOMEBREW_PREFIX/opt/llvm/bin" ]]; then
-  export PATH="$HOMEBREW_PREFIX/opt/llvm/bin:$PATH"
-fi
-
 # ---- vcpkg (optional) ----
 if [[ -d "$HOME/projects/vcpkg" ]]; then
   export VCPKG_ROOT="$HOME/projects/vcpkg"
