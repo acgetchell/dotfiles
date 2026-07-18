@@ -143,7 +143,7 @@ def validate_openai_metadata(metadata: dict[str, object], skill_name: str) -> tu
 
     default_prompt = cast("str", interface["default_prompt"])
     invocation = f"${skill_name}"
-    if invocation not in default_prompt:
+    if re.search(rf"{re.escape(invocation)}(?![a-z0-9-])", default_prompt) is None:
         return False, f"interface.default_prompt must mention {invocation}"
 
     return True, "Skill is valid!"

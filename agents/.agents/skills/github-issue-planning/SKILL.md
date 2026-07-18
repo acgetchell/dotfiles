@@ -19,7 +19,9 @@ bodies; inspect the source of truth before editing.
 - If the user mentions "blocked", "blocking", "is blocked by", or issue
   ordering, assume native GitHub issue dependencies may be involved.
 
-Use `gh` only for repository metadata. Do not edit issue bodies unless the user
+Use `gh` only for repository and issue metadata, including the dependency,
+label, and milestone operations described below. Do not edit code. Do not edit
+issue bodies or substitute body prose for native metadata unless the user
 explicitly asks for text changes.
 
 ### 2. Inspect current issue metadata

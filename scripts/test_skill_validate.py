@@ -89,6 +89,22 @@ def test_validate_skill_rejects_prompt_without_invocation(tmp_path: Path) -> Non
     assert message == "interface.default_prompt must mention $example-skill"
 
 
+def test_validate_skill_rejects_prompt_with_partial_invocation(tmp_path: Path) -> None:
+    """A longer skill name must not satisfy the invocation requirement."""
+    skill_dir = tmp_path / "example-skill"
+    write_skill(skill_dir, 'name: example-skill\ndescription: "Use for tests."')
+    (skill_dir / "agents" / "openai.yaml").write_text(
+        'interface:\n  display_name: "Example Skill"\n  short_description: "Validate an example skill"\n'
+        '  default_prompt: "Use $example-skill-extra to validate this example."\n',
+        encoding="utf-8",
+    )
+
+    valid, message = skill_validate.validate_skill(skill_dir)
+
+    assert not valid
+    assert message == "interface.default_prompt must mention $example-skill"
+
+
 def test_validate_skill_rejects_unexpected_frontmatter_key(tmp_path: Path) -> None:
     """Only supported skill frontmatter keys are accepted."""
     skill_dir = tmp_path / "bad-skill"
