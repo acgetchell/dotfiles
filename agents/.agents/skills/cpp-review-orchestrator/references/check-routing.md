@@ -11,9 +11,12 @@ git --no-pager status --short
 git --no-pager diff --stat
 git --no-pager diff --name-status
 git --no-pager diff
+git ls-files --others --exclude-standard
 ```
 
-For staged-only requests, add `--cached`. Classify:
+The diff commands cover tracked paths only. Inspect the contents of every path returned by `git ls-files --others --exclude-standard` with a file-appropriate reader, and include each untracked file in scope classification and review evidence. Do not treat its status entry or filename alone as inspection.
+
+For staged-only requests, add `--cached` to the diff commands. Classify:
 
 - `*.cc`, `*.cpp`, `*.cxx`: C++ implementation
 - `*.c`: C source; include only when build metadata proves the file is compiled as C++, otherwise use a C-capable reviewer
@@ -29,18 +32,20 @@ For staged-only requests, add `--cached`. Classify:
 
 ## Skill Group Selection
 
+Use this table to select optional specialist groups 1–6. Always run Final Synthesis after the selected specialists, so it is not conditional on a table entry.
+
 | Changed surface | Select these groups |
 |---|---|
-| Resource owners, raw or smart pointers, references, views, iterators, handles, callbacks, coroutines, promises, awaiters, suspension points, container mutation, C interfaces | Lifetime/Ownership, Validation/Test; add Invariant and Final Synthesis when stateful behavior changes |
-| Constructors, destructors, factories, move construction or assignment, validation, caches, mutation, topology, rollback, transaction-style updates, inverse operations | Exception/Error Contracts, Invariant/State, Validation/Test, Final Synthesis; add Lifetime/Ownership when handles, borrows, or resources are involved |
-| `throw`, `try`, `catch`, `noexcept`, exception guarantees, `std::expected`, `std::error_code`, result/status/optional returns, assertions, termination, partial failure, parsing, serialization, filesystem, networking, callbacks, plugin interfaces, C interoperability, or ABI error translation | Exception/Error Contracts, Validation/Test; add Lifetime/Ownership for cleanup, Invariant/State for post-failure state, Concurrency/Reentrancy for execution boundaries, and Final Synthesis for public contracts |
-| Numerical, geometric, combinatorial, stochastic, simulation, or scientific code | Invariant/State, Scientific Correctness, Validation/Test, Final Synthesis; add Lifetime/Ownership when library handles or views are involved |
-| Threads, TBB, OpenMP, tasks, locks, atomics, signal handlers, callbacks, shared caches, globals, or shared RNG | Lifetime/Ownership, Invariant/State, Concurrency/Reentrancy, Validation/Test, Final Synthesis; add Exception/Error Contracts for worker, callback, or boundary failures |
-| Public headers, signatures, templates, concepts, modules, type contracts, ODR, linkage, inline definitions, explicit instantiation, or ABI | Invariant/State when validity contracts change, Exception/Error Contracts when failure specifications change, Validation/Test, Final Synthesis |
-| Allocation, control flow, implementation cleanup, or hot paths | Lifetime/Ownership where relevant, Validation/Test, Final Synthesis; add Scientific Correctness when arithmetic or stochastic behavior can change |
+| Resource owners, raw or smart pointers, references, views, iterators, handles, callbacks, coroutines, promises, awaiters, suspension points, container mutation, C interfaces | Lifetime/Ownership, Validation/Test; add Invariant when stateful behavior changes |
+| Constructors, destructors, factories, move construction or assignment, validation, caches, mutation, topology, rollback, transaction-style updates, inverse operations | Exception/Error Contracts, Invariant/State, Validation/Test; add Lifetime/Ownership when handles, borrows, or resources are involved |
+| `throw`, `try`, `catch`, `noexcept`, exception guarantees, `std::expected`, `std::error_code`, result/status/optional returns, assertions, termination, partial failure, parsing, serialization, filesystem, networking, callbacks, plugin interfaces, C interoperability, or ABI error translation | Exception/Error Contracts, Validation/Test; add Lifetime/Ownership for cleanup, Invariant/State for post-failure state, and Concurrency/Reentrancy for execution boundaries |
+| Numerical, geometric, combinatorial, stochastic, simulation, or scientific code | Invariant/State, Scientific Correctness, Validation/Test; add Lifetime/Ownership when library handles or views are involved |
+| Threads, TBB, OpenMP, tasks, locks, atomics, signal handlers, callbacks, shared caches, globals, or shared RNG | Lifetime/Ownership, Invariant/State, Concurrency/Reentrancy, Validation/Test; add Exception/Error Contracts for worker, callback, or boundary failures |
+| Public headers, signatures, templates, concepts, modules, type contracts, ODR, linkage, inline definitions, explicit instantiation, or ABI | Invariant/State when validity contracts change, Exception/Error Contracts when failure specifications change, Validation/Test |
+| Allocation, control flow, implementation cleanup, or hot paths | Lifetime/Ownership where relevant, Validation/Test; add Scientific Correctness when arithmetic or stochastic behavior can change |
 | C++ tests or fixtures only | Validation/Test; add every owning domain group represented by the behavior under test, including Lifetime/Ownership, Invariant/State, Exception/Error Contracts, Scientific Correctness, or Concurrency/Reentrancy |
-| Examples or benchmark fixtures | Validation/Test and Final Synthesis; add Scientific Correctness before accepting scientific fixtures or performance claims |
-| CMake, dependency manifests, compiler flags, warnings, or sanitizer configuration | Final Synthesis when C++ compilation or diagnostics change; also route to `project-tooling-review` |
+| Examples or benchmark fixtures | Validation/Test; add Scientific Correctness before accepting scientific fixtures or performance claims |
+| CMake, dependency manifests, compiler flags, warnings, or sanitizer configuration | No optional specialist group by default; route to `project-tooling-review` and let mandatory Final Synthesis cover the C++ compilation or diagnostic contract |
 | Workflow or recipe only | No C++ group unless C++ coverage, compiler matrix, flags, tests, or sanitizer semantics change; route to `project-tooling-review` |
 | Docs-only C++ examples, API contracts, or scientific claims | Relevant C++ group only when executable behavior or correctness claims must be verified; otherwise route to documentation review |
 

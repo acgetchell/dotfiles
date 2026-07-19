@@ -44,8 +44,9 @@ Use this reference when `cpp-review-orchestrator` is running in CDT++ or closely
 
 ## Focused Validation
 
-- Use `just check` for fast non-mutating source and configuration validation; it does not replace a C++ build.
-- Use `just build` for the supported reference configure, build, and smoke-test contract.
-- Use `just ci` for the comprehensive local gate when changes cross code, test, and tooling surfaces or before a release-ready handoff.
-- After a reference build, run the affected doctest suite or executable directly while iterating, then rerun `ctest --preset reference-smoke`. Run the full registered CTest set only when its current documented known-failure and nondeterminism status is understood.
+- Before invoking the named validators, inspect the target repository's `justfile`, `CMakePresets.json`, and validation documentation to confirm that `just check`, `just build`, `just ci`, and the `reference-smoke` preset exist. Supported CDT++ repositories should use the documented commands they define. Closely related repositories without those targets must use their documented validation fallback; a missing recipe or preset is not itself a validation failure.
+- When defined, use `just check` for fast non-mutating source and configuration validation; it does not replace a C++ build.
+- When defined, use `just build` for the supported reference configure, build, and smoke-test contract.
+- When defined, use `just ci` for the comprehensive local gate when changes cross code, test, and tooling surfaces or before a release-ready handoff.
+- After a reference build, run the affected doctest suite or executable directly while iterating. Rerun `ctest --preset reference-smoke` only when that preset exists; otherwise use the repository's documented test fallback. Run the full registered CTest set only when its current documented known-failure and nondeterminism status is understood.
 - Use the repository sanitizer, static-analysis, and coverage scripts or workflows for their corresponding risks. Inspect them before execution because diagnostic scripts may recreate the local `build/` directory and may exercise more than unit tests.

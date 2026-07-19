@@ -23,13 +23,13 @@ The intent is to replace a maintainer manually invoking several C++ reviews. Do 
 
 When invoked by `repo-review`, begin with a handoff receipt naming the C++ scope, selected and skipped groups with reasons, and routing files to load.
 
-For each selected group, announce the group and focused skills before loading them. A group is complete only when the final summary can name its status, skill files loaded, files inspected, findings or explicit no-finding result, fixes, and focused validators. A remembered skill name or one blanket CI run is not grouped evidence.
+For each selected specialist group and the mandatory final synthesis, announce the group and focused skills before loading them. A group is complete only when the final summary can name its status, skill files loaded, files inspected, findings or explicit no-finding result, fixes, and focused validators. A remembered skill name or one blanket CI run is not grouped evidence.
 
 Provide table-ready evidence to the parent: selected groups, loaded skills and references, validators, fixes, and intentionally skipped groups.
 
 ## Required Skill Loading
 
-Load every selected skill's `SKILL.md` completely at the start of its logical group and follow directly relevant references. Use the [Per-Group Fix Loop](#per-group-fix-loop) as the execution procedure.
+Load every selected specialist skill's `SKILL.md` completely at the start of its logical group and follow directly relevant references. Always load `cpp-production-review` for mandatory final synthesis after the specialist groups. Use the [Per-Group Fix Loop](#per-group-fix-loop) as the execution procedure.
 
 ## Scope Routing
 
@@ -43,7 +43,7 @@ If files do not match the routing table cleanly, choose the smallest pass set th
 
 ## Skill Groups
 
-Run selected groups in this order.
+Run selected specialist groups in this order, then always run Final Synthesis.
 
 ### 1. Lifetime and Ownership Safety
 
@@ -93,11 +93,11 @@ Project-tooling review owns workflow and command wiring; this group owns the sem
 
 ### 7. Final Synthesis
 
-Use for broad C++ changes, public or type-level contracts, performance-sensitive implementation, invariant-heavy or scientific code, topology, release-readiness, or repository-wide review.
+Run after every C++ review regardless of scope. This group is mandatory even when no earlier specialist group applies.
 
 - `cpp-production-review`
 
-Hand this pass the prior groups' evidence. It must reconcile findings without rerunning completed specialist analysis, cover residual language/build/dependency/API/ABI/performance/simplification concerns, remove duplicates, and classify remaining risk.
+Hand this pass the prior groups' evidence, including explicit skips. It must reconcile findings without rerunning completed specialist analysis, cover residual language/build/dependency/API/ABI/performance/simplification concerns, remove duplicates, and classify every remaining risk or explicitly report that none remains.
 
 ## Per-Group Fix Loop
 
@@ -123,7 +123,7 @@ End with:
 - focused skill and reference files actually loaded
 - table-ready evidence when invoked by `repo-review`
 - validators and results
-- fixed findings and remaining risks
+- fixed findings and the mandatory Final Synthesis classification of every remaining risk, or an explicit no-residual-risk result
 - anything intentionally deferred
 - confirmation that no git state mutations were performed, if true
 
