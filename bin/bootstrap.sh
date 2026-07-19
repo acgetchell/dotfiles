@@ -31,6 +31,9 @@ fi
 echo "==> Installing Brewfile bundle"
 brew bundle install --file="$DOTFILES_DIR/Brewfile"
 
+# rustup is keg-only, so expose its Cargo proxy to this non-interactive shell.
+export PATH="$(brew --prefix rustup)/bin:$PATH"
+
 # 3. Stow packages
 PACKAGES=(git zsh agents)
 echo "==> Stowing packages: ${PACKAGES[*]}"

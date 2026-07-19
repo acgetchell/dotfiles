@@ -48,14 +48,16 @@ def resolve_link(link: Path) -> Path:
     return target.resolve()
 
 
-def check_stowed_file(home_file: Path, dotfiles_dir: Path, report: Report) -> None:
-    """Check that one stowed file is a symlink resolving to an existing file inside the repository."""
+def check_stowed_file(home_file: Path, source: Path, dotfiles_dir: Path, report: Report) -> None:
+    """Check that one stowed file is a symlink resolving to its expected repository source."""
     if home_file.is_symlink():
         raw_target = home_file.readlink()
         if not home_file.exists():
             report.fail(f"{home_file} is a dangling symlink -> {raw_target}")
-        elif resolve_link(home_file).is_relative_to(dotfiles_dir):
+        elif resolve_link(home_file) == source.resolve():
             report.ok(f"{home_file} -> {raw_target}")
+        elif resolve_link(home_file).is_relative_to(dotfiles_dir):
+            report.fail(f"{home_file} symlink points to the wrong repository file (expected {source})")
         else:
             report.fail(f"{home_file} symlink points outside {dotfiles_dir}")
     elif home_file.exists():
@@ -80,7 +82,7 @@ def check_package_files(home: Path, dotfiles_dir: Path) -> Report:
         for source in sorted(package_dir.iterdir()):
             if source.name == ".DS_Store":
                 continue
-            check_stowed_file(home / source.name, dotfiles_dir, report)
+            check_stowed_file(home / source.name, source, dotfiles_dir, report)
     return report
 
 

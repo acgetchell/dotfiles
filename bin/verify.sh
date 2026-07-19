@@ -38,8 +38,14 @@ for tool in "${NON_BREW_TOOLS[@]}"; do
 done
 
 echo "==> Brewfile CLI tools"
-BUNDLE_FORMULAE="$(brew bundle list --formula --file="$DOTFILES_DIR/Brewfile" 2>/dev/null || true)"
-BUNDLE_CASKS="$(brew bundle list --cask --file="$DOTFILES_DIR/Brewfile" 2>/dev/null || true)"
+if ! BUNDLE_FORMULAE="$(HOMEBREW_NO_AUTO_UPDATE=1 brew bundle list --formula --file="$DOTFILES_DIR/Brewfile")"; then
+  BUNDLE_FORMULAE=""
+  fail "could not read formulae from $DOTFILES_DIR/Brewfile"
+fi
+if ! BUNDLE_CASKS="$(HOMEBREW_NO_AUTO_UPDATE=1 brew bundle list --cask --file="$DOTFILES_DIR/Brewfile")"; then
+  BUNDLE_CASKS=""
+  fail "could not read casks from $DOTFILES_DIR/Brewfile"
+fi
 
 # "Brewfile entry:binary" pairs. A pair is only checked when its entry is
 # still declared in the Brewfile, so removing an entry there never causes a
@@ -79,7 +85,15 @@ BREW_BIN_PAIRS=(
 for pair in "${BREW_BIN_PAIRS[@]}"; do
   entry="${pair%%:*}"
   bin="${pair##*:}"
-  if ! printf '%s\n%s\n' "$BUNDLE_FORMULAE" "$BUNDLE_CASKS" | grep -Fxq "$entry"; then
+  if grep -Fxq "$entry" <<< "$BUNDLE_FORMULAE"; then
+    kind="formula"
+  elif grep -Fxq "$entry" <<< "$BUNDLE_CASKS"; then
+    kind="cask"
+  else
+    continue
+  fi
+  if ! brew list "--$kind" "$entry" >/dev/null 2>&1; then
+    fail "$kind: $entry not installed"
     continue
   fi
   if command -v "$bin" >/dev/null 2>&1; then

@@ -94,6 +94,17 @@ def test_symlink_outside_repository_fails(tmp_path: Path) -> None:
     assert any("points outside" in failure for failure in failures)
 
 
+def test_symlink_to_wrong_repository_file_fails(tmp_path: Path) -> None:
+    """A home link must resolve to its matching package source."""
+    home, dotfiles = make_env(tmp_path)
+    (home / ".zshrc").unlink()
+    (home / ".zshrc").symlink_to(dotfiles / "git" / ".gitconfig")
+
+    failures = stow_verify.check_package_files(home, dotfiles).failures
+
+    assert any(".zshrc" in failure and "wrong repository file" in failure for failure in failures)
+
+
 def test_dangling_stowed_file_fails(tmp_path: Path) -> None:
     """A stow symlink whose repository file was removed is reported.
 

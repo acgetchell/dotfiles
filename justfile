@@ -56,6 +56,7 @@ brew-check: _ensure-brew
 [confirm("Uninstall Homebrew formulae and casks not declared in this repository's Brewfile, then run brew cleanup?")]
 brew-cleanup: _ensure-brew
     HOMEBREW_NO_AUTO_UPDATE=1 brew bundle cleanup --force --file="$PWD/Brewfile"
+    HOMEBREW_NO_AUTO_UPDATE=1 brew cleanup
 
 brew-cleanup-preview: _ensure-brew
     #!/usr/bin/env bash
