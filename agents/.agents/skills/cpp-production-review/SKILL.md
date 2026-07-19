@@ -1,11 +1,11 @@
 ---
 name: cpp-production-review
-description: "Review C++ source, headers, tests, and code-facing build configuration for production readiness. Use for C++23 modernization, correctness and undefined behavior, lifetime and ownership, API and invariant design, numerical robustness, concurrency, performance, portability, dependency migrations, deletion, and test quality. Route build-system and CI mechanics to project-tooling-review."
+description: "Review modern C++20/C++23 source, headers, tests, and code-facing build configuration for production readiness. Use for standalone broad reviews or final synthesis across language and build contracts, correctness, API/ABI design, performance, portability, dependency migrations, deletion, and test quality. Route focused ownership, invariants, exception safety, scientific correctness, concurrency, and tests to their specialists when orchestrated; route build-system and CI mechanics to project-tooling-review."
 ---
 
 # C++ Production Review
 
-Review C++ as production code whose correctness, portability, and maintenance life matter. Assume C++23 unless the repository declares another standard.
+Review C++ as production code whose correctness, portability, and maintenance life matter. Follow the repository's declared standard; assume C++23 only when it is not specified.
 
 Prioritize observable defects, undefined behavior, broken invariants, and release risks over stylistic churn. Prefer deletion and standard-library facilities when they reduce real complexity, but do not modernize code merely to demonstrate newer syntax.
 
@@ -14,6 +14,7 @@ Prioritize observable defects, undefined behavior, broken invariants, and releas
 - Read repository-local guidance before reviewing or editing.
 - Do not mutate git state unless the user explicitly requests it.
 - Honor a parent orchestrator's handed-off scope instead of silently narrowing it.
+- In orchestrated final-synthesis mode, consume prior specialist evidence and do not rerun completed ownership, invariant, exception, scientific, concurrency, or test passes. Focus on residual language, build, dependency, API/ABI, portability, performance, deletion, and integration risks.
 - Default to changed C++ files and the nearby code needed to understand their contracts.
 - Use whole-repository baseline mode only when the user explicitly requests a repository-wide, release-readiness, or baseline audit.
 - Keep diagnostic reviews read-only. When fixes are requested, make minimal fixes pass by pass and validate each pass before continuing.
@@ -34,7 +35,7 @@ When invoked by a repository orchestrator, provide table-ready evidence naming t
 
 ## Review Order
 
-Run applicable passes in this order. Complete the evidence and focused validation for one pass before moving to the next when edits are authorized.
+In standalone mode, run applicable passes in this order. In orchestrated final-synthesis mode, skip passes already completed by specialists and apply only the residual portions. Complete the evidence and focused validation for one pass before moving to the next when edits are authorized.
 
 ### 1. Language, Build, and Dependency Contract
 
@@ -42,9 +43,10 @@ Establish what the code actually compiles against.
 
 Check:
 
-- targets request C++23 consistently and do not depend on accidental global flags
-- the claimed minimum GCC, Clang, AppleClang, MSVC, libstdc++, and libc++ versions implement every used C++23 facility
+- targets request the declared C++ standard consistently and do not depend on accidental global flags
+- the claimed minimum GCC, Clang, AppleClang, MSVC, libstdc++, and libc++ versions implement every used facility from that standard
 - source files include what they use and do not receive dependencies through transitive includes
+- public header, template, inline-variable, explicit-instantiation, and module definitions obey ODR, linkage, visibility, and ABI contracts across translation units
 - preprocessor definitions, assertion settings, exception/RTTI settings, and release/debug differences do not silently alter correctness
 - dependency APIs used by the code match the versions the build resolves
 - compiler extensions are disabled unless deliberately required
@@ -70,7 +72,7 @@ Check:
 - every object, reference, pointer, iterator, view, span, and callable wrapper has a valid lifetime
 - container mutation cannot invalidate references or iterators that remain in use
 - ownership is explicit and resources use RAII
-- constructors establish complete valid states and destructors are correct for polymorphic bases
+- constructors establish complete valid states, and deletion through base interfaces is either supported by virtual destruction or deliberately prevented
 - values are initialized on every path
 - indexing, pointer arithmetic, shifts, signed overflow, narrowing, and size conversions are safe
 - casts preserve alignment, aliasing, constness, and dynamic-type requirements
@@ -125,6 +127,7 @@ Check:
 - return values make failure and absence explicit
 - exceptions, error values, and process termination have deliberate boundaries
 - templates and concepts constrain the intended operations and produce actionable diagnostics
+- inline definitions, explicit instantiations, module exports, symbol visibility, exception specifications, and layout exposure preserve intended ODR and ABI contracts
 - virtual interfaces have correct destruction, override, and ownership semantics
 - implementation details and storage layout are not exposed without need
 
@@ -162,9 +165,9 @@ Check:
 
 Do not trade correctness or clarity for speculative micro-optimization. Require measurement for non-obvious performance rewrites.
 
-### 8. C++23 Simplification and Deletion
+### 8. Modern C++ Simplification and Deletion
 
-Use C++23 to remove complexity where support is real across the declared compiler matrix.
+Use facilities available under the repository's declared C++20/C++23 contract to remove complexity where support is real across the compiler matrix.
 
 Consider standard facilities such as `std::span`, `std::string_view`, ranges, concepts, `std::expected`, `std::optional`, `std::variant`, `std::format`, `std::print`, `std::filesystem`, `std::chrono`, and scoped algorithms when they replace custom or third-party machinery cleanly.
 

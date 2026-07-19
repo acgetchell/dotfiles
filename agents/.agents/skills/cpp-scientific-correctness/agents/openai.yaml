@@ -1,0 +1,4 @@
+interface:
+  display_name: "C++ Scientific Correctness"
+  short_description: "Audit numerical and scientific C++ behavior"
+  default_prompt: "Use $cpp-scientific-correctness to audit changed C++ numerical, geometric, stochastic, and scientific behavior."
