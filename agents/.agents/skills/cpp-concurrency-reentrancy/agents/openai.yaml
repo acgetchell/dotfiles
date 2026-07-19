@@ -1,0 +1,4 @@
+interface:
+  display_name: "C++ Concurrency and Reentrancy"
+  short_description: "Audit threads, atomics, locks, and reentrancy"
+  default_prompt: "Use $cpp-concurrency-reentrancy to audit changed C++ concurrency, synchronization, task lifetime, and reentrancy."

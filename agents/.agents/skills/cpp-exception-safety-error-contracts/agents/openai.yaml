@@ -1,0 +1,4 @@
+interface:
+  display_name: "C++ Exception Safety and Error Contracts"
+  short_description: "Audit noexcept, failure guarantees, and error propagation"
+  default_prompt: "Use $cpp-exception-safety-error-contracts to review exception guarantees, noexcept correctness, error representations, rollback, and failure boundaries."

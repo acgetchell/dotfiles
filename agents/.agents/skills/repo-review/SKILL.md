@@ -1,6 +1,6 @@
 ---
 name: repo-review
-description: "Coordinate review-and-fix work across Rust, Python, project tooling, and documentation. Use for branch, PR, staged, release-readiness, repository-wide, or fix-all reviews spanning multiple surfaces, and route each surface to its focused orchestrator. Use a focused skill directly for single-language or single-surface reviews."
+description: "Coordinate read-only review or explicitly requested review-and-fix work across C++, Rust, Python, project tooling, and documentation. Use for branch, PR, staged, release-readiness, repository-wide, or fix-all reviews spanning multiple surfaces, and route each surface to its focused orchestrator. Use a focused skill directly for single-language or single-surface reviews."
 ---
 
 # repo-review
@@ -18,7 +18,7 @@ The intent is to replace the maintainer running the selected orchestrators manua
 - In release-readiness mode, expand the documentation handoff to the repository's complete tracked active documentation suite, including unchanged files; do not infer documentation completeness from the branch diff. Exclude `docs/archive/**` and equivalent designated archive trees unless explicitly requested.
 - If the request clearly targets one surface, use the focused orchestrator directly instead of this meta-skill.
 - When the user asks to fix issues, implement actionable findings as each selected orchestrator discovers them. Do not merely collect findings unless the fix is blocked or unsafe.
-- Keep this skill thin. Do not duplicate the detailed review rules from Rust, Python, or tooling skills; load those skills and follow them.
+- Keep this skill thin. Do not duplicate the detailed review rules from C++, Rust, Python, documentation, or tooling skills; load those skills and follow them.
 
 ## Review Trace
 
@@ -38,7 +38,7 @@ The final summary must include a Markdown table headed `Review Evidence` with th
 | Orchestrator | Status | Why selected or skipped | Scope handed off | Skills/references actually loaded | Validators |
 | --- | --- | --- | --- | --- | --- |
 
-Include one row for each of `project-tooling-review`, `rust-review-orchestrator`, `python-review-orchestrator`, and `docs-review-orchestrator`. Use `selected`, `skipped`, or `blocked` in the Status column. For selected orchestrators, do not leave the skills/references cell blank; name the loaded files, or write `none loaded` only with a reason.
+Include one row for each of `project-tooling-review`, `cpp-review-orchestrator`, `rust-review-orchestrator`, `python-review-orchestrator`, and `docs-review-orchestrator`. Use `selected`, `skipped`, or `blocked` in the Status column. For selected orchestrators, do not leave the skills/references cell blank; name the loaded files, or write `none loaded` only with a reason.
 
 ## Required Skill Loading
 
@@ -49,6 +49,7 @@ After establishing review scope:
 1. Read [`references/check-routing.md`](references/check-routing.md).
 2. Select the smallest set of orchestrators that covers the requested scope:
    - `project-tooling-review`
+   - `cpp-review-orchestrator`
    - `rust-review-orchestrator`
    - `python-review-orchestrator`
    - `docs-review-orchestrator`
@@ -59,27 +60,28 @@ After establishing review scope:
 7. Let the orchestrator run its own pass order, fix loop, and focused validation before moving to the next selected orchestrator.
 8. Record validators, changes, unresolved risks, and any cross-surface handoffs for the final summary.
 
-Do not flatten selected child orchestrators into a single review. The parent may coordinate scope and final synthesis, but Rust, Python, tooling, and documentation evidence must come from the applicable child orchestrator passes.
+Do not flatten selected child orchestrators into a single review. The parent may coordinate scope and final synthesis, but C++, Rust, Python, tooling, and documentation evidence must come from the applicable child orchestrator passes.
 
 ## Review Order
 
 Use this order unless the requested scope makes a different order clearly safer:
 
 1. Run `project-tooling-review` first when tool versions, `justfile`, workflows, or command docs changed enough to affect which validators should run, or when baseline inventory contains tooling surfaces.
-2. Run `rust-review-orchestrator` when Rust source, tests, examples, benches, Cargo metadata, Rust docs, or Rust-facing workflows changed or are present in baseline scope.
-3. Run `python-review-orchestrator` when Python source, notebooks, pytest fixtures, Python config, lockfiles, or Python-facing workflows changed or are present in baseline scope.
-4. Run `docs-review-orchestrator` after the source-owning passes whenever release-readiness mode is active, or when substantive repository documentation, generated-doc ownership, Rust API docs, release metadata, scientific claims, references, or publication material changed or are present in baseline scope.
-5. Revisit tooling only when language or documentation fixes require recipe, workflow, lockfile, or command-doc updates.
-6. Synthesize final validation across all surfaces, preferring the strongest focused validator already justified by the touched files.
+2. Run `cpp-review-orchestrator` when C++ source, C++-owned headers, modules, tests, examples, benchmarks, C++-targeting CMake metadata, C++ docs, or C++-facing workflows changed or are present in baseline scope. Include `.c` files only when build metadata proves they are compiled as C++.
+3. Run `rust-review-orchestrator` when Rust source, tests, examples, benches, Cargo metadata, Rust docs, or Rust-facing workflows changed or are present in baseline scope.
+4. Run `python-review-orchestrator` when Python source, notebooks, pytest fixtures, Python config, lockfiles, or Python-facing workflows changed or are present in baseline scope.
+5. Run `docs-review-orchestrator` after the source-owning passes whenever release-readiness mode is active, or when substantive repository documentation, generated-doc ownership, C++ or Rust API docs, release metadata, scientific claims, references, or publication material changed or are present in baseline scope.
+6. Revisit tooling only when language or documentation fixes require recipe, workflow, lockfile, or command-doc updates.
+7. Synthesize final validation across all surfaces, preferring the strongest focused validator already justified by the touched files.
 
 ## Cross-Surface Handling
 
 Treat build and validation files as shared ownership:
 
-- `Cargo.toml`, `Cargo.lock`, `pyproject.toml`, `uv.lock`, and toolchain files can require both language and tooling review.
-- `justfile` and `.github/workflows/**` belong to project tooling, but route to Rust or Python too when they change the language checks that run.
+- `CMakeLists.txt`, `cmake/**`, C++ dependency manifests, `Cargo.toml`, `Cargo.lock`, `pyproject.toml`, `uv.lock`, and toolchain files can require both language and tooling review.
+- `justfile` and `.github/workflows/**` belong to project tooling, but route to C++, Rust, or Python too when they change the language checks that run.
 - `README.md`, `AGENTS.md`, `CONTRIBUTING.md`, and `docs/**` belong to project tooling when they describe commands, CI, tool versions, or maintainer workflow. Route substantive documentation to `docs-review-orchestrator` for suite-level consistency, and route to language orchestrators when it documents public API, examples, notebooks, or behavior.
-- Active repository docs, generated-document boundaries, Rust API docs, scientific crate metadata, provenance, and publication boundaries belong to `docs-review-orchestrator`, which routes them to the generic reviewer and only the applicable specialist overlays.
+- Active repository docs, generated-document boundaries, C++ or Rust API docs, scientific metadata, provenance, and publication boundaries belong to `docs-review-orchestrator`, which routes them to the generic reviewer and only the applicable specialist overlays.
 - Generated files, fixtures, benchmarks, and support scripts should be reviewed by the language orchestrator that owns their behavior plus project tooling when command wiring changed.
 
 ## Final Summary

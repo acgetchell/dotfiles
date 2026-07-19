@@ -1,0 +1,4 @@
+interface:
+  display_name: "C++ Lifetime and Ownership Safety"
+  short_description: "Audit RAII, lifetime, ownership, and UB"
+  default_prompt: "Use $cpp-lifetime-ownership-safety to audit changed C++ code for RAII, lifetime, ownership, invalidation, and undefined behavior."

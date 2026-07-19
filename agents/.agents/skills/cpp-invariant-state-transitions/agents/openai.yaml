@@ -1,0 +1,4 @@
+interface:
+  display_name: "C++ Invariant State Audit"
+  short_description: "Audit invariants and failure-atomic mutations"
+  default_prompt: "Use $cpp-invariant-state-transitions to audit changed C++ state transitions, invariants, caches, and failure atomicity."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "C++ Review Orchestrator"
+  short_description: "Coordinate focused C++ review passes"
+  default_prompt: "Use $cpp-review-orchestrator to review changed C++ code pass by pass, apply fixes only when requested, and run focused validators."
