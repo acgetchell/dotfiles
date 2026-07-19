@@ -211,6 +211,19 @@ def test_dangling_home_link_elsewhere_is_ignored(tmp_path: Path) -> None:
     assert stow_verify.check_home_links(home, dotfiles).failures == []
 
 
+def test_main_reports_missing_home_without_traceback(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """An invalid --home path produces a normal failure report."""
+    _, dotfiles = make_env(tmp_path)
+    missing_home = tmp_path / "missing-home"
+
+    code = stow_verify.main(["--home", str(missing_home), "--dotfiles-dir", str(dotfiles)])
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert f"{missing_home} missing or is not a directory" in captured.out
+    assert "FAILURES detected" in captured.err
+
+
 def test_main_returns_zero_for_valid_layout(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """The CLI exits 0 and prints a success summary for a valid layout."""
     home, dotfiles = make_env(tmp_path)

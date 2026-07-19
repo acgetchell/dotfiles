@@ -90,7 +90,7 @@ The `just` stow recipes always pass both `-d "$PWD"` and `-t "$HOME"`. If runnin
 
 For new package-owned files such as Codex skills, create the file under the package, run `just stow-check <package>`, then run `just stow-apply <package>` when the dry run looks right. `stow-check` is the only simulation-mode recipe; `stow-apply` and `stow-apply-all` stow missing or new links, while `stow-restow` and `stow-restow-all` perform full unlink/link refreshes. Mutating recipes print the Stow link operations they perform. `just stow-all` remains as an alias for `just stow-apply-all`. Stow recipes do not stage, commit, or print source-control status.
 
-After applying or deleting packages, `just stow-verify` (backed by `scripts/stow_verify.py`) confirms every stowed link resolves to a file inside this repo and flags dangling links left behind by renamed or removed packages or skills. `bin/verify.sh` runs the same check.
+After applying or restowing packages, `just stow-verify` (backed by `scripts/stow_verify.py`) confirms every stowed link resolves to its expected file inside this repo and flags dangling links left behind by renamed or removed packages or skills. After `stow-delete`, missing-link failures are expected until the package is reapplied. `bin/verify.sh` runs the same check.
 
 ## Brewfile workflow
 `Brewfile` is intentionally foundational: core CLI tools, developer casks, and apps expected on every machine.

@@ -141,14 +141,32 @@ fi
 
 # Surface missing formula dependencies. Warn-only: some casks (e.g. mactex)
 # declare Homebrew deps they actually bundle themselves.
-MISSING_DEPS="$(brew missing 2>/dev/null || true)"
-if [[ -z "$MISSING_DEPS" ]]; then
-  pass "brew missing: none"
+BREW_MISSING_ERROR_FILE="$(mktemp)"
+trap 'rm -f "$BREW_MISSING_ERROR_FILE"' EXIT
+if MISSING_DEPS="$(brew missing 2>"$BREW_MISSING_ERROR_FILE")"; then
+  BREW_MISSING_STATUS=0
 else
+  BREW_MISSING_STATUS=$?
+fi
+BREW_MISSING_ERRORS="$(<"$BREW_MISSING_ERROR_FILE")"
+rm -f "$BREW_MISSING_ERROR_FILE"
+trap - EXIT
+
+if [[ -n "$BREW_MISSING_ERRORS" ]]; then
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    echo "  ! brew missing error: $line" >&2
+  done <<< "$BREW_MISSING_ERRORS"
+  fail "brew missing failed (status $BREW_MISSING_STATUS)"
+elif [[ "$BREW_MISSING_STATUS" -eq 0 && -z "$MISSING_DEPS" ]]; then
+  pass "brew missing: none"
+elif [[ -n "$MISSING_DEPS" ]]; then
   while IFS= read -r line; do
     [[ -n "$line" ]] || continue
     echo "  ! brew missing: $line"
   done <<< "$MISSING_DEPS"
+else
+  fail "brew missing failed without a diagnostic (status $BREW_MISSING_STATUS)"
 fi
 
 if [[ "$FAILED" -ne 0 ]]; then

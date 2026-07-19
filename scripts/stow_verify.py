@@ -134,6 +134,9 @@ def check_skills(home: Path, dotfiles_dir: Path) -> Report:
 def check_home_links(home: Path, dotfiles_dir: Path) -> Report:
     """Flag dangling top-level home symlinks that point into the repository."""
     report = Report()
+    if not home.is_dir():
+        report.fail(f"{home} missing or is not a directory")
+        return report
     stale = [entry for entry in sorted(home.iterdir()) if entry.is_symlink() and not entry.exists() and resolve_link(entry).is_relative_to(dotfiles_dir)]
     for link in stale:
         report.fail(f"dangling symlink: {link} -> {link.readlink()}")
