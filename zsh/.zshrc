@@ -100,6 +100,11 @@ elif [[ -x /usr/local/bin/brew ]]; then
   eval "$(/usr/local/bin/brew shellenv)"
 fi
 
+# Expose the keg-only rustup proxies and Cargo-installed command-line tools.
+if [[ -n "${HOMEBREW_PREFIX:-}" ]]; then
+  export PATH="$HOMEBREW_PREFIX/opt/rustup/bin:${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
+fi
+
 # Add Command Line Tools (system path; safe everywhere)
 export PATH="/Library/Developer/CommandLineTools/usr/bin:$PATH"
 
@@ -110,11 +115,6 @@ fi
 
 # ---- Brewfile location (used by `brew bundle` from any directory) ----
 export HOMEBREW_BUNDLE_FILE="$HOME/projects/dotfiles/Brewfile"
-
-# ---- LLVM via Homebrew (optional) ----
-if [[ -n "${HOMEBREW_PREFIX:-}" && -d "$HOMEBREW_PREFIX/opt/llvm/bin" ]]; then
-  export PATH="$HOMEBREW_PREFIX/opt/llvm/bin:$PATH"
-fi
 
 # ---- vcpkg (optional) ----
 if [[ -d "$HOME/projects/vcpkg" ]]; then

@@ -21,13 +21,15 @@ else
   fail "brew bundle check (run: brew bundle install --file=$DOTFILES_DIR/Brewfile)"
 fi
 
-echo "==> CLI tools"
-TOOLS=(
-  actionlint ansible az cargo docker dotnet gh git helm
-  just kubectl node op pwsh python3 rustc ssh stow tailscale
-  zizmor
+echo "==> CLI tools (not Homebrew-managed)"
+NON_BREW_TOOLS=(
+  cargo   # rustup toolchain
+  rustc   # rustup toolchain
+  just    # cargo-installed (bin/bootstrap.sh)
+  zizmor  # cargo-installed (bin/bootstrap.sh)
+  ssh     # macOS system binary
 )
-for tool in "${TOOLS[@]}"; do
+for tool in "${NON_BREW_TOOLS[@]}"; do
   if command -v "$tool" >/dev/null 2>&1; then
     pass "$tool"
   else
@@ -35,55 +37,99 @@ for tool in "${TOOLS[@]}"; do
   fi
 done
 
-echo "==> Casks"
-CASKS=(
-  1password 1password-cli gitkraken mactex notion
-  obsidian slack visual-studio-code warp zed zotero
+echo "==> Brewfile CLI tools"
+if ! BUNDLE_FORMULAE="$(HOMEBREW_NO_AUTO_UPDATE=1 brew bundle list --formula --file="$DOTFILES_DIR/Brewfile")"; then
+  BUNDLE_FORMULAE=""
+  fail "could not read formulae from $DOTFILES_DIR/Brewfile"
+fi
+if ! BUNDLE_CASKS="$(HOMEBREW_NO_AUTO_UPDATE=1 brew bundle list --cask --file="$DOTFILES_DIR/Brewfile")"; then
+  BUNDLE_CASKS=""
+  fail "could not read casks from $DOTFILES_DIR/Brewfile"
+fi
+
+# "Brewfile entry:binary" pairs. A pair is only checked when its entry is
+# still declared in the Brewfile, so removing an entry there never causes a
+# false failure here.
+BREW_BIN_PAIRS=(
+  "1password-cli:op"
+  "actionlint:actionlint"
+  "ansible:ansible"
+  "azure-cli:az"
+  "docker-desktop:docker"
+  "dotnet:dotnet"
+  "gh:gh"
+  "git:git"
+  "git-lfs:git-lfs"
+  "gitleaks:gitleaks"
+  "gnupg:gpg"
+  "gnuplot:gnuplot"
+  "helm:helm"
+  "jq:jq"
+  "kubernetes-cli:kubectl"
+  "markdownlint-cli:markdownlint"
+  "node:node"
+  "pandoc:pandoc"
+  "pkgx:pkgx"
+  "powershell:pwsh"
+  "pylint:pylint"
+  "python@3.14:python3"
+  "ripgrep:rg"
+  "rustup:rustup"
+  "shfmt:shfmt"
+  "stow:stow"
+  "tailscale-app:tailscale"
+  "uv:uv"
+  "visual-studio-code:code"
+  "zola:zola"
 )
-for c in "${CASKS[@]}"; do
+for pair in "${BREW_BIN_PAIRS[@]}"; do
+  entry="${pair%%:*}"
+  bin="${pair##*:}"
+  if grep -Fxq "$entry" <<< "$BUNDLE_FORMULAE"; then
+    kind="formula"
+  elif grep -Fxq "$entry" <<< "$BUNDLE_CASKS"; then
+    kind="cask"
+  else
+    continue
+  fi
+  if ! brew list "--$kind" "$entry" >/dev/null 2>&1; then
+    fail "$kind: $entry not installed"
+    continue
+  fi
+  if command -v "$bin" >/dev/null 2>&1; then
+    pass "$bin ($entry)"
+  else
+    fail "$bin ($entry) not on PATH"
+  fi
+done
+
+echo "==> Casks"
+if [[ -z "$BUNDLE_CASKS" ]]; then
+  fail "could not read casks from $DOTFILES_DIR/Brewfile"
+fi
+while IFS= read -r c; do
+  [[ -n "$c" ]] || continue
+  # ChatGPT desktop is Apple Silicon + macOS 14+ only
+  if [[ "$c" == "chatgpt" ]] && ! { [[ "$(uname -m)" == "arm64" ]] && [[ "$(sw_vers -productVersion | cut -d. -f1)" -ge 14 ]]; }; then
+    echo "  - skipping chatgpt (requires Apple Silicon + macOS 14+)"
+    continue
+  fi
   if brew list --cask "$c" >/dev/null 2>&1; then
     pass "cask: $c"
   else
     fail "cask: $c"
   fi
-done
-
-# ChatGPT desktop is Apple Silicon + macOS 14+ only
-if [[ "$(uname -m)" == "arm64" ]] && [[ "$(sw_vers -productVersion | cut -d. -f1)" -ge 14 ]]; then
-  if brew list --cask chatgpt >/dev/null 2>&1; then
-    pass "cask: chatgpt"
-  else
-    fail "cask: chatgpt"
-  fi
-else
-  echo "  - skipping chatgpt (requires Apple Silicon + macOS 14+)"
-fi
+done <<< "$BUNDLE_CASKS"
 
 echo "==> Stow symlinks"
-for f in "$HOME/.zshrc" "$HOME/.gitconfig"; do
-  if [[ -L "$f" ]]; then
-    target="$(readlink "$f")"
-    case "$target" in
-      /*) resolved="$target" ;;
-      *) resolved="$HOME/$target" ;;
-    esac
-    resolved="$(cd "$(dirname "$resolved")" && pwd -P)/$(basename "$resolved")"
-    if [[ "$resolved" == "$DOTFILES_DIR"/* ]]; then
-      pass "$f -> $target"
-    else
-      fail "$f symlink points outside $DOTFILES_DIR ($target)"
-    fi
-  elif [[ -e "$f" ]]; then
-    fail "$f exists but is not a stow symlink into $DOTFILES_DIR"
+if command -v uv >/dev/null 2>&1; then
+  if (cd "$DOTFILES_DIR" && DOTFILES_DIR="$DOTFILES_DIR" uv run python scripts/stow_verify.py); then
+    pass "scripts/stow_verify.py"
   else
-    fail "$f missing"
+    fail "stow symlink verification failed (see above)"
   fi
-done
-
-if [[ -d "$HOME/.agents/skills" ]]; then
-  pass "$HOME/.agents/skills present"
 else
-  fail "$HOME/.agents/skills missing"
+  fail "uv not on PATH; cannot run scripts/stow_verify.py"
 fi
 
 echo "==> Homebrew health"
@@ -91,6 +137,36 @@ if brew doctor >/dev/null 2>&1; then
   pass "brew doctor"
 else
   echo "  ! brew doctor reported warnings (review manually)"
+fi
+
+# Surface missing formula dependencies. Warn-only: some casks (e.g. mactex)
+# declare Homebrew deps they actually bundle themselves.
+BREW_MISSING_ERROR_FILE="$(mktemp)"
+trap 'rm -f "$BREW_MISSING_ERROR_FILE"' EXIT
+if MISSING_DEPS="$(brew missing 2>"$BREW_MISSING_ERROR_FILE")"; then
+  BREW_MISSING_STATUS=0
+else
+  BREW_MISSING_STATUS=$?
+fi
+BREW_MISSING_ERRORS="$(<"$BREW_MISSING_ERROR_FILE")"
+rm -f "$BREW_MISSING_ERROR_FILE"
+trap - EXIT
+
+if [[ -n "$BREW_MISSING_ERRORS" ]]; then
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    echo "  ! brew missing error: $line" >&2
+  done <<< "$BREW_MISSING_ERRORS"
+  fail "brew missing failed (status $BREW_MISSING_STATUS)"
+elif [[ "$BREW_MISSING_STATUS" -eq 0 && -z "$MISSING_DEPS" ]]; then
+  pass "brew missing: none"
+elif [[ -n "$MISSING_DEPS" ]]; then
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    echo "  ! brew missing: $line"
+  done <<< "$MISSING_DEPS"
+else
+  fail "brew missing failed without a diagnostic (status $BREW_MISSING_STATUS)"
 fi
 
 if [[ "$FAILED" -ne 0 ]]; then

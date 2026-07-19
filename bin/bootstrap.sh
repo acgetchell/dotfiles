@@ -6,7 +6,7 @@
 set -euo pipefail
 
 DOTFILES_DIR="${DOTFILES_DIR:-$HOME/projects/dotfiles}"
-JUST_VERSION="${JUST_VERSION:-1.55.1}"
+JUST_VERSION="${JUST_VERSION:-1.56.0}"
 ZIZMOR_VERSION="${ZIZMOR_VERSION:-1.26.1}"
 
 if [[ ! -d "$DOTFILES_DIR" ]]; then
@@ -30,6 +30,10 @@ fi
 # 2. Brewfile
 echo "==> Installing Brewfile bundle"
 brew bundle install --file="$DOTFILES_DIR/Brewfile"
+
+# rustup is keg-only, so expose its Cargo proxy to this non-interactive shell.
+RUSTUP_PREFIX="$(brew --prefix rustup)"
+export PATH="$RUSTUP_PREFIX/bin:${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
 
 # 3. Stow packages
 PACKAGES=(git zsh agents)

@@ -14,6 +14,11 @@ _ensure-actionlint:
     command -v uv >/dev/null || { echo "'uv' not found. See https://github.com/astral-sh/uv"; exit 1; }
     uv run actionlint -version >/dev/null
 
+_ensure-brew:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v brew >/dev/null || { echo "'brew' not found. See https://brew.sh"; exit 1; }
+
 _ensure-uv:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -44,6 +49,28 @@ action-lint: _ensure-actionlint
     else
         echo "No workflow files found to lint."
     fi
+
+brew-check: _ensure-brew
+    HOMEBREW_NO_AUTO_UPDATE=1 brew bundle check --file="$PWD/Brewfile"
+
+[confirm("Uninstall Homebrew formulae and casks not declared in this repository's Brewfile, then run brew cleanup?")]
+brew-cleanup: _ensure-brew
+    HOMEBREW_NO_AUTO_UPDATE=1 brew bundle cleanup --force --file="$PWD/Brewfile"
+    HOMEBREW_NO_AUTO_UPDATE=1 brew cleanup
+
+brew-cleanup-preview: _ensure-brew
+    #!/usr/bin/env bash
+    set -euo pipefail
+    status=0
+    output="$(HOMEBREW_NO_AUTO_UPDATE=1 brew bundle cleanup --file="$PWD/Brewfile" 2>&1)" || status=$?
+    printf '%s\n' "$output"
+    if (( status == 0 )); then
+        exit 0
+    fi
+    if (( status == 1 )) && [[ "$output" == *'Run `brew bundle cleanup --force` to make these changes.'* ]]; then
+        exit 0
+    fi
+    exit "$status"
 
 check: shell-check git-config-check justfile-fmt-check toml-check yaml-check github-actions-check check-skills semgrep semgrep-test python-ci
     @echo "Checks complete!"
@@ -81,6 +108,10 @@ justfile-fmt:
 
 justfile-fmt-check:
     just --fmt --check
+
+[confirm("Apply captured macOS defaults (Dock, Finder, keyboard, trackpad) and restart Dock/Finder?")]
+macos-defaults:
+    bin/macos-defaults.sh
 
 python-check: _ensure-uv
     uv run ruff format --check {{ python_paths }}
@@ -131,7 +162,7 @@ setup:
     just python-sync
 
 shell-check:
-    bash -n bin/bootstrap.sh bin/verify.sh
+    bash -n bin/bootstrap.sh bin/macos-defaults.sh bin/verify.sh
 
 skill-check skill: _ensure-uv
     uv run python scripts/skill_validate.py "{{ skill }}"
@@ -193,6 +224,9 @@ stow-restow-all:
     for package in git zsh agents; do
         just stow-restow "$package"
     done
+
+stow-verify: _ensure-uv
+    DOTFILES_DIR="$PWD" uv run python scripts/stow_verify.py
 
 test-python: _ensure-uv
     uv run pytest

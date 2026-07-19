@@ -122,6 +122,7 @@ known-first-party = [
   "notebook_check",
   "semgrep_fixture_config",
   "skill_validate",
+  "stow_verify",
   "validate_reference_dois",
 ]
 force-single-line = false

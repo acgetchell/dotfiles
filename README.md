@@ -14,9 +14,11 @@ dotfiles/
 ├── semgrep.yaml            # repository-owned guardrail rules
 ├── bin/
 │   ├── bootstrap.sh        # fresh-machine provisioner
+│   ├── macos-defaults.sh   # captured macOS preferences (defaults write)
 │   └── verify.sh           # health check / sanity check
 ├── scripts/
-│   └── semgrep_fixture_config.py
+│   ├── semgrep_fixture_config.py
+│   └── stow_verify.py      # stow symlink integrity checker
 ├── tests/
 │   └── semgrep/            # Semgrep rule fixtures
 ├── git/
@@ -77,6 +79,9 @@ just stow-delete zsh
 
 # Adopt an existing live file into the repo (overwrites the package copy).
 just stow-adopt zsh
+
+# Verify stowed links resolve into this repo; flag dangling or missing links.
+just stow-verify
 ```
 
 Use `--adopt` only when intentionally moving an existing `$HOME` file into dotfiles. Always inspect the resulting package file changes before committing.
@@ -85,21 +90,44 @@ The `just` stow recipes always pass both `-d "$PWD"` and `-t "$HOME"`. If runnin
 
 For new package-owned files such as Codex skills, create the file under the package, run `just stow-check <package>`, then run `just stow-apply <package>` when the dry run looks right. `stow-check` is the only simulation-mode recipe; `stow-apply` and `stow-apply-all` stow missing or new links, while `stow-restow` and `stow-restow-all` perform full unlink/link refreshes. Mutating recipes print the Stow link operations they perform. `just stow-all` remains as an alias for `just stow-apply-all`. Stow recipes do not stage, commit, or print source-control status.
 
+After applying or restowing packages, `just stow-verify` (backed by `scripts/stow_verify.py`) confirms every stowed link resolves to its expected file inside this repo and flags dangling links left behind by renamed or removed packages or skills. After `stow-delete`, missing-link failures are expected until the package is reapplied. `bin/verify.sh` runs the same check.
+
 ## Brewfile workflow
 `Brewfile` is intentionally foundational: core CLI tools, developer casks, and apps expected on every machine.
+Homebrew owns `pkgx`, `rustup`, and `uv`; Cargo is the sole host installation owner for the directly invokable
+`just` binary. Repository-scoped build tools, formatters, linters, and occasional maintenance tools should be
+supplied ephemerally through pkgx or the repository's language-specific environment rather than added here.
 
 ```sh
 # Install missing formulae/casks
 brew bundle install --file=~/projects/dotfiles/Brewfile
 
 # Verify every Brewfile dependency is installed
-brew bundle check --file=~/projects/dotfiles/Brewfile
+just brew-check
+
+# Preview formulae and casks not owned by the Brewfile
+just brew-cleanup-preview
+
+# Uninstall the previewed formulae/casks and perform Homebrew cache cleanup
+just brew-cleanup
 
 # Snapshot the current machine for review, without committing it
 brew bundle dump --file=~/projects/dotfiles/Brewfile.local --force --describe
 ```
 
 `Brewfile.local` is gitignored. Use it to audit one-off apps before deciding whether they belong in the committed foundational `Brewfile`.
+`just brew-cleanup-preview` never passes Homebrew's destructive `--force` flag. Homebrew returns status 1 when the preview finds cleanup candidates; the recipe treats that documented result as a successful preview while preserving actual errors. `just brew-cleanup` asks for confirmation before passing `--force` and applying that cleanup.
+
+`bin/verify.sh` derives its cask and CLI checks from the Brewfile, so removing an entry there never causes a stale verify failure. It also surfaces `brew missing` output as warnings; some casks (e.g. `mactex`) declare Homebrew dependencies they actually bundle themselves, so those lines are informational rather than fatal.
+
+## macOS defaults
+`bin/macos-defaults.sh` captures this machine's explicitly set system preferences (auto light/dark appearance, Dock, Finder, keyboard text input, trackpad) as idempotent `defaults write` commands.
+
+```sh
+just macos-defaults
+```
+
+The recipe asks for confirmation, then restarts Dock and Finder; appearance changes may need a logout/login. It is intentionally not part of `bootstrap.sh` — run it once per machine when the captured preferences are wanted.
 
 ## Sanity checks
 Run the main check:
@@ -118,7 +146,10 @@ Manual checks that should pass:
 # bootstrap health check
 ~/projects/dotfiles/bin/verify.sh
 
-# stow symlinks point into this repo
+# stow symlinks resolve into this repo; dangling links are flagged
+just stow-verify
+
+# inspect individual links manually if needed
 ls -la ~/.zshrc ~/.gitconfig
 readlink ~/.zshrc
 readlink ~/.gitconfig
@@ -131,7 +162,7 @@ git config --global --get user.email
 git config --global --includes --get coderabbit.machineId
 
 # brew is healthy
-brew bundle check --file=~/projects/dotfiles/Brewfile
+just brew-check
 brew doctor
 
 # shell config parses
