@@ -146,7 +146,9 @@ Keep the main README Quickstart aligned with the crate's primary audience.
 
 ## Validation
 
-After changing CLI packaging or parse boundaries, run focused checks before full CI:
+After changing CLI packaging or parse boundaries, choose the smallest
+non-overlapping set of checks that covers the affected contracts. The following
+are candidate checks, not a mandatory sequence:
 
 ```bash
 cargo check --no-default-features
@@ -156,3 +158,14 @@ cargo run --features cli --bin <name> -- --help
 ```
 
 Also smoke-test at least one successful command and one rejected invalid argument path. For notebook-backed CLIs, execute or lint the notebook through the repository's notebook validator.
+
+Record the source/build/feature state and behavior covered by each command. Do
+not run focused tests and then a full-CI recipe that merely reruns them. If full
+CI is independently required, use it as the single gate or run only its
+previously uncovered checks. Rerun earlier evidence only after a relevant edit
+or configuration change invalidates it.
+
+Decide whether such an indivisible policy gate is required before the first
+test. If that requirement is discovered late and the gate cannot exclude
+already-passing tests, report the command-surface conflict to
+`project-tooling-review` instead of silently replaying or double-counting them.

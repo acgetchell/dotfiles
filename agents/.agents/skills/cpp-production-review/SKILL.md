@@ -1,245 +1,103 @@
 ---
 name: cpp-production-review
-description: "Review modern C++20/C++23 source, headers, tests, and code-facing build configuration for production readiness. Use for standalone broad reviews or final synthesis across language and build contracts, correctness, API/ABI design, performance, portability, dependency migrations, deletion, and test quality. Route focused ownership, invariants, exception safety, scientific correctness, concurrency, and tests to their specialists when orchestrated; route build-system and CI mechanics to project-tooling-review."
+description: "Review modern C++23 for production readiness as either a directly requested standalone broad or release-readiness audit, or final synthesis after focused C++ reviews. In standalone mode, cover cross-cutting production risks. In orchestrated mode, reconcile prior evidence and assess only residual dependency, performance, simplification, deletion, validation, and integration risk without repeating specialist passes."
 ---
 
 # C++ Production Review
 
-Review C++ as production code whose correctness, portability, and maintenance life matter. Follow the repository's declared standard; assume C++23 only when it is not specified.
+Review C++ as production code whose correctness, portability, and maintenance life matter. Follow the repository's declared standard. When none is declared, use C++23 as the working design baseline, report the missing build contract, and inspect what each target requests before relying on C++23 support. Treat C++26 as opt-in until the repository or user explicitly chooses it and the supported compiler and standard-library matrix implements the required facilities.
 
-Prioritize observable defects, undefined behavior, broken invariants, and release risks over stylistic churn. Prefer deletion and standard-library facilities when they reduce real complexity, but do not modernize code merely to demonstrate newer syntax.
+Prioritize observable defects, undefined behavior, broken invariants, and release risks over stylistic churn. Prefer deletion and standard-library facilities only when they reduce real complexity under the supported toolchain contract.
+
+## Select the Mode
+
+### Orchestrated final synthesis
+
+Use this mode when a parent orchestrator invokes the skill after focused review groups.
+
+- Consume the prior groups' scope, evidence, findings, fixes, validators, and explicit skips.
+- Do not load the standalone checklist.
+- Do not rerun completed build-portability, ownership, invariant, parsing, exception, API, functional, scientific, concurrency, or test analysis.
+- Revisit a specialist concern only when later edits invalidate its evidence or the handoff exposes an unresolved cross-group contradiction.
+- Focus on residual dependency, performance, simplification, deletion, validation, and integration risks, then reconcile the release verdict.
+
+### Standalone broad review
+
+Use this mode only when the skill is invoked directly for a broad C++ review, release-readiness review, or whole-repository baseline. Read [references/standalone-review.md](references/standalone-review.md) completely before applying the common residual workflow below.
 
 ## Ground Rules
 
 - Read repository-local guidance before reviewing or editing.
 - Do not mutate git state unless the user explicitly requests it.
-- Honor a parent orchestrator's handed-off scope instead of silently narrowing it.
-- In orchestrated final-synthesis mode, consume prior specialist evidence and do not rerun completed ownership, invariant, exception, scientific, concurrency, or test passes. Focus on residual language, build, dependency, API/ABI, portability, performance, deletion, and integration risks.
-- Default to changed C++ files and the nearby code needed to understand their contracts.
-- Use whole-repository baseline mode only when the user explicitly requests a repository-wide, release-readiness, or baseline audit.
-- Keep diagnostic reviews read-only. When fixes are requested, make minimal fixes pass by pass and validate each pass before continuing.
-- Verify current compiler, standard-library, dependency, and tool behavior from authoritative sources when currentness matters. Do not rely on memory for version claims.
-- Treat passing compilation as necessary but insufficient evidence. Tests, sanitizers, static analysis, and invariant reasoning find different classes of defects.
+- Honor a parent orchestrator's handed-off scope.
+- Default to changed C++ files and nearby code needed to understand their contracts.
+- Use whole-repository baseline mode only when explicitly requested.
+- Keep diagnostic reviews read-only. When fixes are requested, make the smallest safe corrections and validate the affected contract.
+- Verify current compiler, standard-library, dependency, and tool behavior from authoritative sources when version sensitivity matters.
+- Treat compilation, tests, sanitizers, static analysis, and reasoning as complementary evidence.
 
-## Scope and Trace
+## Scope and Evidence
 
-At the start, record:
+Record:
 
-- scope mode and the source, header, and test files in scope
+- scope mode and files or targets in scope
 - declared C++ standard and supported compiler/standard-library combinations
-- build configurations and validators available locally and in CI
+- affected build configurations and available validators
 - dependency upgrades or removals under consideration
+- prior specialist evidence in orchestrated mode
 - untracked or user-owned work that must remain untouched
 
-When invoked by a repository orchestrator, provide table-ready evidence naming the files inspected, pass groups applied, findings or explicit no-finding results, fixes, and validators.
+When invoked by an orchestrator, provide table-ready evidence naming the files inspected, residual concerns applied, findings or an explicit no-finding result, fixes, and validators.
 
-## Review Order
+## Residual Workflow
 
-In standalone mode, run applicable passes in this order. In orchestrated final-synthesis mode, skip passes already completed by specialists and apply only the residual portions. Complete the evidence and focused validation for one pass before moving to the next when edits are authorized.
+### 1. Reconcile dependencies and integration
 
-### 1. Language, Build, and Dependency Contract
+Check that dependency APIs match resolved versions, public and private dependency exposure is intentional, migrations account for semantic as well as source changes, and removals eliminate transitive assumptions. Route registry, lockfile, workflow, and command mechanics to `project-tooling-review`.
 
-Establish what the code actually compiles against.
+For an upgrade or removal:
 
-Check:
-
-- targets request the declared C++ standard consistently and do not depend on accidental global flags
-- the claimed minimum GCC, Clang, AppleClang, MSVC, libstdc++, and libc++ versions implement every used facility from that standard
-- source files include what they use and do not receive dependencies through transitive includes
-- public header, template, inline-variable, explicit-instantiation, and module definitions obey ODR, linkage, visibility, and ABI contracts across translation units
-- preprocessor definitions, assertion settings, exception/RTTI settings, and release/debug differences do not silently alter correctness
-- dependency APIs used by the code match the versions the build resolves
-- compiler extensions are disabled unless deliberately required
-
-For dependency upgrades:
-
-1. Inventory every include and symbol used from each dependency.
+1. Inventory affected includes, symbols, targets, and public exposure.
 2. Compare declared dependencies with actual target usage.
-3. Read the upstream release notes, migration guide, and current API documentation.
-4. Separate source migration, semantic behavior changes, and build-system changes.
-5. Upgrade one dependency boundary at a time when practical.
-6. Compile and test after each boundary change.
-7. Remove a dependency only after all uses and transitive assumptions are gone.
+3. Read authoritative release notes, migration guidance, and API documentation.
+4. Separate source migration, behavior change, build impact, and consumer impact.
+5. Validate one dependency boundary at a time when practical.
 
-Flag unpinned or externally hidden dependency resolution as a reproducibility risk, but leave registry and lockfile mechanics to project tooling.
+### 2. Review performance and allocation
 
-### 2. Correctness, Lifetime, and Undefined Behavior
+Check complexity, hot-path allocation and synchronization, accidental copies, data layout, repeated lookup or computation, and benchmark validity. Require measurement for non-obvious rewrites. Do not trade correctness or clarity for speculative micro-optimization.
 
-Treat undefined behavior and lifetime errors as release blockers.
+### 3. Simplify or delete safely
 
-Check:
+Identify duplicate helpers and tests, unused declarations or dependencies, unreachable or unbuilt sources, stale compatibility branches, committed debug artifacts, and custom machinery replaced cleanly by supported C++23 facilities.
 
-- every object, reference, pointer, iterator, view, span, and callable wrapper has a valid lifetime
-- container mutation cannot invalidate references or iterators that remain in use
-- ownership is explicit and resources use RAII
-- constructors establish complete valid states, and deletion through base interfaces is either supported by virtual destruction or deliberately prevented
-- values are initialized on every path
-- indexing, pointer arithmetic, shifts, signed overflow, narrowing, and size conversions are safe
-- casts preserve alignment, aliasing, constness, and dynamic-type requirements
-- lambdas do not outlive captured references
-- exception paths, early returns, and allocation failures cannot leak resources or leave partial mutation
-- C APIs, varargs, formatting, and raw memory operations use correct types and bounds
-- assertions do not replace validation for reachable external input
+Before replacement or deletion, verify supported compiler/library availability, semantic and performance differences, downstream use, and whether the existing dependency supplies behavior not covered by the replacement. Prefer a proved deletion over a parallel compatibility path.
 
-Require a local safety argument for unavoidable raw ownership, placement construction, union tricks, FFI, or other code whose correctness is not apparent from the type system.
+### 4. Reconcile validation and release risk
 
-### 3. Invariants and State Transitions
+Map each material behavior or configuration change to evidence. In orchestrated mode, reuse valid specialist results and add only validators required by residual or cross-group risk. Do not claim platform support from configuration alone or turn unavailable matrix cells into inferred success.
 
-Check:
-
-- domain invariants are stated near the owning type and enforced at construction or mutation boundaries
-- invalid states cannot be created by ordinary public API use
-- coordinated fields update atomically from the caller's perspective
-- failed operations preserve the prior valid state or document a deliberate destructive contract
-- cached, derived, adjacency, orientation, indexing, topology, and bookkeeping state cannot drift from canonical storage
-- sentinel values and magic integers are replaced by types or explicit optional state where that improves correctness
-
-Trace mutation-heavy operations through complete success and failure paths. For graph, mesh, topology, or simulation code, review operation sequences rather than isolated calls.
-
-### 4. Numerical and Scientific Robustness
-
-Treat numerical behavior as correctness, not polish.
-
-Check:
-
-- units, dimensions, sign conventions, orientation, and boundary conditions are explicit and consistent
-- integer counts and combinatorial expressions cannot overflow at supported problem sizes
-- floating-point equality is used only when exact equality is intended
-- tolerances are scale-aware and justified
-- non-finite values, cancellation, underflow, overflow, and near-degenerate inputs are handled
-- random-number engines and distributions have explicit ownership, seeding, reproducibility, and concurrency semantics
-- parallel or reordered evaluation does not invalidate reproducibility claims
-- tests use independent expected results where feasible rather than reimplementing the same algorithm
-
-Do not endorse scientific claims solely because code compiles or regression snapshots remain unchanged.
-
-### 5. API and Type Design
-
-Review public and cross-module interfaces as long-lived contracts.
-
-Check:
-
-- public surface area is minimal and cohesive
-- types encode important invariants and units
-- ownership and nullability are visible in signatures
-- `const`, value categories, forwarding, and move behavior match the contract
-- parameters avoid unnecessary copies without introducing dangling views
-- return values make failure and absence explicit
-- exceptions, error values, and process termination have deliberate boundaries
-- templates and concepts constrain the intended operations and produce actionable diagnostics
-- inline definitions, explicit instantiations, module exports, symbol visibility, exception specifications, and layout exposure preserve intended ODR and ABI contracts
-- virtual interfaces have correct destruction, override, and ownership semantics
-- implementation details and storage layout are not exposed without need
-
-Prefer simple value types and ordinary functions over elaborate abstraction. Do not force fluent, generic, or metaprogrammed designs where they obscure invariants.
-
-### 6. Concurrency and Reentrancy
-
-Apply when threads, task systems, parallel algorithms, global state, caches, or shared random-number generators are present.
-
-Check:
-
-- data-race freedom and happens-before relationships are demonstrable
-- mutex scope and lock ordering avoid deadlocks and excessive contention
-- atomics use the weakest correct ordering with a written invariant
-- task lifetimes cannot outlive referenced state
-- cancellation and exceptions cannot strand partial work
-- logging, RNGs, caches, and singleton state are thread-safe or explicitly thread-confined
-- parallelism preserves required ordering and determinism
-
-Do not recommend parallelization before the sequential invariant and measurement baseline are sound.
-
-### 7. Performance and Allocation
-
-Make performance findings concrete.
-
-Check:
-
-- time and space complexity match expected workloads
-- hot loops avoid accidental allocation, formatting, synchronization, virtual dispatch, and repeated lookup
-- copies and moves of large structures are intentional
-- containers and data layout fit dominant access patterns
-- capacities are reserved when sizes are predictable
-- views such as `std::span` or ranges improve traversal without creating lifetime hazards
-- benchmarks isolate the operation and prevent optimization artifacts
-
-Do not trade correctness or clarity for speculative micro-optimization. Require measurement for non-obvious performance rewrites.
-
-### 8. Modern C++ Simplification and Deletion
-
-Use facilities available under the repository's declared C++20/C++23 contract to remove complexity where support is real across the compiler matrix.
-
-Consider standard facilities such as `std::span`, `std::string_view`, ranges, concepts, `std::expected`, `std::optional`, `std::variant`, `std::format`, `std::print`, `std::filesystem`, `std::chrono`, and scoped algorithms when they replace custom or third-party machinery cleanly.
-
-Check before replacing:
-
-- compiler and standard-library availability on every supported platform
-- semantic differences, especially allocation, ownership, formatting, locale, time-zone, and error behavior
-- performance and binary-size impact
-- whether the existing dependency supplies functionality not covered by C++23
-
-Identify and classify:
-
-- unreachable or unbuilt source files
-- commented-out implementations and stale feature branches embedded in code
-- duplicate executables, wrappers, helpers, and tests
-- declarations or dependencies with no actual use
-- compatibility workarounds for unsupported compiler versions
-- debug output or generated artifacts accidentally committed
-
-Prefer deletion when a surface is unsupported, untested, and superseded. Preserve historically or scientifically important artifacts in documentation or release notes rather than keeping dead production paths.
-
-### 9. Tests and Diagnostics
-
-Check:
-
-- tests assert behavior and invariants rather than merely execute code
-- negative tests verify exit status or structured errors, not only matching output text
-- deterministic unit tests cover empty, boundary, invalid, degenerate, and large inputs
-- randomized tests record seeds and validate invariants after operation sequences
-- regression tests exist for fixed defects
-- concurrency tests do not depend on timing alone
-- release and debug configurations both receive meaningful coverage
-- warnings, sanitizer reports, and static-analysis findings fail validation rather than being marked successful
-- logging does not hide errors, leak sensitive paths/data, or dominate hot loops
-
-Use property, fuzz, or model-based testing for parsers, topology mutations, state machines, and serialization when their risk justifies it.
-
-## Validation
-
-Choose the strongest focused validators the repository already supports. For a release baseline, prefer:
-
-1. clean configure and build with the primary supported compiler
-2. complete tests with failures propagated
-3. a second supported compiler or platform configuration
-4. warnings-as-errors for project code where dependencies are isolated as system headers
-5. AddressSanitizer plus UndefinedBehaviorSanitizer
-6. ThreadSanitizer for concurrent code
-7. MemorySanitizer or Valgrind where practical
-8. clang-tidy, cppcheck, or the repository's static-analysis contract
-9. release-mode smoke tests of shipped executables
-
-Record commands, compiler and dependency versions, pass/fail status, and any validator intentionally not run. Do not claim platform support from a configuration file alone.
+Record exact commands, versions when relevant, results, unavailable validators, and why any expected validation was skipped. If a late fix affects an earlier contract, return it to the owning specialist and refresh that evidence before final classification.
 
 ## Finding Severity
 
-- **P0 — Release blocker:** build failure, undefined behavior, data race, memory/resource safety defect, invariant corruption, scientifically invalid result, or tests that cannot detect failure.
-- **P1 — Must fix for production:** reachable wrong behavior, non-reproducible dependency/build contract, unsafe error handling, serious portability failure, or untested critical path.
+- **P0 — Release blocker:** build failure, undefined behavior, data race, memory or resource safety defect, invariant corruption, scientifically invalid result, or tests unable to detect failure.
+- **P1 — Must fix for production:** reachable wrong behavior, non-reproducible dependency or build contract, unsafe error handling, serious supported-platform failure, or untested critical path.
 - **P2 — High-value improvement:** meaningful API, maintainability, performance, diagnostic, or test improvement that need not block a preserved legacy release.
-- **P3 — Optional:** low-risk cleanup or stylistic modernization. Keep this category small.
+- **P3 — Optional:** low-risk cleanup or stylistic modernization; keep this category small.
 
-For every finding, provide file and line evidence, the failure scenario, why it matters, and the smallest credible remediation. Distinguish confirmed defects from hypotheses requiring a validator or platform that is unavailable.
+For every finding, provide file and line evidence, the failure scenario, why it matters, and the smallest credible remediation. Distinguish confirmed defects from hypotheses requiring unavailable validation.
 
 ## Final Report
 
 Lead with unresolved P0/P1 findings. Include:
 
 - release-readiness verdict
-- findings ordered by severity with file/line evidence
-- deletion and dependency-removal candidates, with proof still required
-- dependency migration risks and source changes expected
-- validators run and exact results
+- findings ordered by severity with evidence
+- prior specialist outcomes and contradictions resolved in orchestrated mode
+- dependency and deletion candidates with proof still required
+- validators and exact results
 - supported-platform claims actually demonstrated
-- intentionally deferred work and residual risk
-- files changed, if fixes were authorized
-- confirmation that no git state mutation occurred, when true
+- deferred work and residual risk
+- files changed when fixes were authorized
+- confirmation that no git state mutation occurred when true

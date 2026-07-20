@@ -44,7 +44,7 @@ Select `cpp-review-orchestrator` for:
 - `*.hh`, `*.hpp`, `*.hxx`, `*.ixx`, `*.cppm`, public headers, modules, and C++ API examples
 - `*.h` when its owning target or surrounding source establishes C++ rather than C semantics
 - C++ unit, integration, property, fuzz, sanitizer, benchmark, or example code and fixtures
-- `CMakeLists.txt`, `cmake/**`, `CMakePresets.json`, C++ toolchain files, `vcpkg.json`, Conan manifests, `.clang-tidy`, `.clang-format`, and cppcheck configuration when they affect existing C++ targets or a scope that also contains C++ source
+- `CMakeLists.txt`, `cmake/**`, `CMakePresets.json`, C++ toolchain files, `vcpkg.json`, `vcpkg-configuration.json`, overlay ports/triplets, `.clang-tidy`, `.clang-format`, and Semgrep configuration/fixtures when they affect C++ targets or a scope that also contains C++ source
 - workflows or recipes that change C++ compiler matrices, standard levels, build flags, tests, sanitizers, static analysis, releases, or coverage
 
 Select `rust-review-orchestrator` for:
@@ -58,7 +58,7 @@ Select `python-review-orchestrator` for:
 
 - `*.py`, `scripts/**/*.py`, `tests/**/*.py`, Python packages, Python fixtures, and generated Python utilities
 - `.ipynb`, notebook runners, notebook dependency groups, and rendered notebook workflows
-- `pyproject.toml`, `uv.lock`, requirement files, pytest/ruff/mypy/pyright/coverage configuration
+- `pyproject.toml`, `uv.lock`, and pytest/Ruff/ty/coverage configuration
 - workflows or recipes that change Python validation, release helpers, notebooks, or coverage
 
 Select `project-tooling-review` for:
@@ -118,5 +118,18 @@ Let each selected orchestrator choose focused validators from its own routing gu
 - If workflows changed, prefer local structural validation such as YAML parsing, `actionlint`, `zizmor`, or repository recipes when available.
 - If lockfiles, toolchain pins, or latest-version claims changed, verify with live authoritative sources or local package-manager metadata before declaring them current.
 - Escalate to full CI only when cross-surface changes make focused validators insufficient or repository instructions require it.
+
+Treat every candidate command as a set of underlying validators and exact test
+selections. Reuse results already valid for the same source/build/environment
+and material configuration. Decide whether repository policy or known
+cross-surface scope requires full CI before the first test, then inspect its
+composition: either use it as the single test selection or run only checks
+absent from the repository-wide ledger. Do not replay focused language tests
+through a tooling recipe or final meta-review merely to obtain a broader
+summary. If a mandatory indivisible gate is discovered late and cannot exclude
+completed tests, report it as a project-tooling blocker rather than silently
+rerunning or double-counting them. Rerun only after a relevant change
+invalidates the earlier result, for a materially different configuration, or
+when controlled repetition is itself the test.
 
 If a validator needs network access, installation, or approval, run the strongest local read-only substitute and report the gap.

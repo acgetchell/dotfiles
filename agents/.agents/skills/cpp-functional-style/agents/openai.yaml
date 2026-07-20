@@ -1,0 +1,4 @@
+interface:
+  display_name: "C++ Functional Style"
+  short_description: "Write composable functional-style modern C++"
+  default_prompt: "Use $cpp-functional-style to design or refactor this C++ code around clear transformations, value semantics, and controlled effects."

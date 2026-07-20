@@ -1,4 +1,4 @@
 interface:
   display_name: "Jupyter Notebook Review"
   short_description: "Review and fix reproducible notebooks"
-  default_prompt: "Use $jupyter-notebook-review to review and fix this notebook for reproducibility, Polars data handling, and plotting quality."
+  default_prompt: "Use $jupyter-notebook-review to review and fix this notebook for reproducibility, stable structure, output hygiene, and portable execution."

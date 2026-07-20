@@ -71,7 +71,7 @@ Use repository recipes first. Choose the smallest meaningful combination of:
 
 - targeted unit or integration tests
 - AddressSanitizer plus UndefinedBehaviorSanitizer
-- LeakSanitizer or Valgrind where supported and relevant
+- standalone LeakSanitizer where supported and relevant
 - compiler warnings and repository-owned static analysis
 
 Sanitizer silence is supporting evidence, not proof. Add a deterministic regression test when the defect can be exercised reliably.

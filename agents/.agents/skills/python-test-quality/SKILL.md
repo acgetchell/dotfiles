@@ -1,155 +1,113 @@
 ---
 name: python-test-quality
-description: "Review Python tests for meaningful behavior coverage, assertion quality, fixtures, CLI and file-I/O boundaries, parser and date/time edge cases, and error paths. Use for pytest, parametrization, tmp_path, monkeypatch, capsys, malformed inputs, and focused coverage gaps. Route Codecov report triage to codecov-test-gaps."
+description: "Review Python tests, pytest fixtures, properties, stateful scenarios, async or subprocess evidence, package and configuration matrices, and regression coverage for meaningful behavioral confidence. Use for pytest, Hypothesis, parametrization, tmp_path, monkeypatch, capsys, doctests, golden files, malformed inputs, failure atomicity, nondeterminism, and focused coverage gaps. Route Codecov report triage to codecov-test-gaps."
 ---
 
-# python-test-quality
+# Python Test Quality
 
-Evaluate Python tests for behavioral value, maintainability, and risk coverage.
+Evaluate whether tests prove behavior and risk contracts rather than merely execute lines. Own test design and durable evidence; let domain specialists define the behavior that should be true.
 
-The goal is confidence, not high coverage for its own sake. Prefer tests that prove user-visible behavior, invariants, error handling, and integration boundaries.
+## Scope And Boundaries
 
-## Scope
+Use changed-code mode by default and whole-repository mode only when requested.
 
-Default mode:
-- Focus on newly added or modified Python source, tests, fixtures, and CLI behavior.
-- Read nearby tests first and follow the repository's style.
-- Ignore unrelated unchanged code unless it defines conventions used by the changed surface.
+- Own pytest structure, fixtures, assertions, parametrization, properties, test determinism, regression evidence, and test-layer configuration here.
+- Let CLI, parsing, scientific, support, notebook, build, and production specialists define their domain contracts.
+- Select this skill when tests or fixtures changed, test/coverage review is requested, or weak evidence is itself a material risk. Running focused tests alone does not require this skill.
 
-Whole-repo baseline mode:
-- Use when the user explicitly says "whole repo", "entire repo", "baseline audit", or similar.
-- Audit Python source, tests, fixtures, CLI entry points, and coverage configuration across the repository.
-- Prioritize by public/user-facing risk, parser/file I/O fragility, missing negative cases, weak assertions, nondeterminism, and fixture brittleness.
-- Do not require fixing every historical gap in one pass; group findings into focused follow-up batches.
+## Behavior-Driven Structure
 
-## Review Priorities
+Frame each test as a behavior scenario:
 
-### 1. Behavior Coverage
+- **Given** a meaningful starting state and inputs
+- **When** one observable action occurs
+- **Then** outcomes, diagnostics, effects, and unchanged guarantees are explicit
 
-Tests should exercise outcomes users or callers depend on.
+Use descriptive scenario-style test names and clear arrange/act/assert structure. Add literal Given/When/Then comments only when they improve a complex test; do not require a BDD framework or ceremonial comments for simple cases.
 
-Flag:
-- tests that only execute code without asserting results
-- happy-path-only tests for code that has meaningful branches
-- missing boundary cases for empty, single-item, duplicate, min/max, and invalid inputs
-- missing regression tests for reported bugs
-- tests that duplicate implementation logic instead of asserting observable behavior
+Prefer one primary behavioral reason to fail. Test through stable public seams when practical, while allowing focused private-helper tests for otherwise unreachable parsing or transformation logic.
 
-Prefer:
-- assertions on returned values, emitted files, stdout/stderr, exit codes, exceptions, and state changes
-- small parametrized tests for input variation
-- regression tests named after the behavior they protect
+## Assertions
 
-### 2. Error Paths and Malformed Inputs
+Assert complete relevant outcomes:
 
-Bad inputs should fail predictably and with useful diagnostics.
+- returned values and domain state
+- exception category and stable diagnostic fields or substrings
+- stdout and stderr separately
+- exit status
+- emitted files, schemas, permissions, and ordering
+- calls or effects at real integration boundaries
+- state preserved after rejection or failure
 
-Check:
-- invalid files, malformed rows/JSON/YAML/TOML, missing fields, empty inputs, and permission-like failures
-- exception type and message when diagnostics matter
-- CLI exit codes and stderr for user-facing failures
-- partial-write behavior for commands that modify files
+Flag no-exception-only tests, truthiness where exact structure matters, broad `pytest.raises(Exception)`, snapshots that hide the contract, duplicated production logic in expected values, and mocks asserted instead of behavior.
 
-Avoid:
-- broad `pytest.raises(Exception)`
-- swallowing errors only to assert that no crash occurred
-- brittle exact-message assertions when a stable substring is enough
+## Boundary And Failure Scenarios
 
-### 3. Fixtures and Test Data
+Cover normal, empty, minimal, duplicate, boundary, malformed, missing, extra, permission-like, timeout, and partial-failure cases as relevant. Verify rejected operations preserve prior valid state and do not publish partial files, cache entries, indexes, or external effects. Include retry-after-failure when operations are expected to be retryable.
 
-Fixtures should make behavior easier to see, not hide it.
+For parser behavior, distinguish each actionable rejection category. For CLI behavior, assert output channels and exit status. For resources, exercise cleanup across exceptions, cancellation, and partial iteration where reachable.
 
-Prefer:
-- small inline data for simple cases
-- committed fixtures only when realistic structure matters
-- `tmp_path` for filesystem writes
-- `monkeypatch` for environment variables, current working directory, network calls, and time seams
-- factories when multiple tests need related variants
+## Properties And Stateful Testing
 
-Flag:
-- oversized fixtures where the relevant field is hard to find
-- tests that depend on the user's machine, home directory, locale, timezone, current date, or network
-- mutation of shared fixture data across tests
-- generated expected output that is not asserted against a stable value
+Use parametrization for a known finite matrix. Use Hypothesis when broad generated input, algebraic properties, parser variation, or operation sequences provide more confidence than enumerated examples.
 
-### 4. CLI, File I/O, and Output
+Prefer invariants, round trips, metamorphic relations, model-based state machines, and independently derived oracles. Record minimized regression examples for important discovered failures. Constrain generators to meaningful domains and make assumptions visible.
 
-Command-line and file boundaries are common regression points.
+Route scientific property selection and mathematical oracle validity to `python-scientific-review`.
 
-Check:
-- stdout and stderr separately with `capsys` or subprocess capture
-- exit codes for success and failure
-- `tmp_path` usage for all writes
-- explicit encodings for text files
-- deterministic ordering when output lists files, records, or keys
-- no secrets or raw sensitive records in logs or test failure output
+## Determinism And Isolation
 
-Prefer testing the CLI through the repository's established entry point when output formatting or argument parsing is part of the behavior. Test core logic directly when argument parsing is incidental.
+Control randomness, time, timezone, locale, environment, current directory, filesystem order, network, subprocesses, and services. Use explicit seeds or generator objects when exact replay matters. Avoid global random state and tests whose expected value comes from `now()`.
 
-### 5. Time, Dates, and Parsing
+Use `tmp_path` for writes and `monkeypatch` at stable seams. Keep fixtures small and local. Prevent shared mutable fixture state, import-order dependence, hidden environment requirements, and tests that read user data or machine-specific paths.
 
-Date/time and parser code needs edge coverage.
+## Async, Concurrency, And Subprocess Evidence
 
-Check:
-- timezone-aware and timezone-naive inputs when both are accepted
-- date-only versus datetime inputs
-- boundary ranges and inclusive/exclusive endpoints
-- DST-sensitive behavior only when the code explicitly handles timezones
-- CSV quoting, delimiter variation, missing optional fields, and unknown extra fields
+When relevant, test cancellation, timeout, shutdown, worker exceptions, backpressure, race-sensitive state, and cleanup. Avoid sleep-based synchronization when events, barriers, or deterministic fakes express the contract.
 
-Keep tests deterministic by passing explicit dates/times instead of relying on `now()`.
+For subprocess code, distinguish command-not-found, timeout, nonzero exit, malformed output, and successful empty output. Assert the resulting diagnostic without leaking secrets.
 
-### 6. Test Design Quality
+## Packaging And Configuration Evidence
 
-Good tests should fail for one understandable reason.
+When build or install behavior is the contract, test built artifacts rather than only in-tree imports. Cover the minimal supported Python/platform/extra/configuration combinations that distinguish behavior, external entry points, package data, optional imports, and installed consumers.
 
-Flag:
-- large tests that cover many behaviors with one assertion
-- excessive mocking of the function under test's collaborators
-- snapshot/golden tests that obscure the intended contract
-- tests coupled to private implementation details when public behavior is available
-- duplicated setup that would be clearer as a fixture or helper
+Let `python-build-portability` choose the meaningful matrix. Own whether the resulting evidence is durable, specific, and maintainable.
 
-Prefer:
-- arrange/act/assert structure when it improves readability
-- descriptive test names
-- one primary behavior per test
-- targeted helpers for repetitive setup, not assertion logic
+## Coverage Triage
 
-### 7. Coverage Gaps
+Use uncovered lines as prompts, not goals. Prioritize public behavior, error paths, parsers, state transitions, file/process effects, configuration branches, and historical bugs. Skip or justify exclusion of unreachable defensive code, impractical platform fallbacks, debug-only paths, and boilerplate dispatch.
 
-When reviewing uncovered lines, decide whether a test would add real confidence.
+Use `# pragma: no cover` or branch exclusions sparingly and with a reason. Route report-driven gap discovery to `codecov-test-gaps`.
 
-Test:
-- public behavior
-- parser branches
-- file I/O and CLI branches
-- negative cases and diagnostics
-- historical bugs
+## Validation
 
-Skip or recommend exclusion for:
-- defensive branches unreachable through valid inputs
-- platform-specific fallbacks not practical in the current environment
-- debug-only paths
-- boilerplate dispatch
+Maintain a validation ledger keyed by the relevant source and environment
+state, built artifact, Python version, platform, dependency/configuration set,
+instrumentation, and exact pytest or other test selection. Inspect repository
+recipes before execution, decide whether repository policy or the known scope
+requires an indivisible full gate, and reuse still-valid evidence.
 
-Use `# pragma: no cover` or `# pragma: no branch` sparingly, and only with a short reason in the review or patch summary.
+Choose the smallest single selection that proves the touched risk. Do not run
+a named pytest case and then its containing class, module, suite, and full CI as
+successive tiers. If a broader validator is independently required, choose it
+initially or run only the portion not already recorded as passing.
 
-## Output Format
+If an indivisible policy-mandated gate is discovered only after overlapping
+tests have passed and it offers no reliable exclusion, report the validation
+and command-surface conflict and route it to `project-tooling-review`; do not
+silently replay the tests or count the duplicate execution as new evidence.
 
-### Summary
-- PASS, NEEDS IMPROVEMENT, or FAIL
-- One or two sentences naming the main risk.
+Rerun a test only after relevant source, fixture, dependency, environment, or
+configuration changes invalidate its result, or when diagnosing
+nondeterminism. A different supported Python version, platform, optional
+dependency set, subprocess environment, async backend, or instrumentation mode
+is distinct evidence. Repeated Hypothesis, stochastic, concurrency, or
+benchmark samples are distinct only when repetition is part of the stated test
+design; record the seed or sample purpose.
 
-### Findings
-- Concrete issues ordered by severity.
-- Include file and line references when available.
-- Explain the missing behavior, not just the missing line.
+Report the non-overlapping ledger, seeds or generated counterexamples, skipped
+environments, justified reruns, and whether failures reproduce independently.
 
-### Suggested Tests
-- Specific pytest cases, fixtures, or parametrizations to add.
-- Mention when no test is worth adding and why.
+## Output
 
-### Validation
-- Commands run and pass/fail result.
-- Any coverage or environment limitations.
+State PASS, NEEDS IMPROVEMENT, or FAIL. Order findings by behavioral risk. For each, identify the unproven contract, why existing evidence can pass incorrectly, and a concrete Given/When/Then scenario or property to add. Report validation and environment limitations.

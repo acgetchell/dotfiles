@@ -10,6 +10,8 @@ Use this reference for `justfile` changes, command-surface docs, and recipes tha
 - Separate fixers from checks. A recipe named `check` or `ci` should not mutate tracked files; a recipe named `fix` should make mutations explicit.
 - Separate fast local checks from full CI and slow/performance/release checks.
 - Preserve recipe composability. Prefer recipes that call other recipes over copy-pasted command sequences when the same workflow appears in multiple places.
+- Ensure aggregate recipes do not execute the same underlying test selection more than once through overlapping dependencies or nested recipe calls. A broader recipe should add distinct evidence, not replay already completed checks.
+- Give policy-mandated aggregate gates component recipes or reliable selection/exclusion controls so an orchestrator can run only evidence absent from its ledger. An indivisible gate that forces already-passing tests to run again is a command-surface defect.
 
 ## Tool Install Recipes
 

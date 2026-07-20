@@ -1,4 +1,4 @@
 interface:
   display_name: "Documentation Review Orchestrator"
   short_description: "Route repository docs and specialist reviews"
-  default_prompt: "Use $docs-review-orchestrator to review repository documentation and add only the specialist passes required by the files and claims in scope."
+  default_prompt: "Use $docs-review-orchestrator to review repository documentation and select only the scientific, API, citation, or academic specialists required by the scoped claims."

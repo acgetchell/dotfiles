@@ -1,141 +1,126 @@
 ---
 name: rust-review-orchestrator
-description: "Coordinate multi-pass Rust reviews by selecting focused skills for APIs, invariants and errors, scientific correctness, implementation, tests, Cargo, and final synthesis. Use for changed, staged, PR, release-readiness, repository-wide, or fix-all Rust work spanning multiple concerns. Use a focused Rust skill directly for single-concern reviews."
+description: "Coordinate multi-pass Rust reviews by selecting individual skills for build portability and Cargo, public surfaces, invariant state and errors, scientific correctness, concurrency, implementation, tests, and final synthesis. Use for changed, staged, PR, release-readiness, repository-wide, or fix-all Rust work spanning multiple concerns; use one focused Rust skill directly for a single concern."
 ---
 
-# rust-review-orchestrator
+# Rust Review Orchestrator
 
-Coordinate focused Rust review skills without copying their content. This skill is an execution plan: load each selected named skill file, apply selected skills in logical pass groups, fix actionable issues, validate the touched surface for that group, and only then continue to the next group.
+Coordinate focused Rust review skills without copying their content. Select skills individually, run them in logical groups, validate each affected contract, and finish with lean production synthesis.
 
-The intent is to replace a maintainer manually running the relevant Rust review passes one by one. Do not collapse API, invariant, scientific correctness, implementation, validation, and synthesis concerns into one blended review and report it as orchestrated work.
+Do not treat selecting a group as permission to load every skill listed in it. Load only skills whose trigger matches the scoped change and record explicit skips when a maintainer could reasonably expect a pass.
 
 ## Ground Rules
 
-- Do not perform git state mutations. Do not stage, commit, push, tag, checkout, reset, or stash unless the user explicitly asks in the current turn.
-- Use read-only git commands to discover scope when needed: `git --no-pager status --short`, `git --no-pager diff --stat`, `git --no-pager diff --name-status`, and `git --no-pager diff`.
-- Respect repository-local agent instructions before editing. If the repository requires reading development docs before changes, read them first.
-- Prefer changed-file review by default. Use whole-repo baseline mode only when the user explicitly asks for "repo", "whole repo", "entire repo", "baseline audit", or equivalent.
-- When invoked by `repo-review` with a branch-scope file list or diff, honor that provided scope instead of rediscovering a narrower staged or worktree-only scope.
-- When the user says "fix all", implement actionable findings as you go. Do not merely collect them for later unless the fix is blocked or unsafe.
-- Do not run blanket full-CI validators by default. Select focused validators from changed and touched files. Run full CI only when repository rules require it for the touched surface or when changes cross broad core Rust behavior.
+- Do not stage, commit, push, tag, checkout, reset, or stash unless explicitly requested in the current turn.
+- Use read-only git commands to discover scope.
+- Respect repository-local instructions and documented MSRV, edition, feature, target, safety, and validation policy.
+- Prefer changed-file review. Use whole-repository baseline mode only when explicitly requested.
+- Honor a parent `repo-review` file list or diff instead of rediscovering a narrower scope.
+- When fixes are requested, implement verified findings within each selected skill before continuing.
+- Select focused validators; do not run full CI merely because orchestration is ending.
+- Maintain one cross-skill validation ledger keyed by source/build state,
+  toolchain, target, features, instrumentation, and exact test selection. Reuse
+  still-valid evidence instead of replaying it through broader recipes.
 
 ## Review Trace
 
-When invoked by `repo-review`, begin with a handoff receipt that names:
+At the start, record the scope, changed Rust-owned files, selected and skipped individual skills with reasons, repository references to load, focused validators, and the initial validation ledger.
 
-- the parent branch scope and Rust-owned file list or file count handed off
-- selected Rust skill groups and why they apply
-- skipped Rust skill groups when a maintainer might reasonably expect them
-- routing or crate-specific reference files that will be loaded
+For every selected skill:
 
-For every selected group, announce the group and focused skills before loading the first skill. After loading each focused skill or reference file, keep its name in the running trace for the final summary. This trace is required evidence that the orchestrator ran the selected Rust skills rather than only summarizing their names.
+- announce its group and name before loading it
+- load its `SKILL.md` completely and only directly relevant references
+- record files inspected, findings or explicit no-finding result, fixes, and validator evidence
 
-Evidence is grouped by pass, not by memory. A group is complete only when the final summary can name the group status (`selected` or `skipped`), the focused skill files loaded for that group, the changed files inspected, the findings or explicit no-finding result, fixes applied, and the focused validator run for that group. Loading skill files, remembering prior context, or running full CI does not by itself count as applying a group.
-
-When invoked by `repo-review`, provide table-ready evidence for the parent `Review Evidence` table: selected groups, focused skill files loaded, reference files loaded, validators run, and any skipped groups that might otherwise look missing.
-
-## Required Skill Loading
-
-Load every selected skill's `SKILL.md` completely and follow its directly relevant references. Load skills at the start of their logical group, not before earlier groups have findings, fixes, and validator evidence. Use the [Per-Group Fix Loop](#per-group-fix-loop) as the single execution procedure.
+When invoked by `repo-review`, provide table-ready evidence naming selected groups, exact skills and references loaded, validators, fixes, and meaningful skips.
 
 ## Scope Routing
 
-Read [`references/check-routing.md`](references/check-routing.md) after identifying changed files. Use it to choose:
+Read [`references/check-routing.md`](references/check-routing.md) after identifying changed files. Use its individual-skill matrix and validation guidance.
 
-- which skill groups apply
-- which focused validators to run after each group
-- when final validation should escalate from focused commands to the repository's full-CI validator
+Load only the matching repository reference after general routing:
 
-If the repository matches a crate-specific reference, read that one after the general routing matrix:
+- [`references/delaunay.md`](references/delaunay.md) for `delaunay` or closely related computational geometry.
+- [`references/la-stack.md`](references/la-stack.md) for `la-stack` or closely related fixed-size linear algebra.
 
-- [`references/delaunay.md`](references/delaunay.md) for `delaunay` or closely related computational-geometry review-and-fix work.
-- [`references/la-stack.md`](references/la-stack.md) for `la-stack` or closely related linear-algebra review-and-fix work.
-
-If changed files do not match the table cleanly, choose the smallest validator that covers the risk and state the assumption in the final summary.
+If the scope does not match cleanly, choose the smallest set of skills that covers the risk and state the assumption.
 
 ## Skill Groups
 
-Run groups in this order when they apply. Within each group, load and apply each selected skill in the order listed.
+Run selected skills in this order. Conditions below are independent within each group.
 
-### 1. Surface/API Pass
+### 1. Build, Feature, and Cargo Contract
 
-Use for public API changes, doc-comment changes, trait bounds, re-exports, builders, fluent workflows, examples, doctests, and semver-sensitive surface changes.
+- Use `rust-build-portability` for source-level `cfg`, feature combinations, MSRV compilation, targets, cross-compilation, build scripts, generated code, proc macros, `no_std`, WASM, FFI/native linking, or downstream-consumer portability.
+- Use `rust-cargo-hygiene` for manifests, lockfile policy, dependency declarations, feature definitions, workspace inheritance, lint configuration, package metadata, MSRV/edition declarations, publishing, or release readiness.
 
-- `rust-api-docs`
-- `rust-prelude-exports`
-- `rust-fluent-api-design`
-- `rust-trait-bounds`
-- `rust-cli-design` when CLI surfaces, binary packaging, clap parsing, or command examples changed
+Select both only when manifest decisions and demonstrated configuration behavior change together. Route recipes, CI jobs, caches, runner setup, and command wiring to `project-tooling-review`.
 
-### 2. Invariant/Error Pass
+### 2. Public Surface and Usage
 
-Use for constructors, validation boundaries, mutation APIs, snapshots/views, owned caches, typed errors, rollback, parse-don't-validate issues, or invalid-state prevention.
+- Use `rust-api-docs` for new or changed public items whose documented contract must be assessed, public documentation edits, required rustdoc sections, examples as documentation, intra-doc links, or docs.rs presentation.
+- Use `rust-prelude-exports` only for preludes, `pub use`, visibility, feature-gated re-exports, or downstream import ergonomics.
+- Use `rust-fluent-api-design` only for staged workflows, builders, proposals, transactions, guards, chaining, or duplicate fluent/non-fluent surfaces.
+- Use `rust-trait-bounds` only for generic constraints, associated types, HRTBs, `impl Trait`, callable bounds, or downstream generic diagnostics.
+- Use `rust-cli-design` only for CLI packaging, argument parsing, process behavior, command examples, or optional CLI features.
 
-- `rust-parse-dont-validate`
-- `rust-error-variants`
-- `rust-borrowed-view-audit`
-- `rust-concurrency-async` when async, threads, locks, channels, atomics, cancellation, or Send/Sync boundaries changed
+A public item does not automatically select all five skills. Choose the specific contract affected.
 
-### 3. Scientific Correctness Pass
+### 3. Invariants, State, Errors, and Views
 
-Use when scientific or numerical behavior is in scope: mathematical models, formulas, predicates, solvers, exact or approximate arithmetic, tolerances, error bounds, stochastic methods, scientific fixtures, reproducibility, or the validity of scientific benchmark inputs and claims.
+- Use `rust-invariant-state-transitions` for coordinated mutation, state machines, caches/indexes, topology or graph edits, transactions, rollback, failure atomicity, inverse operations, or operation sequences.
+- Use `rust-parse-dont-validate` for raw-to-domain boundaries, smart constructors, refined types, deserialization, setters, or invalid stored states.
+- Use `rust-error-variants` for error enums, typed categories, conversions, propagation, diagnostic fields, or public failure compatibility.
+- Use `rust-borrowed-view-audit` for snapshots, owned caches, cloned canonical data, handles, provenance, borrowed views, or lifetime-bound transaction/view shapes.
 
-- `rust-scientific-correctness`
+Select only the ownership lenses present. A constructor does not require borrowed-view analysis unless borrowing, snapshots, caches, or provenance are involved.
 
-This pass establishes that the code answers the stated scientific question before implementation cleanup or optimization. If a later pass changes formulas, arithmetic order, tolerances, precision or fallback behavior, RNG semantics, or scientific fixtures, rerun the affected scientific checks before closing Validation/Test.
+### 4. Scientific Correctness
 
-### 4. Implementation Pass
+- Use `rust-scientific-correctness` when mathematical models, formulas, numerical behavior, geometry/topology, exact or approximate arithmetic, tolerances, error bounds, stochastic methods, scientific fixtures, reproducibility, or scientific benchmark claims change.
 
-Use for Rust implementation edits, simplification, iterator/control-flow choices, naming/import hygiene, allocation behavior, and invariant-preserving performance.
+Establish scientific validity before optimizing. Rerun affected scientific evidence if later edits change formulas, arithmetic order, precision, tolerances, fallbacks, RNG semantics, fixtures, or claims.
 
-- `rust-style-hygiene`
-- `rust-iter-control-flow`
-- `rust-simplification-review`
-- `rust-invariant-performance` when changed code is hot, allocation-sensitive, numerical/geometric, validation-heavy, or performance-adjacent
+### 5. Concurrency and Async
 
-### 5. Validation/Test Pass
+- Use `rust-concurrency-async` only for async, threads, locks, channels, atomics, task lifetime, Send/Sync, blocking, cancellation, structured concurrency, or mutation observed across scheduling boundaries.
 
-Use for tests, doctests, proptests, integration tests, benchmark fixtures, examples that double as public samples, and Cargo or feature changes.
+Keep purely synchronous state atomicity in `rust-invariant-state-transitions`.
 
-- `rust-test-quality`
-- `rust-cargo-hygiene` when manifests, lockfiles, features, lints, MSRV, package metadata, or Cargo workflows changed
+### 6. Implementation Lenses
 
-### 6. Final Synthesis Pass
+- Use `rust-style-hygiene` only for naming, import organization, and path clarity.
+- Use `rust-iter-control-flow` only for material iterator, closure, loop, pattern-matching, exhaustiveness, or allocation-through-control-flow questions.
+- Use `rust-simplification-review` only when deletion, deduplication, redundant helpers/tests, public-surface reduction, or substantial simplification is plausible or requested.
+- Use `rust-invariant-performance` only for demonstrated or plausible hot paths, allocation/data movement, complexity, benchmark-guided optimization, or performance-sensitive invariants.
 
-Use for broad Rust changes, invariant-heavy code, scientific or numerical algorithms, topology, mutation workflows, or whole-repo review requests.
+Do not load implementation lenses merely because a Rust source file changed.
 
-- `rust-production-review`
+### 7. Validation and Test Quality
 
-This pass reconciles findings from earlier groups, including scientific-correctness evidence when selected, removes duplicates, checks severity, and decides whether remaining issues are blockers, follow-ups, or acceptable residual risk.
+- Use `rust-test-quality` when tests, doctests as executable evidence, proptests, fuzz targets, compile-fail tests, examples as tests, concurrency models, sanitizer/Miri evidence, or production behavior requiring regression coverage changes.
 
-## Per-Group Fix Loop
+This pass owns semantic test strength. Build portability owns which configurations must compile; Cargo hygiene and project tooling own manifest and workflow mechanics.
 
-For each selected group:
+### 8. Final Synthesis
 
-1. Announce the group and selected skills briefly.
-2. Load every selected focused skill file for that group, plus directly relevant references.
-3. Inspect only relevant changed files and nearby invariant owners unless whole-repo mode is active.
-4. Apply the selected skills as one logical group, keeping findings tied to the group and file references.
-5. Implement minimal fixes for real findings.
-6. Run the focused validator from `references/check-routing.md` for the group.
-7. Fix validator failures before continuing.
-8. Record what changed per file and the group outcome for the final summary.
+Always load `rust-production-review` after selected specialist skills. Hand it prior findings, fixes, validators, and explicit skips. It must use orchestrated mode, avoid the standalone checklist, reconcile contradictions, assess residual dependency/performance/simplification/unsafe/integration risk, deduplicate findings, and issue the final severity and readiness verdict.
 
-Do not report a Rust orchestrator run as complete if the work was performed as one undifferentiated review across multiple groups. In that case, label it as preliminary context and rerun the applicable grouped passes.
+## Per-Skill Fix Loop
 
-If a validator is expensive, blocked, or needs approval, use the repository's focused cheaper validator while iterating, then run the strongest relevant validator available before final handoff.
+For each selected skill:
+
+1. Announce the group and skill.
+2. Load the complete skill and directly relevant references.
+3. Inspect scoped files and nearby owners of the affected contract.
+4. Record findings or an explicit no-finding result.
+5. Apply the smallest safe correction when fixes were requested.
+6. Run the focused validator selected from routing guidance only when equivalent evidence is not already valid in the shared ledger.
+7. Resolve caused failures or document a genuine blocker.
+8. Record changed files or read-only status and the skill outcome.
+
+If prior work was an undifferentiated review, treat it as preliminary context and rerun applicable individual skills before claiming orchestrator completion.
 
 ## Final Summary
 
-End with a concise summary that helps the maintainer review unstaged changes by file. Include:
-
-- each file changed and why
-- which skill groups ran
-- focused skill files and reference files actually loaded
-- table-ready evidence for `repo-review` when invoked by the meta-orchestrator
-- validators run and their results
-- issues fixed while moving between skills
-- anything intentionally deferred or not run
-- confirmation that no git state mutations were performed, if true
-
-Do not bury important risk in a generic "all good" closing. If unresolved issues remain, lead with them.
+Lead with unresolved blockers. Include changed files, every selected and meaningful skipped skill, exact skill/reference files loaded, the non-overlapping validation ledger and results, fixed findings, final synthesis classification, deferred work, and confirmation that no git state mutation occurred when true.

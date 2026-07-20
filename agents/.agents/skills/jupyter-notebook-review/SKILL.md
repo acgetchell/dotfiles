@@ -1,322 +1,89 @@
 ---
 name: jupyter-notebook-review
-description: "Review and fix Jupyter notebooks for reproducible execution, Python quality, Polars-first data workflows, and reliable Plotly or Matplotlib output. Use for .ipynb cleanup, hidden state, output clearing, headless execution, notebook environments, data loading, plotting diagnostics, and notebook CI. Route reusable scientific logic to its focused reviewer."
+description: "Review and fix Jupyter notebooks for reproducible execution, stable cell identity, output hygiene, safe data boundaries, portable environments, and reliable generated artifacts. Use for .ipynb cleanup, hidden state, output clearing, notebook lint or execution, data loading, plots, headless or HPC use, experiment tracking, and notebook CI. Route substantial reusable, scientific, CLI, parsing, support-script, and test behavior to focused Python skills."
 ---
 
-# jupyter-notebook-review
+# Jupyter Notebook Review
 
-Review and fix notebooks as reproducible computational artifacts, not scratchpads. Keep core library, simulation, and production logic in importable modules,
-CLIs, or examples; notebooks should orchestrate those APIs and analyze generated artifacts.
+Review notebooks as reproducible computational artifacts rather than scratchpads. Keep production logic in importable modules, CLIs, or examples; let notebooks orchestrate those APIs and interpret artifacts.
 
 ## Workflow
 
-1. Locate notebooks with `rg --files -g '*.ipynb'` unless the user names a file.
+1. Locate the named notebooks or use `rg --files -g '*.ipynb'`.
 2. Inspect structure with `scripts/notebook_check.py --summary NOTEBOOK.ipynb` before reading raw JSON.
-3. Read code cells through `jq` or `notebook_check.py --summary`; avoid dumping large outputs into context.
-4. Review for reproducibility, data handling, plotting, path hygiene, outputs, secrets, and environment setup.
-5. Edit notebooks with `nbformat` or the helper scripts; do not hand-edit large notebook JSON by string substitution.
-6. Validate with `uv run scripts/notebook_check.py --lint NOTEBOOK.ipynb` when the helper is copied into a repo, or with the skill-local script through
-   `uv run`. The lint path compiles cells, runs notebook-specific AST checks, and requires Ruff lint, Ruff format, and ty on extracted notebook code unless a
-   check is explicitly disabled. Execute only when runtime behavior or a generated artifact is part of the task; do not treat execution as routine lint.
-7. Ensure every code, markdown, and raw cell has a unique, stable, descriptive `id` that names its purpose, such as `setup-code`, `load-data`, or
-   `render-plot`. Follow repository naming rules; otherwise prefer lowercase kebab-case.
-8. Clear outputs before finalizing unless the repository intentionally tracks rendered notebook outputs.
+3. Read code cells through the summary helper or `jq`; avoid loading large outputs into context.
+4. Review fresh-kernel order, paths, inputs, outputs, secrets, environments, and generated artifacts.
+5. Edit with `nbformat` or the bundled helpers rather than large JSON string substitutions.
+6. Run structured lint after changes. Execute only when runtime behavior or a generated artifact is in scope.
+7. Give every code, markdown, and raw cell a unique, stable, descriptive ID following repository rules or lowercase kebab-case.
+8. Clear outputs and execution counts unless the repository intentionally tracks rendered results.
 
-## Project References
+## Conditional References
 
-- For the `delaunay` repository, read [`references/delaunay.md`](references/delaunay.md) after the repository's `AGENTS.md` and routed development guidance.
+Load only references that match the notebook:
+
+- Read [`references/dataframes-and-plotting.md`](references/dataframes-and-plotting.md) when reviewing dataframe pipelines, tabular I/O, Matplotlib, Plotly, or saved figures.
+- Read [`references/hpc-and-headless.md`](references/hpc-and-headless.md) for remote servers, CI execution, Slurm, Open OnDemand, scratch storage, or notebook dependency setup.
+- Read [`references/experiment-tracking.md`](references/experiment-tracking.md) only for MLflow, model training, learned proposals, sweeps, or comparable tracked experiments.
+- Read [`references/binary-frontends.md`](references/binary-frontends.md) when cells invoke external binaries, wrap a library API as an engine, parse subprocess output, or must discover the repository root portably.
+- In the `delaunay` repository, read [`references/delaunay.md`](references/delaunay.md) after repository instructions.
 
 ## Related Python Skills
 
-Use this skill as the notebook front door, then bring in narrower Python skills when the notebook contains substantial reusable code:
-- Use `python-parse-dont-validate` when notebook inputs, config dictionaries, JSON summaries, dataframe schemas, or subprocess results carry invariants that
-  should be parsed into typed objects before computation.
-- Use `python-scientific-review` when notebook code implements or validates numerical, statistical, geometric, or scientific algorithms rather than merely
-  plotting already-produced results.
-- Use `python-support-scripts` when notebook helper code graduates into a reusable script for CI, release, benchmark, fixture, or diagnostic workflows.
-- Use `python-cli-review` when notebook code is a small application or CLI front end with user-facing argument parsing and output contracts.
-- Use `python-test-quality` when adding notebook checker tests, fixture notebooks, or coverage for notebook-adjacent helper scripts.
+Select focused skills independently when notebook cells contain substantial owned behavior:
 
-## Review Priorities
+- `python-parse-dont-validate` for invariant-bearing config, structured inputs, dataframe schemas, or subprocess results
+- `python-scientific-review` for mathematical, numerical, statistical, geometric, or scientific validation logic
+- `python-support-scripts` when notebook helpers become reusable release, benchmark, fixture, CI, or diagnostic scripts
+- `python-cli-review` for a material user-facing argument or output contract
+- `python-test-quality` for notebook-checker tests, fixture notebooks, or notebook-adjacent helper evidence
+- `python-build-portability` for notebook dependency groups, optional extras, installed imports, or supported runtime/platform claims
 
-### Python Code Quality
+Do not load every related skill merely because a notebook contains imports, assertions, or a subprocess call.
 
-Notebook Python should follow the same standards as repository scripts when the code may be reused, validated, or trusted by readers.
+## Core Review
 
-Check:
-- functions have type hints at non-trivial boundaries and narrow responsibilities
-- imports are grouped near the top instead of hidden in late cells
-- `pathlib.Path` and explicit `encoding="utf-8"` are used for text I/O
-- exceptions are specific and include enough context to diagnose bad files, rows, paths, or commands
-- mutable defaults, import-time side effects, broad `except`, and swallowed failures are absent
-- assertions are not used for user-input or environment validation; raise an exception with context instead
-- output order is deterministic when listing files, records, glob results, keys, or categories
+### Reproducible State
 
-Prefer extracting long reusable code into `scripts/`, examples, or package modules when it stops being notebook-local tutorial glue.
+Check that cells run top-to-bottom in a fresh kernel. Put imports, deterministic paths, seeds, and configuration near the beginning. Remove dependence on stale variables, manual execution order, current timestamps, ambient environment variables, local usernames, or undocumented working directories.
 
-### Reproducibility
+Avoid package-install cells that mutate global environments. Prefer the repository's locked environment and named notebook commands.
 
-Flag:
-- hidden state: cells fail when run top-to-bottom in a fresh kernel
-- code that relies on the current working directory without finding the repository root
-- package installation cells that mutate global user environments
-- random behavior without explicit seeds where output interpretation depends on repeatability
-- timestamps, host paths, usernames, or machine-local state embedded in outputs
+### Notebook Structure
 
-Prefer:
-- a first setup cell with imports, deterministic paths, and configuration
-- `uv run --group notebooks ...` or a repository `just notebook` / `just notebook-setup` recipe
-- a headless recipe such as `just notebook-execute` for CI, remote servers, and HPC jobs
-- data and generated artifacts under `target/`, `runs/`, or another documented output directory
-- fresh-kernel execution through `nbconvert`, `nbclient`, or a repository notebook check recipe
+Keep cells concise and purposeful. Move reusable algorithms and long helpers into importable code. Group imports near the top, document interpretation rather than restating implementation, and preserve stable descriptive cell IDs across edits.
 
-Treat notebook cost as parameter-dependent. Do not create permanent `slow/` notebook categories or an aggregate execute-all recipe unless the repository
-explicitly requires one. Routine checks should remain lint-only when notebooks may become expensive under altered parameters.
+Flag hidden late imports, duplicated helpers, monolithic cells mixing I/O/computation/plotting, user-input validation through `assert`, broad exception swallowing, and import-time or cell-order side effects.
+
+### Inputs And Invariants
+
+Validate paths, file shapes, required columns, dtypes, optional values, and finite numeric inputs before computation or plotting. Use a small parser, `TypedDict`, frozen dataclass, enum/literal, or schema check only when the notebook carries a meaningful invariant. Keep passive display-only reports lightweight.
+
+Route deeper domain modeling to `python-parse-dont-validate` and mathematical validity to `python-scientific-review` rather than duplicating those reviews here.
 
 ### Generated And Tracked Artifacts
 
-Keep ordinary execution scratch-only. Write executed notebooks and generated files under `target/`, `$SCRATCH`, or another repository-designated disposable
-directory. Refresh tracked figures or reports only when the task includes that artifact and through a named repository workflow.
+Write ordinary execution output under `target/`, `$SCRATCH`, or another documented disposable location. Refresh tracked figures or reports only through a named repository workflow when the requested task includes that artifact.
 
-When documentation and papers consume the same generated figure, prefer one canonical tracked asset over duplicate copies. Notebook code should default to a
-scratch destination; let the named refresh recipe supply a tracked path through a validated parameter or environment variable instead of hard-coding a direct
-`savefig` or `write_image` call into a tracked documentation directory.
+Prefer one canonical tracked asset when documentation and papers consume the same figure. Let named refresh commands provide tracked destinations instead of hard-coding documentation paths in normal notebook cells.
 
-### Boundary Parsing And Invariants
+### Output, Metadata, And Privacy
 
-Parse external data at the notebook boundary before using it in computations or plots.
+Flag committed execution counts or outputs unless policy requires them, huge embedded images, widget state, stale exceptions, random-looking cell IDs, secrets, tokens, private records, absolute local paths, and machine-specific metadata.
 
-Check:
-- JSON/CSV/TOML/YAML shapes are checked before deep indexing
-- dataframe columns have expected names and dtypes before aggregation
-- numeric inputs used in scientific plots are finite and in expected ranges
-- paths exist and point to files/directories as expected
-- optional values are handled deliberately instead of assuming presence
+Ensure human-facing output is intentional and machine-consumed data remains parseable. Do not print raw private records or secrets as diagnostics.
 
-Prefer small parser helpers, `TypedDict`, frozen dataclasses, `Enum`/`Literal`, or Polars schema checks when a notebook carries meaningful invariants. Do not add
-heavy domain models for passive display-only report shapes.
+## Validation
 
-### Dataframes And I/O
+Use repository commands first. Otherwise use bundled scripts:
 
-Prefer Polars for table work:
+- `scripts/notebook_check.py --summary NOTEBOOK.ipynb` for a compact inventory
+- `scripts/notebook_check.py --lint NOTEBOOK.ipynb` for JSON, cell IDs, compilation, notebook AST checks, Ruff, formatting, and ty checks
+- `scripts/notebook_check.py --execute NOTEBOOK.ipynb --repo-root PATH` for in-memory execution without writing outputs to the source
+- `scripts/clear_outputs.py NOTEBOOK.ipynb` to clear outputs and counts in place
 
-```python
-import polars as pl
-
-trace = pl.read_csv(trace_path)
-summary = trace.select(
-    pl.len().alias("steps"),
-    pl.col("accepted").sum().alias("accepted"),
-    pl.col("action").mean().alias("mean_action"),
-)
-```
-
-Use `pl.scan_csv`, `pl.scan_parquet`, or LazyFrame pipelines when data may become large. Use Parquet/Arrow for cached intermediate tables when possible.
-
-Accept pandas only when:
-- the repository already standardizes on pandas
-- a library API requires pandas objects
-- the notebook is explicitly comparing pandas behavior
-
-Flag:
-- manual CSV parsing for dataframe-shaped analysis when Polars is available
-- implicit dtype guesses that break booleans, datetimes, or categorical columns
-- code that silently drops malformed rows or fills numeric failures with sentinels
-- large in-memory conversions to Python lists before filtering or aggregating
-
-For scientific or Rust-interoperability notebooks, also check:
-- units, coordinate conventions, indexing bases, and dtype/precision assumptions match the Rust or data-source contract
-- NaN, infinity, overflow, underflow, and degenerate inputs fail loudly or are explicitly filtered with explanation
-- tolerances and rounding choices are justified by the plotted quantity and data scale
-
-### Plotting
-
-Use Matplotlib for stable static plots, saved figures, and headless validation. Set `MPLBACKEND=Agg` for noninteractive execution checks when needed.
-
-Use Plotly for interactive exploration when hover, zoom, faceting, or shareable HTML output matters. Make Plotly cells tolerate noninteractive validation by
-building figures as objects and avoiding browser-only side effects.
-
-Check:
-- axis labels, units, legends, and titles describe the plotted quantity
-- plots use dataframe columns directly rather than duplicated hand-built lists when practical
-- figure generation does not require a live browser in CI/headless mode
-- saved plots use deterministic paths and create parent directories
-
-### Notebook Hygiene
-
-Flag:
-- committed cell outputs or execution counts unless the project explicitly wants rendered notebooks
-- missing cell ids, random-looking generated cell ids, or ids that churn across saves
-- huge base64 images, binary blobs, widgets, or stale errors in outputs
-- secrets, tokens, local absolute paths, usernames, or private data in source or outputs
-- hidden imports in later cells that should be in setup
-- long cells that should be functions in a Python module or script
-
-Prefer:
-- short markdown context that explains interpretation, not implementation trivia
-- stable, descriptive cell ids that summarize the cell's role and make diffs, nbformat validation, and review comments easier to follow
-- functions for repeated notebook-local operations
-- imports grouped in the first code cell
-- concise cells with one clear purpose
-
-### Subprocesses And CLI Front Ends
-
-When notebooks run binaries or CLIs:
-- use argument lists, never `shell=True` with interpolated values
-- include a timeout or documented reason not to use one
-- justify intentional subprocess wrappers with a narrow `# noqa: S603` comment rather than globally ignoring subprocess diagnostics
-- surface command, exit code, stdout, and stderr when failures matter
-- keep machine-parseable command output separate from tutorial/log text when downstream cells parse it
-- avoid printing secrets, tokens, or raw private records
-- pass deterministic environment variables when command output is parsed
-
-Streaming output is acceptable for tutorial front doors, but failures should still report enough context to reproduce the command outside the notebook.
-
-### Tests And Validation
-
-Notebook-adjacent helpers should have behavior tests when they become reusable scripts:
-- lint helpers should be tested on valid notebooks, syntax errors, dirty outputs, and malformed JSON
-- execution helpers should use `tmp_path` or in-memory execution and avoid changing source notebooks
-- path and parser helpers should cover missing files, bad schemas, empty data, and malformed rows
-- assertions should check outputs, exit codes, and diagnostics, not only "no exception"
-
-## Fix Patterns
-
-### Environment
-
-For repos using uv, add a notebook dependency group rather than ad hoc pip cells:
-
-```toml
-[dependency-groups]
-notebooks = [
-    "ipykernel",
-    "jupyterlab",
-    "matplotlib",
-    "polars",
-    "plotly",
-]
-```
-
-Prefer a `just` wrapper when the repo already uses `just`:
-
-```just
-notebook-setup:
-    uv sync --group notebooks
-
-notebook:
-    uv run --group notebooks jupyter lab notebooks/00_quickstart.ipynb
-```
-
-Pin exact versions only when the repository's policy requires lockstep reproducibility. Otherwise let `uv.lock` capture the resolved versions.
-
-### HPC And Headless Execution
-
-For HPC clusters, remote servers, and CI:
-- provide a non-GUI execution path with `jupyter nbconvert --execute`, `nbclient`, or a repository `just notebook-execute` recipe
-- set `MPLBACKEND=Agg` for Matplotlib plots
-- write executed notebooks and generated artifacts under `target/`, `$SCRATCH`, or another documented scratch/output directory
-- let users set `UV_CACHE_DIR` when home-directory caches are unavailable or slow
-- document whether `uv sync --group notebooks` must run on a login node before offline compute jobs
-- honor an environment variable such as `CDT_BINARY`, `MODEL_BINARY`, or `SIM_BINARY` when a cluster module or release artifact provides the executable
-- avoid browser-only Plotly renderers in batch mode; save HTML/JSON artifacts instead when interactivity matters
-- include walltime/memory expectations for notebooks that run simulations or large analyses
-
-For Open OnDemand:
-- assume `just notebook` may run inside a Jupyter app backed by a compute allocation
-- avoid requiring local GUI browser behavior inside notebook cells
-- prefer notebook cells that submit long jobs to Slurm and later load generated artifacts for analysis
-- keep `sbatch`/`srun` commands as argument lists or generated scripts with explicit paths, walltime, memory, and output locations
-- make job IDs, run directories, trace paths, and summary paths visible to the reader
-
-Example headless recipe:
-
-```just
-notebook-execute notebook="notebooks/00_quickstart.ipynb" output_dir="target/notebooks":
-    mkdir -p "{{output_dir}}"
-    MPLBACKEND=Agg uv run --group notebooks jupyter nbconvert --execute --to notebook --output-dir "{{output_dir}}" "{{notebook}}"
-```
-
-### Experiment Tracking
-
-Use MLflow only for notebooks that manage model-training, learned proposals, hyperparameter sweeps, or comparable experiments. Do not add it to simple
-quickstarts that only run a binary and plot trace files.
-
-When MLflow is appropriate:
-- keep tracking URI, experiment name, and artifact root configurable through environment variables or a small validated config cell
-- log parameters, code version, dataset/run identifiers, seeds, metrics, and produced artifact paths
-- store large model artifacts and generated datasets in a cluster/project artifact store, not inside the notebook
-- make reruns idempotent by using explicit run names or tags rather than relying on ambient notebook state
-- keep MLflow setup optional so headless validation can run without a live tracking server unless the notebook is specifically an MLflow integration test
-
-### Paths
-
-Use repository-root discovery instead of assuming the launch directory:
-
-```python
-from pathlib import Path
-
-def find_repo_root(start: Path) -> Path:
-    for path in (start, *start.parents):
-        if (path / "pyproject.toml").exists() or (path / ".git").exists():
-            return path
-    raise RuntimeError("Run this notebook from inside the repository.")
-
-ROOT = find_repo_root(Path.cwd().resolve())
-```
-
-Validate data paths after constructing them:
-
-```python
-if not trace_path.is_file():
-    raise FileNotFoundError(f"trace CSV not found: {trace_path}")
-```
-
-### Binary Or API Front Ends
-
-If a notebook wraps a binary or library API:
-- keep the binary/API as the engine
-- stream command output for tutorials
-- write artifacts to a documented directory
-- load artifacts back into Polars or JSON for analysis
-- avoid duplicating production simulation or data-processing logic in notebook cells
-
-Use a typed command helper when the cell needs to preserve failure context:
-
-```python
-import subprocess
-
-def run_command(command: list[str], *, cwd: Path, timeout: int = 120) -> subprocess.CompletedProcess[str]:
-    result = subprocess.run(command, cwd=cwd, text=True, capture_output=True, timeout=timeout, check=False)
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"command failed with exit code {result.returncode}: {' '.join(command)}\n"
-            f"stdout:\n{result.stdout}\n"
-            f"stderr:\n{result.stderr}"
-        )
-    return result
-```
-
-## Helper Scripts
-
-Use bundled scripts from this skill when useful:
-
-- `scripts/notebook_check.py --summary NOTEBOOK.ipynb` prints a compact cell inventory including cell IDs.
-- `scripts/notebook_check.py --lint NOTEBOOK.ipynb` validates JSON and cell IDs, compiles code cells, requires Ruff lint, Ruff format, and ty by default, and
-  reports output counts.
-- `scripts/notebook_check.py --execute NOTEBOOK.ipynb --repo-root PATH` executes in memory without writing outputs back.
-- `scripts/clear_outputs.py NOTEBOOK.ipynb` clears outputs and execution counts in place.
-
-Run scripts with `uv run` or the active project Python. If a repository has its own notebook checker, prefer the repository command and use these scripts as a
-fallback or comparison.
+Run helpers with `uv run` or the active project environment. Execute a notebook only when dependencies, cost, side effects, and requested scope make execution appropriate. Never treat successful execution as proof of scientific correctness or portability.
 
 ## Output
 
-For a review, lead with findings ordered by severity and cite notebook cell numbers. Include:
-- reproducibility blockers
-- dataframe and I/O issues
-- plotting/headless risks
-- output/metadata hygiene
-- concrete fixes or patches applied
-- validation commands run and their result
-
-For a fix, summarize the notebook changes and confirm whether outputs were cleared and whether fresh execution passed.
+Lead with reproducibility or privacy blockers. Cite notebook cells by number and ID where possible. Report structural, state, input, artifact, and environment findings; references and focused skills loaded; whether outputs were cleared; validators run; execution status; and any unavailable dependencies or runtime limitations.

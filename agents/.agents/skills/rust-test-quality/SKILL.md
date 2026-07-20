@@ -1,127 +1,139 @@
 ---
 name: rust-test-quality
-description: "Review Rust tests, doctests, public panic behavior, and supporting documentation for meaningful risk coverage. Use for weak assertions, missing boundary, error, or negative cases, brittle or duplicated tests, public API examples, doctest correctness, recoverable panics, and private helper docs that explain public behavior."
+description: "Review Rust unit, integration, doctest, property, fuzz, compile-fail, Miri, sanitizer, concurrency-model, benchmark-fixture, and example tests for meaningful risk coverage, precise assertions, deterministic reproduction, and reliable failure diagnostics. Use when tests change or production behavior needs durable regression evidence."
 ---
 
-# rust-test-quality
+# Rust Test Quality
 
-Evaluate Rust code for test coverage, doctests, and documentation quality.
+Review Rust tests as executable evidence for behavior, invariants, compatibility, and safety. Strengthen tests that can pass while the target behavior is wrong.
 
-## Scope
+## Ground Rules
 
-Focus on:
-- newly added or modified code
-- public APIs
-- supporting private helper functions
+- Follow repository-local frameworks, fixture placement, feature policy, commands, and diagnostic tooling.
+- Default to changed tests plus the production risk they claim to cover.
+- Keep public documentation completeness under `rust-api-docs`, source build-matrix correctness under `rust-build-portability`, and test/CI wiring under `project-tooling-review`.
+- Do not require one doctest per public function. Require runnable examples for non-trivial public workflows and semver-relevant contracts where copied usage provides real evidence.
+- Do not add a property, fuzz, compile-fail, Miri, Loom, or sanitizer framework merely for ceremony; use established tooling or add it only when the uncovered risk justifies the maintenance cost.
+- Do not mutate git state without explicit authorization.
 
-Ignore unrelated, unchanged code.
+## Workflow
 
-### Scope Modes
+### 1. Identify the failure the test must detect
 
-Default mode:
-- Focus on newly added or modified Rust code.
-- Ignore unrelated, unchanged code.
+For each changed behavior, name the incorrect implementation, invariant violation, compatibility break, panic, race, or scientific error the test should catch.
 
-Whole-repo baseline mode:
-- Use when the user explicitly says "whole repo", "entire repo", "baseline audit", or similar.
-- Evaluate all Rust source, tests, examples, benches, and doctests.
-- Prioritize actionable gaps by public API risk, panic behavior, missing doctests, weak tests, and untested invariants.
-- Do not require fixing every historical issue in one pass; report findings by priority and recommend focused follow-up patches.
+Reject tests that only execute code, check `is_ok()`/`is_err()`, assert a generic validity helper, or duplicate production logic as the oracle. Prefer exact outputs, state deltas, typed error variants and fields, independent properties, and observable public behavior.
 
----
+### 2. Choose the right evidence level
 
-## Requirements
+Use:
 
-### 1. Test Coverage
+- unit tests for local algorithms and private invariants
+- integration tests for public package behavior and module boundaries
+- doctests/examples for realistic downstream usage and import paths
+- property or metamorphic tests for broad invariant-bearing input spaces
+- fuzzing for parsers, serialization, unsafe boundaries, state machines, and complex mutation sequences
+- compile-fail or `trybuild` tests for stable type, trait-bound, lifetime, macro, and misuse contracts
+- model checking such as Loom for concurrency interleavings when established and warranted
+- benchmarks only as performance evidence after correctness is asserted outside measured work
 
-New functionality must include sufficient and reasonable tests.
+Avoid using an expensive or brittle layer when a focused deterministic regression proves the same risk.
 
-A test suite is insufficient if it:
-- only tests happy paths
-- lacks boundary conditions
-- does not test error handling
-- does not validate invariants
-- does not cover realistic usage patterns
+### 3. Cover success, rejection, and failure atomicity
+
+Check:
+
+- smallest successful examples and exact expected results
+- empty, boundary, malformed, unsupported, overflow-adjacent, non-finite, and degenerate inputs where relevant
+- every meaningful typed rejection category
+- public recoverable inputs return `Err`/`None` rather than panic
+- failed setters, builders, transactions, repairs, and restores leave promised state unchanged
+- operation sequences, inverse behavior, retry, drop rollback, and cache/index consistency
+- a regression test exists for each fixed defect
+
+Use panic tests only when panic is the deliberate public or internal contract. Do not normalize recoverable public panic behavior by testing it as success.
+
+### 4. Make assertions independent and diagnostic
 
 Prefer:
-- unit tests for core logic
-- integration tests where behavior crosses modules
-- layer-specific tests for validation hierarchies, including negative cases that prove the expected error variant for malformed topology, invalid embedding, or failed geometric predicates
 
----
+- direct equality or structured field assertions
+- exact error variants plus relevant context
+- analytical values, exact arithmetic, trusted independent implementations, or metamorphic properties
+- canonical snapshots only when representation stability is part of the contract
+- multiple nonfatal assertions when independent postconditions should all be reported
 
-### 2. Public Functions (API Quality)
+Avoid matching complete error prose, debug formatting, nondeterministic iteration order, or incidental storage layout unless explicitly promised.
 
-All public functions must include **doctests**.
-Public functions should not panic for recoverable conditions. They should either be truly infallible or return `Result` / `Option`.
+### 5. Keep generated and stochastic evidence reproducible
 
-Doctests must:
-- compile
-- demonstrate intended usage
-- reflect realistic inputs
-- include edge cases when relevant
+Record failing seeds and minimize counterexamples. Keep generators within the intended domain unless testing rejection. Preserve discovered failures as deterministic regressions.
 
-Flag:
-- missing doctests
-- trivial doctests that add no value
-- examples that don't match actual behavior
-- public API paths that can panic on recoverable input or state
-- `unwrap`, `expect`, unchecked indexing, `assert!`, or `panic!` in public API paths unless they enforce a documented invariant that cannot be represented as a normal error
-- undocumented panic preconditions
+For scientific or numerical behavior, cover supported dimensions/features and adversarial regimes with an oracle independent of the production path. Defer mathematical validity to `rust-scientific-correctness` while ensuring the test harness preserves its evidence.
 
----
+### 6. Test compile and configuration contracts
 
-### 3. Non-Panicking Public Behavior
+When public generics, macros, features, cfg-selected APIs, targets, MSRV, or downstream usage changes, check:
 
-For public APIs, prefer recoverable behavior that callers can handle:
+- minimal external consumers use only published paths and dependencies
+- compile-pass cases exercise intended bounds, lifetimes, conversions, macros, and feature combinations
+- compile-fail cases reject dangerous uses through stable categories rather than complete compiler prose
+- default, no-default, all, and affected curated feature sets receive appropriate evidence
+- doctests/examples do not compile only because of workspace, dev-dependency, or hidden feature context
 
-- return `Result` for errors with useful diagnostics
-- return `Option` when absence is the only expected failure mode
-- keep infallible functions genuinely infallible
-- document any remaining panic as an invariant violation or explicit precondition
+`rust-build-portability` owns which configurations must build; this skill owns whether durable tests detect regression.
 
-Tests and doctests should verify that recoverable bad inputs return `Err` / `None` instead of panicking.
+### 7. Test concurrency and unsafe boundaries proportionately
 
----
+For concurrency, avoid timing-only sleeps; use barriers, channels, deterministic scheduling hooks, or model checking. Assert cancellation, shutdown, join/error propagation, and state consistency.
 
-### 4. Private Functions (Design Clarity)
+For unsafe/FFI or aliasing-sensitive code, use targeted regression tests and established Miri, sanitizer, or platform checks where they can exercise the actual assumption. A clean dynamic run supplements rather than proves soundness.
 
-All private functions must include `///` comments explaining:
+### 8. Check harness reliability
 
-- why the function exists (intent)
-- what it does (behavior)
+Verify:
 
-Reject:
-- comments that restate the function name
-- missing documentation on non-trivial helpers
+- test discovery includes every intended case
+- feature and cfg gates do not silently remove critical tests
+- ignored tests have documented ownership and execution paths
+- fixtures clean up and avoid order dependence
+- expected-failure tests fail when the expected condition disappears
+- fuzz/property regressions replay in ordinary validation when practical
+- benchmark setup and correctness checks remain outside measured closures
+- nonzero exits and diagnostic reports propagate through repository commands
 
----
+## Validation
 
-### 5. Quality of Tests
+Maintain a validation ledger keyed by the relevant source state, built artifact,
+toolchain, target, feature set, profile, instrumentation, and exact test
+selection. Before executing a repository recipe or Cargo command, inspect what
+it selects, decide whether repository policy or the known scope requires an
+indivisible full gate, and reuse still-valid evidence already in the ledger.
 
-Evaluate whether tests:
+Choose the smallest single test selection that proves the touched risk: a named
+test, doctest, property replay, fuzz regression, compile-fail target, model
+check, affected package, or feature tier. Do not run a named test and then its
+containing target, package, workspace, and full CI as successive tiers. If a
+broader gate is independently required, choose it initially or run only the
+portion not already recorded as passing.
 
-- assert meaningful outcomes (not just execution)
-- validate invariants and correctness
-- include negative / failure cases
-- exercise public fast-fail wrappers and the canonical validation functions they delegate to, so duplicate API surfaces cannot drift
-- avoid duplication without abstraction
-- are readable and maintainable
+If an indivisible policy-mandated gate is discovered only after overlapping
+tests have passed and it offers no reliable exclusion, report the validation
+and command-surface conflict and route it to `project-tooling-review`; do not
+silently replay the tests or count the duplicate execution as new evidence.
 
----
+Rerun a test only after relevant source, fixture, build, or configuration
+changes invalidate its result, or when diagnosing nondeterminism. A different
+toolchain, target, feature set, Miri/sanitizer mode, or other material runtime
+configuration is distinct evidence rather than a duplicate. Repeated
+property, fuzz, concurrency, or benchmark samples are also distinct when the
+repetition is itself part of the stated test design; record the seed, schedule,
+or sample purpose.
 
-## Output Format
+## Finding Standard
 
-### Summary
-- PASS
-- NEEDS IMPROVEMENT
-- FAIL
+For each finding, state what wrong implementation could still pass, the missing input/oracle/assertion/configuration, the smallest stronger test, and the command that demonstrates it.
 
-### Findings
-- Bullet list of concrete, actionable issues
+## Handoff
 
-### Suggested Fixes
-- Specific recommendations (e.g., "add boundary test for empty input")
-
-### Optional Improvements
-- Non-critical but valuable enhancements
+Summarize risks and tests inspected, evidence strengthened, independent oracles, seeds/counterexamples, compile/configuration contracts, the non-overlapping validation ledger, remaining gaps, files changed, and confirmation that no git state mutation occurred when true.
