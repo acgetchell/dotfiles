@@ -40,7 +40,7 @@ After identifying changed files, load only the references that apply:
 - [`references/justfile.md`](references/justfile.md) for `justfile`, command recipes, local validator tiers, recipe naming, and docs that describe `just` commands.
 - [`references/github-actions.md`](references/github-actions.md) for `.github/workflows/**`, Actions permissions/triggers/caches/matrices, CI use of `just`, and workflow validation.
 - [`references/tool-versions.md`](references/tool-versions.md) for `Brewfile`, `uv`, `cargo install`, `rustup`, lockfiles, action versions, language toolchains, and version drift.
-- [`references/static-analysis.md`](references/static-analysis.md) for repository-owned Semgrep/Opengrep rules, fixtures, path scoping, and validation.
+- [`references/static-analysis.md`](references/static-analysis.md) for repository-owned Semgrep rules, fixtures, path scoping, and validation.
 - [`references/delaunay.md`](references/delaunay.md) in the `delaunay` repository for its Semgrep fixture harness, notebook execution policy, and generated-asset
   ownership.
 
@@ -82,6 +82,19 @@ Check:
 
 Keep fast local checks, full CI, slow/performance checks, release checks, and fixers distinct. Do not make every local workflow run the slowest path unless the repository explicitly wants that.
 
+Treat each aggregate recipe as a set of underlying validators and test
+selections. Do not run overlapping tiers in sequence when they would replay
+tests whose source/build/configuration state has not changed. Choose the
+broader tier initially or add only the evidence missing from completed focused
+checks. Post-fix reruns, materially different configurations, nondeterminism
+diagnosis, and deliberately repeated measurements remain justified.
+
+Require policy-mandated aggregate gates to expose enough component recipes or
+selection/exclusion controls for an orchestrator to add missing evidence
+without replaying completed tests. Treat an indivisible gate that forces
+duplicate execution as a command-surface defect and make the overlap visible
+rather than counting it twice.
+
 ### 4. Version And Update Discipline
 
 Check that tool versions are intentional, documented where needed, and consistent across local installers, lockfiles, workflows, and docs. When latest-version claims matter, verify them live before recommending changes.
@@ -99,6 +112,8 @@ Start with the local installed version for tools that are invoked directly from 
 ### 5. Cross-Language Coordination
 
 When tooling changes alter Rust or Python validation behavior, identify the affected language surface and call out whether `rust-review-orchestrator` or `python-review-orchestrator` should also run. Do not duplicate their source-code review inside this skill.
+
+For Python packaging changes, own recipe, workflow, installer, validator, and tool-version mechanics here. Route wheel/sdist contents, package discovery, installed imports, entry points, extras, runtime/platform matrices, and external-consumer behavior through `python-review-orchestrator` to `python-build-portability`.
 
 When command, release, or process changes affect a wider documentation suite, hand off navigation, cross-document consistency, generated-document ownership, and any applicable specialist documentation to `docs-review-orchestrator`. Keep command truth in this skill; do not absorb the broader documentation review here.
 

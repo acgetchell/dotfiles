@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python Production Review"
+  short_description: "Review production Python integration risks"
+  default_prompt: "Use $python-production-review to perform a production-readiness review of this Python code and its integration contracts."

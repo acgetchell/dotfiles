@@ -9,6 +9,8 @@ Audit `Cargo.toml`, feature flags, MSRV, lint configuration, and other crate-lev
 
 Manifest mistakes break downstream builds quietly: an unintended `default-features = true`, a missing dev-only dependency move, or a slipping MSRV often only surfaces on a user's machine. Treat the manifest as part of the public API.
 
+This skill owns declaration and release hygiene. Route source-level `cfg` agreement, feature/target matrix compilation, build scripts, generated code, cross-compilation, `no_std`, WASM, FFI/linking, and external-consumer proof to `rust-build-portability`; route workflow mechanics to `project-tooling-review`.
+
 ## Scope
 
 Focus on newly added or modified files such as:
@@ -90,21 +92,19 @@ Flag:
 - non-additive features
 - features that silently change MSRV
 - public feature names that leak third-party crate names callers should not depend on
-- feature combinations that fail to compile
+
+Route compilation of default, minimal, all, and curated feature combinations to `rust-build-portability`; this pass owns whether the manifest declares a coherent feature surface.
 
 ### 4. MSRV and toolchain
 
 Check:
 
-- `rust-version` is consistent with the highest stable feature actually used
-- CI tests against the declared MSRV
+- `rust-version` and edition declarations are explicit and consistent across the published workspace
 - `rust-toolchain.toml` is intentional and matches contributor expectations
 - bumping MSRV is treated as at least a minor version change for libraries
+- dependency policy does not make the declared MSRV meaningless without an explicit compatibility strategy
 
-Flag:
-
-- nightly-only features used in a crate that claims a stable MSRV
-- silent MSRV drift through new dependency versions
+Route proof that source, dependencies, build scripts, proc macros, and generated code compile on the declared MSRV to `rust-build-portability`.
 
 ### 5. Lints and style configuration
 
@@ -142,7 +142,7 @@ Before a release, also check:
 - version references are consistent only within an explicit release workflow; do not introduce the version bump yourself unless the user requested that release step
 - `cargo publish --dry-run` would succeed with the current manifest
 - yanked or deprecated dependencies are not present
-- MSRV declared in `Cargo.toml` matches the value tested in CI
+- declared MSRV and supported feature/target compilation or cross-compilation evidence is available from `rust-build-portability`; `project-tooling-review` owns only the commands, workflows, and runners that produce it
 
 ## Output Format
 

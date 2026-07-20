@@ -28,6 +28,8 @@ Reject performance ideas that:
 - introduce `unsafe` in crates that forbid it
 - remove diagnostics needed to debug correctness failures
 
+Keep scientific validity under `rust-scientific-correctness`, coordinated mutation and rollback under `rust-invariant-state-transitions`, raw boundary modeling under `rust-parse-dont-validate`, typed failure taxonomy under `rust-error-variants`, build-matrix behavior under `rust-build-portability`, and durable regression strength under `rust-test-quality`. This skill owns cost, complexity, allocation, data movement, and benchmark evidence inside those contracts.
+
 ## References
 
 Load the crate-specific reference only when working in that crate or when the
@@ -45,6 +47,12 @@ user asks for a cross-crate comparison:
 - [`references/causal-triangulations.md`](references/causal-triangulations.md)
   for causal triangulation moves, topology constraints, slice structure, and
   Monte Carlo move performance.
+- Read [`references/benchmark-evidence.md`](references/benchmark-evidence.md)
+  only when implementing an optimization, evaluating a performance claim, or
+  choosing between routine, PR, and release benchmark evidence.
+- Read [`references/delaunay-benchmark-commands.md`](references/delaunay-benchmark-commands.md)
+  only for Delaunay benchmark execution, PR regression checks, release
+  comparisons, or performance-document promotion.
 
 ## Scope
 
@@ -199,54 +207,18 @@ Flag:
 
 ### 7. Benchmark Accountability
 
-Every meaningful performance recommendation or implementation must be measured,
-not inferred. Before changing performance-sensitive code, run the smallest
-representative benchmark, smoke test, or allocation check that covers the
-claimed hot path and record the command and result. After each bounded change,
-rerun the same command before calling the change a performance improvement.
+Require the smallest representative benchmark, smoke proxy, allocation check, or
+complexity evidence before and after an implementation. Use the same command,
+inputs, features, toolchain, and environment; keep fixture construction,
+validation, logging, and parsing outside measured work.
 
-If the after measurement regresses, treat that as a failed optimization: revert,
-retune, or narrow the change before moving on. Do not rely on subjective
-complexity arguments, Criterion reports from unrelated benches, or "should be
-faster" reasoning when a representative proxy exists.
+Treat a clear regression as a failed optimization. Do not add
+dimension-, size-, seed-, or fixture-specific branches merely to improve a noisy
+table; specialization must follow a genuine domain algorithm boundary.
 
-Interpret benchmark evidence statistically and honestly. Small per-case timing
-wobbles can be normal for local smoke tests, especially when the aggregate proxy
-and correctness checks still look healthy. Clear regressions in a representative
-case or in the aggregate proxy should block the change. Do not game mixed
-benchmark evidence by adding dimension-, size-, or fixture-specific branches
-unless the algorithm is genuinely different for that domain case and the code
-would still be justified without the benchmark noise.
-
-Prefer:
-
-- naming an existing benchmark to run
-- measuring before editing, changing one bounded performance surface, then
-  measuring the same proxy afterward
-- judging noisy local benchmark proxies by direction, size, and aggregate impact
-  rather than demanding every subcase improve
-- recommending a focused benchmark when no existing one covers the hot path
-- checking allocation counts when heap traffic is the concern
-- comparing invariant-preserving alternatives, not under-validated shortcuts
-- considering realistic dimensions, sample counts, triangulation sizes, matrix
-  shapes, or move counts for the crate
-- using crate-specific smoke tests documented in `references/` when doing
-  repo-wide or user-visible performance work; use analogous repo-local smoke
-  tests when the exact command differs by crate
-
-Flag:
-
-- performance claims without before/after measurements from the same command
-- dimension-, input-size-, seed-, or fixture-specific code paths added only to
-  rescue mixed benchmark output rather than because the domain algorithm requires
-  them
-- clear representative-proxy regressions that are dismissed as noise without
-  rerunning, reverting, or explaining why the benchmark is no longer relevant
-- benchmark fixtures that are too clean, too small, or unrelated to the claimed
-  improvement
-- benchmark code that logs, allocates, parses config, or constructs heavy inputs
-  inside the measured closure
-- performance changes without regression tests for the invariant they rely on
+Load `references/benchmark-evidence.md` for detailed evidence selection,
+before/after discipline, noise interpretation, and routine-versus-release command
+roles.
 
 ## Common Recommendations
 
@@ -265,50 +237,6 @@ Use these when they fit the codebase:
 - add typed budgets to retry, repair, or rejection-sampling loops
 - make cache invalidation explicit before adding caches
 - add or update benchmarks before claiming a win
-
-## Command Taxonomy
-
-When a repo provides standardized benchmark recipes, distinguish routine
-correctness validation, performance evidence, release evidence, and docs
-promotion. Do not recommend expensive release-comparison commands as a default
-pre-commit step.
-
-When a repository provides `benches/README.md`, read it before running or
-recommending benchmark commands. Use its final or PR-ready checks for
-benchmark-affecting or performance-sensitive changes, but do not promote
-expensive benchmark suites into routine correctness gates unless the repository
-explicitly says to.
-
-Prefer this order:
-
-- Run the repo's normal correctness gate before committing or handing off work.
-  In many Rust crates this is `just ci`, but defer to the repo's own
-  development docs.
-- For performance-sensitive code, run the smallest representative benchmark or
-  smoke proxy before and after the change.
-- For PR-ready performance work, run the repo's local regression guard when one
-  exists.
-- For release prep, run the curated release-signal suite and release-comparison
-  report commands.
-- For already-published releases, compare stored release benchmark artifacts
-  instead of rerunning old code locally when the repo supports that workflow.
-
-Common command roles:
-
-- Correctness gate: compile, lint, test, doc, example, and benchmark-harness
-  validation. This should be the routine pre-commit check.
-- Focused benchmark: targeted Criterion or domain-specific benchmark for the
-  hot path under review.
-- Smoke proxy: broad but relatively cheap wall-clock or allocation proxy used
-  before pushing performance-sensitive changes.
-- Regression guard: local branch-vs-baseline comparison used for PR-ready
-  performance evidence.
-- Release-signal suite: curated benchmark set for release-to-release evidence,
-  usually slower and not a routine commit gate.
-- Release artifact comparison: compares benchmark data already attached to
-  published releases.
-- Release docs promotion: updates curated performance documentation and archives
-  the previous report; this is a release-maintenance task, not an audit default.
 
 ## Output Format
 

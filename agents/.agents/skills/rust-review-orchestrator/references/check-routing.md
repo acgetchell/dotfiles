@@ -1,111 +1,108 @@
-# Changed-File Routing
+# Rust Changed-File Routing
 
-Use this matrix after inspecting changed files. Prefer the smallest validator that covers the files touched by the current group. If a repository has stricter local guidance, follow the repository guidance.
+Use this matrix after inspecting the scoped diff. Repository guidance overrides generic commands.
+
+## Contents
+
+- [Scope detection](#scope-detection)
+- [Individual skill selection](#individual-skill-selection)
+- [Focused validators](#focused-validators)
+- [Full-CI escalation](#full-ci-escalation)
+- [Handoff evidence](#handoff-evidence)
 
 ## Scope Detection
 
-Use read-only commands:
+Use read-only git commands. For staged-only work, add `--cached`.
 
-```bash
-git --no-pager status --short
-git --no-pager diff --stat
-git --no-pager diff --name-status
-git --no-pager diff
-```
+Classify effects rather than routing only by extension:
 
-For staged-only requests, use the same commands with `--cached`.
+- source/API: `src/**/*.rs`, public modules, generated Rust, FFI
+- tests: `tests/**`, unit modules, doctests, fuzz, compile-fail fixtures
+- examples/benches: `examples/**`, `benches/**`, scientific fixtures
+- build/package: `Cargo.toml`, `Cargo.lock`, `.cargo/**`, `build.rs`, toolchain and lint files
+- docs/tooling: README/docs, workflows, `justfile`, configuration
 
-Classify files by path and effect:
+## Individual Skill Selection
 
-- `src/**/*.rs`: Rust library implementation or public API.
-- `tests/**/*.rs`: Rust integration/property tests.
-- `benches/**/*.rs`: benchmark harnesses or benchmark fixtures.
-- `examples/**/*.rs`: public sample code.
-- `Cargo.toml`, `Cargo.lock`, `.cargo/**`, `rust-toolchain.toml`, `rustfmt.toml`, `clippy.toml`: Cargo/toolchain surface.
-- `justfile`, `.github/workflows/**`, config files: tooling or CI surface.
-- `README.md`, `docs/**`, Rust doc comments: documentation surface.
-
-## Skill Group Selection
-
-| Changed surface | Select these groups |
+| Changed contract | Select |
 |---|---|
-| Public items, `pub` signatures, trait impls, re-exports, prelude modules, builders, doctests | Surface/API, Validation/Test, Final Synthesis |
-| Constructors, validation APIs, invariant-bearing types, mutation workflows, rollback, snapshots, borrowed views | Invariant/Error, Implementation, Validation/Test, Final Synthesis |
-| Error enums, error conversions, `Result` boundaries, diagnostic/report types | Invariant/Error, Surface/API, Validation/Test |
-| Algorithmic geometry/topology/numerical/probabilistic code | Invariant/Error, Scientific Correctness, Implementation, Validation/Test, Final Synthesis |
-| Scientific tests, reference fixtures, tolerances, error bounds, or benchmark inputs/results | Scientific Correctness, Validation/Test; add Surface/API or Implementation when production behavior or public claims changed |
-| Iterator/control-flow rewrites, allocation changes, naming/import cleanup | Implementation, Validation/Test |
-| Tests/proptests/doctests only | Validation/Test, Implementation only if tests duplicate or obscure production behavior |
-| Examples or benchmarks | Surface/API, Implementation, Validation/Test |
-| Cargo manifests, features, lints, MSRV, package metadata | Validation/Test with `rust-cargo-hygiene`; Surface/API if feature-gated API changed |
-| CLI binary, clap args, command output, CLI docs/examples | Surface/API with `rust-cli-design`, Validation/Test |
-| Workflow/config only | No Rust skill group unless Rust behavior changed; run config validators |
-| Docs-only scientific/numerical claims about methods, exactness, bounds, supported regimes, or benchmark results | Scientific Correctness; add Surface/API for Rust API docs; run docs validators |
-| Other docs-only repository prose | No Rust skill group unless Rust API docs changed; run docs validators |
+| `cfg`, features in source, MSRV compilation, targets, `build.rs`, generated code, proc macros, cross-compilation, `no_std`, WASM, FFI/linking, external consumers | `rust-build-portability` |
+| Manifest dependencies/features, workspace inheritance, lockfile policy, edition/MSRV declaration, lint tables, package metadata, publishing | `rust-cargo-hygiene` |
+| New/changed public item documentation, required Errors/Panics/Safety/Examples sections, intra-doc links, docs.rs rendering | `rust-api-docs` |
+| Prelude, `pub use`, visibility, feature-gated exports, downstream imports | `rust-prelude-exports` |
+| Builder, proposal, transaction, guard, staged workflow, chaining, duplicate fluent surface | `rust-fluent-api-design` |
+| Generic bounds, associated types, HRTBs, callable traits, `impl Trait`, generic diagnostics | `rust-trait-bounds` |
+| CLI packaging, clap/argument boundary, process output/exit behavior, CLI docs | `rust-cli-design` |
+| Coordinated mutation, state machine, cache/index update, rollback, topology edit, failure atomicity, inverse sequence | `rust-invariant-state-transitions` |
+| Smart constructor, raw DTO, parser, deserialization, refined type, setter, invalid stored state | `rust-parse-dont-validate` |
+| Error enum/category, conversion, `Result` propagation, structured diagnostic context | `rust-error-variants` |
+| Snapshot, clone/cache, canonical owner, handle provenance, lifetime-bound view or transaction shape | `rust-borrowed-view-audit` |
+| Formula, numerical/geometry/topology behavior, tolerance, exactness, stochastic semantics, scientific claim | `rust-scientific-correctness` |
+| Async, threads, locks, channels, atomics, Send/Sync, blocking, scheduling, cancellation | `rust-concurrency-async` |
+| Naming, imports, or path clarity | `rust-style-hygiene` |
+| Iterator/loop/closure/pattern/exhaustiveness or control-flow allocation | `rust-iter-control-flow` |
+| Deletion, deduplication, redundant helper/test/API, accidental complexity | `rust-simplification-review` |
+| Hot path, allocation, data movement, complexity, benchmarked optimization | `rust-invariant-performance` |
+| Behavioral tests, doctests as evidence, property/fuzz/compile-fail/concurrency tests, regressions | `rust-test-quality` |
+
+Always add `rust-production-review` last for orchestrated final synthesis. Do not load unrelated skills from the same group.
+
+Route workflow/config-only mechanics to `project-tooling-review` when no Rust semantic contract changes.
 
 ## Focused Validators
 
-Use the repository's documented commands when available. If no local guidance exists, use the generic Cargo fallbacks in this table.
+Use documented repository commands first. Generic fallbacks are examples, not mandatory new tooling.
 
-If `benches/README.md` exists and changed files touch `benches/**`, benchmark
-fixtures, hot paths, allocation-sensitive Rust, or performance claims, read it
-before choosing benchmark validators. Treat its final or PR-ready checks as
-repo-local guidance for benchmark-affecting work, not as a blanket final step
-for unrelated Rust changes.
-
-| Files touched | Validator |
+| Risk | Focused evidence |
 |---|---|
-| Rust library source affecting core behavior | documented focused Rust check; fallback `cargo test --lib` plus `cargo clippy --all-targets --all-features -- -D warnings` |
-| Scientific or numerical behavior | focused known-value, property, adversarial, and independent-oracle tests across affected dimensions/features; add the repository's numerical validator when documented |
-| Rust unit tests only | documented narrow unit-test recipe; fallback `cargo test --lib` |
-| Rust integration tests only | documented integration-test recipe; fallback `cargo test --tests` |
-| Doctests or Rust API docs | documented doctest/docs recipe; fallback `cargo test --doc` |
-| Examples | documented example validator; fallback `cargo check --examples` |
-| Benchmarks or benchmark fixtures | benchmark smoke/check recipe or `cargo check --benches`; avoid performance claims unless optimizing |
-| Cargo manifests/features/toolchain config | documented cargo-hygiene validators; fallback `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and targeted feature checks |
-| GitHub workflows/YAML/config | documented config validators, `actionlint`, or YAML checks |
-| Markdown/docs | documented docs validator, markdown lint, or link check |
-| Python support scripts touched during Rust workflow | documented Python checks; fallback project pytest/ruff/mypy recipes if present |
-| Notebook/paper artifacts touched | repository notebook or paper validators |
+| Core Rust behavior | affected package/test target; fallback `cargo test --lib` and focused Clippy |
+| Public API/docs | doctests, `cargo doc` with rustdoc warnings denied, representative downstream consumer |
+| Feature/target/MSRV | affected no-default/all/curated features, declared MSRV, target checks, external consumer |
+| State transition/rollback | focused success/rejection/failure-injection and operation-sequence tests |
+| Error contract | exact variant/field tests and affected public callers |
+| Scientific behavior | known-value, property, adversarial, independent-oracle, feature/backend parity tests |
+| Async/concurrency | deterministic synchronization tests; Loom/model checks when established; runtime-specific tests |
+| Iterator/simplification/style | focused tests plus format/Clippy for the touched package |
+| Performance | same representative benchmark or allocation proxy before and after, after correctness passes |
+| Tests only | narrow named test, doctest, property replay, fuzz regression, or compile-fail target |
+| Cargo/package | manifest checks, feature checks, package/publish dry run when release scope requires it |
+| Workflows/YAML/docs | repository tooling, action, YAML, Markdown, or link validators |
 
-When a selected validator fails:
+If `benches/README.md` exists and performance or benchmark fixtures are in scope, read it before selecting benchmark commands.
 
-1. Treat the failure as part of the current group.
-2. Fix the underlying issue.
-3. Rerun the same validator.
-4. Continue to the next skill only after the validator passes or the blocker is explicitly documented.
+Before running a validator, record the source/build state, toolchain, target,
+features, instrumentation, and exact test selection in the orchestrator's
+validation ledger. Reuse a still-valid result from another skill. When a
+validator fails, keep the failure in the current skill, repair caused failures
+when authorized, rerun it after that repair invalidates the prior result, and
+record genuine blockers before continuing.
 
-## Escalation To Full CI
+## Full-CI Escalation
 
-Run the repository's full-CI validator when any of these are true:
+Run the repository full gate when required locally, when no smaller set covers cross-layer risk, when public API and core invariants change together, when topology/numerical/rollback behavior changes broadly, or when final synthesis finds uncovered integration risk.
 
-- repository instructions explicitly require it for the touched files
-- changes span multiple Rust layers and no smaller validator covers the combined risk
-- public API and core invariant behavior changed together
-- mutation/rollback/topology/numerical code changed in a way that could affect broad behavior
-- final synthesis finds cross-cutting risk not covered by focused validators
+Do not escalate solely because orchestration is ending. Focused evidence is normally sufficient for docs-only, config-only, tests-only, examples-only, or narrowly isolated changes.
 
-Do not run full CI merely because the workflow is ending. Use focused validators for docs-only, config-only, tests-only, examples-only, benchmark-only, notebook-only, or paper-only changes when repository guidance allows them.
+Decide whether repository policy or known cross-layer scope requires the full
+gate before executing the first test, and inspect the gate's composition then.
+If it contains tests already passing for the current
+source/build/configuration state, choose the full gate as the single test
+selection from the outset or run only its uncovered validators. Do not run a
+named test, its containing target or package, the workspace suite, and full CI
+as nested tiers. If a mandatory indivisible gate is discovered late and offers
+no reliable exclusion, report the command-surface blocker and route it to
+`project-tooling-review`; do not silently replay tests or count them twice. A
+relevant edit invalidates earlier evidence; a request for a broader summary
+does not.
 
-## Review Summary Template
+## Handoff Evidence
 
-Use this shape at handoff:
+Report:
 
-```text
-Changed files:
-- path: why it changed and which issue/skill finding it addressed
-
-Review passes:
-- Surface/API: skills run and notable outcomes
-- Invariant/Error: skills run and notable outcomes
-- Scientific Correctness: skills run and notable outcomes
-- Implementation: skills run and notable outcomes
-- Validation/Test: skills run and notable outcomes
-- Final Synthesis: remaining risk or none
-
-Validation:
-- command: pass/fail/blocked, with concise context
-
-Git:
-- No git state mutations performed.
-```
+- scoped files and effects
+- each selected and meaningful skipped individual skill
+- exact skill and reference files loaded
+- findings, fixes, and per-skill validators
+- the shared validation ledger, including any justified reruns
+- final synthesis verdict and residual risk
+- git-state confirmation

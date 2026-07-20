@@ -53,11 +53,9 @@ Prefer:
 
 ### 2. Path Usage (Short and Readable)
 
-Functions should use **short, unqualified paths**.
+Prefer short imported paths when repetition harms readability, while preserving qualification when it disambiguates names, documents an uncommon origin, or keeps a one-off use clearer.
 
-Flag:
-- fully qualified paths inside functions (e.g., `crate::module::submodule::Type`)
-- repeated long paths that reduce readability
+Flag repeated fully qualified paths inside functions when they obscure the operation or duplicate the same importable prefix.
 
 Prefer:
 - `use` statements + short names
@@ -67,16 +65,11 @@ Prefer:
 
 ### 3. Import Placement
 
-Imports must be placed at the **top of the appropriate module**, not inside functions.
+Prefer imports at the narrowest module scope that remains clear and avoids repetition.
 
-Flag:
-- `use` statements inside function bodies
-- repeated imports across multiple functions
-- `#[cfg(test)]` imports in production module preambles instead of inside the relevant test module
+Flag repeated function-local imports, production-scope test imports, or broad module imports that create ambiguity or unused names.
 
-Exceptions (allowed but should be justified):
-- highly localized imports used to avoid namespace pollution
-- conditional compilation cases (`cfg`) that cannot live in a narrower module
+Accept localized imports when they avoid namespace pollution, clarify trait-method activation, or isolate conditional compilation.
 
 ---
 

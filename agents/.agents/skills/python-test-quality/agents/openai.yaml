@@ -1,4 +1,4 @@
 interface:
   display_name: "Python Test Quality"
   short_description: "Review pytest behavior and coverage"
-  default_prompt: "Use $python-test-quality to review these Python tests for meaningful behavior coverage, strong assertions, and robust fixtures."
+  default_prompt: "Use $python-test-quality to review these Python tests for behavior-driven scenarios, strong assertions, robust fixtures, properties, and failure evidence."

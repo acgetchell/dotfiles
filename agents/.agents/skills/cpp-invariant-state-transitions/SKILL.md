@@ -75,6 +75,7 @@ Do not introduce full-state copies into hot paths without evidence that the cost
 Hand off or jointly inspect:
 
 - invalidated pointers, views, iterators, and handles with `cpp-lifetime-ownership-safety`
+- raw boundary representations, repeated validation, and proof-bearing domain types with `cpp-parse-dont-validate`
 - exception guarantees, failure representations, `noexcept`, and cross-boundary propagation with `cpp-exception-safety-error-contracts`
 - concurrent publication, locking, atomics, and cancellation with `cpp-concurrency-reentrancy`
 - numerical, geometric, stochastic, or scientific invariants with `cpp-scientific-correctness`

@@ -1,6 +1,6 @@
 ---
 name: cpp-exception-safety-error-contracts
-description: "Audit modern C++20/C++23 exception safety and error contracts for correctness, consistency, and preserved failure guarantees. Use when changes touch throw/try/catch, noexcept, constructors, destructors, move operations, std::expected, std::error_code, result/status/optional returns, assertions, termination, rollback or transaction logic, parsing, serialization, filesystem, networking, callbacks, plugin interfaces, threads, coroutines, C interoperability, ABI boundaries, or partial mutation before failure."
+description: "Audit modern C++23 exception safety and error contracts for correctness, consistency, and preserved failure guarantees. Use when changes touch throw/try/catch, noexcept, constructors, destructors, move operations, std::expected, std::error_code, result/status/optional returns, assertions, termination, rollback or transaction logic, parsing, serialization, filesystem, networking, callbacks, plugin interfaces, threads, coroutines, C interoperability, ABI boundaries, or partial mutation before failure."
 ---
 
 # C++ Exception Safety and Error Contracts
@@ -76,7 +76,7 @@ Prefer focused tests that inject or simulate failure at meaningful steps:
 - `static_assert(noexcept(...))` or equivalent checks for contractually significant operations
 - cross-thread, callback, plugin, C ABI, result/status, and `std::expected` propagation paths
 
-Use the repository's existing test framework and fault-injection facilities. Do not add elaborate injection machinery unless the risk and unreachable coverage justify it.
+Use doctest through the repository's CMake/CTest targets and existing fault-injection facilities. Do not add another test framework or elaborate injection machinery unless the user explicitly changes the toolchain or the risk and unreachable coverage justify a focused helper.
 
 ## Finding Standard
 

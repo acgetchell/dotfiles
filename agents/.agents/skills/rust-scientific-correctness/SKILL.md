@@ -20,7 +20,9 @@ This skill owns:
 
 Coordinate with, but do not duplicate:
 
-- `rust-production-review` for broad Rust readiness, API, safety, mutation, maintainability, and final severity synthesis
+- `rust-production-review` for standalone broad readiness or orchestrated final severity synthesis
+- `rust-invariant-state-transitions` for coordinated mutation, rollback, caches, and operation-sequence atomicity
+- `rust-build-portability` for feature, target, MSRV, generated-code, and consumer-matrix correctness
 - `rust-invariant-performance` for hot-path cost, allocation, complexity, benchmark mechanics, and before/after performance evidence inside an established correctness envelope
 - `rust-test-quality` for test organization, coverage mechanics, doctests, panic behavior, and assertion quality
 - `scientific-citation-audit` for source existence, bibliographic accuracy, relevance, completeness, and credit
@@ -143,7 +145,11 @@ Do not broaden scope into unrelated style cleanup. If correctness depends on a d
 
 ## Validation
 
-Use repository-local commands when available. Select the narrowest checks that cover the corrected contract, then escalate when repository guidance or cross-cutting risk requires it.
+Use repository-local commands when available. Select the smallest
+non-overlapping checks that cover the corrected contract. If repository
+guidance or cross-cutting risk requires a full gate that subsumes focused
+tests, choose that gate initially or run only its uncovered checks; do not
+replay the same tests merely to escalate.
 
 Typical evidence includes:
 

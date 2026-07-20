@@ -1,124 +1,126 @@
 ---
 name: python-review-orchestrator
-description: "Coordinate multi-pass Python reviews by selecting focused skills for notebooks, CLI and boundary behavior, scientific code, support tooling, and tests. Use for changed, staged, PR, release-readiness, repository-wide, or fix-all Python work spanning multiple concerns. Use a focused Python skill directly for single-concern reviews."
+description: "Coordinate multi-pass Python reviews by selecting individual specialists for packaging and portability, notebooks, CLI behavior, boundary parsing, scientific code, support tooling, tests, and production integration. Use for changed, staged, branch, PR, release-readiness, repository-wide, or fix-all Python work spanning multiple concerns. Use a focused Python skill directly for a single concern."
 ---
 
-# python-review-orchestrator
+# Python Review Orchestrator
 
-Coordinate focused Python review skills without copying their content. This skill is an execution plan: load each selected named skill file, apply selected skills in logical pass groups, fix actionable issues, validate the touched surface for that group, and only then continue to the next group.
-
-The intent is to replace a maintainer manually running the relevant Python, notebook, and scientific review passes one by one. Do not collapse notebook, boundary, scientific, support-tooling, validation, and synthesis concerns into one blended review and report it as orchestrated work.
+Coordinate focused Python skills without copying their guidance. Select each skill independently from the changed behavior; selecting a pass does not imply loading every skill listed in that pass.
 
 ## Ground Rules
 
-- Do not perform git state mutations. Do not stage, commit, push, tag, checkout, reset, or stash unless the user explicitly asks in the current turn.
-- Use read-only git commands to discover scope when needed: `git --no-pager status --short`, `git --no-pager diff --stat`, `git --no-pager diff --name-status`, and `git --no-pager diff`.
-- Respect repository-local agent instructions before editing. If the repository requires reading development docs before changes, read them first.
-- Prefer changed-file review by default. Use whole-repo baseline mode only when the user explicitly asks for "repo", "whole repo", "entire repo", "baseline audit", or equivalent.
-- When invoked by `repo-review` with a branch-scope file list or diff, honor that provided scope instead of rediscovering a narrower staged or worktree-only scope.
-- When the user says "fix all", implement actionable findings as you go. Do not merely collect them for later unless the fix is blocked or unsafe.
-- Do not run blanket full-CI validators by default. Select focused validators from changed and touched files. Run full CI only when repository rules require it for the touched surface or when changes cross broad Python behavior.
+- Do not mutate git state unless the user explicitly requests it in the current turn.
+- Respect repository-local instructions before inspecting or editing files.
+- Prefer changed-file scope. Use whole-repository mode only when explicitly requested or handed off as baseline scope by `repo-review`.
+- Honor a parent orchestrator's branch-scope file list instead of narrowing it to current worktree changes.
+- When asked to fix issues, implement safe actionable fixes as each pass finds them.
+- Use focused validators while iterating. Run full CI only when repository policy or cross-layer risk requires it.
+- Maintain one cross-skill validation ledger keyed by source/environment state,
+  built artifact and installation-target identity, Python/platform/dependency
+  configuration, instrumentation, and exact test selection. Use a wheel,
+  sdist, installed tree, or entry-point digest when applicable. Reuse
+  still-valid evidence instead of replaying it through broader recipes.
+
+## Establish Scope And Routing
+
+1. Inspect the supplied scope. Otherwise use read-only git commands to enumerate
+   the committed branch delta from its merge base, staged changes, unstaged
+   changes, and untracked paths.
+2. Read the complete contents of every untracked file with a file-appropriate
+   reader before selecting skills; a status entry or filename is not evidence.
+3. Read [`references/check-routing.md`](references/check-routing.md).
+4. Select individual skills from changed behavior, not file extensions alone.
+5. State selected and meaningfully skipped skills before loading specialist bodies.
+6. Load a repository-specific reference only when both the repository and its concern match.
+
+Validator selection is independent from skill selection. Running tests for changed code does not by itself require loading `python-test-quality`.
 
 ## Review Trace
 
-When invoked by `repo-review`, begin with a handoff receipt that names:
+For each selected skill, record:
 
-- the parent branch scope and Python-owned file list or file count handed off
-- selected Python skill groups and why they apply
-- skipped Python skill groups when a maintainer might reasonably expect them
-- routing reference files that will be loaded
+- why it applies
+- skill and reference files loaded
+- changed files inspected
+- findings or explicit no-finding outcome
+- fixes applied
+- focused validation and result, or the matching ledger evidence reused
 
-For every selected group, announce the group and focused skills before loading the first skill. After loading each focused skill or reference file, keep its name in the running trace for the final summary. This trace is required evidence that the orchestrator ran the selected Python skills rather than only summarizing their names.
+When invoked by `repo-review`, provide table-ready evidence for the parent review. Name selected and skipped skills whose absence might otherwise appear accidental.
 
-Evidence is grouped by pass, not by memory. A group is complete only when the final summary can name the group status (`selected` or `skipped`), the focused skill files loaded for that group, the changed files inspected, the findings or explicit no-finding result, fixes applied, and the focused validator run for that group. Loading skill files, remembering prior context, or running full CI does not by itself count as applying a group.
+## Pass Order And Individual Selection
 
-When invoked by `repo-review`, provide table-ready evidence for the parent `Review Evidence` table: selected groups, focused skill files loaded, reference files loaded, validators run, and any skipped groups that might otherwise look missing.
+Run applicable skills in this order. Within a pass, select only the skills whose trigger conditions match.
 
-## Required Skill Loading
+### 1. Build, Install, And Configuration
 
-Load every selected skill's `SKILL.md` completely and follow its directly relevant references. Load skills at the start of their logical group, not before earlier groups have findings, fixes, and validator evidence. Use the [Per-Group Fix Loop](#per-group-fix-loop) as the single execution procedure.
+- Select `python-build-portability` for package builds, wheels, sdists, package discovery/data, entry points, extras, environment markers, declared Python or platform support, editable-versus-installed differences, optional imports, native extensions, or external consumers.
+- Select `project-tooling-review` separately when workflow mechanics, command recipes, validation configuration, installers, or tool-version pins changed. Do not load it merely because package source changed.
 
-## Scope Routing
+### 2. Notebook And Reproducibility
 
-Read [`references/check-routing.md`](references/check-routing.md) after identifying changed files. Use it to choose:
+- Select `jupyter-notebook-review` for `.ipynb` structure, cell identity, hidden state, outputs, notebook environments, plotting, headless execution, or generated notebook artifacts.
+- Select additional Python specialists only when notebook cells contain substantial behavior owned by those skills. Plotting already-produced data does not automatically require scientific review.
 
-- which skill groups apply
-- which focused validators to run after each group
-- when final validation should escalate from focused commands to the repository's full-CI validator
+### 3. Application And Boundary Behavior
 
-If changed files do not match the table cleanly, choose the smallest validator that covers the risk and state the assumption in the final summary.
+- Select `python-cli-review` for user-visible CLI/application contracts, arguments, stdout/stderr, privacy-sensitive output, application file workflows, and date/time behavior.
+- Select `python-parse-dont-validate` independently for raw dictionaries, config, environment variables, structured files, subprocess output, paths, optionals, primitive values with invariants, or validated domain models.
 
-## Skill Groups
+Do not load `python-cli-review` for a pure parser or model change with no application behavior. Do not load the parsing skill for passive data shapes with no meaningful invariant.
 
-Run groups in this order when they apply. Within each group, load and apply each selected skill in the order listed.
+### 4. Scientific And Data Correctness
 
-### 1. Notebook/Reproducibility Pass
+- Select `python-scientific-review` for mathematical, numerical, geometric, statistical, stochastic, dataframe-computation, scientific-reproducibility, or independent Rust-interoperability behavior.
+- Select the parsing skill additionally only when external scientific inputs carry structural or domain invariants before computation.
 
-Use when `.ipynb` files, notebook execution helpers, notebook dependency groups, rendered outputs, or notebook CI paths changed.
+### 5. Development And Release Support
 
-- `jupyter-notebook-review`
+- Select `python-support-scripts` for changelog generators, release helpers, benchmark runners, CI utilities, fixture generators, diagnostic tools, generated-artifact preparation, or subprocess orchestration around development tools.
+- Add CLI or parsing skills only when their distinct contracts are material; a support script having `argparse` does not alone require a second full pass.
 
-This skill is the notebook front door. After it runs, select additional Python skills below when notebook code contains substantial reusable, scientific, CLI, support-tooling, or test behavior.
+### 6. Test Evidence
 
-### 2. Boundary/Application Pass
+Select `python-test-quality` when:
 
-Use for CLI/application behavior, parsers, file I/O, stdout/stderr contracts, privacy-sensitive output, date/time handling, config loading, raw data boundaries, typed models, or invalid-state prevention.
+- tests, fixtures, pytest configuration, or test helpers changed
+- the user requests test or coverage review
+- a discovered bug requires regression evidence
+- property, stateful, async, subprocess, install, or configuration-matrix evidence is a material part of the contract
+- existing tests may conceal a production defect through weak assertions, excessive mocking, nondeterminism, or duplicated logic
 
-- `python-cli-review`
-- `python-parse-dont-validate` when raw dicts, config, environment variables, subprocess output, JSON/CSV/TOML/YAML, paths, optionals, or primitive values carry invariants
+Skip the skill when tests are unchanged and specialist validation is sufficient. Still run appropriate focused tests.
 
-### 3. Scientific/Data Pass
+### 7. Production Synthesis
 
-Use for numerical, geometric, statistical, dataframe, fixture-generation, scientific reproducibility, Rust-interoperability, NumPy/SciPy, or Hypothesis-over-numerical-input changes.
+Always load `python-production-review` after selected specialists in orchestrated work. Use its orchestrated mode: do not load the standalone checklist.
 
-- `python-scientific-review`
+Use it to review ordinary reusable Python code with no narrower owner, reconcile cross-skill contracts, remove duplicate findings, inspect residual integration/resource/security risks, and decide release readiness.
 
-### 4. Support Tooling Pass
+## Per-Skill Fix Loop
 
-Use for changelog generators, release helpers, benchmark runners, CI scripts, fixture utilities, diagnostic CLIs, subprocess wrappers around `cargo`/`git`/`gh`, generated artifact preparation, or Rust-crate development tooling.
+For each selected specialist:
 
-- `python-support-scripts`
+1. Announce the skill and why it applies.
+2. Read its `SKILL.md` completely and only directly relevant references.
+3. Inspect the changed surface and nearby contract owners.
+4. Record findings or an explicit no-finding result.
+5. Implement minimal fixes when authorized.
+6. Run the smallest validator that covers the risk only when equivalent evidence is not already valid in the shared ledger.
+7. Fix validator failures before continuing or document a genuine blocker.
 
-### 5. Validation/Test Pass
-
-Use for tests, fixtures, coverage gaps, pytest ergonomics, CLI output capture, malformed-input coverage, notebook checker tests, and error-path behavior.
-
-- `python-test-quality`
-
-### 6. Final Synthesis Pass
-
-Use this pass after all selected skills and validators have run.
-
-This pass reconciles findings from earlier groups, removes duplicates, checks severity, and decides whether remaining issues are blockers, follow-ups, or acceptable residual risk. Do not load an extra broad Python skill unless one of the focused skills above actually applies to the remaining issue.
-
-## Per-Group Fix Loop
-
-For each selected group:
-
-1. Announce the group and selected skills briefly.
-2. Load every selected focused skill file for that group, plus directly relevant references.
-3. Inspect only relevant changed files and nearby boundary owners unless whole-repo mode is active.
-4. Apply the selected skills as one logical group, keeping findings tied to the group and file references.
-5. Implement minimal fixes for real findings.
-6. Run the focused validator from `references/check-routing.md` for the group.
-7. Fix validator failures before continuing.
-8. Record what changed per file and the group outcome for the final summary.
-
-Do not report a Python orchestrator run as complete if the work was performed as one undifferentiated review across multiple groups. In that case, label it as preliminary context and rerun the applicable grouped passes.
-
-If a validator is expensive, blocked, or needs approval, use the repository's focused cheaper validator while iterating, then run the strongest relevant validator available before final handoff.
+Do not claim an orchestrated review from one undifferentiated pass. Preserve ownership and evidence per selected skill.
 
 ## Final Summary
 
-End with a concise summary that helps the maintainer review unstaged changes by file. Include:
+Lead with unresolved blockers. Then include:
 
-- each file changed and why
-- which skill groups ran
-- focused skill files and reference files actually loaded
-- table-ready evidence for `repo-review` when invoked by the meta-orchestrator
-- validators run and their results
-- issues fixed while moving between skills
-- anything intentionally deferred or not run
-- confirmation that no git state mutations were performed, if true
+- files changed and why
+- selected skills and references actually loaded
+- meaningful skips
+- fixes and cross-skill reconciliations
+- the non-overlapping validation ledger and results
+- untested configurations or external limitations
+- confirmation that git state was not mutated, when true
 
-Do not bury important risk in a generic "all good" closing. If unresolved issues remain, lead with them.
+When invoked by `repo-review`, return this evidence in the parent's requested table-ready form.

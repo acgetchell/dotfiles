@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust Invariant State Transitions"
+  short_description: "Audit Rust mutation and rollback invariants"
+  default_prompt: "Use $rust-invariant-state-transitions to audit Rust state transitions, coordinated mutation, rollback, and failure atomicity."

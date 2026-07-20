@@ -1,6 +1,6 @@
 ---
 name: repository-docs-review
-description: "Review and fix an active repository documentation suite for navigation, operational clarity, generated-file ownership, and cross-document consistency. Use for README, AGENTS, CONTRIBUTING, SECURITY, codes of conduct, docs/**, runbooks, architecture guides, and ADRs. Route command truth, language behavior, citations, Rust API docs, and scholarly prose to their focused owners."
+description: "Review and fix an active repository documentation suite for navigation, operational clarity, generated-file ownership, and cross-document consistency. Use for README, AGENTS, CONTRIBUTING, SECURITY, codes of conduct, docs/**, runbooks, architecture guides, and ADRs. Route command truth, language behavior, scientific claims, citations, C++ or Rust API docs, and scholarly prose to focused owners."
 ---
 
 # Repository Documentation Review
@@ -42,6 +42,8 @@ include:
 Treat this as examples, not an allowlist. Classify tracked documentation as active,
 generated, template, archived, or otherwise out of scope. Exclude repository-designated
 archives unless the user explicitly requests archive maintenance.
+
+Read [`references/latex-validation.md`](references/latex-validation.md) only when LaTeX, TeX tooling, publication builds, PDF generation, `chktex`, or TeX-produced documentation is in scope.
 
 Default to the parent task's branch or changed-file scope. For an explicit whole-repo
 baseline or documentation release-readiness review, inspect every tracked active
@@ -101,22 +103,16 @@ validator when the repository already defines one.
 If a check needs unavailable network access or installation, run the strongest local
 substitute and report the remaining gap.
 
-For LaTeX paper checks on macOS, when a repository recipe reports `chktex` as
-missing, check `/Library/TeX/texbin/chktex` before installing another TeX
-distribution. MacTeX may provide the binary outside the inherited `PATH`; when
-present, run the repository recipe with `PATH=/Library/TeX/texbin:$PATH`. Keep
-this to mechanical source/build validation and route manuscript prose through
-the academic-authorship boundary.
-
 ## Specialist Handoffs
 
 Keep ownership explicit and select only specialists required by the files and claims:
 
 - `project-tooling-review`: command, CI, workflow, installer, and tool-version truth
 - language reviewers: API, example, and behavior truth for the implementation language
+- `cpp-api-docs`: C++ public comments, Doxygen/reference output, caller contracts, and canonical examples
 - `rust-api-docs`: Rust `///` and `//!` documentation or API-supporting helper docs
-- `scientific-crate-docs-review`: Cargo, `CITATION.cff`, `REFERENCES.md`, scientific
-  Rust release metadata, and crate-specific scientific documentation coupling
+- `scientific-software-docs-review`: scientific claims, validation evidence, reproducibility, limitations, and research artifacts
+- `scientific-crate-docs-review`: Rust Cargo/README/CITATION release metadata and generated changelog coupling
 - `scientific-citation-audit`: bibliographic identity, DOI/source validity, scientific
   provenance, scientific claims, and credit alignment
 - `academic-authorship-boundary`: substantive scholarly manuscript prose or reviewer

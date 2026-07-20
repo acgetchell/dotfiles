@@ -1,0 +1,4 @@
+interface:
+  display_name: "C++ API Docs"
+  short_description: "Audit C++ public API documentation"
+  default_prompt: "Use $cpp-api-docs to audit this C++ public API documentation, examples, contracts, and generated-doc warnings."

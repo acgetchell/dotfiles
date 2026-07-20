@@ -1,4 +1,4 @@
 interface:
   display_name: "Python CLI Review"
   short_description: "Review Python CLI app behavior."
-  default_prompt: "Use $python-cli-review to review changed Python CLI/application code for correctness, edge cases, user-facing behavior, privacy-sensitive output, and test coverage."
+  default_prompt: "Use $python-cli-review to review changed Python CLI or application behavior, output contracts, privacy, and safe local effects."

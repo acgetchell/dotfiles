@@ -1,101 +1,84 @@
-# Changed-File Routing
+# Python Review Routing
 
-Use this matrix after inspecting changed files. Prefer the smallest validator that covers the files touched by the current group. If a repository has stricter local guidance, follow the repository guidance.
+Use this matrix after identifying changed behavior. Select skills individually and choose validators separately.
 
 ## Scope Detection
 
-Use read-only commands:
+Use a supplied parent scope when present. Otherwise use read-only git commands
+to enumerate the committed branch delta from its merge base, staged changes,
+unstaged changes, and every untracked path. Read the complete contents of each
+untracked file with a file-appropriate reader before routing it; a status entry
+or filename alone is insufficient. Classify the resulting complete scope by
+behavior:
 
-```bash
-git --no-pager status --short
-git --no-pager diff --stat
-git --no-pager diff --name-status
-git --no-pager diff
-```
+- Python modules and scripts
+- pytest tests, fixtures, and configuration
+- notebooks and notebook helpers
+- packaging, dependency, uv, Ruff, ty, and runtime metadata
+- scientific data, examples, and generated artifacts
+- workflow, recipe, and documentation surfaces shared with other orchestrators
 
-For staged-only requests, use the same commands with `--cached`.
+## Individual Skill Routing
 
-Classify files by path and effect:
+| Skill | Select when | Skip when |
+|---|---|---|
+| `python-build-portability` | Wheels, sdists, package discovery/data, installed imports, entry points, extras, markers, supported runtimes/platforms, native extensions, external consumers | Only workflow commands or tool pins changed |
+| `jupyter-notebook-review` | Notebook cells, metadata, outputs, execution, plotting, environments, or notebook artifacts changed | A normal Python module merely supports a notebook |
+| `python-cli-review` | User-visible arguments, output, privacy, application files, dates/times, or exit behavior changed | Pure parser/model or support-transform change |
+| `python-parse-dont-validate` | Raw external values carry structural or semantic invariants into trusted code | Passive reports or already-validated values |
+| `python-scientific-review` | Mathematical, numerical, statistical, geometric, stochastic, dataframe-computation, or scientific-oracle behavior changed | Plot formatting or generic file plumbing only |
+| `python-support-scripts` | Release, changelog, benchmark, CI, fixture, diagnostic, generated-artifact, or development subprocess behavior changed | User application or scientific algorithm code |
+| `python-test-quality` | Test artifacts changed, coverage/test review was requested, or durable evidence is itself at risk | Tests are unchanged and focused specialist validation is sufficient |
+| `python-production-review` | Always in orchestrated mode; also owns ordinary reusable modules and residual integration concerns | Never skip final synthesis during orchestration |
 
-- `*.py`, `src/**/*.py`, `scripts/**/*.py`, `tools/**/*.py`: Python implementation, CLI, support tooling, or scientific code.
-- `tests/**/*.py`, `test_*.py`, `*_test.py`, `conftest.py`: pytest surface, fixtures, and test helpers.
-- `notebooks/**/*.ipynb`, `*.ipynb`: notebook source, outputs, and execution hygiene.
-- `pyproject.toml`, `uv.lock`, `requirements*.txt`, `setup.cfg`, `tox.ini`, `noxfile.py`, `mypy.ini`, `.python-version`, `.ruff.toml`, `ruff.toml`, `ty.toml`, `pyrightconfig.json`: Python packaging, dependency, lint, format, and type-check surface.
-- `data/**`, `fixtures/**`, `tests/fixtures/**`, `examples/**`: fixtures, examples, generated reference data, and interoperability artifacts.
-- `justfile`, `.github/workflows/**`, config files: tooling or CI surface.
-- `README.md`, `docs/**`, notebook markdown, and CLI examples: documentation surface.
+Select `project-tooling-review` outside this skill when recipes, workflows, validation configuration, installers, or tool versions changed. Select documentation review for suite-wide docs consistency. Shared ownership does not justify loading unrelated Python specialists.
 
-## Skill Group Selection
+## Common Combinations
 
-| Changed surface | Select these groups |
-|---|---|
-| `.ipynb` notebooks, notebook execution helpers, notebook dependency groups, committed outputs | Notebook/Reproducibility, then any domain group implied by code cells, Validation/Test |
-| CLI entry points, argparse/Click/Typer, stdout/stderr, local file import/export, date/time parsing, privacy-sensitive output | Boundary/Application, Validation/Test |
-| JSON/CSV/TOML/YAML/env/subprocess parsing, dataclasses/attrs/Pydantic models, raw dicts or primitives with invariants | Boundary/Application with `python-parse-dont-validate`, Validation/Test |
-| Numerical, geometric, statistical, scientific, dataframe, NumPy/SciPy, Hypothesis-over-numeric, or Rust-interoperability code | Scientific/Data, Boundary/Application when raw inputs carry invariants, Validation/Test |
-| Changelog/release/CI/benchmark/fixture/diagnostic scripts, generated artifact preparation, subprocess wrappers around `cargo`/`git`/`gh` | Support Tooling, Boundary/Application when CLI behavior matters, Validation/Test |
-| Tests/fixtures only | Validation/Test, plus domain group only if tests encode scientific, CLI, parser, or support-tool behavior that can hide a production bug |
-| Python packaging, lint, format, type-check, or dependency config | Validation/Test, plus affected domain group if config changes behavior |
-| Docs-only Python examples or notebook prose | Relevant domain group only if examples are executable or user-facing behavior changed; otherwise docs validators |
-| Workflow/config only | No Python skill group unless Python behavior, validators, notebooks, or generated artifacts changed; run config validators |
+- Pure config parser: parsing, then production; add test-quality only for changed or materially weak evidence.
+- CLI importing structured data: CLI plus parsing, then production.
+- Scientific computation over external data: parsing plus scientific, then production.
+- Scientific notebook plotting existing artifacts: notebook, then production; add scientific only when cells perform or validate scientific computation.
+- Release script with a user-facing CLI: support scripts; add CLI only for a substantial public output/argument contract.
+- Packaging metadata or installed import change: build portability, then production; add tooling only for command or workflow mechanics.
+- Tests-only change: test quality plus the domain specialist only when the tests encode a domain assumption that could hide a production bug.
+- Ordinary reusable module: production; add a focused specialist only for a matching concern.
 
 ## Focused Validators
 
-Use the repository's documented commands when available. If no local guidance exists, use the generic fallbacks in this table.
+Prefer repository commands. Otherwise choose the smallest applicable evidence:
 
-| Files touched | Validator |
+| Surface | Focused evidence |
 |---|---|
-| Python library/application source | documented focused Python check; fallback `python -m compileall <changed paths>` plus targeted `pytest` when tests exist |
-| CLI entry points or user-facing command output | documented CLI tests; fallback targeted `pytest`, plus `python -m <module> --help` or the local command's `--help` when discoverable |
-| Parser/config/model changes | targeted parser/model tests; fallback targeted `pytest` plus the repository type checker if configured |
-| Scientific/numerical/dataframe code | targeted scientific tests, property tests, or fixture checks; run benchmark/allocation checks only when making performance claims |
-| Support scripts and dev tooling | targeted pytest/golden tests; run `--help` smoke checks for changed CLIs when safe |
-| Tests only | `pytest <changed test files>` or the repository's narrow test recipe |
-| Notebooks | repository notebook lint/execute recipe; fallback notebook JSON parse and lightweight lint, execute only when dependencies and runtime are reasonable |
-| Python package/dependency config | repository lock/check recipe; fallback `python -m compileall` and configured lint/type/test commands when available |
-| Type annotations or invariant-carrying models | configured type checker (`mypy`, `pyright`, `basedpyright`, `ty`, or local recipe) plus targeted tests |
-| Markdown/docs/examples | docs, markdown, link, or example validators from the repository |
-| GitHub workflows/YAML/config | documented config validators, `actionlint`, or YAML checks |
+| Python source | Compile/import check, `uv run --locked ruff check`, `uv run --locked ruff format --check`, `uv run --locked ty check`, targeted pytest |
+| CLI | Targeted tests plus safe `--help` or entry-point smoke check |
+| Parser/model | Rejection and acceptance tests plus `uv run --locked ty check` |
+| Scientific | Targeted numerical/property/fixture tests; benchmark only for performance claims |
+| Support script | Fixture/golden tests and safe `--help` smoke check |
+| Notebook | Structured lint; execute only when runtime behavior or artifacts are in scope |
+| Build/install | `uv lock --check`, `uv build`, isolated uv wheel install, external import, entry points/extras |
+| Tests only | Narrow pytest target or repository test recipe |
+| Docs/examples | Documentation and example validators |
+| Workflow/config | Tooling-owned YAML, action, lock, lint, or configuration validators |
 
-When a selected validator fails:
+When annotations or invariant models change, run ty through uv. Use Ruff through uv for lint and format evidence. Before running a validator, record its source/environment state, built artifact and installation-target identity, Python/platform/dependency configuration, instrumentation, and exact test selection in the shared ledger. Reuse build/install or external-consumer evidence only when the artifact and installation target also match. When a validator fails, fix and rerun it after that repair invalidates the prior result before moving to the next skill, or document the blocker.
 
-1. Treat the failure as part of the current group.
-2. Fix the underlying issue.
-3. Rerun the same validator.
-4. Continue to the next skill only after the validator passes or the blocker is explicitly documented.
+## Escalate To Full CI
 
-## Escalation To Full CI
+Run full CI when repository policy requires it, changes span several Python layers without a narrower combined validator, public behavior and packaging changed together, scientific results have broad impact, or final synthesis identifies uncovered cross-cutting risk. Do not run it solely because orchestration is ending.
 
-Run the repository's full-CI validator when any of these are true:
+Decide whether repository policy or known cross-layer scope requires the full
+gate before executing the first test, and inspect the gate's composition then.
+If it contains tests already passing for the current
+source/environment/configuration state, choose the full gate as the single
+test selection from the outset or run only its uncovered validators. Do not
+nest a named pytest case, its containing module or suite, and full CI. If a
+mandatory indivisible gate is discovered late and offers no reliable
+exclusion, report the command-surface blocker and route it to
+`project-tooling-review`; do not silently replay tests or count them twice. A
+relevant edit invalidates earlier evidence; a desire for a broader summary
+does not.
 
-- repository instructions explicitly require it for the touched files
-- changes span multiple Python layers and no smaller validator covers the combined risk
-- public CLI behavior and parser/model invariants changed together
-- scientific/reproducibility behavior changed in a way that could affect broad results
-- notebook execution, support scripts, and package config changed together
-- final synthesis finds cross-cutting risk not covered by focused validators
+## Handoff Evidence
 
-Do not run full CI merely because the workflow is ending. Use focused validators for docs-only, config-only, tests-only, examples-only, fixture-only, notebook-only, or support-script-only changes when repository guidance allows them.
-
-## Review Summary Template
-
-Use this shape at handoff:
-
-```text
-Changed files:
-- path: why it changed and which issue/skill finding it addressed
-
-Review passes:
-- Notebook/Reproducibility: skills run and notable outcomes
-- Boundary/Application: skills run and notable outcomes
-- Scientific/Data: skills run and notable outcomes
-- Support Tooling: skills run and notable outcomes
-- Validation/Test: skills run and notable outcomes
-- Final Synthesis: remaining risk or none
-
-Validation:
-- command: pass/fail/blocked, with concise context
-
-Git:
-- No git state mutations performed.
-```
+Report selected and meaningfully skipped skills, files inspected, references loaded, findings/fixes, the shared validation ledger and results, configuration gaps, and git-state status. Keep evidence attributable to individual skills.

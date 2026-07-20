@@ -1,0 +1,4 @@
+interface:
+  display_name: "C++ Parse Don’t Validate"
+  short_description: "Design invariant-safe C++ boundary types"
+  default_prompt: "Use $cpp-parse-dont-validate to design or audit this C++ boundary so validated domain types carry invariants inward."

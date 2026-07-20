@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust Build Portability"
+  short_description: "Audit Rust build and target portability"
+  default_prompt: "Use $rust-build-portability to audit Rust feature, target, MSRV, build-script, and downstream-consumer portability."

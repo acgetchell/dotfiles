@@ -1,121 +1,83 @@
 ---
 name: scientific-crate-docs-review
-description: "Review the scientific Rust documentation layer coupling Cargo metadata, README release claims, CITATION.cff, REFERENCES.md, scientific topic docs, release guidance, and generated changelogs. Use for scientific crate release readiness, version and credit synchronization, algorithm provenance, and validation documentation alongside repository-docs-review."
+description: "Review Rust-specific release documentation coupling for scientific crates across Cargo metadata, README installation and release claims, CITATION.cff synchronization, crates.io identity, docs.rs metadata, authorship, license, repository links, and generated changelogs. Use when scientific Rust crate release metadata is materially in scope; route language-neutral scientific claims and validation documentation to scientific-software-docs-review."
 ---
 
 # Scientific Crate Documentation Review
 
-Review the scientific Rust-specific layer after the generic documentation surface is
-known. This skill owns crate metadata, scientific credit and provenance handoffs, and
-release coupling; `repository-docs-review` owns the general suite inventory,
-navigation, style, operational clarity, and generated-document workflow.
+Review the Rust ecosystem release layer for a scientific crate. Keep this pass narrow: establish consistency among Cargo, README, citation metadata, crates.io-facing identity, docs.rs configuration, and generated changelog ownership without repeating generic or scientific documentation reviews.
 
-## Ground Rules
+## Scope And Boundaries
 
-- Do not mutate git state unless explicitly requested.
-- Do not broaden a generic docs task into a scientific review merely because the
-  repository is written in Rust or has research users.
-- Use the parent review's inventory and findings when available instead of repeating
-  the generic documentation pass.
-- Treat `Cargo.toml`, source code, release configuration, and validated bibliographic
-  records as authorities for the claims they own.
-- Do not write substantive manuscript prose under a human author's name.
-- Do not hand-edit generated changelog content or generated publication artifacts.
+Select this skill only when scientific Rust crate release metadata is material. Do not select it merely because the repository contains Rust or scientific documentation.
+
+- Let `repository-docs-review` own suite navigation, operational clarity, and generic consistency.
+- Let `scientific-software-docs-review` own scientific claims, validation methodology, benchmarks, reproducibility, limitations, and research artifacts.
+- Let `rust-api-docs` own `///`, `//!`, public coverage, examples, links, and rendered API quality.
+- Let `rust-cargo-hygiene` own manifest design, features, MSRV, dependency, and publishing correctness.
+- Let `scientific-citation-audit` own DOI identity, bibliographic validity, provenance, and credit.
+- Let `academic-authorship-boundary` constrain manuscript prose.
+
+Use complete parent evidence rather than rerunning these passes.
 
 ## Applicable Surface
 
-Select this skill when one or more of these surfaces is materially in scope:
+Inspect only files relevant to the release contract, such as:
 
-- scientific Rust crate release documentation and version synchronization
-- `CITATION.cff`, `REFERENCES.md`, crate authorship, ORCIDs, licenses, or repository
-  metadata
-- scientific algorithm, invariant, numerical robustness, validation, benchmark, or
-  provenance documentation tied to crate behavior
-- `cliff.toml` ownership of generated `CHANGELOG.md` content
-- scientific crate publication or artifact-build guidance outside manuscript prose
+- `Cargo.toml` package name, version, authors, license, repository, homepage, documentation, readme, keywords, categories, and published features
+- README installation/version examples, compatibility statements, crate badges, and links
+- `CITATION.cff` version, release date, repository identity, authors, ORCIDs, DOI, and preferred citation
+- crates.io and docs.rs metadata or release configuration
+- `cliff.toml` or another source for generated changelog sections
+- release and migration guidance tied to the crate version
 
-If invoked directly for a broad documentation review, pair it with
-`repository-docs-review` or route through `docs-review-orchestrator`.
+Use the parent inventory to exclude unrelated generic docs, manuscripts, archives, and generated build output.
 
-## Workflow
+## Review Workflow
 
-### 1. Inspect the Scientific and Release Authorities
+1. Identify the release being prepared and the authoritative version source.
+2. Inventory crate identity and release fields repeated across Cargo, README, CFF, release notes, and generated sites.
+3. Classify each repeated value as authoritative, derived, or independently intentional.
+4. Check generated changelog ownership and release-date/commit semantics.
+5. Hand scientific claims, API docs, citation validity, and manifest design to their owners.
+6. Run the narrowest crate documentation and metadata validators.
 
-Read the applicable files rather than assuming conventional names:
+## Cross-File Release Consistency
 
-- `Cargo.toml` package version, authors, license, repository, documentation, homepage,
-  and release-relevant feature metadata
-- `CITATION.cff` version, release date, commit, DOI, authors, and ORCIDs
-- `REFERENCES.md` or the repository's bibliography source
-- README install/version claims and scientific feature descriptions
-- active scientific topic, validation, benchmark, coverage, performance, and release
-  docs
-- `cliff.toml` or equivalent generated-changelog configuration
+Check, when applicable:
 
-Use the parent inventory to exclude archives, generated build output, and unrelated
-generic docs.
+- package name and current version agree where exact values are intentionally repeated
+- README installation snippets and feature names match the published Cargo surface
+- MSRV or supported-platform statements come from established build evidence
+- repository, homepage, documentation, license, and readme links resolve to intended release resources
+- author names, ordering, roles, and ORCIDs are intentionally synchronized or explicitly different
+- `CITATION.cff` release date, version, commit, and preferred citation describe the artifact actually being released
+- docs.rs feature/configuration claims match the public API intended to render
+- migration and compatibility guidance names the correct versions
 
-### 2. Map Scientific Changes Downstream
+Do not force every metadata file to have identical authorship semantics. Record deliberate differences between code authors, maintainers, paper authors, and citation credit.
 
-- new or changed algorithm/predicate/move -> owning topic and validation docs; request a
-  citation audit when provenance or scientific credit is asserted
-- new invariant or numerical guarantee -> invariant, robustness, and limitation docs
-- changed benchmark or validation result -> methodology, environment, comparison, and
-  reproducibility guidance
-- crate release -> Cargo/README/CITATION version and release metadata consistency
-- changed authorship, license, DOI, or repository identity -> all corresponding crate
-  and citation metadata surfaces
-- changed publication tooling -> artifact/build guidance, subject to the academic
-  authorship boundary for manuscript prose
+Do not validate a DOI from memory. Select `scientific-citation-audit` when identity or provenance is in question. A version/date-only CFF synchronization does not require a full citation pass.
 
-Ask the Rust or scientific-code owner to settle uncertain implementation claims before
-editing documentation.
+## Generated Changelogs
 
-### 3. Check Cross-File Consistency
+When `git-cliff` or another generator owns `CHANGELOG.md`, fix commit categorization, templates, or generator configuration and regenerate through the documented command. Do not hand-edit generated entries.
 
-Verify, when applicable:
+Check that release headings, versions, dates, comparison links, categories, and breaking-change notes correspond to the prepared release. Route upstream commit-message correction to `changelog-commit-message` when appropriate.
 
-- Cargo, README install snippets, and `CITATION.cff` describe the same current release
-- release dates and commit identifiers describe the release actually being prepared
-- author names, ordering, and ORCIDs are intentional and consistent
-- repository, documentation, homepage, and license metadata agree
-- scientific features, invariants, limitations, and validation claims match the code
-  and current evidence
-- citations used by code or docs have bibliography entries, and bibliography entries
-  are actually referenced or intentionally retained
+## Validation
 
-Do not validate bibliographic existence or DOI resolution from memory. Hand those facts
-to `scientific-citation-audit` when they are in scope. A `CITATION.cff` version-only edit
-does not automatically require a full citation audit.
+Prefer repository commands. Relevant focused evidence includes:
 
-### 4. Respect Generated Ownership
+- Cargo metadata and publish/package checks owned by Rust/tooling reviewers
+- README examples or install snippets against the intended crate version
+- CFF validation
+- docs.rs configuration or local rustdoc build when release metadata affects rendering
+- generated changelog preview/drift check
+- link and documentation configuration validation
 
-When `git-cliff` owns `CHANGELOG.md`, preview or regenerate through the repository's
-documented command. Fix upstream commit categorization or `cliff.toml` rather than
-patching generated entries. The same rule applies to generated papers, figures, API
-sites, and benchmark reports.
-
-Validate `CITATION.cff` with the repository command or `cffconvert --validate` when
-available. Run crate-specific documentation and release checks required by repository
-guidance.
-
-## Specialist Boundaries
-
-- use `repository-docs-review` for generic documentation structure and consistency
-- use `rust-api-docs` for Rust `///`, `//!`, intra-doc links, and public API coverage
-- use `rust-cargo-hygiene` for feature, MSRV, lint, and manifest design
-- use `scientific-citation-audit` for bibliographic validity, provenance, and credit
-- use `academic-authorship-boundary` for manuscript prose and reviewer responses
-- use `changelog-commit-message` when generated changelog output requires an upstream
-  commit-message correction
+Do not run a broad citation, scientific, or API pass solely because these validators mention the same files.
 
 ## Output
 
-Report:
-
-- scientific and release files inspected
-- cross-file metadata and scientific-claim checks performed
-- findings, fixes, and deliberately preserved source discrepancies
-- generated artifacts deferred to their owners
-- specialist handoffs selected or skipped and why
-- validators run and their results
+Report the release identity, metadata authorities, files inspected, inconsistencies and deliberate differences, generated artifacts, specialist handoffs, validators, and unverified external release surfaces.

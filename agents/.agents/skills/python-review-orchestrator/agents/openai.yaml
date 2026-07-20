@@ -1,4 +1,4 @@
 interface:
   display_name: "Python Review Orchestrator"
   short_description: "Coordinate focused Python review passes"
-  default_prompt: "Use $python-review-orchestrator to review and fix changed Python code pass by pass, then run focused validators."
+  default_prompt: "Use $python-review-orchestrator to select focused Python specialists, review the changed behavior, apply fixes only when explicitly requested, and run proportionate validators."

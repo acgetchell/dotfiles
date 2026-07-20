@@ -1,0 +1,4 @@
+interface:
+  display_name: "C++ API Design"
+  short_description: "Review modern C++ public API contracts"
+  default_prompt: "Use $cpp-api-design to review a modern C++ public API for cohesive contracts, safe generic interfaces, value-category correctness, usability, and ABI exposure."
