@@ -1,4 +1,4 @@
 interface:
   display_name: "C++ Test Quality"
-  short_description: "Audit C++ tests and diagnostic coverage"
-  default_prompt: "Use $cpp-test-quality to audit changed C++ tests, sanitizer coverage, deterministic fixtures, and failure-path assertions."
+  short_description: "Audit doctest BDD and CTest evidence"
+  default_prompt: "Use $cpp-test-quality to audit changed doctest BDD scenarios, CTest registration, compile-time consumer contracts, sanitizer coverage, and deterministic fixtures."

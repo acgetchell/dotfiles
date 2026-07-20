@@ -1,0 +1,4 @@
+interface:
+  display_name: "Scientific Software Docs Review"
+  short_description: "Review scientific software documentation"
+  default_prompt: "Use $scientific-software-docs-review to audit scientific claims, validation evidence, reproducibility, and generated research artifacts."

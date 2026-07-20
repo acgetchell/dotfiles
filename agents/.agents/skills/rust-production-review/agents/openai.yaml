@@ -1,4 +1,4 @@
 interface:
   display_name: "Rust Production Review"
-  short_description: "Senior Rust production review"
-  default_prompt: "Use $rust-production-review to review changed Rust code for invariants, correctness, API stability, and maintainability."
+  short_description: "Synthesize or broadly review production Rust"
+  default_prompt: "Use $rust-production-review to perform a standalone Rust production audit or reconcile focused review evidence into a final readiness verdict."

@@ -14,6 +14,8 @@ runtime bookkeeping. Prefer mutable owner borrows or transaction guards for
 topology mutation windows so Rust enforces mutable versus immutable access and
 prevents mutating through stale detached identifiers.
 
+This skill owns lifetime, aliasing, canonical-owner, snapshot/view, handle-provenance, and guard-shape questions. Route complete state publication, rollback contents, cache/index coordination, and operation-sequence atomicity to `rust-invariant-state-transitions`.
+
 ## Workflow
 
 1. Identify the canonical owner of each relation or data structure.

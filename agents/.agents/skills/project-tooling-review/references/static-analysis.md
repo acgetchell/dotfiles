@@ -1,7 +1,6 @@
 # Repository-Owned Static Analysis Review
 
-Use this reference for Semgrep, Opengrep, or similar repository-owned rule
-configuration and fixtures.
+Use this reference for repository-owned Semgrep rule configuration and fixtures.
 
 ## Ownership
 

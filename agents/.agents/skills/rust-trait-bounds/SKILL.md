@@ -9,6 +9,8 @@ Audit Rust trait bounds, generic constraints, and `where` clauses for simplifica
 
 Good bounds express the minimum contract needed by the code. Overly broad, duplicated, or misplaced bounds make APIs harder to use and compiler diagnostics harder to understand, while overly clever simplification can hide important semantics.
 
+Keep general ownership, smart-pointer, interior-mutability, snapshot, and borrowed-view design under `rust-borrowed-view-audit`; keep Send/Sync and async bounds under `rust-concurrency-async`. This skill owns the necessity, placement, semantics, and caller ergonomics of generic constraints.
+
 ## Scope
 
 Focus on newly added or modified Rust code that includes:
@@ -129,29 +131,7 @@ Flag:
 - requiring callers to implement marker traits that could remain internal
 - adding bounds to public structs that make construction or storage unnecessarily difficult
 
-### 6. Smart pointer and ownership choice
-
-The choice of smart pointer is part of the API contract that bounds support. Review it together with the bounds it implies.
-
-Check that:
-
-- `Box<T>` is used to give a value a stable size/heap address (e.g., trait objects, recursive types) rather than out of habit
-- `Rc<T>` / `Arc<T>` are used only when shared ownership is genuinely needed; prefer borrowing or single ownership when feasible
-- thread-shared data uses `Arc<T>` and not `Rc<T>` (and vice versa)
-- interior mutability (`Cell`, `RefCell`, `Mutex`, `RwLock`) is justified by the access pattern, not used to bypass borrow checking
-- one-time initialization uses `OnceLock` / `LazyLock` instead of ad hoc `Mutex<Option<_>>` patterns
-- `Cow<'_, T>` is used when the API genuinely needs to return either a borrow or an owned value, not as a generic "maybe owned" smear
-- function parameters use `&str` over `&String`, `&[T]` over `&Vec<T>`, and `impl AsRef<Path>`/`impl Into<X>` only when callers benefit
-
-Flag:
-
-- `Box<T>` purely to satisfy a trait object that could be a generic parameter
-- `Arc<Mutex<T>>` patterns where simpler ownership would do
-- `Rc`/`Arc` cloning to avoid lifetime annotations rather than to model real sharing
-- public APIs that expose `Rc<T>` (which forbids `Send`) without intent
-- public APIs that take owned `String`/`Vec<T>` when `&str`/`&[T]` would suffice
-
-### 7. Tests and examples
+### 6. Tests and examples
 
 When bounds change, tests should demonstrate the intended caller experience.
 
@@ -181,7 +161,6 @@ Avoid:
 - Bounds to remove
 - Bounds to move from type definitions to impls/methods
 - Signatures or `where` clauses to simplify
-- Smart pointer or parameter type changes that improve the API contract
 - Public API docs, doctests, or integration tests to update
 
 ### Optional Improvements

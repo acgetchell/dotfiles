@@ -19,6 +19,10 @@ The intent is to replace the maintainer running the selected orchestrators manua
 - If the request clearly targets one surface, use the focused orchestrator directly instead of this meta-skill.
 - When the user asks to fix issues, implement actionable findings as each selected orchestrator discovers them. Do not merely collect findings unless the fix is blocked or unsafe.
 - Keep this skill thin. Do not duplicate the detailed review rules from C++, Rust, Python, documentation, or tooling skills; load those skills and follow them.
+- Maintain one repository-wide validation ledger across child orchestrators.
+  Key test evidence by source/build/environment state, material configuration,
+  and exact selection so shared or aggregate recipes do not replay tests that
+  already passed.
 
 ## Review Trace
 
@@ -72,7 +76,7 @@ Use this order unless the requested scope makes a different order clearly safer:
 4. Run `python-review-orchestrator` when Python source, notebooks, pytest fixtures, Python config, lockfiles, or Python-facing workflows changed or are present in baseline scope.
 5. Run `docs-review-orchestrator` after the source-owning passes whenever release-readiness mode is active, or when substantive repository documentation, generated-doc ownership, C++ or Rust API docs, release metadata, scientific claims, references, or publication material changed or are present in baseline scope.
 6. Revisit tooling only when language or documentation fixes require recipe, workflow, lockfile, or command-doc updates.
-7. Synthesize final validation across all surfaces, preferring the strongest focused validator already justified by the touched files.
+7. Synthesize final validation across all surfaces, preferring the strongest focused validator already justified by the touched files and adding only evidence absent from the shared ledger.
 
 ## Cross-Surface Handling
 
@@ -92,7 +96,7 @@ End with a concise summary that helps the maintainer review unstaged changes by 
 - orchestrators selected and skipped, with reasons
 - focused skill groups, skill files, and reference files actually loaded by each selected orchestrator
 - files changed and what was fixed
-- validators run and their results
+- the repository-wide non-overlapping validation ledger and results
 - cross-surface risks resolved or deferred
 - anything intentionally not run
 - confirmation that no git state mutations were performed, if true

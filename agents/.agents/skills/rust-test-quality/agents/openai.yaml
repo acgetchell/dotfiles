@@ -1,4 +1,4 @@
 interface:
   display_name: "Rust Test Quality"
-  short_description: "Review Rust tests, doctests, and panics"
-  default_prompt: "Use $rust-test-quality to review these Rust tests and doctests for meaningful risk coverage, strong assertions, and appropriate panic behavior."
+  short_description: "Review Rust tests as durable evidence"
+  default_prompt: "Use $rust-test-quality to review Rust tests, doctests, properties, fuzz or compile contracts for meaningful risk coverage and strong assertions."

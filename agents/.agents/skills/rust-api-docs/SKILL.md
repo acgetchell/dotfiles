@@ -1,6 +1,6 @@
 ---
 name: rust-api-docs
-description: "Audit Rust API documentation for completeness, required Errors, Panics, Safety, and Examples sections, intra-doc links, crate and module docs, docs.rs visibility, and API-supporting private helper docs. Use for public documentation coverage and semver-relevant doc changes; route doctest behavior to rust-test-quality."
+description: "Audit Rust API documentation for completeness, required Errors, Panics, Safety, and Examples sections, intra-doc links, crate and module docs, docs.rs visibility, and non-trivial private helper intent behind public behavior. Use for public documentation coverage and semver-relevant doc changes; route executable doctest evidence to rust-test-quality."
 ---
 
 # rust-api-docs

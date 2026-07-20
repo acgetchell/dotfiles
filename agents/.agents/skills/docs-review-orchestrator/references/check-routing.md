@@ -1,101 +1,60 @@
-# Documentation Check Routing
+# Documentation Review Routing
 
-Use this reference after establishing the requested scope and before loading focused
-skills.
+Use this matrix after establishing scope. Select skills individually and validators separately.
 
 ## Scope Discovery
 
-Default to branch scope and include committed branch changes plus staged, unstaged, and
-untracked work. Use an explicit staged-only, changed-file-only, release-readiness, or
-whole-repo baseline scope only when requested or handed off by `repo-review`.
-Treat an explicit request to prepare, audit, or review a release as release-readiness
-unless the user explicitly narrows the documentation surface.
+Default to branch scope, including committed branch changes and staged, unstaged, and untracked work. Use staged-only, changed-file-only, release-readiness, or whole-repository scope when requested or handed off by `repo-review`. A named release patch, diff, or file set remains changed-scope; only an explicit release-readiness or release documentation audit expands to the active release suite.
 
-Use read-only git discovery. In release-readiness or whole-suite mode, inventory every
-tracked active document. Classify generated, template, archived, or otherwise excluded
-files and record the reason. A diff supplies change context but does not bound a full
-documentation suite review.
+In release-readiness or whole-suite mode, inventory every tracked active document. Classify generated, template, archived, or excluded files. A diff supplies change context but does not bound a full documentation-suite review.
 
-## Route by Actual Surface
+## Individual Skill Routing
 
-### `repository-docs-review`
-
-Select for any substantive repository documentation review, including:
-
-- README, AGENTS, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT, and support docs
-- active `docs/**`, runbooks, architecture guides, ADRs, policies, and diagrams
-- book/site navigation, cross-document consistency, and link structure
-- generated Markdown ownership, source datasets, fixtures, or regeneration guidance
-- release, migration, compatibility, operational, and maintainer documentation
-
-This is the default documentation owner for scientific and non-scientific repositories.
-
-### `scientific-crate-docs-review`
-
-Add only when the scope materially includes a scientific Rust crate concern:
-
-- Cargo/README/CITATION version, authorship, license, or repository metadata coupling
-  that explicitly describes a scientific or research crate or artifact
-- `CITATION.cff`, `REFERENCES.md`, or `cliff.toml` when coupled to scientific or
-  research release metadata or provenance
-- scientific algorithm, invariant, numerical, validation, benchmark, provenance, or
-  research-artifact docs tied to Rust crate behavior
-
-Do not select it for generic Rust docs, ordinary operational docs, or an infrastructure
-repository without these surfaces.
-
-### `rust-api-docs`
-
-Add for Rust `///` or `//!` docs, public-item coverage, required sections, intra-doc
-links, feature visibility, or private helpers that support public API docs. Skip a
-duplicate pass when a parent Rust review already supplied complete evidence for the
-same scope.
-
-### `scientific-citation-audit`
-
-Add for bibliographic existence or identity, DOI/source validity, algorithm provenance,
-scientific claims, or scientific credit alignment. Do not select it for ordinary web
-links, a generic source list, or a `CITATION.cff` version/date-only synchronization.
-
-### `academic-authorship-boundary`
-
-Apply before all editing when the scope includes substantive scholarly manuscript
-prose, thesis/paper sections, reviewer responses, or publication text intended to
-appear under a human author's name. Do not select it for operational docs, repository
-policy, publication build tooling, bibliography wiring, or artifact freshness checks
-that contain no substantive manuscript prose.
+| Skill | Select when | Skip when |
+|---|---|---|
+| `repository-docs-review` | Active repository docs, navigation, operations, architecture, policies, release/migration guidance, generated-doc ownership, or cross-document consistency | Source-comment-only API docs with no suite effect |
+| `scientific-software-docs-review` | Scientific claims, algorithms, validation, numerical limitations, benchmarks, reproducibility, data conventions, figures, or research artifacts | Repository is scientific but scoped docs contain no scientific claim/evidence surface |
+| `scientific-crate-docs-review` | Scientific Rust Cargo/README/CITATION release coupling, crate identity, or generated changelog metadata | Generic scientific Rust docs without crate release metadata |
+| `cpp-api-docs` | C++ public comments, Doxygen/generated reference, headers/modules, caller contracts, or canonical examples | Docs merely mention C++ behavior already established elsewhere |
+| `rust-api-docs` | Rust `///`/`//!`, public coverage, structured sections, intra-doc links, docs.rs | Rust behavior is mentioned only in downstream prose |
+| `scientific-citation-audit` | DOI/source identity, bibliography, algorithm provenance, scientific credit or citation claims | Ordinary links or CFF version/date-only synchronization |
+| `academic-authorship-boundary` | Substantive manuscript prose, publication text, thesis/Praxis content, or reviewer responses | Mechanical publication tooling, labels, figure paths, or bibliography wiring only |
 
 ## Shared Ownership
 
-- Docs containing commands: project tooling owns command truth;
-  `repository-docs-review` owns placement, clarity, and suite consistency.
-- Docs describing code or APIs: language reviewers own behavior truth;
-  `repository-docs-review` owns downstream consistency.
-- README in a scientific Rust crate: the generic reviewer owns its repository-doc role;
-  the scientific overlay owns crate release and scientific metadata; Rust reviewers own
-  examples and behavior.
-- `CITATION.cff`: the scientific overlay owns cross-file release metadata; citation
-  audit owns bibliographic/provenance validity.
-- `REFERENCES.md`: the scientific overlay owns crate-doc coupling; citation audit owns
-  bibliographic validity and credit.
-- Paper directories: the academic boundary governs manuscript prose; generic docs and
-  tooling reviewers may still own build or artifact instructions.
-- Generated docs: when the authoritative change is within the user's requested scope,
-  fix the declared source or generator and regenerate; never patch the generated region
-  to hide drift. Preserve user-supplied or out-of-scope source values and report the
-  discrepancy instead of changing them for consistency.
+- Commands: project tooling owns truth; repository docs owns clarity and placement.
+- Code/API behavior: language reviewers own truth; docs specialists own rendered contracts and downstream consistency.
+- Scientific claims: scientific-code reviewers own validity; scientific software docs owns claim/evidence presentation.
+- Scientific Rust release: scientific software docs owns claims; crate docs owns Cargo/release coupling.
+- README: repository docs owns repository role; add scientific, API, crate, or citation skills only for matching content.
+- `CITATION.cff`: crate overlay owns Rust release synchronization; scientific software docs owns non-Rust scientific release synchronization, using a language reference when applicable; citation audit owns bibliographic/provenance validity. Version/date-only synchronization does not trigger citation audit.
+- Generated API links: repository docs owns an ordinary README or navigation link; select the language API-doc skill when comments, generator configuration, public coverage, rendered reference content, or canonical API examples are evaluated.
+- Papers: academic boundary governs prose; other skills may own mechanical build, references, figures, and artifact freshness.
+- Generated docs: fix the source or generator and regenerate when its authority is in scope; never patch derived output to hide drift.
+
+## Common Combinations
+
+- Generic README/runbook: repository docs only.
+- C++ Doxygen comments: C++ API docs; add repository docs only when guides/navigation also change.
+- Scientific C++ release docs: repository docs plus scientific software docs; add C++ API docs for public reference claims.
+- Scientific Rust release metadata: repository docs plus crate docs; add scientific software docs only when scientific claims or evidence change, and add Rust API docs or citations only when independently triggered.
+- Bibliography-only audit: citation audit; add academic boundary only if manuscript prose would be edited.
+- Paper artifact refresh without prose edits: repository/scientific docs as applicable; academic boundary may be skipped with the mechanical scope recorded.
 
 ## Validation
 
-Use repository-defined commands first. Select validators from actual files and edits:
+Use repository commands first. Match evidence to the surface:
 
-- documentation or site build for navigation and rendering
-- generated-output drift checks when source-backed docs changed
+- docs/site build for navigation and rendering
+- generated-output drift checks for source-backed docs
 - Markdown, link, spelling, and configuration checks
-- Rust doc tests or API-doc checks for Rust documentation
-- CFF validation for citation metadata
-- publication build or freshness checks for publication tooling
+- Doxygen and compiled examples for C++ API docs
+- rustdoc, doctests, and docs.rs configuration for Rust API docs
+- CFF and DOI metadata checks for citations/release metadata
+- publication build and artifact freshness checks for papers
 
-Run the narrowest focused checks first, then the repository-mandated aggregate command
-when the changed surface requires it. Report unavailable network- or installation-bound
-checks rather than claiming they passed.
+Language or tooling validators establish quoted behavior and commands; they do not replace documentation rendering checks. Report network-, installation-, compiler-, or generator-bound gaps.
+
+## Handoff Evidence
+
+Report selected and meaningfully skipped skills, scope per skill, references loaded, authorities inspected, findings/fixes, validators, generated artifacts, unavailable evidence, and git-state status. Add a compact truth-owner record for external language, scientific-correctness, build, or tooling evidence actually consulted. Keep evidence attributable to individual skills.

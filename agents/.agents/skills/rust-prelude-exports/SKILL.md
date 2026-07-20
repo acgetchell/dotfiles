@@ -9,6 +9,8 @@ Audit Rust prelude modules and public re-export surfaces for minimality, orthogo
 
 A good prelude makes examples and downstream code pleasant without turning into a dumping ground. It should expose the concepts users need to compose the crate's public API, while keeping specialized domains separate enough that imports remain obvious.
 
+This skill owns the intentional export and import surface. Route feature/target combinations that fail to compile or expose inconsistent cfg-selected APIs to `rust-build-portability`.
+
 ## Scope
 
 Focus on newly added or modified Rust public APIs that affect:

@@ -1,192 +1,76 @@
 ---
 name: python-support-scripts
-description: "Review Python development and release tooling for transform correctness, determinism, malformed-input handling, subprocess discipline, fixture-driven tests, and CLI ergonomics. Use for changelog generators, benchmark runners, release helpers, CI scripts, Cargo metadata tools, GitHub Actions diagnostics, and fixture utilities. Route scientific algorithms to python-scientific-review."
+description: "Review Python development, release, benchmark, fixture, CI, diagnostic, and generated-artifact scripts for transformation correctness, determinism, safe subprocess orchestration, malformed tool output, atomic publication, and release-day failure behavior. Use for changelog generators, release helpers, benchmark runners, Cargo or GitHub tooling, and repository automation. Route user applications, scientific algorithms, packaging semantics, boundary models, and test design to focused skills."
 ---
 
-# python-support-scripts
+# Python Support Scripts
 
-Review Python that exists to support a Rust crate's development workflow: changelog generators, benchmark runners, release helpers, CI scripts, fixture utilities, and diagnostic CLIs.
+Review Python that supports development and releases. Treat these scripts as part of the release surface: broken transforms, flaky ordering, unsafe subprocesses, and partial artifact publication can invalidate CI or releases.
 
-These scripts are not user-facing scientific code, but they are still part of the project's release surface. A broken changelog generator or a flaky benchmark runner causes real damage on release day. The bar is correctness, determinism, and resilience to messy inputs, not algorithmic depth.
+## Scope And Boundaries
 
-## Scope
+Use changed-code mode by default. Use whole-repository mode only when requested.
 
-Focus on newly added or modified Python that:
+- Own development-tool transformations, deterministic rendering, external command orchestration, generated artifacts, release diagnostics, and support-script failure semantics here.
+- Route substantial public application contracts to `python-cli-review`.
+- Route invariant-bearing structured inputs to `python-parse-dont-validate` when they warrant domain models rather than local parse checks.
+- Route scientific algorithms and scientific oracle design to `python-scientific-review`.
+- Route build artifact and installed-package semantics to `python-build-portability`.
+- Route general test mechanics to `python-test-quality` and workflow command wiring to `project-tooling-review`.
 
-- parses commit messages, git logs, or GitHub Actions output
-- generates `CHANGELOG.md` or release notes
-- runs `cargo bench` / Criterion and aggregates JSON results
-- prepares release artifacts (tarballs, signed assets, docs uploads)
-- prepares reproducible paper, PDF, figure, or generated documentation artifacts
-- manipulates `Cargo.toml`, `Cargo.lock`, or workspace metadata
-- runs subprocess commands such as `cargo`, `gh`, `git`, or `rsync`
-- generates fixtures or diagnostic reports for the Rust crate
-- stitches together CI workflows or pre-commit checks
+## Review Workflow
 
-Ignore unrelated unchanged code unless reviewing it surfaces a real bug in the changed surface.
+1. Identify inputs, consumers, generated artifacts, external commands, and release consequences.
+2. Trace parse, transform, render, and publish stages separately.
+3. Exercise malformed and empty tool output before reviewing CLI polish.
+4. Check repeatability across machines and reruns.
+5. Verify failures preserve prior valid artifacts and enough diagnostics for release pressure.
 
-### Scope Modes
-
-Default mode:
-- Review newly added or modified Python support scripts, fixtures, tests, and CI-facing utilities.
-- Ignore unrelated unchanged tooling unless it defines conventions or helper APIs used by the changed code.
-
-Whole-repo baseline mode:
-- Use when the user explicitly says "whole repo", "entire repo", "baseline audit", or similar.
-- Audit all Python support scripts, their tests, fixtures, command-line entry points, subprocess boundaries, and committed generated-output paths.
-- Prioritize findings by release/CI breakage risk, parser/renderer correctness, nondeterminism, unsafe subprocess behavior, malformed-input handling, and weak fixture coverage.
-- Do not require fixing every historical tooling issue in one pass; separate release blockers from maintainability cleanup.
-
-## Review posture
-
-Be direct. Assume the author knows Python and Rust. Skip basic Python style commentary; focus on correctness, determinism, and how the script fails when inputs go wrong.
-
-## Review goals
-
-### 1. Transform and parse correctness
-
-The interesting bugs live in input parsing and output rendering, not in glue code.
+## Transform And Render Correctness
 
 Check:
 
-- parsers handle every documented input shape, including the malformed cases the script will see in the wild
-- output renderers produce the format consumers (Codecov, crates.io, release-plz, git-cliff) actually accept
-- round-trips compose: parse → transform → serialize matches the expected output for fixture inputs
-- version computation, semver bumping, type/scope categorization, and section assignment match the project's commit/changelog conventions
+- parsers recognize every supported input form and reject malformed ambiguity
+- transform rules match version, changelog, benchmark, coverage, fixture, or metadata conventions
+- renderers produce schemas and syntax accepted by downstream consumers
+- parse-transform-serialize composition is tested with representative fixtures
+- unknown categories and future fields follow an explicit compatibility policy
+- generated files have one source of truth
 
-Flag:
+Flag permissive regular expressions, string concatenation for strict formats, silent partial parsing, and output validation performed only by rereading with the same flawed parser.
 
-- regex parsers that succeed silently on bad input
-- string concatenation building output that consumers parse strictly
-- changelog logic that depends on commit message wording it does not actually validate
+## Determinism And Reproducibility
 
-### 2. Determinism
+Sort filesystem, set, mapping, and external-command results before committed output unless semantic order is already defined. Derive dates and versions from explicit inputs rather than the wall clock. Fix locale, timezone, encoding, and machine-readable command modes when parsing external output.
 
-Support scripts are usually run in CI and locally; the outputs need to match.
+Keep absolute paths, usernames, temporary roots, process IDs, nondeterministic hashes, and host metadata out of committed artifacts. Make reruns idempotent or document intentional replacement behavior.
 
-Check:
+## Subprocess Discipline
 
-- iteration order is stable: sort lists, sort dict keys when serializing, do not depend on `set` iteration
-- timestamps are absent or come from explicit inputs (commit dates, release tags), not `datetime.now()`
-- absolute paths and machine-specific values do not leak into committed output
-- random seeds, if any, are explicit
-- subprocess output is parsed deterministically (`--porcelain`, `--json`, `LC_ALL=C` when relevant)
-- dates used in committed artifacts come from explicit inputs and are parsed/formatted without relying on the process locale
+Use argument arrays rather than interpolated shells. Check return status, preserve stderr/stdout context, set a timeout when a hang can block automation, and pass deterministic environment values when output is parsed.
 
-Flag:
+Do not log tokens, signing material, GitHub credentials, or private payloads. Distinguish command absence, timeout, nonzero exit, malformed output, and empty-but-valid output when callers need different actions.
 
-- `os.listdir`, `Path.glob`, or `set` iteration feeding committed output without sorting
-- timestamps in changelog entries that change between runs
-- locale-sensitive sorting or formatting on user-facing output
-- `datetime.strptime(..., "%B ...")` or similar locale-dependent parsing for English month names in CI/reproducible artifact paths; prefer ISO dates or an explicit month-name map plus UTC-aware datetimes
+Avoid catching `CalledProcessError` only to discard its command and diagnostics. Keep publish, upload, tag, or release effects behind explicit intent and dry-run support where appropriate.
 
-### 3. Error and edge handling
+## Artifact Publication And Cleanup
 
-Bad inputs should fail loudly with useful context, not silently produce wrong output.
+Validate complete output before replacing an existing artifact. Use temporary files and atomic replacement where failure must preserve the prior result. Scope cleanup to explicit generated paths and avoid broad globs or unresolved environment variables.
 
-Check:
+Check archive contents, permissions, encodings, newlines, metadata, and output directories. Ensure a failed multi-artifact operation does not leave a misleading mixture of old and new results.
 
-- empty inputs, missing fields, unknown commit types, unparseable versions, and malformed JSON are handled explicitly
-- error messages name the offending file, line, commit, or value
-- exit codes distinguish "nothing to do" from "real failure"
-- partial writes leave no half-rendered output behind (write to temp file, rename)
+## Support CLI Contract
 
-Flag:
+Keep support entry points configurable and discoverable. Provide useful help, meaningful exit codes, machine-readable stdout when consumed by automation, and diagnostics on stderr. Require dry-run or explicit confirmation for publish/destructive behavior.
 
-- bare `except` or swallowed exceptions
-- `try/except: pass` around parsing
-- functions that return `None` for both "no match" and "error"
-- writes that overwrite the destination before validation succeeds
+Load `python-cli-review` only when the command exposes a substantial stable application contract beyond this support workflow.
 
-### 4. Subprocess discipline
+## Evidence
 
-Most support scripts shell out to `cargo`, `git`, `gh`, or similar.
+Prefer small committed input/output fixtures, golden files for strict rendering, parametrized malformed cases, property tests for parsers/version logic, and safe command fakes at the subprocess boundary. Avoid live GitHub, network, wall-clock, or current-repository state in unit tests.
 
-Check:
+Load `python-test-quality` when fixtures or evidence structure changed or is materially weak. Run safe `--help` and dry-run smoke checks when relevant.
 
-- subprocesses use argument lists, never `shell=True` with interpolated values
-- failures are captured with the failing command, exit code, stdout, and stderr in the error message
-- timeouts are set when a hang would block CI
-- environment is set explicitly when output is parsed (e.g., `LC_ALL=C`, `GIT_PAGER=cat`)
-- no Codecov / GitHub / signing tokens are logged
+## Output
 
-Flag:
-
-- `subprocess.run(cmd, shell=True)` with f-strings
-- `check=True` without surfacing stderr in the raised exception
-- silent `subprocess.run(...)` whose result is ignored
-
-### 5. CLI ergonomics
-
-Support scripts have to be invokable both by humans and by CI.
-
-Check:
-
-- `argparse` (or equivalent) with explicit `--help`
-- `--dry-run` for anything that writes or publishes
-- separation between machine-parseable output (stdout) and human logs (stderr)
-- exit codes are documented and meaningful
-- `-q`/`-v` levels are handled by `logging`, not by `print`
-
-Flag:
-
-- scripts that require editing the source to change behavior
-- scripts that mix log noise into stdout that another tool parses
-- destructive defaults (deleting, force-pushing, force-publishing) without `--dry-run`
-
-### 6. Tests and fixtures
-
-For these scripts, tests are mostly fixture-driven.
-
-Prefer:
-
-- committed fixture inputs (small commit logs, Criterion JSON snippets, partial Cargo.toml) under `tests/fixtures/`
-- tests that compare rendered output to a committed expected file (golden tests)
-- property tests on commit-message parsing and version computation when input variation is the main risk
-- pytest parametrization across fixture pairs
-
-Flag:
-
-- tests that only check `is_not_empty()` or `returncode == 0`
-- tests that regenerate fixtures from live `git`/`gh` calls
-- tests dependent on the network, the current clock, or ambient environment variables
-- coverage of `argparse` boilerplate and `__main__` dispatch instead of the parsing/rendering core
-
-### 7. Path and encoding handling
-
-Scripts run on multiple OSes and from multiple CI environments.
-
-Check:
-
-- `pathlib.Path` everywhere, no string path concatenation
-- explicit `encoding="utf-8"` on file reads/writes that are not binary
-- newline handling is intentional when output is committed (consider `newline=""`)
-- writes are scoped to the project tree, not user-controlled paths
-
-### 8. Code structure and types
-
-Keep the code easy to maintain after release pressure.
-
-Check:
-
-- transformation logic is in small functions that take and return data, not side effects
-- script entry points (`main()` / `if __name__ == "__main__":`) are thin
-- structured records use `dataclass`, `TypedDict`, or `NamedTuple` instead of opaque dicts
-- type hints are present on public functions
-- mutable defaults are avoided
-
-## Output format
-
-### Summary
-Concise overall quality and major risks before release.
-
-### 🔴 Critical (must fix)
-- Correctness, determinism, data-loss, or unsafe-execution issues that should block merging.
-
-### 🟠 Important (should fix)
-- Robustness, test quality, or maintainability problems that should be addressed soon.
-
-### 🟡 Improvements (nice to have)
-- Non-blocking improvements that would make the script clearer or easier to maintain.
-
-Provide concrete code suggestions where applicable. Avoid praise unless it highlights a strong pattern worth preserving.
+Lead with release/CI breakage, nondeterminism, unsafe execution, or data-loss risks. For each finding, name the input, transformation, consumer, failure consequence, and smallest fix. Report artifacts protected, commands validated, effects deliberately not executed, and remaining external limitations.

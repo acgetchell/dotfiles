@@ -33,8 +33,10 @@ Use this skill to verify that a scientific repository credits the right work and
 Run the bundled checker when auditing Markdown references with DOI labels:
 
 ```bash
-python3 /path/to/scientific-citation-audit/scripts/validate_reference_dois.py REFERENCES.md
+uv run <skill-directory>/scripts/validate_reference_dois.py REFERENCES.md
 ```
+
+Resolve `<skill-directory>` from the loaded `SKILL.md`. When the active repository does not use `uv`, run the dependency-free script through its documented isolated Python environment rather than installing into a system interpreter.
 
 The script extracts DOI labels from Markdown, queries DOI content negotiation for CSL JSON metadata, and compares the resolved title against the surrounding bibliography entry. Use `--json` for machine-readable output.
 
@@ -42,19 +44,9 @@ Network access is required. If the environment blocks network calls, request app
 
 A passing network check is not enough. Manually inspect low-confidence matches, primary algorithm references, and every citation that supports a scientific or implementation claim.
 
-## Credit Checklist
+## Domain References
 
-Check these common surfaces in computational geometry and scientific Rust crates:
-
-- Delaunay/Voronoi theory, lifted paraboloid duality, and incremental construction.
-- Robust predicates, exact arithmetic, floating-point filters, and Simulation of Simplicity.
-- Flip/Pachner/bistellar moves, local repair, and PL-manifold/topology validation.
-- Point location, spatial ordering, Hilbert curves, and spatial indexes.
-- Convex hull construction, visibility predicates, point-in-polytope tests, and high-dimensional bounds.
-- Periodic/toroidal triangulations and quotient/image-point construction.
-- Quality metrics, circumcenter/circumsphere formulas, volume/Gram determinant methods.
-- Data structures, compact mesh representations, slot/key storage, secondary maps, and cache invalidation if externally inspired.
-- Benchmark methodology, reproducibility, software citation, and research software practice when claimed.
+Read [`references/computational-geometry.md`](references/computational-geometry.md) only when auditing computational geometry, triangulation, mesh/topology, spatial-index, or robust-predicate credit. Do not load it for unrelated scientific fields.
 
 ## Editing Guidance
 
