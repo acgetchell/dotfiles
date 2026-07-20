@@ -82,8 +82,21 @@ Reconcile contracts across modules, installed entry points, generated artifacts,
 
 ## Final Validation
 
-Use the strongest focused evidence already produced. Add validation only for an integration path not covered by specialist checks. Do not run full CI solely because this is the final pass; follow repository requirements and escalate when changes span multiple layers without narrower coverage.
+Apply one validation ledger in both modes, keyed by source/environment state,
+built artifact and installation-target identity, Python/platform/dependency
+configuration, instrumentation, and exact validator or test selection. In
+orchestrated mode, consume the parent ledger; in standalone mode, create it.
+Reuse matching evidence and add validation only for an uncovered integration
+path. Rerun only after a relevant change invalidates the result, for a
+materially different configuration, or for explicit nondeterminism diagnosis.
+Do not run full CI solely because this is the final pass; follow repository
+requirements and escalate only when narrower non-overlapping coverage is
+insufficient.
 
 ## Output
 
-In orchestrated mode, synthesize specialist outcomes, remove duplicate findings, identify cross-cutting blockers, and name residual risk. In standalone mode, lead with findings ordered by severity and list focused skills or checklist sections used. Always report validation performed and meaningful limitations.
+In orchestrated mode, synthesize specialist outcomes, remove duplicate findings, identify cross-cutting blockers, and name residual risk. In standalone mode, lead with findings ordered by severity and list focused skills or checklist sections used. Always report validation performed, reused ledger evidence, and meaningful limitations. End both modes with one verdict:
+
+- **PASS**: no actionable production-readiness issue remains in scope.
+- **NEEDS IMPROVEMENT**: only non-blocking weaknesses or deferred strengthening remain.
+- **FAIL**: a correctness, security, compatibility, data-loss, or release blocker remains.

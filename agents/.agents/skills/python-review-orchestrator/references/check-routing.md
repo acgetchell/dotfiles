@@ -4,7 +4,12 @@ Use this matrix after identifying changed behavior. Select skills individually a
 
 ## Scope Detection
 
-Use a supplied parent scope when present. Otherwise inspect read-only status and diffs. Classify files by behavior:
+Use a supplied parent scope when present. Otherwise use read-only git commands
+to enumerate the committed branch delta from its merge base, staged changes,
+unstaged changes, and every untracked path. Read the complete contents of each
+untracked file with a file-appropriate reader before routing it; a status entry
+or filename alone is insufficient. Classify the resulting complete scope by
+behavior:
 
 - Python modules and scripts
 - pytest tests, fixtures, and configuration
@@ -56,7 +61,7 @@ Prefer repository commands. Otherwise choose the smallest applicable evidence:
 | Docs/examples | Documentation and example validators |
 | Workflow/config | Tooling-owned YAML, action, lock, lint, or configuration validators |
 
-When annotations or invariant models change, run ty through uv. Use Ruff through uv for lint and format evidence. Before running a validator, record its source/environment state, Python/platform/dependency configuration, instrumentation, and exact test selection in the shared ledger. Reuse equivalent still-valid evidence. When a validator fails, fix and rerun it after that repair invalidates the prior result before moving to the next skill, or document the blocker.
+When annotations or invariant models change, run ty through uv. Use Ruff through uv for lint and format evidence. Before running a validator, record its source/environment state, built artifact and installation-target identity, Python/platform/dependency configuration, instrumentation, and exact test selection in the shared ledger. Reuse build/install or external-consumer evidence only when the artifact and installation target also match. When a validator fails, fix and rerun it after that repair invalidates the prior result before moving to the next skill, or document the blocker.
 
 ## Escalate To Full CI
 

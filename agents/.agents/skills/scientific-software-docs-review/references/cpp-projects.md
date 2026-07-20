@@ -25,4 +25,8 @@ Check that scientific topic docs and API docs agree on:
 
 Treat Doxygen/Sphinx/Breathe output as generated. Fix source comments, configuration, examples, or navigation and rebuild. Compile documented examples as consumers of installed or exported targets when they define canonical use; avoid repository-only include paths or transitive dependency assumptions.
 
-Record compiler or platform gaps instead of broadening claims from the local build alone.
+Record auditable validation evidence: the wrapper and working directory,
+documentation tool and compiler versions, configuration, generated output
+artifacts, warnings, exit status, and installed/exported consumer checks.
+Report unsupported or untested formats, compilers, and platforms instead of
+broadening claims from the local build alone.

@@ -91,6 +91,11 @@ Compare debug/release, overflow checks, panic strategy, LTO, codegen units, test
 
 ## Validation
 
+Record portability evidence in the parent orchestrator's shared validation
+ledger when supplied; otherwise create the same ledger locally. Key each result
+by source/build state, toolchain, target, features, instrumentation, and exact
+test selections. Reuse a matching matrix cell instead of executing it again.
+
 Choose only affected matrix cells, using repository commands when available. Typical evidence includes:
 
 1. default and no-default-feature builds
@@ -110,4 +115,10 @@ For each finding, name the affected toolchain, target, feature set, crate, gener
 
 ## Handoff
 
-Summarize the declared and demonstrated matrix, cfg and feature contracts, build scripts and consumers inspected, validators, unavailable cells, work routed to Cargo hygiene or project tooling, files changed, and confirmation that no git state mutation occurred when true.
+Summarize the declared and demonstrated matrix, cfg and feature contracts,
+build scripts and consumers inspected, validators, unavailable cells, work
+routed to Cargo hygiene or project tooling, files changed, and confirmation
+that no git state mutation occurred when true. Include the ledger's
+source/build state, toolchain, target, features, instrumentation, and exact
+test selections, or explicitly confirm that the parent orchestrator recorded
+those fields.

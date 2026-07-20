@@ -67,6 +67,11 @@ Check that readers can identify the code revision, data source/version, configur
 
 Separate lightweight verification from expensive experiments. State resource, service, dataset, and hardware requirements. Avoid machine-specific paths, undocumented ambient environment, wall-clock filenames, and mutable external data without version identity.
 
+Review evidence before quoting it in findings or reports. Redact credentials,
+tokens, personally identifiable information, private dataset identifiers, and
+internal filesystem paths. Use safe summaries and placeholders that preserve
+the reproducibility fact without disclosing private context.
+
 ## Scientific Data Conventions
 
 Keep coordinate order, orientation, units, indexing base, dimension order, dtype, precision, missing values, endianness, schema version, and normalization consistent across code, docs, fixtures, notebooks, and external consumers.

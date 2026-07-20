@@ -142,7 +142,7 @@ Before a release, also check:
 - version references are consistent only within an explicit release workflow; do not introduce the version bump yourself unless the user requested that release step
 - `cargo publish --dry-run` would succeed with the current manifest
 - yanked or deprecated dependencies are not present
-- declared MSRV and supported feature/target evidence are available from the build-portability and project-tooling contracts
+- declared MSRV and supported feature/target compilation or cross-compilation evidence is available from `rust-build-portability`; `project-tooling-review` owns only the commands, workflows, and runners that produce it
 
 ## Output Format
 

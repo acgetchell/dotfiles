@@ -11,7 +11,11 @@ Audit correctness under realistic scheduling, cancellation, contention, failure,
 
 - Read repository runtime, thread-safety, determinism, and shutdown contracts first.
 - Default to changed concurrent code and nearby state, callers, and tests needed to prove it.
-- Keep purely synchronous coordinated mutation, rollback contents, caches, and operation sequences under `rust-invariant-state-transitions`.
+- Keep the underlying invariant, purely synchronous coordinated mutation,
+  rollback contents, caches, and operation sequences under
+  `rust-invariant-state-transitions`. Intentional overlap begins only at a
+  scheduling boundary: this skill owns synchronization across `.await` or task
+  boundaries and the associated cancellation safety.
 - Keep general smart-pointer/view ownership under `rust-borrowed-view-audit` and generic-bound minimality under `rust-trait-bounds`.
 - Do not recommend parallelism before the sequential invariant and measurement baseline are established.
 - Keep reviews read-only unless fixes are requested; do not mutate git state without permission.

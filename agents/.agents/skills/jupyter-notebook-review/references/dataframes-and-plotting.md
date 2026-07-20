@@ -35,4 +35,4 @@ Check:
 - saved figures use deterministic paths and create parent directories
 - tracked assets are refreshed only through their owning workflow
 
-Build Plotly figures as objects and save HTML or JSON when batch interactivity matters. Use a noninteractive Matplotlib backend for headless execution when the repository does not already configure one.
+Build Plotly figures as objects and save HTML or JSON when batch interactivity matters. For headless execution, configure a noninteractive Matplotlib backend before importing `matplotlib.pyplot` when the repository does not already configure one; changing the backend after the `pyplot` import is too late to establish reliable headless behavior.

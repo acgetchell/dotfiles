@@ -59,11 +59,17 @@ Load this reference only when `python-production-review` is invoked directly for
 
 - Route test design to `python-test-quality`.
 - Require regression evidence for corrected behavior, failure atomicity, public contracts, and configuration-sensitive branches.
-- Prefer focused commands while iterating and the strongest repository-required validator before handoff.
+- Apply the main skill's validation ledger, including source/environment state,
+  built artifact and installation target, Python/platform/dependency
+  configuration, instrumentation, and exact selection. Reuse matching evidence
+  instead of replaying it through a broader command.
+- Add only focused evidence absent from the ledger; rerun after invalidating
+  changes or for an explicitly distinct configuration or nondeterminism probe.
 - Record unavailable services, platforms, interpreters, or optional dependencies as limitations rather than implied passes.
 
 ## Final Synthesis
 
 - Deduplicate findings from selected specialists.
 - Lead with reachable correctness, data-loss, security, compatibility, or release blockers.
-- State changed files, fixes, validators, residual risks, and skipped specialists whose absence may otherwise look accidental.
+- State changed files, fixes, validation performed or reused, meaningful limitations, residual risks, and skipped specialists whose absence may otherwise look accidental.
+- End with the main skill's `PASS`, `NEEDS IMPROVEMENT`, or `FAIL` verdict.

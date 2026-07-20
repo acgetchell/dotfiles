@@ -11,7 +11,7 @@ Audit whether every observable Rust value remains valid before, during, and afte
 
 - Read repository-local invariant, mutation, and validation guidance first.
 - Default to changed transitions and the nearby canonical owner, derived state, callers, and tests needed to prove them.
-- Keep raw-to-domain conversion under `rust-parse-dont-validate`, typed failure categories under `rust-error-variants`, lifetime-bound views under `rust-borrowed-view-audit`, and async cancellation or synchronization under `rust-concurrency-async`.
+- Keep raw-to-domain conversion under `rust-parse-dont-validate`, typed failure categories under `rust-error-variants`, and lifetime-bound views under `rust-borrowed-view-audit`. Route cancellation and synchronization whose correctness depends on `.await` or task boundaries to `rust-concurrency-async`; retain the underlying invariant and purely synchronous coordinated mutation here.
 - Do not require a transaction abstraction when validation-before-commit or build-then-swap gives a simpler strong guarantee.
 - Keep reviews read-only unless fixes are requested. Do not mutate git state without explicit authorization.
 

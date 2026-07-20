@@ -68,7 +68,10 @@ For each selected skill:
 3. Inspect authorities and record findings or an explicit no-finding result.
 4. Defer overlapping shared-file edits until all owners establish facts.
 5. Implement focused fixes when authorized.
-6. Run the narrowest authoritative validator and fix failures before continuing or report a genuine blocker.
+6. Run the narrowest authoritative validator. When fixes are explicitly
+   authorized, repair in-scope failures and rerun the validator; otherwise
+   record the failure and report it as deferred or blocked without editing the
+   worktree.
 
 Do not report one blended pass as orchestrated evidence.
 

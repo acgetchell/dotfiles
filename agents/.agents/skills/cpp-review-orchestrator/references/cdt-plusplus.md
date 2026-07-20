@@ -4,7 +4,10 @@ Use this compact reference for every CDT++ or closely related C++ causal-dynamic
 
 ## Sources of Truth
 
-- Read local instructions first, then the relevant portions of `README.md`, `.github/CONTRIBUTING.md`, `justfile`, `CMakePresets.json`, `tests/CMakeLists.txt`, CMake modules, and workflows.
+- Read the repository-root `AGENTS.md`, or the repository-specific equivalent,
+  before the relevant portions of `README.md`, `.github/CONTRIBUTING.md`,
+  `justfile`, `CMakePresets.json`, `tests/CMakeLists.txt`, CMake modules, and
+  workflows.
 - Apply the fixed toolchain declared by `cpp-review-orchestrator`. Prefer repository `just` recipes backed by named presets; if required coverage is absent, use the configured tool directly and report the command-surface gap.
 - Keep contributor-facing commands and policy in repository documentation; keep agent routing here.
 

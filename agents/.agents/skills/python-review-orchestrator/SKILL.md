@@ -16,17 +16,22 @@ Coordinate focused Python skills without copying their guidance. Select each ski
 - When asked to fix issues, implement safe actionable fixes as each pass finds them.
 - Use focused validators while iterating. Run full CI only when repository policy or cross-layer risk requires it.
 - Maintain one cross-skill validation ledger keyed by source/environment state,
-  Python/platform/dependency configuration, instrumentation, and exact test
-  selection. Reuse still-valid evidence instead of replaying it through
-  broader recipes.
+  built artifact and installation-target identity, Python/platform/dependency
+  configuration, instrumentation, and exact test selection. Use a wheel,
+  sdist, installed tree, or entry-point digest when applicable. Reuse
+  still-valid evidence instead of replaying it through broader recipes.
 
 ## Establish Scope And Routing
 
-1. Inspect the supplied scope or use read-only git status and diff commands.
-2. Read [`references/check-routing.md`](references/check-routing.md).
-3. Select individual skills from changed behavior, not file extensions alone.
-4. State selected and meaningfully skipped skills before loading specialist bodies.
-5. Load a repository-specific reference only when both the repository and its concern match.
+1. Inspect the supplied scope. Otherwise use read-only git commands to enumerate
+   the committed branch delta from its merge base, staged changes, unstaged
+   changes, and untracked paths.
+2. Read the complete contents of every untracked file with a file-appropriate
+   reader before selecting skills; a status entry or filename is not evidence.
+3. Read [`references/check-routing.md`](references/check-routing.md).
+4. Select individual skills from changed behavior, not file extensions alone.
+5. State selected and meaningfully skipped skills before loading specialist bodies.
+6. Load a repository-specific reference only when both the repository and its concern match.
 
 Validator selection is independent from skill selection. Running tests for changed code does not by itself require loading `python-test-quality`.
 

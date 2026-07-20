@@ -104,6 +104,13 @@ does not.
 Changed files:
 - path: reason and finding addressed
 
+Selection:
+- Selected group: reason
+- Skipped group: reason
+
+Loaded guidance:
+- skill/reference path: group and purpose
+
 Review passes:
 - Build/Portability: skills and outcome
 - Lifetime/Ownership: skills and outcome
@@ -116,10 +123,16 @@ Review passes:
 - Scientific Correctness: skills and outcome
 - Concurrency/Reentrancy: skills and outcome
 - Validation/Test: skills and outcome
-- Final Synthesis: remaining risk or none
 
-Validation:
-- command: pass/fail/blocked with concise context
+Findings:
+- Fixed: finding and affected files
+- Deferred/blocked: finding, reason, and owner
+
+Validation ledger:
+- source/build/configuration and exact selection: command, pass/fail/blocked/reused, and rerun rationale when applicable
+
+Final Synthesis:
+- residual-risk classification and release-readiness verdict, or explicit no-residual-risk result
 
 Git:
 - No git state mutations performed.
