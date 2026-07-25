@@ -12,6 +12,7 @@
 brew "actionlint"                      # GitHub Actions workflow linter
 brew "ansible"                         # configuration management and automation
 brew "azure-cli"                       # Azure CLI (`az`)
+brew "cmake"                           # cross-platform build system generator
 brew "dotnet"                          # .NET SDK/runtime CLI (`dotnet`)
 brew "gh"                              # GitHub CLI
 brew "git"                             # modern Git version control
