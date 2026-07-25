@@ -100,7 +100,7 @@ supplied ephemerally through pkgx or the repository's language-specific environm
 
 ```sh
 # Install missing formulae/casks
-brew bundle install --file=~/projects/dotfiles/Brewfile
+just brew-install
 
 # Verify every Brewfile dependency is installed
 just brew-check

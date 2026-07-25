@@ -55,6 +55,7 @@ BREW_BIN_PAIRS=(
   "actionlint:actionlint"
   "ansible:ansible"
   "azure-cli:az"
+  "cmake:cmake"
   "docker-desktop:docker"
   "dotnet:dotnet"
   "gh:gh"

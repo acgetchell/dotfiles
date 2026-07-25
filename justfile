@@ -72,6 +72,9 @@ brew-cleanup-preview: _ensure-brew
     fi
     exit "$status"
 
+brew-install: _ensure-brew
+    brew bundle install --file="$PWD/Brewfile"
+
 check: shell-check git-config-check justfile-fmt-check toml-check yaml-check github-actions-check check-skills semgrep semgrep-test python-ci
     @echo "Checks complete!"
 
