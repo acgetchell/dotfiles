@@ -1,19 +1,15 @@
 """Behavioral tests for the review-graph scope capture helper."""
 
-from __future__ import annotations
-
 import json
 import shutil
 import subprocess
 import sys
+from collections.abc import Sequence  # noqa: TC003 - keep available for runtime annotation evaluation.
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import cast
 
 import pytest
 from capture_scope import _scope_data
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 _TIMEOUT_SECONDS = 30
 
@@ -47,7 +43,10 @@ def _commit_all(repo: Path) -> None:
 def _capture(repo: Path, mode: str, *arguments: str) -> dict[str, object]:
     script = Path(__file__).with_name("capture_scope.py")
     result = _run((sys.executable, str(script), "--repo", str(repo), "--mode", mode, *arguments), repo)
-    return json.loads(result.stdout)
+    payload: object = json.loads(result.stdout)
+    assert isinstance(payload, dict)
+    assert all(isinstance(key, str) for key in payload)
+    return cast("dict[str, object]", payload)
 
 
 def _capture_result(repo: Path, mode: str, *arguments: str) -> subprocess.CompletedProcess[str]:

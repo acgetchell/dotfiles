@@ -1,4 +1,5 @@
 interface:
   display_name: "Rust Concurrency and Async"
   short_description: "Audit Rust concurrency and async safety"
-  default_prompt: "Use $rust-concurrency-async to audit Rust tasks, async cancellation, Send/Sync, synchronization, atomics, backpressure, and shutdown behavior."
+  default_prompt: >-
+    Use $rust-concurrency-async to audit Rust tasks, async cancellation, Send/Sync, synchronization, atomics, backpressure, and shutdown behavior.

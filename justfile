@@ -6,6 +6,7 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 export UV_CACHE_DIR := env_var_or_default("UV_CACHE_DIR", ".uv-cache")
 
 python_paths := "agents/.agents/skills scripts"
+dprint_version := "0.55.2"
 just_version := "1.58.0"
 uv_version := "0.12.3"
 zizmor_version := "1.29.0"
@@ -14,12 +15,25 @@ _ensure-actionlint:
     #!/usr/bin/env bash
     set -euo pipefail
     command -v uv >/dev/null || { echo "'uv' not found. See https://github.com/astral-sh/uv"; exit 1; }
-    uv run actionlint -version >/dev/null
+    uv run --locked actionlint -version >/dev/null
 
 _ensure-brew:
     #!/usr/bin/env bash
     set -euo pipefail
     command -v brew >/dev/null || { echo "'brew' not found. See https://brew.sh"; exit 1; }
+
+_ensure-dprint:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    installed_version=""
+    if command -v dprint >/dev/null; then
+        installed_version="$(dprint --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+    fi
+    if [[ "$installed_version" != "{{ dprint_version }}" ]]; then
+        echo "'dprint' {{ dprint_version }} not found. Run bin/bootstrap.sh or install:"
+        echo "   cargo install --locked dprint --version {{ dprint_version }}"
+        exit 1
+    fi
 
 _ensure-just:
     #!/usr/bin/env bash
@@ -62,9 +76,9 @@ action-lint: _ensure-actionlint
     files=()
     while IFS= read -r -d '' file; do
         files+=("$file")
-    done < <(git ls-files -z '.github/workflows/*.yml' '.github/workflows/*.yaml')
+    done < <(git ls-files -co --exclude-standard -z -- '.github/workflows/*.yml' '.github/workflows/*.yaml')
     if [ "${#files[@]}" -gt 0 ]; then
-        printf '%s\0' "${files[@]}" | xargs -0 uv run actionlint
+        printf '%s\0' "${files[@]}" | xargs -0 uv run --locked actionlint
     else
         echo "No workflow files found to lint."
     fi
@@ -116,7 +130,7 @@ check-skills: _ensure-uv
 ci: check
     @echo "CI checks complete!"
 
-fix: justfile-fmt python-fix
+fix: justfile-fmt python-fix yaml-fix
     @echo "Fixes complete!"
 
 git-config-check:
@@ -136,16 +150,16 @@ macos-defaults:
     bin/macos-defaults.sh
 
 python-check: _ensure-uv
-    uv run ruff format --check {{ python_paths }}
-    uv run ruff check {{ python_paths }}
+    uv run --locked ruff format --check {{ python_paths }}
+    uv run --locked ruff check {{ python_paths }}
     just python-typecheck
 
 python-ci: python-check test-python
     @echo "Python checks complete!"
 
 python-fix: _ensure-uv
-    uv run ruff check {{ python_paths }} --fix
-    uv run ruff format {{ python_paths }}
+    uv run --locked ruff check {{ python_paths }} --fix
+    uv run --locked ruff format {{ python_paths }}
 
 python-lint: python-check
 
@@ -153,10 +167,22 @@ python-sync: _ensure-uv
     uv sync --group dev
 
 python-typecheck: _ensure-uv
-    uv run ty check {{ python_paths }} --error all
+    uv run --locked ty check {{ python_paths }} --error all
 
 semgrep: _ensure-uv
-    uv run semgrep --error --strict --timeout 120 --config semgrep.yaml .
+    #!/usr/bin/env bash
+    set -euo pipefail
+    files=()
+    while IFS= read -r -d '' file; do
+        if [[ -f "$file" && "$file" != tests/semgrep/* ]]; then
+            files+=("$file")
+        fi
+    done < <(git ls-files -co --exclude-standard -z)
+    if ((${#files[@]})); then
+        uv run --locked semgrep --metrics off --error --strict --timeout 120 --config semgrep.yaml "${files[@]}"
+    else
+        echo "No repository files found to scan."
+    fi
 
 semgrep-test: _ensure-uv
     #!/usr/bin/env bash
@@ -174,9 +200,9 @@ semgrep-test: _ensure-uv
         state_dir="$state_root/${rel%.*}"
         mkdir -p "$(dirname "$config_path")"
         mkdir -p "$state_dir"
-        uv run python scripts/semgrep_fixture_config.py "$fixture" "$PWD/semgrep.yaml" "$config_path"
+        uv run --locked python scripts/semgrep_fixture_config.py "$fixture" "$PWD/semgrep.yaml" "$config_path"
 
-        SEMGREP_SEND_METRICS=off SEMGREP_SETTINGS_FILE="$state_dir/settings.yml" uv run semgrep scan --test --strict --config "$config_path" "$fixture"
+        SEMGREP_SEND_METRICS=off SEMGREP_SETTINGS_FILE="$state_dir/settings.yml" uv run --locked semgrep scan --metrics off --test --strict --config "$config_path" "$fixture"
     done < <(find tests/semgrep -type f ! -name '*.fixed' -print0)
 
 setup:
@@ -187,7 +213,7 @@ shell-check:
     bash -n bin/bootstrap.sh bin/macos-defaults.sh bin/resolve-just-version.sh bin/verify.sh
 
 skill-check skill: _ensure-uv
-    uv run python scripts/skill_validate.py "{{ skill }}"
+    uv run --locked python scripts/skill_validate.py "{{ skill }}"
 
 stow-adopt package:
     #!/usr/bin/env bash
@@ -248,16 +274,60 @@ stow-restow-all:
     done
 
 stow-verify: _ensure-uv
-    DOTFILES_DIR="$PWD" uv run python scripts/stow_verify.py
+    DOTFILES_DIR="$PWD" uv run --locked python scripts/stow_verify.py
 
 test-python: _ensure-uv
-    uv run pytest
+    uv run --locked pytest
 
 toml-check: _ensure-uv
-    uv run python -c 'import subprocess, tomllib; from pathlib import Path; [tomllib.load(Path(path).open("rb")) for path in subprocess.run(["git", "ls-files", "*.toml"], check=True, capture_output=True, text=True).stdout.splitlines()]'
+    uv run --locked python -c 'import subprocess, tomllib; from pathlib import Path; [tomllib.load(Path(path).open("rb")) for path in subprocess.run(["git", "ls-files", "*.toml"], check=True, capture_output=True, text=True).stdout.splitlines()]'
 
-yaml-check:
-    ruby -e 'require "psych"; paths = Dir.glob([".coderabbit.yml", ".github/*.{yaml,yml}", ".github/workflows/*.{yaml,yml}", "agents/.agents/skills/**/agents/*.{yaml,yml}"]); paths.sort.each { |path| Psych.safe_load(File.read(path), permitted_classes: [], aliases: false) }'
+yaml-check: yaml-fmt-check yaml-lint
+
+yaml-fix: _ensure-dprint
+    #!/usr/bin/env bash
+    set -euo pipefail
+    files=()
+    while IFS= read -r -d '' file; do
+        if [ -f "$file" ]; then
+            files+=("$file")
+        fi
+    done < <(git ls-files -co --exclude-standard -z -- '*.yml' '*.yaml' 'CITATION.cff')
+    if [ "${#files[@]}" -gt 0 ]; then
+        printf '%s\0' "${files[@]}" | xargs -0 dprint fmt --incremental=false
+    else
+        echo "No YAML files found to format."
+    fi
+
+yaml-fmt-check: _ensure-dprint
+    #!/usr/bin/env bash
+    set -euo pipefail
+    files=()
+    while IFS= read -r -d '' file; do
+        if [ -f "$file" ]; then
+            files+=("$file")
+        fi
+    done < <(git ls-files -co --exclude-standard -z -- '*.yml' '*.yaml' 'CITATION.cff')
+    if [ "${#files[@]}" -gt 0 ]; then
+        printf '%s\0' "${files[@]}" | xargs -0 dprint check --incremental=false
+    else
+        echo "No YAML files found to check."
+    fi
+
+yaml-lint: _ensure-uv
+    #!/usr/bin/env bash
+    set -euo pipefail
+    files=()
+    while IFS= read -r -d '' file; do
+        if [ -f "$file" ]; then
+            files+=("$file")
+        fi
+    done < <(git ls-files -co --exclude-standard -z -- '*.yml' '*.yaml' 'CITATION.cff')
+    if [ "${#files[@]}" -gt 0 ]; then
+        uv run --locked yamllint --strict -c .yamllint "${files[@]}"
+    else
+        echo "No YAML files found to lint."
+    fi
 
 zizmor: _ensure-zizmor
     zizmor .github

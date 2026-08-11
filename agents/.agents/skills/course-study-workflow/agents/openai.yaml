@@ -1,4 +1,6 @@
 interface:
   display_name: "Course Study Workflow"
   short_description: "Build understanding and train exam retrieval"
-  default_prompt: "Use $course-study-workflow to build Markdown-first study materials with coverage audits, quick recall, point-weighted practice assessments, targeted repairs, and exam sheets."
+  default_prompt: >-
+    Use $course-study-workflow to build Markdown-first study materials with coverage audits, quick recall, point-weighted practice assessments, targeted
+    repairs, and exam sheets.

@@ -43,7 +43,7 @@ def read_frontmatter_text(skill_path: Path | str) -> tuple[str | None, str]:
     match = FRONTMATTER_RE.match(content)
     if match is None:
         return None, "Invalid frontmatter format"
-    return match.group(1), ""
+    return cast("str", match.group(1)), ""
 
 
 def parse_frontmatter(frontmatter_text: str) -> tuple[dict[str, object] | None, str]:

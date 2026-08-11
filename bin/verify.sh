@@ -107,7 +107,7 @@ done
 
 echo "==> Pinned tool versions"
 if command -v just >/dev/null 2>&1; then
-  for tool in just uv zizmor; do
+  for tool in dprint just uv zizmor; do
     pin_name="${tool}_version"
     if ! expected_version="$(just --justfile "$DOTFILES_DIR/justfile" --evaluate "$pin_name")"; then
       fail "could not resolve $pin_name from $DOTFILES_DIR/justfile"
@@ -151,7 +151,7 @@ done <<< "$BUNDLE_CASKS"
 
 echo "==> Stow symlinks"
 if command -v uv >/dev/null 2>&1; then
-  if (cd "$DOTFILES_DIR" && DOTFILES_DIR="$DOTFILES_DIR" uv run python scripts/stow_verify.py); then
+  if (cd "$DOTFILES_DIR" && DOTFILES_DIR="$DOTFILES_DIR" uv run --locked python scripts/stow_verify.py); then
     pass "scripts/stow_verify.py"
   else
     fail "stow symlink verification failed (see above)"

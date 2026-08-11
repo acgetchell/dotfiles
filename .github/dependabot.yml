@@ -1,6 +1,7 @@
 ---
 version: 2
 updates:
+  # Enable version updates for GitHub Actions.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -10,11 +11,21 @@ updates:
       timezone: "America/Los_Angeles"
     cooldown:
       default-days: 7
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "github_actions"
     groups:
       github-actions:
+        applies-to: version-updates
+        patterns:
+          - "*"
+      github-actions-security:
+        applies-to: security-updates
         patterns:
           - "*"
 
+  # Enable version updates for Python development dependencies locked by uv.
   - package-ecosystem: "uv"
     directory: "/"
     schedule:
@@ -24,7 +35,16 @@ updates:
       timezone: "America/Los_Angeles"
     cooldown:
       default-days: 7
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "python:uv"
     groups:
-      python-tools:
+      dependencies:
+        applies-to: version-updates
+        patterns:
+          - "*"
+      python-security:
+        applies-to: security-updates
         patterns:
           - "*"

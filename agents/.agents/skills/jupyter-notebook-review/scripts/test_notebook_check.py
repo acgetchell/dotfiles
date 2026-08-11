@@ -7,10 +7,9 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    import pytest
+import pytest
 
 SCRIPT = Path(__file__).with_name("notebook_check.py")
 SPEC = importlib.util.spec_from_file_location("notebook_check", SCRIPT)
@@ -75,3 +74,33 @@ def test_summary_displays_cell_ids(tmp_path: Path, capsys: pytest.CaptureFixture
     MODULE.summarize(notebook_path)
 
     assert "id=setup-code" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("metadata", [None, [], "invalid"])
+def test_load_notebook_rejects_non_object_cell_metadata(tmp_path: Path, metadata: Any) -> None:
+    """Each cell metadata field must be a JSON object."""
+    notebook_path = tmp_path / "invalid-metadata.ipynb"
+    notebook = notebook_with_ids("setup-code")
+    notebook["cells"][0]["metadata"] = metadata
+    notebook_path.write_text(json.dumps(notebook), encoding="utf-8")
+
+    with pytest.raises(TypeError, match=r"cell 1 metadata must be a JSON object") as error:
+        MODULE.load_notebook(notebook_path)
+
+    assert str(notebook_path) in str(error.value)
+    assert f"cell 1 metadata must be a JSON object, got {type(metadata).__name__}" in str(error.value)
+
+
+@pytest.mark.parametrize("nbformat", [4.0, True])
+def test_load_notebook_rejects_non_integer_nbformat_four(tmp_path: Path, nbformat: Any) -> None:
+    """Numeric equality must not admit floats or Booleans as nbformat 4."""
+    notebook_path = tmp_path / "invalid-nbformat.ipynb"
+    notebook = notebook_with_ids("setup-code")
+    notebook["nbformat"] = nbformat
+    notebook_path.write_text(json.dumps(notebook), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=r"expected nbformat to be the JSON integer 4") as error:
+        MODULE.load_notebook(notebook_path)
+
+    assert str(notebook_path) in str(error.value)
+    assert f"expected nbformat to be the JSON integer 4, got {nbformat!r}" in str(error.value)

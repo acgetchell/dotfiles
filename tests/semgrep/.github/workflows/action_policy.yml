@@ -102,3 +102,23 @@ jobs:
       - name: Locked uv sync
         # ok: dotfiles.github-actions.uv-sync-locked-in-workflows
         run: uv sync --locked
+
+      - name: Unsafe auto-merge
+        # ruleid: dotfiles.github-actions.automerge-head-safe-squash
+        run: gh pr merge --auto "$PR_URL"
+
+      - name: Safe squash auto-merge
+        # ok: dotfiles.github-actions.automerge-head-safe-squash
+        run: gh pr merge --auto --squash --match-head-commit "$PR_HEAD_SHA" "$PR_URL"
+
+      - name: CodeRabbit token outside reviewed workflow
+        env:
+          # ruleid: dotfiles.github-actions.coderabbit-token-confined
+          GH_TOKEN: ${{ secrets.CODERABBIT_REVIEW_TOKEN }}
+        run: gh api user
+
+      - name: Unrelated scoped token
+        env:
+          # ok: dotfiles.github-actions.coderabbit-token-confined
+          GH_TOKEN: ${{ secrets.OTHER_REVIEW_TOKEN }}
+        run: gh api user

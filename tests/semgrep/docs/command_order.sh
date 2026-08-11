@@ -15,3 +15,11 @@ just python-fix
 # ruleid: dotfiles.docs.check-before-fix-command-order
 just python-fix
 just python-check
+
+# ok: dotfiles.docs.check-before-fix-command-order
+just yaml-check
+just yaml-fix
+
+# ruleid: dotfiles.docs.check-before-fix-command-order
+just yaml-fix
+just yaml-check

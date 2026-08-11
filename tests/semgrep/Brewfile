@@ -1,4 +1,7 @@
 # ruleid: dotfiles.brewfile.no-cargo-installed-tools
+brew "dprint"
+
+# ruleid: dotfiles.brewfile.no-cargo-installed-tools
 brew "just"
 
 # ruleid: dotfiles.brewfile.no-cargo-installed-tools

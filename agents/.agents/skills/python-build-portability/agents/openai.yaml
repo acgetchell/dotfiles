@@ -1,4 +1,6 @@
 interface:
   display_name: "Python Build Portability"
   short_description: "Audit uv-managed Python build portability"
-  default_prompt: "Use $python-build-portability to audit this uv-managed Python package with Ruff and ty across builds, installs, runtimes, extras, entry points, and supported platforms."
+  default_prompt: >-
+    Use $python-build-portability to audit this uv-managed Python package with Ruff and ty across builds, installs, runtimes, extras, entry points, and
+    supported platforms.
