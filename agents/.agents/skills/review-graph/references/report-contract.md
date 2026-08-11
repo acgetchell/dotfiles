@@ -1,5 +1,11 @@
 # Review Graph Reporting Contract
 
+Use this detailed contract for isolated execution and for any partial isolated
+evidence retained after fallback. Grouped delivery uses the `Review Evidence`
+table and final-report requirements in `review-graph/SKILL.md` and
+`repo-review/references/legacy-grouped-review.md`; it does not fabricate worker
+lifecycle, node, epoch, or isolation records.
+
 Use this contract for the coordinator-owned graph journal, the pre-dispatch
 plan, and the final user-facing report. The final answer must be self-contained;
 commentary and hidden worker reports are not substitutes for any required

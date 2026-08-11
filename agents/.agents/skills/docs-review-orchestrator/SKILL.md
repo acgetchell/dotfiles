@@ -11,8 +11,8 @@ Coordinate a domain-neutral documentation review with the smallest applicable sp
 
 - Do not mutate git state unless explicitly requested in the current turn.
 - Read repository-local guidance and honor any supplied parent scope without
-  narrowing it silently, including `repo-review legacy-grouped` outside
-  graph-routing mode.
+  narrowing it silently, including the default `repo-review` grouped profile
+  outside graph-routing mode.
 - Default to branch scope. Use staged-only, changed-file-only, release-readiness, or whole-repository scope when explicitly requested or handed off.
 - Treat an explicit release-readiness or release documentation audit as release-readiness. A request to review a named release patch, diff, or changed-file set remains bounded to that supplied surface unless the user asks to expand it.
 - In release-readiness or whole-suite mode, inspect every tracked active document and classify generated, template, archived, or excluded material.

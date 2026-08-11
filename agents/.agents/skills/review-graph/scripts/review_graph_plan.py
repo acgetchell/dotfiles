@@ -70,6 +70,16 @@ class CapacityAssessment(Assessment):
 
 
 @dataclass(frozen=True)
+class ExecutionProfileAssessment(Assessment):
+    """Selected delivery profile before repository routing or graph planning."""
+
+    profile: str
+    reason: str
+    isolated_requested: bool
+    isolated_only: bool
+
+
+@dataclass(frozen=True)
 class PlanNode:
     """One bounded node in a sequential or dependency-driven schedule."""
 
@@ -446,6 +456,11 @@ class MigrationTrial:
     accepted: bool
     recovery_completed: bool = False
     multi_epoch_completed: bool = False
+    runtime_artifact_id: str | None = None
+    runtime_artifact_verified: bool = False
+    runtime_artifact_verifier: str | None = None
+    workers_created: int = 0
+    grouped_fallback_completed: bool = False
 
 
 @dataclass(frozen=True)
@@ -1259,6 +1274,12 @@ def _migration_trial_blockers(trial: MigrationTrial) -> tuple[str, ...]:
         blockers.append(f"{trial.trial_id} missed applicable skills: {', '.join(missing_skills)}")
     if trial.unexpected_skill_ids:
         blockers.append(f"{trial.trial_id} has unexplained extra skills: {', '.join(trial.unexpected_skill_ids)}")
+    if not trial.runtime_artifact_id:
+        blockers.append(f"{trial.trial_id} has no runtime trial artifact")
+    elif not trial.runtime_artifact_verified or not trial.runtime_artifact_verifier:
+        blockers.append(f"{trial.trial_id} runtime trial artifact was not independently verified")
+    if trial.workers_created < 1:
+        blockers.append(f"{trial.trial_id} created no runtime workers")
     missing_findings = sorted(expected_findings - observed_findings)
     if missing_findings:
         blockers.append(f"{trial.trial_id} missed canonical findings: {', '.join(missing_findings)}")
@@ -1276,23 +1297,34 @@ def _migration_trial_blockers(trial: MigrationTrial) -> tuple[str, ...]:
 
 
 def assess_migration_trials(trials: Sequence[MigrationTrial], *, required_consecutive: int = 3) -> Assessment:
-    """Require quantified forward parity before retiring legacy review."""
+    """Require verified forward parity before promoting isolated review."""
     if required_consecutive < 1:
         msg = "required consecutive migration trials must be positive"
         raise ValueError(msg)
     _validate_unique_ids((trial.trial_id for trial in trials), label="migration trial")
     required_modes = ("branch-read-only", "baseline-release", "review-and-fix")
     streaks = dict.fromkeys(required_modes, 0)
+    active_failure_blockers: dict[str, tuple[str, ...]] = dict.fromkeys(required_modes, ())
     blockers: list[str] = []
     for trial in trials:
         trial_blockers = _migration_trial_blockers(trial)
-        if trial.mode in streaks:
-            streaks[trial.mode] = streaks[trial.mode] + 1 if not trial_blockers else 0
+        if trial.mode not in streaks:
+            blockers.extend(trial_blockers)
+            blockers.append(f"unknown migration trial mode: {trial.mode}")
+            continue
+        if trial_blockers:
+            streaks[trial.mode] = 0
+            active_failure_blockers[trial.mode] = trial_blockers
+            continue
+        streaks[trial.mode] += 1
+        if streaks[trial.mode] >= required_consecutive:
+            active_failure_blockers[trial.mode] = ()
     for mode, streak in streaks.items():
         if streak < required_consecutive:
+            blockers.extend(active_failure_blockers[mode])
             blockers.append(f"{mode} has {streak} consecutive accepted trials; requires {required_consecutive}")
-    if not any(not _migration_trial_blockers(trial) and trial.recovery_completed for trial in trials):
-        blockers.append("no accepted forced worker-failure recovery trial completed")
+    if not any(not _migration_trial_blockers(trial) and trial.recovery_completed and trial.grouped_fallback_completed for trial in trials):
+        blockers.append("no accepted forced worker-failure trial completed grouped fallback")
     if not any(not _migration_trial_blockers(trial) and trial.multi_epoch_completed for trial in trials):
         blockers.append("no accepted multi-epoch fresh-root continuation trial completed")
     return Assessment(not blockers, tuple(blockers))
@@ -1401,6 +1433,65 @@ def assess_worker_capacity(metadata: Mapping[str, Any], *, required_fresh_worker
     full_plan_guaranteed = None if remaining is None else remaining >= required_fresh_worker_creations
     return CapacityAssessment(
         not blockers, tuple(blockers), remaining, required_fresh_worker_creations, free_slots, required_peak_workers, full_plan_guaranteed
+    )
+
+
+def select_execution_profile(
+    *,
+    isolated_requested: bool = False,
+    isolated_only: bool = False,
+    fresh_workers_supported: bool = False,
+    capacity_metadata: Mapping[str, Any] | None = None,
+    budget: WorkerBudget | None = None,
+) -> ExecutionProfileAssessment:
+    """Choose useful grouped delivery unless strict isolation is both requested and feasible."""
+    selected_budget = budget or WorkerBudget()
+    if isolated_only:
+        isolated_requested = True
+
+    if not isolated_requested:
+        return ExecutionProfileAssessment(
+            feasible=True, blockers=(), profile="grouped", reason="grouped delivery is the default profile", isolated_requested=False, isolated_only=False
+        )
+
+    blockers: list[str] = []
+    if not fresh_workers_supported:
+        blockers.append("fresh no-inherited-turn workers are unavailable")
+    if selected_budget.total <= selected_budget.recovery_finalization_reserve or selected_budget.recovery_finalization_reserve < 1:
+        blockers.append("configured fresh-worker budget must exceed a positive recovery/finalization reserve")
+    if capacity_metadata is None:
+        blockers.append("safe aggregate worker-capacity metadata is unavailable")
+    else:
+        capacity = assess_worker_capacity(capacity_metadata, required_fresh_worker_creations=max(1, selected_budget.recovery_finalization_reserve + 1))
+        blockers.extend(capacity.blockers)
+
+    if not blockers:
+        return ExecutionProfileAssessment(
+            feasible=True,
+            blockers=(),
+            profile="isolated",
+            reason="explicit isolation request passed the worker-capability gate",
+            isolated_requested=True,
+            isolated_only=isolated_only,
+        )
+
+    if isolated_only:
+        return ExecutionProfileAssessment(
+            feasible=False,
+            blockers=tuple(blockers),
+            profile="blocked",
+            reason="isolated-only execution cannot start safely",
+            isolated_requested=True,
+            isolated_only=True,
+        )
+
+    return ExecutionProfileAssessment(
+        feasible=True,
+        blockers=tuple(blockers),
+        profile="grouped",
+        reason="isolated execution was requested but unavailable; using grouped delivery",
+        isolated_requested=True,
+        isolated_only=False,
     )
 
 

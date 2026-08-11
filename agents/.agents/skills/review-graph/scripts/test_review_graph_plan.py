@@ -38,6 +38,7 @@ from review_graph_plan import (
     plan_from_document,
     plan_graph,
     reconcile_execution,
+    select_execution_profile,
     stop_after_worker_creation_failure,
     validate_routing_ledger,
 )
@@ -95,6 +96,56 @@ def test_capacity_evidence_rejects_prior_reports_without_echoing_them() -> None:
     assert result.blockers[0].startswith("isolation-failure:")
     assert "$.workers[0].final_report" in result.blockers[0]
     assert prior_text not in result.blockers[0]
+
+
+def test_grouped_delivery_is_the_default_without_capacity_diagnosis() -> None:
+    result = select_execution_profile()
+
+    assert result.feasible
+    assert result.profile == "grouped"
+    assert result.blockers == ()
+
+
+def test_explicit_isolation_uses_isolated_profile_when_capability_is_safe() -> None:
+    result = select_execution_profile(isolated_requested=True, fresh_workers_supported=True, capacity_metadata=_capacity(active=1))
+
+    assert result.feasible
+    assert result.profile == "isolated"
+
+
+def test_isolation_preference_falls_back_to_grouped_delivery() -> None:
+    result = select_execution_profile(isolated_requested=True)
+
+    assert result.feasible
+    assert result.profile == "grouped"
+    assert "fresh no-inherited-turn workers are unavailable" in result.blockers
+    assert "safe aggregate worker-capacity metadata is unavailable" in result.blockers
+
+
+def test_isolation_requires_creation_capacity_beyond_the_recovery_reserve() -> None:
+    result = select_execution_profile(isolated_requested=True, fresh_workers_supported=True, capacity_metadata=_capacity(remaining=1, active=1))
+
+    assert result.feasible
+    assert result.profile == "grouped"
+    assert "known fresh-worker capacity is smaller than the bounded plan: requires 2, has 1" in result.blockers
+
+
+def test_isolation_accepts_creation_capacity_beyond_the_recovery_reserve() -> None:
+    result = select_execution_profile(isolated_requested=True, fresh_workers_supported=True, capacity_metadata=_capacity(remaining=2, active=1))
+
+    assert result.feasible
+    assert result.profile == "isolated"
+
+
+def test_isolated_only_blocks_when_safe_capacity_is_unavailable() -> None:
+    result = select_execution_profile(
+        isolated_only=True, fresh_workers_supported=True, capacity_metadata={**_capacity(), "workers": [{"final_report": "must not leak"}]}
+    )
+
+    assert not result.feasible
+    assert result.profile == "blocked"
+    assert result.blockers[0].startswith("isolation-failure:")
+    assert "must not leak" not in result.blockers[0]
 
 
 def test_packaged_python_support_tooling_requires_build_portability() -> None:
@@ -675,7 +726,7 @@ def test_meaningful_skip_cannot_satisfy_an_applicable_requirement() -> None:
     assert any("cannot complete through meaningful skips" in blocker for blocker in result.blockers)
 
 
-def _migration_trial(trial_id: str, mode: str, *, recovery: bool = False, multi_epoch: bool = False) -> MigrationTrial:
+def _migration_trial(trial_id: str, mode: str, *, recovery: bool = False, multi_epoch: bool = False, grouped_fallback: bool = False) -> MigrationTrial:
     return MigrationTrial(
         trial_id=trial_id,
         mode=mode,
@@ -692,13 +743,22 @@ def _migration_trial(trial_id: str, mode: str, *, recovery: bool = False, multi_
         accepted=True,
         recovery_completed=recovery,
         multi_epoch_completed=multi_epoch,
+        runtime_artifact_id=f"artifact://{trial_id}",
+        runtime_artifact_verified=True,
+        runtime_artifact_verifier="forward-trial-recorder",
+        workers_created=1,
+        grouped_fallback_completed=grouped_fallback,
     )
 
 
 def test_migration_gate_requires_three_consecutive_modes_recovery_and_epochs() -> None:
     trials = tuple(
         _migration_trial(
-            f"{mode}-{ordinal}", mode, recovery=mode == "branch-read-only" and ordinal == 1, multi_epoch=mode == "baseline-release" and ordinal == 1
+            f"{mode}-{ordinal}",
+            mode,
+            recovery=mode == "branch-read-only" and ordinal == 1,
+            multi_epoch=mode == "baseline-release" and ordinal == 1,
+            grouped_fallback=mode == "branch-read-only" and ordinal == 1,
         )
         for mode in ("branch-read-only", "baseline-release", "review-and-fix")
         for ordinal in range(1, 4)
@@ -717,6 +777,50 @@ def test_migration_gate_rejects_missing_applicable_skill_recall() -> None:
 
     assert not result.feasible
     assert any("branch-read-only has 0 consecutive" in blocker for blocker in result.blockers)
+
+
+def test_migration_gate_rejects_trials_without_runtime_evidence() -> None:
+    trial = replace(
+        _migration_trial("branch-1", "branch-read-only"),
+        runtime_artifact_id=None,
+        runtime_artifact_verified=False,
+        runtime_artifact_verifier=None,
+        workers_created=0,
+    )
+
+    result = assess_migration_trials((trial,))
+
+    assert not result.feasible
+    assert any("has no runtime trial artifact" in blocker for blocker in result.blockers)
+    assert any("created no runtime workers" in blocker for blocker in result.blockers)
+
+
+def test_migration_gate_rejects_an_unverified_runtime_artifact() -> None:
+    trial = replace(_migration_trial("branch-1", "branch-read-only"), runtime_artifact_verified=False, runtime_artifact_verifier=None)
+
+    result = assess_migration_trials((trial,))
+
+    assert not result.feasible
+    assert any("runtime trial artifact was not independently verified" in blocker for blocker in result.blockers)
+
+
+def test_migration_gate_allows_a_recovered_trailing_streak() -> None:
+    old_failure = replace(_migration_trial("old-failure", "branch-read-only"), observed_applicable_skill_ids=())
+    recovered_trials = tuple(
+        _migration_trial(
+            f"{mode}-{ordinal}",
+            mode,
+            recovery=mode == "branch-read-only" and ordinal == 1,
+            multi_epoch=mode == "baseline-release" and ordinal == 1,
+            grouped_fallback=mode == "branch-read-only" and ordinal == 1,
+        )
+        for mode in ("branch-read-only", "baseline-release", "review-and-fix")
+        for ordinal in range(1, 4)
+    )
+
+    result = assess_migration_trials((old_failure, *recovered_trials))
+
+    assert result.feasible
 
 
 def test_node_acceptance_requires_isolation_skill_reference_and_fingerprint_proof() -> None:

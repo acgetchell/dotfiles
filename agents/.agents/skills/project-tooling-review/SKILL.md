@@ -33,12 +33,12 @@ When `review-graph` dispatches this skill as a worker node:
   catalog handoffs instead of broadening the dispatch
 - return the exact Review Node Result required by the graph's node contract
 
-Otherwise use the standalone workflow below. The explicit
-`repo-review legacy-grouped` path is standalone behavior, not graph evidence.
+Otherwise use the standalone workflow below. The default `repo-review` grouped
+profile is standalone behavior, not isolated graph evidence.
 
 ## Review Trace
 
-When invoked through `repo-review legacy-grouped`, begin with a handoff receipt
+When invoked through the `repo-review` grouped profile, begin with a handoff receipt
 that names:
 
 - the parent branch scope and tooling-owned file list or file count handed off
@@ -50,7 +50,7 @@ After loading each reference file, keep its name in the running trace for the fi
 
 Evidence is grouped by tooling surface. A surface is complete only when the final summary can name the surface status (`selected` or `skipped`), reference files loaded for that surface, changed files or command owners inspected, findings or explicit no-finding result, fixes applied, and the focused validator run for that surface. Running a broad validator does not by itself count as reviewing every tooling surface.
 
-In `legacy-grouped` mode, provide table-ready evidence for the parent `Review
+In grouped mode, provide table-ready evidence for the parent `Review
 Evidence` table: selected tooling surfaces, reference files loaded, validators
 run, version checks performed, and any skipped surfaces that might otherwise
 look missing.
@@ -163,7 +163,7 @@ End with a concise summary that helps the maintainer review unstaged changes by 
 - each file changed and why
 - tooling surfaces reviewed
 - reference files actually loaded
-- table-ready evidence when invoked through `repo-review legacy-grouped`
+- table-ready evidence when invoked through the `repo-review` grouped profile
 - validators run and their results
 - version checks performed and whether they were live or local-only
 - managed tool updates performed, before/after versions, and `justfile` or GitHub Actions pins updated

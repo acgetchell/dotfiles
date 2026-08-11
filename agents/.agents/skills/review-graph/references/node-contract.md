@@ -1,5 +1,8 @@
 # Review Graph Node Contract
 
+This contract applies only to isolated worker nodes. Grouped delivery follows
+each selected surface orchestrator's native evidence and reporting contract.
+
 Use the mode-specific contract below for every worker dispatch. Keep scope and
 output fields stable so the coordinator can compare, gate, and synthesize
 independent runs without treating review, independent checking, and validation

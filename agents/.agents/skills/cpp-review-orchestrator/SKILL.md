@@ -17,8 +17,7 @@ The intent is to replace a maintainer manually invoking several C++ reviews. Do 
 - Respect repository-local instructions and exact recipe/preset names plus documented compiler, standard-library, triplet, dependency, and sanitizer support.
 - Prefer changed-file review by default. Use whole-repo baseline mode only when the user explicitly asks for a repository-wide or baseline audit.
 - Outside graph-routing mode, honor any handed-off branch file list, diff, or
-  baseline inventory. This includes the explicit `repo-review legacy-grouped`
-  path.
+  baseline inventory. This includes the default `repo-review` grouped profile.
 - When the user asks to fix issues, implement actionable findings as each group discovers them unless the fix is blocked or unsafe.
 - Select focused validators from touched risks. Do not run full CI by default.
 - Maintain one cross-group validation ledger. Reuse still-valid results and never rerun the same test selection under the same source/build/configuration state.
@@ -42,7 +41,7 @@ Otherwise keep the standalone behavior below.
 
 ## Review Trace
 
-When invoked through `repo-review legacy-grouped`, begin with a handoff receipt
+When invoked through the `repo-review` grouped profile, begin with a handoff receipt
 naming the C++ scope, selected and skipped groups with reasons, and routing
 files to load.
 
@@ -187,7 +186,7 @@ End with:
 - each changed file and why
 - every selected and skipped group
 - focused skill and reference files actually loaded
-- table-ready evidence when invoked through `repo-review legacy-grouped`
+- table-ready evidence when invoked through the `repo-review` grouped profile
 - validators and results
 - non-overlapping validation ledger, including why any rerun was necessary
 - fixed findings and the mandatory Final Synthesis classification of every remaining risk, or an explicit no-residual-risk result

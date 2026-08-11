@@ -1,5 +1,9 @@
 # Complete Review Graph Planning
 
+This contract applies only to the explicit isolated execution profile. Grouped
+delivery uses the surface-orchestrator workflow and validation ledger instead;
+it does not create one fresh worker per specialist or partition worker epochs.
+
 Read this contract before creating any worker. Use
 `scripts/review_graph_plan.py` as the deterministic authority for routing
 closure, path validation, coalescing, epochs, acceptance, resume, and completion.

@@ -13,7 +13,7 @@ Coordinate focused Python skills without copying their guidance. Select each ski
 - Respect repository-local instructions before inspecting or editing files.
 - Prefer changed-file scope. Outside graph-routing mode, use whole-repository
   mode only when explicitly requested or supplied as a parent baseline scope,
-  including `repo-review legacy-grouped`.
+  including the default `repo-review` grouped profile.
 - Honor a parent orchestrator's branch-scope file list instead of narrowing it to current worktree changes.
 - When asked to fix issues, implement safe actionable fixes as each pass finds them.
 - Use focused validators while iterating. Run full CI only when repository policy or cross-layer risk requires it.
@@ -67,7 +67,7 @@ For each selected skill, record:
 - fixes applied
 - focused validation and result, or the matching ledger evidence reused
 
-When invoked through `repo-review legacy-grouped`, provide table-ready evidence
+When invoked through the `repo-review` grouped profile, provide table-ready evidence
 for the parent review. Name selected and not-selected skills whose absence might
 otherwise appear accidental.
 
@@ -146,5 +146,5 @@ Lead with unresolved blockers. Then include:
 - untested configurations or external limitations
 - confirmation that git state was not mutated, when true
 
-When invoked through `repo-review legacy-grouped`, return this evidence in the
+When invoked through the `repo-review` grouped profile, return this evidence in the
 parent's requested table-ready form.

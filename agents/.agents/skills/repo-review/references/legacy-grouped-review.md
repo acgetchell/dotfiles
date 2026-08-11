@@ -1,8 +1,8 @@
-# Explicit Legacy Grouped Review
+# Grouped Repository Review
 
-Use this fallback only when the user explicitly requests `legacy-grouped`.
-Never select it automatically because graph capability, routing, validation, or
-worker creation is blocked.
+Use this workflow for ordinary `repo-review` and `review-graph` requests. The
+filename is retained for compatibility; this is the supported delivery-first
+profile, not a fallback.
 
 ## Scope
 
@@ -48,5 +48,5 @@ Return:
 | --- | --- | --- | --- | --- | --- |
 
 Include one row for all five orchestrators. Use `selected`, `skipped`, or
-`blocked`. Lead with unresolved blockers and explicitly label the result
-`legacy-grouped`; it is not isolated graph evidence.
+`blocked`. Lead with unresolved blockers and label the result `grouped`; it is
+not isolated graph evidence.
