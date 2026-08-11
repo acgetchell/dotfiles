@@ -31,6 +31,9 @@ When `review-graph` explicitly requests `graph-routing`:
    changed-file, or fix targets. Mark it not applicable only for a pure baseline
    without a concrete diff.
 7. Always select `repository-production-review` for final broad synthesis.
+8. Return exhaustive `routing_decisions` with `consulted_routers` containing
+   `repo-review`. Treat an empty ledger or one that omits `repo-review` as open;
+   `validate_routing_ledger` must not report `catalog_closed` for it.
 
 Return records only. Do not load surface orchestrator or leaf bodies, create
 subagents, review, validate, edit, synthesize, or delegate to `review-graph` in

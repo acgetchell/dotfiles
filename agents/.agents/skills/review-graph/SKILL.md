@@ -29,8 +29,10 @@ acceptance, resume, and completion decisions.
   `fork_turns: "none"` when supported.
 - Invoke exactly one skill per worker and never reuse a completed worker.
 - Require the planned absolute skill path, matching frontmatter name, required
-  reference paths, complete native report, and matching before/after
-  fingerprints for every accepted node.
+  reference paths, and complete native report. Require matching before/after
+  fingerprints for completed or no-findings read-only nodes, the recorded
+  blocker identity for blocked nodes, and the expected pre-edit identity plus
+  changed-as-reported post-edit identity for authorized fix nodes.
 - Preserve complete worker reports unchanged outside the reviewed repository in
   a coordinator-owned journal.
 - Keep audit, validation, independent-review, synthesis, and revalidation nodes

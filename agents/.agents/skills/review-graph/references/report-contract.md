@@ -42,8 +42,8 @@ routing_decisions[]:
 nodes[]:
   node ID, exact skill/path, selection reason, mode, owned paths,
   predecessors, instruction and static routing/repository references, budgets,
-  dispatch fingerprints, result status,
-  complete accepted result or blocked record
+  dispatch fingerprints, accepted/blocked/invalidated-stale result status,
+  complete accepted result, blocked record, or stale invalidation record
 worker_attempts[]:
   attempt ID, node ID, creation ordinal, created=yes/no, skill loaded=yes/no,
   result returned=yes/no, elapsed time, remaining deadline, blocker; never infer
@@ -87,7 +87,8 @@ resume_manifest:
 Keep complete node reports unchanged. The journal adds cross-node indexes; it
 does not replace raw reports with summaries.
 
-Persist the journal and raw reports after every accepted or blocked node. Use
+Persist the journal and raw reports after every accepted, blocked, or
+invalidated/stale node. Use
 session-owned keyed storage when available; otherwise create a unique temporary
 directory outside the reviewed repository. Do not rely on conversation context
 alone. Record the storage mechanism and location in the journal and final
@@ -321,7 +322,7 @@ out-of-repository validator artifacts separately.
 Do not send the final response until all applicable equalities hold:
 
 ```text
-selected nodes = accepted nodes + blocked-after-execution + blocked-before-execution
+selected nodes = accepted nodes + blocked-after-execution + blocked-before-execution + invalidated/stale nodes
 worker creation attempts = workers created + creation failures
 skills executed <= workers created
 canonical findings = fixed + remaining + accepted-risk + blocked
@@ -365,6 +366,8 @@ Also verify:
   remains selected and is reported as blocked before execution
 - no completed worker was reused for a later node
 - no blocked node was replaced by same-context coordinator review
+- every invalidated/stale node is recorded as such until a current replacement
+  result is accepted; an unresolved stale node blocks `complete`
 - each execution epoch's nodes plus recovery/finalization reserve did not exceed
   its effective root budget, and every epoch completed before `complete`
 - every declared validation requirement maps to exactly one coalesced validator

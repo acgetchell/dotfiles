@@ -196,6 +196,7 @@ class ExecutionLedger:
     accepted_nodes: tuple[str, ...]
     blocked_after_execution: tuple[str, ...]
     blocked_before_execution: tuple[str, ...]
+    invalidated_nodes: tuple[str, ...]
     worker_attempts: tuple[str, ...]
     workers_created: tuple[str, ...]
     worker_creation_failures: tuple[str, ...]
@@ -629,6 +630,8 @@ def validate_routing_ledger(
     active_entries = {entry.catalog_id: entry for entry in catalog if entry.router_id in consulted}
     decision_ids = tuple(item.catalog_id for item in decisions)
     blockers: list[str] = []
+    if "repo-review" not in consulted:
+        blockers.append("routing ledger must consult repo-review before catalog closure")
     if len(decision_ids) != len(set(decision_ids)):
         blockers.append("routing decisions must contain each catalog ID exactly once")
     unknown = sorted(set(decision_ids) - set(active_entries))
@@ -772,8 +775,8 @@ def classify_repository_paths(paths: Sequence[str], *, release_readiness: bool =
         signals[surface].add(f"{path}: {reason}")
 
     has_cpp = any(fnmatch.fnmatch(path, pattern) for path in normalized for pattern in ("*.cc", "*.cpp", "*.cxx", "*.hh", "*.hpp", "*.hxx", "*.ixx", "*.cppm"))
-    has_rust = any(path.endswith(".rs") or path in {"Cargo.toml", "Cargo.lock"} for path in normalized)
-    has_python = any(path.endswith((".py", ".ipynb")) or path in {"pyproject.toml", "uv.lock"} for path in normalized)
+    has_rust = any(path.endswith(".rs") or PurePosixPath(path).name in {"Cargo.toml", "Cargo.lock"} for path in normalized)
+    has_python = any(path.endswith((".py", ".ipynb")) or PurePosixPath(path).name in {"pyproject.toml", "uv.lock"} for path in normalized)
     for path in normalized:
         basename = PurePosixPath(path).name
         if path.endswith((".cc", ".cpp", ".cxx", ".hh", ".hpp", ".hxx", ".ixx", ".cppm")):
@@ -1531,6 +1534,7 @@ def reconcile_execution(ledger: ExecutionLedger) -> Assessment:
     accepted = set(ledger.accepted_nodes)
     blocked_after = set(ledger.blocked_after_execution)
     blocked_before = set(ledger.blocked_before_execution)
+    invalidated = set(ledger.invalidated_nodes)
     attempts = set(ledger.worker_attempts)
     created = set(ledger.workers_created)
     creation_failures = set(ledger.worker_creation_failures)
@@ -1538,18 +1542,22 @@ def reconcile_execution(ledger: ExecutionLedger) -> Assessment:
     validator_plan = set(ledger.planned_validators)
     validator_runs = set(ledger.executed_validators)
     validator_skips = set(ledger.validators_not_run)
-    outcomes = accepted | blocked_after | blocked_before
+    outcomes = accepted | blocked_after | blocked_before | invalidated
+    outcome_sets = (accepted, blocked_after, blocked_before, invalidated)
     checks = (
-        (selected != outcomes, "selected nodes do not reconcile with accepted and blocked lifecycle outcomes"),
-        (bool((accepted & blocked_after) or (accepted & blocked_before) or (blocked_after & blocked_before)), "node lifecycle outcome sets overlap"),
+        (selected != outcomes, "selected nodes do not reconcile with accepted, blocked, and invalidated lifecycle outcomes"),
+        (any(left & right for index, left in enumerate(outcome_sets) for right in outcome_sets[index + 1 :]), "node lifecycle outcome sets overlap"),
         (bool(attempts != created | creation_failures or created & creation_failures), "worker creation attempts do not reconcile"),
         (not created <= attempts or not executed_skills <= created, "created-worker or executed-skill records lack a worker attempt"),
-        (not (accepted | blocked_after) <= created, "executed node outcomes lack a created worker"),
-        (not accepted <= executed_skills or not executed_skills <= accepted | blocked_after, "accepted-node and executed-skill records do not reconcile"),
+        (not (accepted | blocked_after | invalidated) <= created, "executed node outcomes lack a created worker"),
+        (
+            not (accepted | invalidated) <= executed_skills or not executed_skills <= accepted | blocked_after | invalidated,
+            "accepted, invalidated, and executed-skill records do not reconcile",
+        ),
         (bool(blocked_before & created), "pre-execution blocked nodes incorrectly claim a created worker"),
         (bool(validator_plan != validator_runs | validator_skips or validator_runs & validator_skips), "planned validators do not reconcile"),
         (not validator_plan <= selected, "planned validators are not selected graph nodes"),
-        (not validator_runs <= accepted, "executed validators lack an accepted node result"),
+        (not validator_runs <= accepted | invalidated, "executed validators lack an accepted or invalidated node result"),
     )
     blockers = [message for failed, message in checks if failed]
     return Assessment(not blockers, tuple(blockers))

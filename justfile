@@ -167,7 +167,7 @@ markdown-check: _ensure-rumdl
         fi
     done < <(git ls-files -co --exclude-standard -z -- '*.md')
     if [ "${#files[@]}" -gt 0 ]; then
-        printf '%s\0' "${files[@]}" | xargs -0 -n100 rumdl check --deny-config-warnings
+        printf '%s\0' "${files[@]}" | xargs -0 -n100 rumdl check --deny-config-warnings --
     else
         echo "No Markdown files found to check."
     fi
@@ -182,7 +182,7 @@ markdown-fix: _ensure-rumdl
         fi
     done < <(git ls-files -co --exclude-standard -z -- '*.md')
     if [ "${#files[@]}" -gt 0 ]; then
-        printf '%s\0' "${files[@]}" | xargs -0 -n100 rumdl check --fix --deny-config-warnings
+        printf '%s\0' "${files[@]}" | xargs -0 -n100 rumdl check --fix --deny-config-warnings --
     else
         echo "No Markdown files found to fix."
     fi

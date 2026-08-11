@@ -346,7 +346,9 @@ route its raw evidence to the owning reviewer or synthesis node for diagnosis.
 
 ## Independent Review Worker Contract
 
-Use `repository-independent-review` only for a concrete code-change target.
+Use `repository-independent-review` only for a concrete repository-change
+target, including code, documentation, tooling, or configuration changes such
+as `routing-handoff.md`, `migration-acceptance.md`, and `report-contract.md`.
 The worker must receive no specialist findings, coordinator diagnosis,
 predecessor reports, or expected answer. Dependencies determine when it runs,
 not what conclusions it sees.

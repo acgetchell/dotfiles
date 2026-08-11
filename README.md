@@ -45,7 +45,7 @@ git clone https://github.com/acgetchell/dotfiles.git ~/projects/dotfiles
 1. installs Homebrew if missing;
 2. runs `brew bundle install --file=Brewfile`;
 3. stows `git`, `zsh`, and `agents`;
-4. installs pinned cargo tools such as `just`, `rumdl`, and `zizmor`;
+4. installs pinned cargo tools such as `dprint`, `just`, `rumdl`, and `zizmor`;
 5. runs `bin/verify.sh`.
 
 After bootstrap, the equivalent discoverable setup entry point is:
@@ -57,10 +57,11 @@ just setup
 
 `just setup` runs `bin/bootstrap.sh` with `DOTFILES_DIR` pointed at the current checkout, then syncs the uv-managed developer tools.
 
-The repository's exact host-tool pins for `just`, `rumdl`, `uv`, and `zizmor` live in
-`justfile`. Bootstrap and CI use `bin/resolve-just-version.sh` only for the
-pre-`just` bootstrap step; after `just` is available, consumers resolve pins
-with `just --evaluate <tool>_version`.
+The repository's exact host-tool pins for `dprint`, `just`, `rumdl`, `uv`, and
+`zizmor` live in `justfile`. Bootstrap and CI use
+`bin/resolve-just-version.sh` only for the pre-`just` bootstrap step; after
+`just` is available, consumers resolve pins with
+`just --evaluate <tool>_version`.
 
 ## Day-to-day stow commands
 
@@ -109,7 +110,8 @@ After applying or restowing packages, `just stow-verify` (backed by `scripts/sto
 
 `Brewfile` is intentionally foundational: core CLI tools, developer casks, and apps expected on every machine.
 Homebrew owns `pkgx`, `rustup`, and the `justfile`-pinned `uv`; Cargo owns the
-`justfile`-pinned, directly invokable `just`, `rumdl`, and `zizmor` binaries.
+`justfile`-pinned, directly invokable `dprint`, `just`, `rumdl`, and `zizmor`
+binaries.
 Repository-scoped build tools, formatters, linters, and occasional maintenance
 tools should be supplied ephemerally through pkgx or the repository's
 language-specific environment rather than added here.

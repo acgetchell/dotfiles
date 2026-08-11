@@ -199,8 +199,11 @@ Use a portable JSON input whose skill paths are `$SKILLS_ROOT/...` or exact
 absolute paths. Prefer exhaustive `consulted_routers` plus `routing_decisions`;
 legacy `review_requirements` are accepted only for isolated planner fixtures.
 
+Use a repository-owned `just` recipe when one wraps this dry run. Otherwise,
+run the following from `agents/.agents/skills/review-graph`:
+
 ```sh
-uv run python scripts/review_graph_plan.py \
+uv run --locked python scripts/review_graph_plan.py \
   --input scripts/fixtures/representative_rust_python_docs.json \
   --catalog references/routing-catalog.json \
   --skill-root ..

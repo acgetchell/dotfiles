@@ -109,8 +109,9 @@ formats verbatim.
    directories, complete relevant environment/configuration identity, expected
    evidence, mutation classification and basis, dependency policy, allowed
    artifacts, and bounded elapsed-time budgets. Coalesce compatible requirements
-   by source state, canonical recipe or exact command, environment/toolchain,
-   features, platform, artifact ownership, and mutation/locking compatibility.
+   by source state, canonical recipe or exact command, working directories,
+   environment/toolchain, features, platform, artifact ownership, and
+   mutation/locking compatibility.
    Record unit-to-requirement and requirement-to-evidence mappings. Record
    whether units are sequential or independently parallelizable. Use supplied
    ledger entries only when their complete identities match; otherwise set the

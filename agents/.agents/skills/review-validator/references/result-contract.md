@@ -57,9 +57,9 @@ repository_state_fingerprint: content digest covering HEAD, branch, index,
   tracked worktree files, and nonignored untracked files
 state_verification_command: exact read-only command that recomputes all three digests
 requirement_ids: exact validation requirements owned by this unit
-unit_coalescing_basis: source state, command or canonical recipe,
-  environment/toolchain, features, platform, artifact ownership, and
-  mutation/locking compatibility shared by those requirements
+unit_coalescing_basis: source state, command or canonical recipe, working
+  directories, environment/toolchain, features, platform, artifact ownership,
+  and mutation/locking compatibility shared by those requirements
 requirement_evidence_mapping: every requirement ID mapped to this unit and its
   exact candidate ledger entry or none
 commands: ordered exact commands, including arguments
@@ -228,9 +228,9 @@ Accept a result only when:
   is not required to report `matched`
 - every requirement ID has exactly one disposition
 - the coalescing basis covers source state, command or canonical recipe,
-  environment/toolchain, features, platform, artifact ownership, and
-  mutation/locking compatibility; every requirement maps exactly once to this
-  unit and any candidate evidence
+  working directories, environment/toolchain, features, platform, artifact
+  ownership, and mutation/locking compatibility; every requirement maps
+  exactly once to this unit and any candidate evidence
 - every executed command exactly matches the dispatch and reports working
   directory, executor, environment, result, exit code, elapsed time, and evidence
 - every candidate and executed command is classified from repository-owned

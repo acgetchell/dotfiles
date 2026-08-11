@@ -242,6 +242,16 @@ def test_exhaustive_routing_ledger_closes_selected_repository_and_surface_router
     assert set(result.selected_requirement_ids) == {"requirement-repo.independent", "requirement-rust.invariants", "requirement-rust.tests"}
 
 
+def test_empty_routing_ledger_cannot_close_without_repo_review() -> None:
+    catalog = load_routing_catalog(ROUTING_CATALOG)
+
+    result = validate_routing_ledger(catalog, (), consulted_routers=())
+
+    assert not result.feasible
+    assert not result.catalog_closed
+    assert result.blockers == ("routing ledger must consult repo-review before catalog closure",)
+
+
 def test_exhaustive_routing_ledger_rejects_silent_omission() -> None:
     catalog = load_routing_catalog(ROUTING_CATALOG)
     decisions = tuple(item for item in _closed_rust_routing_decisions() if item.catalog_id != "rust.errors")
@@ -352,6 +362,13 @@ def test_repository_classifier_routes_shared_manifests_and_workflows_to_all_owne
     assert any("ci.yml" in item for item in signals["python"])
 
 
+def test_repository_classifier_detects_nested_language_manifests_for_shared_workflows() -> None:
+    signals = classify_repository_paths(("crates/core/Cargo.toml", "packages/app/pyproject.toml", ".github/workflows/ci.yml"))
+
+    assert any("ci.yml" in item for item in signals["rust"])
+    assert any("ci.yml" in item for item in signals["python"])
+
+
 def test_repository_classifier_floor_rejects_router_conflict() -> None:
     catalog = load_routing_catalog(ROUTING_CATALOG)
     decisions = _closed_rust_routing_decisions()
@@ -412,6 +429,7 @@ def test_pre_execution_blocks_reconcile_without_claiming_skills_or_validators() 
             accepted_nodes=(),
             blocked_after_execution=(),
             blocked_before_execution=("A01", "V01"),
+            invalidated_nodes=(),
             worker_attempts=(),
             workers_created=(),
             worker_creation_failures=(),
@@ -419,6 +437,27 @@ def test_pre_execution_blocks_reconcile_without_claiming_skills_or_validators() 
             planned_validators=("V01",),
             executed_validators=(),
             validators_not_run=("V01",),
+        )
+    )
+
+    assert result.feasible
+
+
+def test_invalidated_validator_reconciles_as_an_explicit_stale_outcome() -> None:
+    result = reconcile_execution(
+        ExecutionLedger(
+            selected_nodes=("V01",),
+            accepted_nodes=(),
+            blocked_after_execution=(),
+            blocked_before_execution=(),
+            invalidated_nodes=("V01",),
+            worker_attempts=("V01",),
+            workers_created=("V01",),
+            worker_creation_failures=(),
+            skills_executed=("V01",),
+            planned_validators=("V01",),
+            executed_validators=("V01",),
+            validators_not_run=(),
         )
     )
 

@@ -53,6 +53,8 @@ Before capture, router loading, graph construction, or a pre-dispatch report:
 3. Require at least one free concurrent slot and a positive configured total
    fresh-worker budget. If an authoritative lifetime count is present, require
    it to be greater than zero and use the smaller value as the effective budget.
+   Require the effective budget to be strictly greater than the
+   recovery/finalization reserve so at least one worker remains dispatchable.
 4. Record the evidence source, aggregate values, configured and effective
    budgets, recovery/finalization reserve, isolation status, and gate result in
    the journal.

@@ -14,8 +14,10 @@ Perform a production-readiness review without repeating focused specialist passe
 Use when `review-graph` or `python-review-orchestrator` supplies accepted focused
 review evidence.
 
-- Read only this file.
-- Do not load the standalone checklist.
+- Do not load the standalone checklist in orchestrated mode.
+- In a `review-graph` synthesis node, read only this skill, the supplied
+  handoff and accepted evidence ledger, and the changed files needed to assess
+  cross-cutting integration.
 - Treat specialist findings and validation as established evidence.
 - Inspect cross-cutting integration and concerns that remain genuinely unowned.
 - Do not repeat parsing, CLI, scientific, notebook, support-tooling, packaging, or test checklists.
@@ -93,7 +95,7 @@ Reconcile contracts across modules, installed entry points, generated artifacts,
 
 ## Final Validation
 
-Apply one validation ledger in both modes, keyed by source/environment state,
+Apply one validation ledger in all execution modes, keyed by source/environment state,
 built artifact and installation-target identity, Python/platform/dependency
 configuration, instrumentation, and exact validator or test selection. In graph
 synthesis mode, consume the accepted parent ledger without running or adding
@@ -109,7 +111,11 @@ non-overlapping coverage is insufficient.
 
 ## Output
 
-In orchestrated mode, synthesize specialist outcomes, remove duplicate findings, identify cross-cutting blockers, and name residual risk. In standalone mode, lead with findings ordered by severity and list focused skills or checklist sections used. Always report validation performed, reused ledger evidence, and meaningful limitations. End both modes with one verdict:
+In orchestrated mode, synthesize specialist outcomes, remove duplicate findings, identify cross-cutting blockers, and name residual risk. In standalone mode, lead with findings ordered by severity and list focused skills or checklist sections used. Always report validation performed, reused ledger evidence, and meaningful limitations.
+
+In a `review-graph` synthesis node, return table-ready fields for `Findings`,
+`Exact Blockers`, `Validator Results`, `Reused Ledger Evidence`, and
+`Readiness Verdict`. Use the dedicated `Readiness Verdict` field for one of:
 
 - **PASS**: no actionable production-readiness issue remains in scope.
 - **NEEDS IMPROVEMENT**: only non-blocking weaknesses or deferred strengthening remain.
