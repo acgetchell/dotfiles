@@ -103,8 +103,11 @@ capability-blocked and failed dispositions make the graph incomplete.
 Before creating a worker:
 
 1. Convert every selected leaf disposition into a required worker commitment.
-2. Coalesce only identical skill paths, scopes, references, synthesis owners,
-   and compatible validator identities. Preserve every requirement and owner.
+2. Key each commitment by its complete task identity: exact mode prompt,
+   task-local input, requirement ownership, validator command, configuration,
+   and selection identity, skill paths, scopes, references, synthesis owners,
+   and compatible validator identities. Coalesce only when every field matches
+   exactly; otherwise preserve separate commitments and their owners.
 3. Add one required baseline `review-validator` unit, selected language
    syntheses, independent review, repository synthesis, planned fixes, and
    affected revalidations.
@@ -142,18 +145,22 @@ execution. Never claim that another attempt in the same root resets capacity.
 
 ## 5. Reopen Routing From Discoveries
 
-After every accepted audit or independent-review result:
+After every accepted audit or independent-review result and every post-fix
+routing rerun:
 
 1. Validate each routing handoff by catalog ID and evidence.
 2. Re-run the owning router ledger when a handoff changes applicability.
-3. Add newly selected nodes before dependent synthesis, preserving completed
-   evidence and recomputing epochs.
-4. Block synthesis while any handoff is unknown or unresolved.
+3. Reconcile additions, removals, replacements, and every changed disposition,
+   including changes to not-applicable, exact verified reuse, or explicit user
+   exclusion.
+4. Retire non-executable and replaced nodes from dispatch and dependency sets,
+   invalidate their dependent evidence, preserve completed evidence that remains
+   valid, and recompute the graph and epochs before dependent synthesis.
+5. Block synthesis while any handoff is unknown or unresolved.
 
 After every authorized fix, recapture fingerprints, invalidate affected audit,
 validation, independent-review, and synthesis evidence, and rerun repository
-and affected surface routing. A fix that creates a new surface creates its
-applicable worker nodes.
+and affected surface routing. Apply the full reconciliation above to the rerun.
 
 ## 6. Synthesize And Fix
 
@@ -186,9 +193,12 @@ Derive the legacy `Review Evidence` rows for tooling, C++, Rust, Python, and
 documentation from graph evidence so `repo-review` callers retain a familiar
 summary.
 
-Report `complete` only when the planner's completion gate passes: no applicable
-requirement was skipped, no future epoch or node remains, routing and handoffs
-are closed, post-change routing was revalidated, required validation,
-independent review, and synthesis are accepted, fingerprints match, isolation
-has no failure, and the final report reconciles. Otherwise lead with
+Report `complete` only when the planner's completion gate passes: every required
+node has an accepted terminal status or an explicit non-execution disposition;
+no required node is blocked, failed, undispatched, unaccepted, stale without an
+accepted replacement, or otherwise unresolved; unresolved blockers and failures
+are both zero; no applicable requirement was skipped; no future epoch remains;
+routing and handoffs are closed; post-change routing was revalidated; required
+validation, independent review, and synthesis are accepted; fingerprints match;
+isolation has no failure; and the final report reconciles. Otherwise lead with
 `incomplete` and the exact resumption work.
