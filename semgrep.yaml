@@ -267,12 +267,13 @@ rules:
     paths:
       include:
         - "/**/*.md"
+        - "/**/*.mdx"
         - "/**/*.sh"
         - "/**/*.toml"
+        - "/**/*.txt"
         - "/**/*.yaml"
         - "/**/*.yml"
         - "/justfile"
-        - "/tests/semgrep/portability/**/*.txt"
     pattern-regex: |-
       (?mx)(?:/Users|/home)/
       (?!<[^/\n]+>(?:/|$))

@@ -4,14 +4,12 @@ import json
 import shutil
 import subprocess
 import sys
+from collections.abc import Sequence  # noqa: TC003 - keep available for runtime annotation evaluation.
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
 import pytest
 from capture_scope import _scope_data
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 _TIMEOUT_SECONDS = 30
 
