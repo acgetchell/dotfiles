@@ -26,6 +26,15 @@ Use changed-code mode by default. Use whole-repository mode only when requested.
 4. Check repeatability across machines and reruns.
 5. Verify failures preserve prior valid artifacts and enough diagnostics for release pressure.
 
+## Python Annotation Semantics
+
+Check the declared Python floor before preserving compatibility imports. For
+Python 3.14-or-newer-only projects, remove
+`from __future__ import annotations`: Python now defers annotations by default,
+while the future import retains deprecated stringified semantics. Keep it only
+when a documented runtime annotation consumer intentionally requires strings,
+and verify that consumer explicitly.
+
 ## Transform And Render Correctness
 
 Check:

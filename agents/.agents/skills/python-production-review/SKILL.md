@@ -50,6 +50,12 @@ Check that public functions, classes, protocols, and module exports have cohesiv
 
 Flag unused generic constraints, ambiguous sentinel values, widening to `Any`, incompatible override behavior, or callers required to know undocumented sequencing rules.
 
+Check the declared Python floor before preserving compatibility imports. For
+Python 3.14-or-newer-only projects, flag
+`from __future__ import annotations` unless a documented runtime annotation
+consumer intentionally requires legacy stringified annotations; Python 3.14
+defers annotations by default.
+
 ### Correctness And State
 
 Trace important operations from accepted input to committed result. Check coordinated mutation, cache/index coherence, idempotence, retries, partial failures, and observable post-error state. Prefer building a valid replacement before publishing it when multiple values must change together.

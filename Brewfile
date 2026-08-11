@@ -27,6 +27,7 @@ brew "kubernetes-cli"                  # Kubernetes CLI (`kubectl`)
 brew "markdownlint-cli"                # Markdown linter
 brew "node"                            # JavaScript/TypeScript runtime
 brew "pandoc"                          # universal document converter
+brew "pkgconf"                         # pkg-config implementation (`pkg-config`)
 brew "pkgx"                            # ephemeral repository-scoped developer tools
 brew "powershell"                      # PowerShell shell (`pwsh`)
 brew "pylint"                          # Python linter

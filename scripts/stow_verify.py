@@ -86,20 +86,41 @@ def check_package_files(home: Path, dotfiles_dir: Path) -> Report:
     return report
 
 
-def check_stowed_skill(link: Path, source: Path, report: Report) -> bool:
-    """Check that one repository skill is linked from the matching home path."""
+def check_stowed_skill_file(link: Path, source: Path, report: Report) -> bool:
+    """Check one file link created by a no-folding Stow operation."""
     if not link.is_symlink():
-        if link.exists():
-            report.fail(f"skill not stowed: {link} exists but is not a symlink to {source}")
-        else:
-            report.fail(f"skill not stowed: {source.name} (run: just stow-apply agents)")
+        report.fail(f"skill file not stowed: {link} (expected {source})")
         return False
     if not link.exists():
+        report.fail(f"dangling skill symlink: {link} -> {link.readlink()}")
         return False
     if resolve_link(link) != source.resolve():
-        report.fail(f"skill points to wrong target: {link} -> {link.readlink()} (expected {source})")
+        report.fail(f"skill file points to wrong target: {link} -> {link.readlink()} (expected {source})")
         return False
     return True
+
+
+def check_stowed_skill(link: Path, source: Path, report: Report) -> bool:
+    """Check one skill installed as a directory link or no-folding file tree."""
+    if link.is_symlink():
+        if not link.exists():
+            report.fail(f"dangling skill symlink: {link} -> {link.readlink()}")
+            return False
+        if resolve_link(link) != source.resolve():
+            report.fail(f"skill points to wrong target: {link} -> {link.readlink()} (expected {source})")
+            return False
+        return True
+    if not link.is_dir():
+        report.fail(f"skill not stowed: {source.name} (run: just stow-apply agents)")
+        return False
+
+    all_stowed = True
+    for source_file in sorted(source.rglob("*")):
+        if source_file.is_dir() and not source_file.is_symlink():
+            continue
+        target_file = link / source_file.relative_to(source)
+        all_stowed = check_stowed_skill_file(target_file, source_file, report) and all_stowed
+    return all_stowed
 
 
 def check_skills(home: Path, dotfiles_dir: Path) -> Report:
@@ -114,7 +135,7 @@ def check_skills(home: Path, dotfiles_dir: Path) -> Report:
         report.fail(f"{repo_skills_dir} missing from repository")
         return report
 
-    dangling = [link for link in sorted(skills_dir.iterdir()) if link.is_symlink() and not link.exists()]
+    dangling = [link for link in sorted(skills_dir.rglob("*")) if link.is_symlink() and not link.exists() and resolve_link(link).is_relative_to(dotfiles_dir)]
     for link in dangling:
         report.fail(f"dangling skill symlink: {link} -> {link.readlink()}")
     if not dangling:

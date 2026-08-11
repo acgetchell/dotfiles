@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Tests for skill_validate.py."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 import skill_validate
@@ -57,6 +55,17 @@ def test_validate_skill_rejects_missing_openai_metadata(tmp_path: Path) -> None:
 
     assert not valid
     assert message == "agents/openai.yaml not found"
+
+
+def test_validate_skill_rejects_name_that_differs_from_directory(tmp_path: Path) -> None:
+    """A skill name must match its portable directory identifier."""
+    skill_dir = tmp_path / "example-skill"
+    write_skill(skill_dir, 'name: different-skill\ndescription: "Use for tests."')
+
+    valid, message = skill_validate.validate_skill(skill_dir)
+
+    assert not valid
+    assert message == "Frontmatter name 'different-skill' must match skill directory 'example-skill'"
 
 
 def test_validate_skill_rejects_short_ui_description(tmp_path: Path) -> None:

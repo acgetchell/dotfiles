@@ -70,6 +70,7 @@ BREW_BIN_PAIRS=(
   "markdownlint-cli:markdownlint"
   "node:node"
   "pandoc:pandoc"
+  "pkgconf:pkg-config"
   "pkgx:pkgx"
   "powershell:pwsh"
   "pylint:pylint"
@@ -103,6 +104,32 @@ for pair in "${BREW_BIN_PAIRS[@]}"; do
     fail "$bin ($entry) not on PATH"
   fi
 done
+
+echo "==> Pinned tool versions"
+if command -v just >/dev/null 2>&1; then
+  for tool in just uv zizmor; do
+    pin_name="${tool}_version"
+    if ! expected_version="$(just --justfile "$DOTFILES_DIR/justfile" --evaluate "$pin_name")"; then
+      fail "could not resolve $pin_name from $DOTFILES_DIR/justfile"
+      continue
+    fi
+    if [[ ! "$expected_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      fail "invalid $pin_name in $DOTFILES_DIR/justfile: ${expected_version:-missing}"
+      continue
+    fi
+    actual_version=""
+    if command -v "$tool" >/dev/null 2>&1; then
+      actual_version="$("$tool" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+    fi
+    if [[ "$actual_version" == "$expected_version" ]]; then
+      pass "$tool $actual_version"
+    else
+      fail "$tool version ${actual_version:-missing}; expected $expected_version"
+    fi
+  done
+else
+  fail "just not on PATH; cannot resolve pinned tool versions"
+fi
 
 echo "==> Casks"
 if [[ -z "$BUNDLE_CASKS" ]]; then

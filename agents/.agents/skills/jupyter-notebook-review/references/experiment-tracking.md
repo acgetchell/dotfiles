@@ -1,6 +1,6 @@
 # Experiment Tracking
 
-Load this reference only for notebooks that manage model training, learned proposals, hyperparameter sweeps, or comparable experiments requiring tracked lineage.
+Load this reference only for notebooks that manage model training, hyperparameter sweeps, or comparable experiments requiring tracked lineage.
 
 Do not add MLflow or another tracking service to simple quickstarts that only run a binary and plot artifacts.
 

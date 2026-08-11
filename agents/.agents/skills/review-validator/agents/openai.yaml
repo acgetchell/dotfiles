@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review Validator"
+  short_description: "Plan and execute review validation"
+  default_prompt: "Use $review-validator to validate this branch, show the outcome, and return fingerprinted evidence reusable by $review-graph."

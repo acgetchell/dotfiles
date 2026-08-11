@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Validate Codex skill metadata stored in this repository."""
 
-from __future__ import annotations
-
 import argparse
 import re
 import sys
@@ -93,7 +91,8 @@ def validate_frontmatter(frontmatter: dict[str, object]) -> tuple[bool, str]:
 
 def validate_skill(skill_path: Path | str) -> tuple[bool, str]:
     """Validate one skill directory."""
-    frontmatter, message = load_frontmatter(skill_path)
+    skill_dir = Path(skill_path)
+    frontmatter, message = load_frontmatter(skill_dir)
     if frontmatter is None:
         return False, message
 
@@ -101,11 +100,15 @@ def validate_skill(skill_path: Path | str) -> tuple[bool, str]:
     if not valid_frontmatter:
         return False, frontmatter_message
 
-    openai_metadata, metadata_message = load_openai_metadata(skill_path)
+    skill_name = cast("str", frontmatter["name"])
+    if skill_name != skill_dir.name:
+        return False, f"Frontmatter name '{skill_name}' must match skill directory '{skill_dir.name}'"
+
+    openai_metadata, metadata_message = load_openai_metadata(skill_dir)
     if openai_metadata is None:
         return False, metadata_message
 
-    return validate_openai_metadata(openai_metadata, cast("str", frontmatter["name"]))
+    return validate_openai_metadata(openai_metadata, skill_name)
 
 
 def load_openai_metadata(skill_path: Path | str) -> tuple[dict[str, object] | None, str]:

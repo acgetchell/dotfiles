@@ -32,6 +32,19 @@ def make_env(tmp_path: Path) -> tuple[Path, Path]:
     return home, dotfiles
 
 
+def use_no_folding_tree(home: Path, source: Path) -> None:
+    """Replace a skill-directory link with file-level Stow links."""
+    target = home / ".agents" / "skills" / source.name
+    target.unlink()
+    target.mkdir()
+    for source_file in source.rglob("*"):
+        if source_file.is_dir():
+            continue
+        target_file = target / source_file.relative_to(source)
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+        target_file.symlink_to(source_file)
+
+
 def all_failures(home: Path, dotfiles: Path) -> list[str]:
     """Collect failures from every check section."""
     return [
@@ -44,6 +57,15 @@ def all_failures(home: Path, dotfiles: Path) -> list[str]:
 def test_valid_layout_has_no_failures(tmp_path: Path) -> None:
     """A fully stowed layout passes every check."""
     home, dotfiles = make_env(tmp_path)
+
+    assert all_failures(home, dotfiles) == []
+
+
+def test_no_folding_skill_tree_has_no_failures(tmp_path: Path) -> None:
+    """File-level links created with --no-folding pass."""
+    home, dotfiles = make_env(tmp_path)
+    source = dotfiles / "agents" / ".agents" / "skills" / "skill-a"
+    use_no_folding_tree(home, source)
 
     assert all_failures(home, dotfiles) == []
 
@@ -179,7 +201,24 @@ def test_repo_skill_shadowed_by_regular_directory_fails(tmp_path: Path) -> None:
 
     failures = stow_verify.check_skills(home, dotfiles).failures
 
-    assert any("exists but is not a symlink" in failure and "skill-a" in failure for failure in failures)
+    assert any("skill file not stowed" in failure and "skill-a" in failure for failure in failures)
+
+
+def test_no_folding_skill_file_linked_to_foreign_file_fails(tmp_path: Path) -> None:
+    """A file-level skill link must resolve to its matching repository file."""
+    home, dotfiles = make_env(tmp_path)
+    source = dotfiles / "agents" / ".agents" / "skills" / "skill-a"
+    use_no_folding_tree(home, source)
+    foreign = tmp_path / "elsewhere" / "SKILL.md"
+    foreign.parent.mkdir()
+    foreign.write_text("foreign\n", encoding="utf-8")
+    link = home / ".agents" / "skills" / "skill-a" / "SKILL.md"
+    link.unlink()
+    link.symlink_to(foreign)
+
+    failures = stow_verify.check_skills(home, dotfiles).failures
+
+    assert any("skill file points to wrong target" in failure for failure in failures)
 
 
 def test_missing_skills_dir_fails(tmp_path: Path) -> None:

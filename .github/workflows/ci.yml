@@ -11,9 +11,6 @@ permissions:
 
 env:
   UV_CACHE_DIR: ".uv-cache"
-  JUST_VERSION: "1.56.0"
-  UV_VERSION: "0.11.26"
-  ZIZMOR_VERSION: "1.26.1"
 
 jobs:
   verify:
@@ -23,33 +20,65 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version-file: ".python-version"
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
-        with:
-          version: ${{ env.UV_VERSION }}
-          enable-cache: true
-
-      - name: Sync Python tooling
-        run: uv sync --locked --group dev
+      - name: Resolve just version
+        id: just_version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(bash bin/resolve-just-version.sh justfile)"
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
 
       - name: Install just
         uses: taiki-e/cache-cargo-install-action@417450f3c33ee20393705369577571770643d4c7 # v3.0.7
         with:
-          tool: just@${{ env.JUST_VERSION }}
+          tool: just@${{ steps.just_version.outputs.version }}
+
+      - name: Resolve repository tool versions
+        id: tool_versions
+        run: |
+          set -euo pipefail
+
+          resolve_version() {
+            local name="$1"
+            local value
+            value="$(just --evaluate "$name")"
+            if [[ ! "$value" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Invalid $name in justfile: ${value:-missing}"
+              return 1
+            fi
+            printf '%s\n' "$value"
+          }
+
+          uv_version="$(resolve_version uv_version)"
+          zizmor_version="$(resolve_version zizmor_version)"
+          {
+            printf 'uv_version=%s\n' "$uv_version"
+            printf 'zizmor_version=%s\n' "$zizmor_version"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ${{ steps.tool_versions.outputs.uv_version }}
+          enable-cache: true
+          prune-cache: true
+
+      - name: Sync Python tooling
+        run: uv sync --locked --group dev
 
       - name: Install zizmor
         uses: taiki-e/cache-cargo-install-action@417450f3c33ee20393705369577571770643d4c7 # v3.0.7
         with:
-          tool: zizmor@${{ env.ZIZMOR_VERSION }}
+          tool: zizmor@${{ steps.tool_versions.outputs.zizmor_version }}
 
       - name: Run CI checks
         run: just ci

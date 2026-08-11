@@ -24,7 +24,7 @@ Load only references that match the notebook:
 
 - Read [`references/dataframes-and-plotting.md`](references/dataframes-and-plotting.md) when reviewing dataframe pipelines, tabular I/O, Matplotlib, Plotly, or saved figures.
 - Read [`references/hpc-and-headless.md`](references/hpc-and-headless.md) for remote servers, CI execution, Slurm, Open OnDemand, scratch storage, or notebook dependency setup.
-- Read [`references/experiment-tracking.md`](references/experiment-tracking.md) only for MLflow, model training, learned proposals, sweeps, or comparable tracked experiments.
+- Read [`references/experiment-tracking.md`](references/experiment-tracking.md) only for MLflow, model training, hyperparameter sweeps, or comparable tracked experiments.
 - Read [`references/binary-frontends.md`](references/binary-frontends.md) when cells invoke external binaries, wrap a library API as an engine, parse subprocess output, or must discover the repository root portably.
 - In the `delaunay` repository, read [`references/delaunay.md`](references/delaunay.md) after repository instructions.
 

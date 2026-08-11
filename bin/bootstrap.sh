@@ -6,14 +6,14 @@
 set -euo pipefail
 
 DOTFILES_DIR="${DOTFILES_DIR:-$HOME/projects/dotfiles}"
-JUST_VERSION="${JUST_VERSION:-1.56.0}"
-ZIZMOR_VERSION="${ZIZMOR_VERSION:-1.26.1}"
 
 if [[ ! -d "$DOTFILES_DIR" ]]; then
   echo "==> Dotfiles directory not found at $DOTFILES_DIR" >&2
   echo "    Set DOTFILES_DIR or clone the repo first." >&2
   exit 1
 fi
+
+JUST_VERSION="$(bash "$DOTFILES_DIR/bin/resolve-just-version.sh" "$DOTFILES_DIR/justfile")"
 
 # 1. Homebrew
 if ! command -v brew >/dev/null 2>&1; then
@@ -40,7 +40,7 @@ PACKAGES=(git zsh agents)
 echo "==> Stowing packages: ${PACKAGES[*]}"
 for pkg in "${PACKAGES[@]}"; do
   if [[ -d "$DOTFILES_DIR/$pkg" ]]; then
-    stow -d "$DOTFILES_DIR" -t "$HOME" -R "$pkg"
+    stow --no-folding -d "$DOTFILES_DIR" -t "$HOME" -R "$pkg"
   else
     echo "    skipping missing package: $pkg" >&2
   fi
@@ -48,10 +48,10 @@ done
 
 # 4. Cargo-installed tools
 if command -v cargo >/dev/null 2>&1; then
-  for tool_spec in "just:$JUST_VERSION" "zizmor:$ZIZMOR_VERSION"; do
-    tool="${tool_spec%%:*}"
-    version="${tool_spec##*:}"
-    installed_version=""
+  install_cargo_tool() {
+    local tool="$1"
+    local version="$2"
+    local installed_version=""
     if command -v "$tool" >/dev/null 2>&1; then
       installed_version="$("$tool" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
     fi
@@ -61,7 +61,15 @@ if command -v cargo >/dev/null 2>&1; then
     else
       echo "==> $tool already installed: $installed_version"
     fi
-  done
+  }
+
+  install_cargo_tool just "$JUST_VERSION"
+  zizmor_version="$(just --justfile "$DOTFILES_DIR/justfile" --evaluate zizmor_version)"
+  if [[ ! "$zizmor_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "==> Invalid zizmor_version in $DOTFILES_DIR/justfile: $zizmor_version" >&2
+    exit 1
+  fi
+  install_cargo_tool zizmor "$zizmor_version"
 else
   echo "==> Skipping cargo-installed tools: cargo not on PATH" >&2
 fi

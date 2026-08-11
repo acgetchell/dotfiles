@@ -18,7 +18,7 @@ In release-readiness or whole-suite mode, inventory every tracked active documen
 | `cpp-api-docs` | C++ public comments, Doxygen/generated reference, headers/modules, caller contracts, or canonical examples | Docs merely mention C++ behavior already established elsewhere |
 | `rust-api-docs` | Rust `///`/`//!`, public coverage, structured sections, intra-doc links, docs.rs | Rust behavior is mentioned only in downstream prose |
 | `scientific-citation-audit` | DOI/source identity, bibliography, algorithm provenance, scientific credit or citation claims | Ordinary links or CFF version/date-only synchronization |
-| `academic-authorship-boundary` | Substantive manuscript prose, publication text, thesis/Praxis content, or reviewer responses | Mechanical publication tooling, labels, figure paths, or bibliography wiring only |
+| `academic-authorship-boundary` | Substantive manuscript prose, publication text, thesis or capstone content, or reviewer responses | Mechanical publication tooling, labels, figure paths, or bibliography wiring only |
 
 ## Shared Ownership
 

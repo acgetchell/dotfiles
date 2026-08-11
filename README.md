@@ -55,6 +55,11 @@ just setup
 
 `just setup` runs `bin/bootstrap.sh` with `DOTFILES_DIR` pointed at the current checkout, then syncs the uv-managed developer tools.
 
+The repository's exact host-tool pins for `just`, `uv`, and `zizmor` live in
+`justfile`. Bootstrap and CI use `bin/resolve-just-version.sh` only for the
+pre-`just` bootstrap step; after `just` is available, consumers resolve pins
+with `just --evaluate <tool>_version`.
+
 ## Day-to-day stow commands
 Supported stow packages are `git`, `zsh`, and `agents`.
 
@@ -86,7 +91,12 @@ just stow-verify
 
 Use `--adopt` only when intentionally moving an existing `$HOME` file into dotfiles. Always inspect the resulting package file changes before committing.
 
-The `just` stow recipes always pass both `-d "$PWD"` and `-t "$HOME"`. If running raw `stow`, pass both paths explicitly; otherwise stow targets the parent of the current directory, which can create links in the wrong place.
+The `just` stow recipes always pass `--no-folding`, `-d "$PWD"`, and
+`-t "$HOME"`. Keeping intermediate directories real allows independently
+managed Stow packages to contribute disjoint files below the same target
+directory. If running raw `stow`, pass these options explicitly; otherwise
+Stow can fold a whole directory into one repository or target the parent of the
+current directory.
 
 For new package-owned files such as Codex skills, create the file under the package, run `just stow-check <package>`, then run `just stow-apply <package>` when the dry run looks right. `stow-check` is the only simulation-mode recipe; `stow-apply` and `stow-apply-all` stow missing or new links, while `stow-restow` and `stow-restow-all` perform full unlink/link refreshes. Mutating recipes print the Stow link operations they perform. `just stow-all` remains as an alias for `just stow-apply-all`. Stow recipes do not stage, commit, or print source-control status.
 
@@ -94,9 +104,11 @@ After applying or restowing packages, `just stow-verify` (backed by `scripts/sto
 
 ## Brewfile workflow
 `Brewfile` is intentionally foundational: core CLI tools, developer casks, and apps expected on every machine.
-Homebrew owns `pkgx`, `rustup`, and `uv`; Cargo is the sole host installation owner for the directly invokable
-`just` binary. Repository-scoped build tools, formatters, linters, and occasional maintenance tools should be
-supplied ephemerally through pkgx or the repository's language-specific environment rather than added here.
+Homebrew owns `pkgx`, `rustup`, and the `justfile`-pinned `uv`; Cargo owns the
+`justfile`-pinned, directly invokable `just` and `zizmor` binaries.
+Repository-scoped build tools, formatters, linters, and occasional maintenance
+tools should be supplied ephemerally through pkgx or the repository's
+language-specific environment rather than added here.
 
 ```sh
 # Install missing formulae/casks

@@ -6,7 +6,9 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 export UV_CACHE_DIR := env_var_or_default("UV_CACHE_DIR", ".uv-cache")
 
 python_paths := "agents/.agents/skills scripts"
-zizmor_version := "1.26.1"
+just_version := "1.58.0"
+uv_version := "0.12.3"
+zizmor_version := "1.29.0"
 
 _ensure-actionlint:
     #!/usr/bin/env bash
@@ -19,10 +21,27 @@ _ensure-brew:
     set -euo pipefail
     command -v brew >/dev/null || { echo "'brew' not found. See https://brew.sh"; exit 1; }
 
+_ensure-just:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    resolved="$(command -v just 2>/dev/null || true)"
+    actual="$(just --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+    if [[ "$actual" != "{{ just_version }}" ]]; then
+        echo "'just' resolves to '${resolved:-missing}' at version '${actual:-missing}', expected '{{ just_version }}'." >&2
+        echo "   Install with: cargo install --locked just --version {{ just_version }}" >&2
+        exit 1
+    fi
+
 _ensure-uv:
     #!/usr/bin/env bash
     set -euo pipefail
-    command -v uv >/dev/null || { echo "'uv' not found. See https://github.com/astral-sh/uv"; exit 1; }
+    resolved="$(command -v uv 2>/dev/null || true)"
+    actual="$(uv --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+    if [[ "$actual" != "{{ uv_version }}" ]]; then
+        echo "'uv' resolves to '${resolved:-missing}' at version '${actual:-missing}', expected '{{ uv_version }}'." >&2
+        echo "   Install or upgrade Homebrew uv to {{ uv_version }}." >&2
+        exit 1
+    fi
 
 _ensure-zizmor:
     #!/usr/bin/env bash
@@ -106,10 +125,10 @@ git-config-check:
 github-actions-check: action-lint zizmor
     @echo "GitHub Actions checks complete!"
 
-justfile-fmt:
+justfile-fmt: _ensure-just
     just --fmt
 
-justfile-fmt-check:
+justfile-fmt-check: _ensure-just
     just --fmt --check
 
 [confirm("Apply captured macOS defaults (Dock, Finder, keyboard, trackpad) and restart Dock/Finder?")]
@@ -165,7 +184,7 @@ setup:
     just python-sync
 
 shell-check:
-    bash -n bin/bootstrap.sh bin/macos-defaults.sh bin/verify.sh
+    bash -n bin/bootstrap.sh bin/macos-defaults.sh bin/resolve-just-version.sh bin/verify.sh
 
 skill-check skill: _ensure-uv
     uv run python scripts/skill_validate.py "{{ skill }}"
@@ -176,7 +195,7 @@ stow-adopt package:
     package='{{ package }}'
     case "$package" in git|zsh|agents) ;; *) echo "Unsupported stow package: $package" >&2; exit 2 ;; esac
     [ -d "$package" ] || { echo "Unknown stow package: $package" >&2; exit 2; }
-    stow -d "$PWD" -t "$HOME" --adopt -v -R "$package"
+    stow --no-folding -d "$PWD" -t "$HOME" --adopt -v -R "$package"
     just stow-check "$package"
 
 stow-all:
@@ -188,7 +207,7 @@ stow-apply package:
     package='{{ package }}'
     case "$package" in git|zsh|agents) ;; *) echo "Unsupported stow package: $package" >&2; exit 2 ;; esac
     [ -d "$package" ] || { echo "Unknown stow package: $package" >&2; exit 2; }
-    stow -d "$PWD" -t "$HOME" -v -S "$package"
+    stow --no-folding -d "$PWD" -t "$HOME" -v -S "$package"
 
 stow-apply-all:
     #!/usr/bin/env bash
@@ -203,7 +222,7 @@ stow-check package:
     package='{{ package }}'
     case "$package" in git|zsh|agents) ;; *) echo "Unsupported stow package: $package" >&2; exit 2 ;; esac
     [ -d "$package" ] || { echo "Unknown stow package: $package" >&2; exit 2; }
-    stow -d "$PWD" -t "$HOME" -n -v -S "$package"
+    stow --no-folding -d "$PWD" -t "$HOME" -n -v -S "$package"
 
 stow-delete package:
     #!/usr/bin/env bash
@@ -211,7 +230,7 @@ stow-delete package:
     package='{{ package }}'
     case "$package" in git|zsh|agents) ;; *) echo "Unsupported stow package: $package" >&2; exit 2 ;; esac
     [ -d "$package" ] || { echo "Unknown stow package: $package" >&2; exit 2; }
-    stow -d "$PWD" -t "$HOME" -v -D "$package"
+    stow --no-folding -d "$PWD" -t "$HOME" -v -D "$package"
 
 stow-restow package:
     #!/usr/bin/env bash
@@ -219,7 +238,7 @@ stow-restow package:
     package='{{ package }}'
     case "$package" in git|zsh|agents) ;; *) echo "Unsupported stow package: $package" >&2; exit 2 ;; esac
     [ -d "$package" ] || { echo "Unknown stow package: $package" >&2; exit 2; }
-    stow -d "$PWD" -t "$HOME" -v -R "$package"
+    stow --no-folding -d "$PWD" -t "$HOME" -v -R "$package"
 
 stow-restow-all:
     #!/usr/bin/env bash
