@@ -1,9 +1,11 @@
 # My Dotfiles
+
 Personal macOS dotfiles managed with [GNU Stow](https://www.gnu.org/software/stow/) and [Homebrew Bundle](https://github.com/Homebrew/homebrew-bundle).
 
 This repo is intended to remain public. Committed files define reproducible, non-secret defaults; machine-specific values live in local ignored files such as `~/.zshrc.local`, `~/.gitconfig.local`, and `Brewfile.local`.
 
 ## Layout
+
 Each top-level directory is a stow package. Package contents mirror paths under `$HOME`.
 
 ```text
@@ -43,7 +45,7 @@ git clone https://github.com/acgetchell/dotfiles.git ~/projects/dotfiles
 1. installs Homebrew if missing;
 2. runs `brew bundle install --file=Brewfile`;
 3. stows `git`, `zsh`, and `agents`;
-4. installs pinned cargo tools such as `just` and `zizmor`;
+4. installs pinned cargo tools such as `just`, `rumdl`, and `zizmor`;
 5. runs `bin/verify.sh`.
 
 After bootstrap, the equivalent discoverable setup entry point is:
@@ -55,12 +57,13 @@ just setup
 
 `just setup` runs `bin/bootstrap.sh` with `DOTFILES_DIR` pointed at the current checkout, then syncs the uv-managed developer tools.
 
-The repository's exact host-tool pins for `just`, `uv`, and `zizmor` live in
+The repository's exact host-tool pins for `just`, `rumdl`, `uv`, and `zizmor` live in
 `justfile`. Bootstrap and CI use `bin/resolve-just-version.sh` only for the
 pre-`just` bootstrap step; after `just` is available, consumers resolve pins
 with `just --evaluate <tool>_version`.
 
 ## Day-to-day stow commands
+
 Supported stow packages are `git`, `zsh`, and `agents`.
 
 ```sh
@@ -103,9 +106,10 @@ For new package-owned files such as Codex skills, create the file under the pack
 After applying or restowing packages, `just stow-verify` (backed by `scripts/stow_verify.py`) confirms every stowed link resolves to its expected file inside this repo and flags dangling links left behind by renamed or removed packages or skills. After `stow-delete`, missing-link failures are expected until the package is reapplied. `bin/verify.sh` runs the same check.
 
 ## Brewfile workflow
+
 `Brewfile` is intentionally foundational: core CLI tools, developer casks, and apps expected on every machine.
 Homebrew owns `pkgx`, `rustup`, and the `justfile`-pinned `uv`; Cargo owns the
-`justfile`-pinned, directly invokable `just` and `zizmor` binaries.
+`justfile`-pinned, directly invokable `just`, `rumdl`, and `zizmor` binaries.
 Repository-scoped build tools, formatters, linters, and occasional maintenance
 tools should be supplied ephemerally through pkgx or the repository's
 language-specific environment rather than added here.
@@ -133,6 +137,7 @@ brew bundle dump --file=~/projects/dotfiles/Brewfile.local --force --describe
 `bin/verify.sh` derives its cask and CLI checks from the Brewfile, so removing an entry there never causes a stale verify failure. It also surfaces `brew missing` output as warnings; some casks (e.g. `mactex`) declare Homebrew dependencies they actually bundle themselves, so those lines are informational rather than fatal.
 
 ## macOS defaults
+
 `bin/macos-defaults.sh` captures this machine's explicitly set system preferences (auto light/dark appearance, Dock, Finder, keyboard text input, trackpad) as idempotent `defaults write` commands.
 
 ```sh
@@ -142,6 +147,7 @@ just macos-defaults
 The recipe asks for confirmation, then restarts Dock and Finder; appearance changes may need a logout/login. It is intentionally not part of `bootstrap.sh` — run it once per machine when the captured preferences are wanted.
 
 ## Sanity checks
+
 Run the main check:
 
 ```sh
@@ -150,7 +156,8 @@ just ci
 ```
 
 Apply the repository's safe mechanical fixers with `just fix`. Use
-`just justfile-fmt` or `just python-fix` to run one fixer directly.
+`just justfile-fmt`, `just markdown-fix`, or `just python-fix` to run one fixer
+directly. Run `just markdown-check` for Markdown validation without mutation.
 
 Manual checks that should pass:
 
@@ -190,6 +197,7 @@ Expected symlink shape:
 ```
 
 ## Codex config
+
 Codex rewrites `~/.codex/config.toml` with app runtime state, local absolute
 paths, project trust entries, plugin metadata, and other machine-specific
 values. Keep that file local rather than stowing it from this public repo.
@@ -220,9 +228,11 @@ connector tokens, machine-local project trust entries, or opaque app-generated
 identifiers.
 
 ## Local override files
+
 Local override files are not tracked and should not be committed.
 
 ### `~/.zshrc.local`
+
 Use for machine-specific shell paths, aliases, and experiments. It is sourced last by `zsh/.zshrc`.
 Keep host-specific SSH aliases and work/institution endpoints here rather than
 in the tracked `zsh/.zshrc`.
@@ -235,6 +245,7 @@ alias work-vpn="tailscale up --accept-routes"
 ```
 
 ### `~/.gitconfig.local`
+
 Use for per-machine git config such as tool machine IDs, signing keys, or work-specific identity.
 
 The tracked `git/.gitconfig` includes it via:
@@ -260,9 +271,11 @@ git config --global --includes --get coderabbit.machineId
 ```
 
 ### `Brewfile.local`
+
 Use for a temporary `brew bundle dump` snapshot of the current machine. It is for review only; copy intentional entries into `Brewfile`.
 
 ## Skills
+
 Codex and Warp/Oz both load skills from `~/.agents/skills/`, so the `agents` stow package provides one global source of truth across Rust repos.
 
 To add a skill:
@@ -295,6 +308,7 @@ description: "Short trigger description. USE FOR: specific situations. DO NOT US
 ```
 
 ## Public repo safety policy
+
 Commit:
 
 - shell aliases, functions, and portable PATH setup;

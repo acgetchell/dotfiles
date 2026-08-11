@@ -1,0 +1,6 @@
+interface:
+  display_name: "Repository Production Review"
+  short_description: "Synthesize isolated repository review evidence"
+  default_prompt: >-
+    Use $repository-production-review to reconcile the supplied accepted repository-review reports, validation ledger, routing ledger, and source
+    fingerprints into one production-readiness result without performing new specialist analysis.

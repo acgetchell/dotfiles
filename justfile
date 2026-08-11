@@ -8,6 +8,7 @@ export UV_CACHE_DIR := env_var_or_default("UV_CACHE_DIR", ".uv-cache")
 python_paths := "agents/.agents/skills scripts"
 dprint_version := "0.55.2"
 just_version := "1.58.0"
+rumdl_version := "0.2.53"
 uv_version := "0.12.3"
 zizmor_version := "1.29.0"
 
@@ -43,6 +44,17 @@ _ensure-just:
     if [[ "$actual" != "{{ just_version }}" ]]; then
         echo "'just' resolves to '${resolved:-missing}' at version '${actual:-missing}', expected '{{ just_version }}'." >&2
         echo "   Install with: cargo install --locked just --version {{ just_version }}" >&2
+        exit 1
+    fi
+
+_ensure-rumdl:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    resolved="$(command -v rumdl 2>/dev/null || true)"
+    actual="$(rumdl --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+    if [[ "$actual" != "{{ rumdl_version }}" ]]; then
+        echo "'rumdl' resolves to '${resolved:-missing}' at version '${actual:-missing}', expected '{{ rumdl_version }}'." >&2
+        echo "   Install with: cargo install --locked rumdl --version {{ rumdl_version }}" >&2
         exit 1
     fi
 
@@ -108,7 +120,7 @@ brew-cleanup-preview: _ensure-brew
 brew-install: _ensure-brew
     brew bundle install --file="$PWD/Brewfile"
 
-check: shell-check git-config-check justfile-fmt-check toml-check yaml-check github-actions-check check-skills semgrep semgrep-test python-ci
+check: shell-check git-config-check justfile-fmt-check toml-check yaml-check markdown-check github-actions-check check-skills semgrep semgrep-test python-ci
     @echo "Checks complete!"
 
 check-skills: _ensure-uv
@@ -130,7 +142,7 @@ check-skills: _ensure-uv
 ci: check
     @echo "CI checks complete!"
 
-fix: justfile-fmt python-fix yaml-fix
+fix: justfile-fmt python-fix yaml-fix markdown-fix
     @echo "Fixes complete!"
 
 git-config-check:
@@ -144,6 +156,38 @@ justfile-fmt: _ensure-just
 
 justfile-fmt-check: _ensure-just
     just --fmt --check
+
+markdown-check: _ensure-rumdl
+    #!/usr/bin/env bash
+    set -euo pipefail
+    files=()
+    while IFS= read -r -d '' file; do
+        if [ -f "$file" ]; then
+            files+=("$file")
+        fi
+    done < <(git ls-files -co --exclude-standard -z -- '*.md')
+    if [ "${#files[@]}" -gt 0 ]; then
+        printf '%s\0' "${files[@]}" | xargs -0 -n100 rumdl check --deny-config-warnings
+    else
+        echo "No Markdown files found to check."
+    fi
+
+markdown-fix: _ensure-rumdl
+    #!/usr/bin/env bash
+    set -euo pipefail
+    files=()
+    while IFS= read -r -d '' file; do
+        if [ -f "$file" ]; then
+            files+=("$file")
+        fi
+    done < <(git ls-files -co --exclude-standard -z -- '*.md')
+    if [ "${#files[@]}" -gt 0 ]; then
+        printf '%s\0' "${files[@]}" | xargs -0 -n100 rumdl check --fix --deny-config-warnings
+    else
+        echo "No Markdown files found to fix."
+    fi
+
+markdown-lint: markdown-check
 
 [confirm("Apply captured macOS defaults (Dock, Finder, keyboard, trackpad) and restart Dock/Finder?")]
 macos-defaults:

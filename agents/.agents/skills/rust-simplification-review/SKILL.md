@@ -12,15 +12,18 @@ Favor deletion and consolidation only when the remaining code still says the sam
 ## Scope
 
 Default mode:
+
 - Review newly added or modified Rust code, tests, examples, benches, doctests, public exports, and nearby helpers needed to judge the change.
 - Ignore unrelated unchanged code unless it defines an invariant, API contract, or performance path the change relies on.
 
 Whole-repo baseline mode:
+
 - Use only when the user explicitly says "whole repo", "entire repo", "baseline audit", or similar.
 - Prioritize high-confidence simplifications that reduce maintenance risk without changing behavior.
 - Do not require fixing every historical issue in one pass; produce a focused remediation plan.
 
 Look for:
+
 - code that can be deleted safely
 - duplicated tests that cover the same behavior, inputs, dimensions, feature gates, and failure mode
 - helper functions whose indirection no longer carries an invariant or name worth preserving
@@ -42,6 +45,7 @@ Apply this order when tradeoffs conflict:
 ## Do Not Delete
 
 Do not recommend deletion of code, comments, or tests that protect a distinct:
+
 - error variant or typed failure path
 - public API contract
 - dimension-generic behavior
@@ -83,6 +87,7 @@ When apparent duplication protects different invariants, classify it as `Keep`.
 ## Review Checklist
 
 Production code:
+
 - unnecessary `clone`, `collect`, allocation, formatting, boxing, dynamic dispatch, or temporary storage
 - duplicate validation paths that can share a helper without hiding layer boundaries
 - branches that can become clearer with `let else`, `matches!`, direct `match`, or early return
@@ -92,6 +97,7 @@ Production code:
 - error pathways that conflate independent failure axes
 
 Tests:
+
 - duplicated tests with identical domain coverage and failure modes
 - weak smoke tests superseded by stronger unit, integration, doctest, or property coverage
 - helper abstractions that make failures harder to diagnose
@@ -100,6 +106,7 @@ Tests:
 - doctests that duplicate examples without guarding API behavior
 
 Performance:
+
 - unnecessary heap allocation in hot paths
 - avoidable full clones or snapshots
 - timers, logging, or string formatting in measured or hot loops
@@ -107,6 +114,7 @@ Performance:
 - benchmark setup accidentally included in measured work
 
 Orthogonality:
+
 - focused preludes mixing unrelated workflows
 - tests coupling geometry, topology, and construction when a narrower layer would prove the invariant
 - public types or helpers that duplicate existing concepts

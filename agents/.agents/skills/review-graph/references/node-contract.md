@@ -40,7 +40,7 @@ instruction_paths: applicable AGENTS.md or equivalent files
 routing_reference_paths: applicable static router/repository guidance or empty
 inspection_commands: commands that reproduce the intended diff or inventory
 state_verification_command: exact read-only command that recomputes all three fingerprints
-change_target: exact diff, commit, or custom target for review-agent, or none
+change_target: exact diff, commit, or custom target for independent review, or none
 validation_requirements: exact requirement IDs and commands, or none
 validation_ledger: exact reusable evidence, including verified standalone candidates, or empty
 supplied_validation_results: complete user-supplied standalone Validation Results or empty
@@ -50,7 +50,7 @@ predecessor_reports: complete reports for synthesis, fix, or revalidation; other
 Do not replace either path list with phrases such as "the relevant files." Every
 node-owned path must be present in `captured_scope_paths`. Focused review,
 synthesis, fix, revalidation, and validation prompts receive only the fields
-their contracts name. An independent `review-agent` receives only the identity,
+their contracts name. `repository-independent-review` receives only the identity,
 change-target, instruction, and state-verification fields in the Independent
 Review Worker Contract. Never send it `validation_ledger`,
 `supplied_validation_results`, `predecessor_reports`, prior findings, or
@@ -74,9 +74,11 @@ but unable to load its skill is `blocked-after-creation-before-skill-execution`;
 record the attempt without adding the skill to `Skills Run`.
 
 Create a fresh no-inherited-turn worker for every node. Never dispatch a later
-node through a follow-up to a completed worker. If creation fails or the hard
-deadline leaves no dispatch window, preserve completed reports and mark every
-undispatched node `blocked-before-execution` with the exact shared blocker.
+node through a follow-up to a completed worker. Commit the complete bounded plan
+and recovery/finalization reserve before the first creation attempt. If creation
+fails or the hard deadline leaves no dispatch window, stop dispatch, preserve
+completed reports, mark every undispatched node `blocked-before-execution`, and
+emit the resume manifest from `planning-contract.md`.
 
 ## Focused Review Worker Prompt
 
@@ -236,7 +238,9 @@ must report `none`. Do not use only generic descriptions such as “cleanup,”
 
 ## Handoffs
 
-- Suggested skill: <skill-id>
+- Handoff ID: <node-id>-handoff-<ordinal>
+  - Catalog ID: <exact routing-catalog candidate>
+  - Observed trigger: <concrete new applicability evidence>
   - Reason: <unreviewed contract requiring that owner>
   - Scope: <exact paths>
 
@@ -279,7 +283,20 @@ Accept a result only when:
   HEAD, branch, nor index
 - limitations explain every `blocked` status
 
+Apply the same rules to a report returned after its elapsed cap. Accept it only
+when the complete final report arrived and every required heading, proof, and
+normal acceptance condition passes. Do not accept a status update, partial
+report, interrupted response, or malformed timeout output. Preserve it as
+unaccepted evidence in the resume manifest.
+
 Do not upgrade an incomplete result to success during synthesis.
+
+For final repository synthesis, dispatch `repository-production-review` in
+`synthesis` mode with complete accepted predecessor reports, exhaustive routing
+ledgers, validation mappings, exact reuse, and explicit user exclusions. It may
+not capture, route, create workers, validate, fix, or perform new specialist
+analysis. Require every predecessor under `Predecessor Coverage` and apply all
+normal skill-loading, static-reference, structure, and fingerprint gates.
 
 ## Validation Worker Contract
 
@@ -329,7 +346,7 @@ route its raw evidence to the owning reviewer or synthesis node for diagnosis.
 
 ## Independent Review Worker Contract
 
-Use the active system `review-agent` only for a concrete code-change target.
+Use `repository-independent-review` only for a concrete code-change target.
 The worker must receive no specialist findings, coordinator diagnosis,
 predecessor reports, or expected answer. Dependencies determine when it runs,
 not what conclusions it sees.
@@ -337,7 +354,7 @@ not what conclusions it sees.
 Use this prompt shell:
 
 ```text
-Use $review-agent at <absolute-review-agent-skill-path> to independently inspect
+Use $repository-independent-review at <absolute-independent-review-skill-path> to independently inspect
 this exact change target.
 
 Read every applicable repository instruction file, then read the complete skill
@@ -354,17 +371,17 @@ State verification command: <exact non-mutating command>
 Applicable instruction files: <exact paths>
 
 Run the state-verification command before and after inspection. Follow
-review-agent's native finding and assessment format so findings remain first.
+the skill's native finding and assessment format so findings remain first.
 Then append the Review Graph Envelope below. Return no other graph commentary.
 ```
 
-Require this envelope after the native review-agent result:
+Require this envelope after the native independent-review result:
 
 ```markdown
 ## Review Graph Envelope
 
 - Node ID: <node-id>
-- Skill: review-agent
+- Skill: repository-independent-review
 - Mode: independent-review
 - Status: <completed|no-findings|blocked>
 - Scope fingerprint: <digest>
@@ -392,7 +409,7 @@ Derive `completed` when at least one native finding is present, `no-findings`
 only when the native result says `No findings.`, and `blocked` when the target or
 source identity could not be inspected. Require the result-header identities to
 equal the dispatch. Accept `completed` or `no-findings` only when both observed
-checks match all three identities, findings follow review-agent's severity and
+checks match all three identities, findings follow the skill's severity and
 location format, inspected files overlap the nonempty target, and no source or
 git-state mutation occurred. Accept `blocked` when it preserves every check that
 could run plus the exact unavailable target, observed mismatch, or detected

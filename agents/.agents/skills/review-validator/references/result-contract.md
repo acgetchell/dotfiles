@@ -57,6 +57,11 @@ repository_state_fingerprint: content digest covering HEAD, branch, index,
   tracked worktree files, and nonignored untracked files
 state_verification_command: exact read-only command that recomputes all three digests
 requirement_ids: exact validation requirements owned by this unit
+unit_coalescing_basis: source state, command or canonical recipe,
+  environment/toolchain, features, platform, artifact ownership, and
+  mutation/locking compatibility shared by those requirements
+requirement_evidence_mapping: every requirement ID mapped to this unit and its
+  exact candidate ledger entry or none
 commands: ordered exact commands, including arguments
 working_directories: one exact directory for each command
 environment_configuration: toolchain, platform, features, target, dependency,
@@ -120,6 +125,9 @@ Return every heading, using `none` when a section has no entries.
   - Mutation classification: <non-mutating and exact definition or policy basis>
   - Expected evidence: <observable success evidence>
   - Budget: <bounded duration>
+- Coalescing basis: <complete compatibility identity for this validator unit>
+- Requirement-to-evidence mapping:
+  - <requirement-id>: <this unit and exact candidate ledger entry, or none>
 - Meaningful skips: <command and reason or none>
 - Execution strategy: <sequential|parallel-independent>
 - Independence basis: <prerequisite and shared-resource analysis or none>
@@ -219,6 +227,10 @@ Accept a result only when:
   or blocker; an unavailable or mismatched check is valid blocked evidence and
   is not required to report `matched`
 - every requirement ID has exactly one disposition
+- the coalescing basis covers source state, command or canonical recipe,
+  environment/toolchain, features, platform, artifact ownership, and
+  mutation/locking compatibility; every requirement maps exactly once to this
+  unit and any candidate evidence
 - every executed command exactly matches the dispatch and reports working
   directory, executor, environment, result, exit code, elapsed time, and evidence
 - every candidate and executed command is classified from repository-owned

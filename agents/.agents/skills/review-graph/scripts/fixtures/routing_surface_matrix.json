@@ -1,0 +1,47 @@
+{
+  "cases": [
+    {
+      "id": "rust-source-api-tests",
+      "mode": "branch",
+      "paths": ["src/lib.rs", "tests/api.rs"],
+      "expected_surfaces": ["rust"]
+    },
+    {
+      "id": "python-packaging-cli-tests",
+      "mode": "branch",
+      "paths": ["pyproject.toml", "src/tool/cli.py", "tests/test_cli.py"],
+      "expected_surfaces": ["python", "tooling"]
+    },
+    {
+      "id": "cpp-build-api-scientific-tests",
+      "mode": "branch",
+      "paths": ["CMakeLists.txt", "include/model.hpp", "src/model.cpp", "tests/model.cpp"],
+      "expected_surfaces": ["cpp", "tooling"]
+    },
+    {
+      "id": "documentation-citations-release",
+      "mode": "release-readiness",
+      "release_readiness": true,
+      "paths": ["README.md", "CITATION.cff", "docs/algorithm.md"],
+      "expected_surfaces": ["documentation", "tooling"]
+    },
+    {
+      "id": "tooling-workflow-only",
+      "mode": "staged-only",
+      "paths": ["justfile", ".github/workflows/ci.yml"],
+      "expected_surfaces": ["tooling"]
+    },
+    {
+      "id": "cross-surface-shared-owners",
+      "mode": "branch",
+      "paths": ["Cargo.toml", "pyproject.toml", "CMakeLists.txt", "src/lib.rs", "src/tool.py", "src/model.cpp", ".github/workflows/ci.yml", "README.md"],
+      "expected_surfaces": ["cpp", "documentation", "python", "rust", "tooling"]
+    },
+    {
+      "id": "clean-whole-repository-baseline",
+      "mode": "baseline",
+      "paths": ["Cargo.toml", "src/lib.rs", "pyproject.toml", "src/tool.py", "README.md", "justfile"],
+      "expected_surfaces": ["documentation", "python", "rust", "tooling"]
+    }
+  ]
+}

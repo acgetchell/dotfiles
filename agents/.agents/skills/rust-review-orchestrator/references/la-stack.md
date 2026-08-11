@@ -29,4 +29,3 @@ crate or closely related linear-algebra code.
   stack/heap transition boundaries.
 - Preserve typed errors for shape mismatch, singularity, rank deficiency,
   non-finite input, overflow, and unsupported dimensions.
-

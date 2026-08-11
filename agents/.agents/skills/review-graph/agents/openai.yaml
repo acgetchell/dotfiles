@@ -1,6 +1,6 @@
 interface:
   display_name: "Review Graph"
-  short_description: "Preflight and coordinate isolated reviews"
+  short_description: "Run complete isolated repository review graphs"
   default_prompt: >-
-    Use $review-graph to review this branch with sequential fresh-context specialists, run $review-validator for each validation unit, and account for every
-    completed or unrun node before the hard deadline.
+    Use $review-graph to exhaustively route every applicable repository-review skill, validate exact paths, run fresh-context workers across bounded resumable
+    epochs, coalesce validation, close late handoffs, and synthesize the final result.

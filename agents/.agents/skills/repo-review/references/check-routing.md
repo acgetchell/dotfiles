@@ -2,6 +2,13 @@
 
 Use this reference after reading the requested scope and before selecting focused orchestrators.
 
+In `graph-routing` mode, use this matrix as semantic evidence and the
+repository classifier in `review_graph_plan.py` as a conservative floor. Return
+one disposition for every `repo-review` entry in the machine-readable routing
+catalog. Silence is not a skip. Resolve any disagreement with classifier
+signals explicitly, preserve every shared owner, select independent review for
+a concrete change target, and always select repository synthesis.
+
 ## Scope Discovery
 
 Default to branch scope. The normal workflow is to make a branch, review the whole branch, and include any staged, unstaged, or untracked work still sitting on top of it.

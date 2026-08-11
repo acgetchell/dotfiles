@@ -28,10 +28,12 @@ compatibility, or other behavior callers observe indirectly.
 ### Scope Modes
 
 Default mode:
+
 - Audit newly added or modified public APIs.
 - Ignore unrelated unchanged APIs unless they clarify the changed contract.
 
 Whole-repo baseline mode:
+
 - Use when the user explicitly says "whole repo", "entire repo", "baseline audit", or similar.
 - Audit the full public documentation surface: crate docs, module docs, public items, examples, rustdoc lint configuration, and docs.rs metadata.
 - Prioritize findings by published API risk, broken or missing required sections, misleading contracts, and examples users are likely to copy.
@@ -149,17 +151,20 @@ If doctest *test quality* is the primary concern, defer to `rust-test-quality`. 
 ## Output Format
 
 ### Summary
+
 - PASS
 - NEEDS IMPROVEMENT
 - FAIL
 
 ### Findings
+
 - Items missing required sections
 - Items with weak descriptions or broken links
 - API-supporting private helpers missing intent/behavior docs
 - Crate-level or module-level documentation gaps
 
 ### Required Fixes
+
 - Sections to add (`# Errors`, `# Panics`, `# Safety`, `# Examples`)
 - Intra-doc links to add or repair
 - Description rewrites
@@ -167,5 +172,6 @@ If doctest *test quality* is the primary concern, defer to `rust-test-quality`. 
 - Lint or `[package.metadata.docs.rs]` configuration changes
 
 ### Optional Improvements
+
 - Examples to strengthen
 - Cross-links between related items

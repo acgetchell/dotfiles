@@ -13,13 +13,17 @@ Prioritize observable defects, undefined behavior, broken invariants, and releas
 
 ### Orchestrated final synthesis
 
-Use this mode when a parent orchestrator invokes the skill after focused review groups.
+Use this mode when `review-graph` or a parent language orchestrator invokes the
+skill after focused review groups.
 
 - Consume the prior groups' scope, evidence, findings, fixes, validators, and explicit skips.
 - Do not load the standalone checklist.
 - Do not rerun completed build-portability, ownership, invariant, parsing, exception, API, functional, scientific, concurrency, or test analysis.
 - Revisit a specialist concern only when later edits invalidate its evidence or the handoff exposes an unresolved cross-group contradiction.
 - Focus on residual dependency, performance, simplification, deletion, validation, and integration risks, then reconcile the release verdict.
+- In a `review-graph` synthesis node, remain read-only and evidence-only. Do not
+  edit, run validators, route work, or create subagents. Return missing or stale
+  validation as an exact blocker for the coordinator.
 
 ### Standalone broad review
 
@@ -29,10 +33,12 @@ Use this mode only when the skill is invoked directly for a broad C++ review, re
 
 - Read repository-local guidance before reviewing or editing.
 - Do not mutate git state unless the user explicitly requests it.
-- Honor a parent orchestrator's handed-off scope.
+- Honor a parent coordinator or orchestrator's handed-off scope.
 - Default to changed C++ files and nearby code needed to understand their contracts.
 - Use whole-repository baseline mode only when explicitly requested.
-- Keep diagnostic reviews read-only. When fixes are requested, make the smallest safe corrections and validate the affected contract.
+- Keep diagnostic reviews read-only. Apply fixes and run new validation only in
+  standalone mode when explicitly authorized; graph synthesis is always
+  read-only.
 - Verify current compiler, standard-library, dependency, and tool behavior from authoritative sources when version sensitivity matters.
 - Treat compilation, tests, sanitizers, static analysis, and reasoning as complementary evidence.
 
@@ -47,7 +53,9 @@ Record:
 - prior specialist evidence in orchestrated mode
 - untracked or user-owned work that must remain untouched
 
-When invoked by an orchestrator, provide table-ready evidence naming the files inspected, residual concerns applied, findings or an explicit no-finding result, fixes, and validators.
+When invoked by an orchestrator or `review-graph`, provide table-ready evidence
+naming the files inspected, residual concerns applied, findings or an explicit
+no-finding result, fixes, and validators.
 
 ## Residual Workflow
 
@@ -75,7 +83,13 @@ Before replacement or deletion, verify supported compiler/library availability, 
 
 ### 4. Reconcile validation and release risk
 
-Map each material behavior or configuration change to evidence. In orchestrated mode, reuse valid specialist results and add only validators required by residual or cross-group risk. Do not claim platform support from configuration alone or turn unavailable matrix cells into inferred success.
+Map each material behavior or configuration change to evidence. In graph
+synthesis mode, consume accepted validation without running or adding
+validators; return uncovered residual or cross-group requirements to the
+coordinator as blockers. In standalone mode, add only validators required by
+uncovered risk. In non-graph orchestrated mode, follow the parent validation
+workflow and add only uncovered evidence. Do not claim platform support from
+configuration alone or turn unavailable matrix cells into inferred success.
 
 Record exact commands, versions when relevant, results, unavailable validators, and why any expected validation was skipped. If a late fix affects an earlier contract, return it to the owning specialist and refresh that evidence before final classification.
 

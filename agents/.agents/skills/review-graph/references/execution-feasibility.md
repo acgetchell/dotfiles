@@ -1,8 +1,8 @@
 # Review Graph Execution Feasibility
 
-Use this contract before repository capture, after the exact node plan exists,
-and before every worker dispatch. Use `scripts/review_graph_plan.py` as the
-deterministic decision model.
+Use this contract before repository capture, after the exact bounded node plan
+exists, and before every worker dispatch. Read `planning-contract.md` first and
+use `scripts/review_graph_plan.py` as the deterministic decision model.
 
 ## Contents
 
@@ -31,12 +31,12 @@ fresh_worker_creations_remaining
 lifecycle_semantics
 ```
 
-Treat an authoritative lifetime count as a completion forecast. A known zero
-blocks the first dispatch; a positive count smaller than the planned graph does
-not erase runnable work. Report that full completion is not guaranteed, dispatch
-fresh workers sequentially, and account for later unrun nodes. When the count is
-absent, record `not exposed; enforced incrementally` rather than inferring a
-limit or release policy from concurrent capacity.
+Treat an authoritative lifetime count as the current root's hard epoch ceiling.
+A known zero blocks the first dispatch. Partition a larger complete plan into
+fresh-root epochs; never reduce applicable coverage. When the count is absent,
+use the configured per-root budget (default 24) and record `not exposed; bounded
+by configured budget <N>`. Do not infer a limit or release policy from
+concurrent capacity.
 
 Do not call a status or listing surface for capacity diagnosis when its schema
 or observed payload may include messages, reports, findings, results, outputs,
@@ -50,39 +50,45 @@ Before capture, router loading, graph construction, or a pre-dispatch report:
 
 1. Verify that fresh workers with no inherited turns are supported.
 2. Obtain safe aggregate concurrent-capacity evidence without creating a worker.
-3. Require at least one free concurrent slot. If an authoritative lifetime count
-   is present, require it to be greater than zero for the first dispatch.
-4. Record the evidence source, aggregate values, optional lifetime forecast,
-   isolation status, and gate result in the journal.
+3. Require at least one free concurrent slot and a positive configured total
+   fresh-worker budget. If an authoritative lifetime count is present, require
+   it to be greater than zero and use the smaller value as the effective budget.
+4. Record the evidence source, aggregate values, configured and effective
+   budgets, recovery/finalization reserve, isolation status, and gate result in
+   the journal.
 5. If a check fails, emit the blocked capability report below and stop. Do not
    describe routers as consulted, create selected leaf nodes, or claim that a
    focused skill or validator ran.
 
-An unavailable lifetime count is not a failed check. The early gate proves only
-that the first isolated invocation can start.
+An unavailable lifetime count is not a failed check and is never unlimited. The
+configured total budget remains binding.
 
 ## Exact Schedule Assessment
 
-After routing creates a provisional node plan, count the maximum fresh-worker
-attempts for:
+After exhaustive routing creates the complete node plan, coalesce compatible
+requirements and partition the schedule under `planning-contract.md`. Count
+fresh-worker commitments for:
 
 - every audit, validation, independent-review, synthesis, fix, and revalidation
   node
-- every permitted fresh-worker retry
+- every explicitly planned fresh-worker retry or synthesis rerun
 - every planned post-fix rerun
 - an explicit review-and-fix iteration reserve, when fixes are authorized
 
 Do not count router reads, coordinator reconciliation, or formatting-only
-follow-ups to an already-created worker as fresh creations. Dispatch nodes one
-at a time and never assign a later node to a completed worker. Required peak
-worker concurrency is therefore one.
+follow-ups to an already-created worker as fresh creations. Count the
+recovery/finalization reserve separately. Dispatch nodes one at a time and never
+assign a later node to a completed worker. Required peak worker concurrency is
+therefore one.
 
-Record planned attempts and any authoritative lifetime count. Classify
-full-plan creation capacity as `guaranteed`, `not guaranteed`, or `unknown`.
-Neither `not guaranteed` nor `unknown` blocks the first runnable node. If a real
-worker creation later fails, record that node as `blocked-before-execution`,
-preserve completed reports, and block every undispatched node. Never replace
-them with coordinator review or reused-worker follow-ups.
+Require `nodes in the current epoch + recovery/finalization reserve <= effective
+root budget`. Record the complete graph count, every epoch, reserve, and
+authoritative lifetime count. If the complete graph exceeds one root, retain all
+nodes and mark later epochs as fresh-root continuations. Until they complete,
+the graph is incomplete. If a real worker creation later fails, stop all
+dispatch, record that node as `blocked-before-execution`, preserve completed
+reports, and emit a resume manifest for every undispatched or unaccepted node.
+Never replace them with coordinator review or reused-worker follow-ups.
 
 ## Hard Deadline Accounting
 

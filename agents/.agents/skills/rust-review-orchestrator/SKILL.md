@@ -15,12 +15,32 @@ Do not treat selecting a group as permission to load every skill listed in it. L
 - Use read-only git commands to discover scope.
 - Respect repository-local instructions and documented MSRV, edition, feature, target, safety, and validation policy.
 - Prefer changed-file review. Use whole-repository baseline mode only when explicitly requested.
-- Honor a parent `repo-review` file list or diff instead of rediscovering a narrower scope.
+- Outside graph-routing mode, honor any parent file list or diff instead of
+  rediscovering a narrower scope. This includes the explicit
+  `repo-review legacy-grouped` path.
 - When fixes are requested, implement verified findings within each selected skill before continuing.
 - Select focused validators; do not run full CI merely because orchestration is ending.
 - Maintain one cross-skill validation ledger keyed by source/build state,
   toolchain, target, features, instrumentation, and exact test selection. Reuse
   still-valid evidence instead of replaying it through broader recipes.
+
+## Graph-Routing Mode
+
+When `review-graph` requests a declarative handoff, read
+[`review-graph/references/routing-handoff.md`](../review-graph/references/routing-handoff.md)
+and return its records instead of running this skill's standalone pass loop.
+Use every `rust-review-orchestrator` entry in
+[`routing-catalog.json`](../review-graph/references/routing-catalog.json) and
+return exactly one disposition per candidate, including the mandatory
+`rust-production-review` synthesis entry. Select Rust specialists from the
+supplied surface, cite the catalog rule and inspected trigger evidence, expand
+exact skill paths, attach applicable static guidance such as
+`references/la-stack.md`, and declare exact validators, priorities, owners, and
+synthesis dependencies. Do not load specialist bodies, validate, synthesize,
+edit, create subagents, or recursively invoke an orchestrator in graph-routing
+mode.
+
+Otherwise keep the standalone behavior below.
 
 ## Review Trace
 
@@ -32,7 +52,9 @@ For every selected skill:
 - load its `SKILL.md` completely and only directly relevant references
 - record files inspected, findings or explicit no-finding result, fixes, and validator evidence
 
-When invoked by `repo-review`, provide table-ready evidence naming selected groups, exact skills and references loaded, validators, fixes, and meaningful skips.
+When invoked through `repo-review legacy-grouped`, provide table-ready evidence
+naming selected groups, exact skills and references loaded, validators, fixes,
+and not-selected skills with reasons.
 
 ## Scope Routing
 
@@ -123,4 +145,8 @@ If prior work was an undifferentiated review, treat it as preliminary context an
 
 ## Final Summary
 
-Lead with unresolved blockers. Include changed files, every selected and meaningful skipped skill, exact skill/reference files loaded, the non-overlapping validation ledger and results, fixed findings, final synthesis classification, deferred work, and confirmation that no git state mutation occurred when true.
+Lead with unresolved blockers. Include changed files, every selected and
+not-selected skill with its reason, exact skill/reference files loaded, the
+non-overlapping validation ledger and results, fixed findings, final synthesis
+classification, deferred work, and confirmation that no git state mutation
+occurred when true.

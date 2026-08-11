@@ -20,6 +20,10 @@ formats verbatim.
   dispatch or comes from `review-graph`, whether or not its Validation Dispatch
   is complete. Require every field; return `blocked` for any omission instead of
   falling through to discovery, re-planning, or broader commands.
+- Treat one graph dispatch as one already-coalesced validation unit. Verify its
+  complete coalescing identity and requirement-to-evidence mapping. Do not split
+  it into one execution per requirement when one command or canonical recipe
+  satisfies all of them.
 - Otherwise use `standalone` mode. Do not require the user to supply commands,
   fingerprints, configurations, requirement IDs, or a validation ledger.
   Discover them, build an internal Validation Dispatch, show the compact plan,
@@ -51,6 +55,9 @@ formats verbatim.
   `review-graph` must recapture state and dispatch a validator to verify exact
   command, source, environment, configuration, and selection identity before
   recording reuse.
+- List every requirement satisfied by a coalesced execution or verified reuse.
+  Preserve the dispatch's requirement-to-evidence mapping so one execution can
+  satisfy several owners without losing attribution.
 
 ## Build A Standalone Plan
 
@@ -101,9 +108,13 @@ formats verbatim.
 8. Convert the selection into stable requirement IDs, exact commands and working
    directories, complete relevant environment/configuration identity, expected
    evidence, mutation classification and basis, dependency policy, allowed
-   artifacts, and bounded elapsed-time budgets. Record whether units are
-   sequential or independently parallelizable. Use supplied ledger entries only
-   when their complete identities match; otherwise set the ledger to `none`.
+   artifacts, and bounded elapsed-time budgets. Coalesce compatible requirements
+   by source state, canonical recipe or exact command, environment/toolchain,
+   features, platform, artifact ownership, and mutation/locking compatibility.
+   Record unit-to-requirement and requirement-to-evidence mappings. Record
+   whether units are sequential or independently parallelizable. Use supplied
+   ledger entries only when their complete identities match; otherwise set the
+   ledger to `none`.
 9. If applicable validation is required but no safe authoritative non-mutating
    command can be determined, construct a blocked
    internal dispatch that records every authority inspected and the exact
@@ -148,6 +159,9 @@ formats verbatim.
 - Reuse evidence only when command, source state, built artifact or installation
   target, environment, configuration, instrumentation, and exact selection all
   match.
+- Execute a coalesced canonical command once and apply its accepted evidence to
+  every mapped requirement. Do not replay it for each owner. Keep distinct
+  platform, feature, packaging/consumer, artifact, or locking units separate.
 - Execute each validation unit in its declared order. A unit may contain an
   ordered setup, build, and test sequence only when all commands share one
   configuration and evidence identity. Run separate units concurrently only
