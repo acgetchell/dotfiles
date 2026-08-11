@@ -38,7 +38,7 @@ jobs:
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
 
       - name: Install just
-        uses: taiki-e/cache-cargo-install-action@417450f3c33ee20393705369577571770643d4c7 # v3.0.7
+        uses: taiki-e/cache-cargo-install-action@9ee83daaa7b96a6fab930949ecf1122bba04a389 # v3.0.8
         with:
           tool: just@${{ steps.just_version.outputs.version }}
 
@@ -58,12 +58,19 @@ jobs:
             printf '%s\n' "$value"
           }
 
+          dprint_version="$(resolve_version dprint_version)"
           uv_version="$(resolve_version uv_version)"
           zizmor_version="$(resolve_version zizmor_version)"
           {
+            printf 'dprint_version=%s\n' "$dprint_version"
             printf 'uv_version=%s\n' "$uv_version"
             printf 'zizmor_version=%s\n' "$zizmor_version"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Install dprint
+        uses: taiki-e/cache-cargo-install-action@9ee83daaa7b96a6fab930949ecf1122bba04a389 # v3.0.8
+        with:
+          tool: dprint@${{ steps.tool_versions.outputs.dprint_version }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -76,7 +83,7 @@ jobs:
         run: uv sync --locked --group dev
 
       - name: Install zizmor
-        uses: taiki-e/cache-cargo-install-action@417450f3c33ee20393705369577571770643d4c7 # v3.0.7
+        uses: taiki-e/cache-cargo-install-action@9ee83daaa7b96a6fab930949ecf1122bba04a389 # v3.0.8
         with:
           tool: zizmor@${{ steps.tool_versions.outputs.zizmor_version }}
 

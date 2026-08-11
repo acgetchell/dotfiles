@@ -1,4 +1,6 @@
 interface:
   display_name: "Review Graph"
   short_description: "Preflight and coordinate isolated reviews"
-  default_prompt: "Use $review-graph to review this branch with sequential fresh-context specialists, run $review-validator for each validation unit, and account for every completed or unrun node before the hard deadline."
+  default_prompt: >-
+    Use $review-graph to review this branch with sequential fresh-context specialists, run $review-validator for each validation unit, and account for every
+    completed or unrun node before the hard deadline.

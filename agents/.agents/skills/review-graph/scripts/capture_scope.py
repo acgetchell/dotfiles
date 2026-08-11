@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Capture a path-bounded, content-based Git review scope manifest."""
 
-from __future__ import annotations
-
 import argparse
 import hashlib
 import json
@@ -104,7 +102,9 @@ def _resolve_base(git: str, repo: Path, explicit_base: str | None) -> str:
         return explicit_base
 
     origin_head = _try_git(git, repo, ("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"))
-    candidates = [_decode(origin_head)] if origin_head else []
+    candidates: list[str] = []
+    if origin_head is not None:
+        candidates.append(_decode(origin_head))
     candidates.extend(("origin/main", "origin/master", "main", "master"))
     for candidate in candidates:
         if candidate and _try_git(git, repo, ("rev-parse", "--verify", f"{candidate}^{{commit}}")) is not None:

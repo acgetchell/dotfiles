@@ -64,12 +64,15 @@ if command -v cargo >/dev/null 2>&1; then
   }
 
   install_cargo_tool just "$JUST_VERSION"
-  zizmor_version="$(just --justfile "$DOTFILES_DIR/justfile" --evaluate zizmor_version)"
-  if [[ ! "$zizmor_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "==> Invalid zizmor_version in $DOTFILES_DIR/justfile: $zizmor_version" >&2
-    exit 1
-  fi
-  install_cargo_tool zizmor "$zizmor_version"
+  for tool in dprint zizmor; do
+    pin_name="${tool}_version"
+    version="$(just --justfile "$DOTFILES_DIR/justfile" --evaluate "$pin_name")"
+    if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      echo "==> Invalid $pin_name in $DOTFILES_DIR/justfile: $version" >&2
+      exit 1
+    fi
+    install_cargo_tool "$tool" "$version"
+  done
 else
   echo "==> Skipping cargo-installed tools: cargo not on PATH" >&2
 fi

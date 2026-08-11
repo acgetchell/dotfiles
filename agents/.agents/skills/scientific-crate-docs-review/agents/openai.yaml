@@ -1,4 +1,5 @@
 interface:
   display_name: "Scientific Crate Docs Review"
   short_description: "Review scientific crate release metadata"
-  default_prompt: "Use $scientific-crate-docs-review to audit Rust scientific crate release metadata across Cargo, README, citation, docs.rs, and generated changelog surfaces."
+  default_prompt: >-
+    Use $scientific-crate-docs-review to audit Rust scientific crate release metadata across Cargo, README, citation, docs.rs, and generated changelog surfaces.

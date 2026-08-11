@@ -1,4 +1,5 @@
 interface:
   display_name: "Rust Production Review"
   short_description: "Synthesize or broadly review production Rust"
-  default_prompt: "Use $rust-production-review to perform a standalone Rust production audit or reconcile focused review evidence into a final readiness verdict."
+  default_prompt: >-
+    Use $rust-production-review to perform a standalone Rust production audit or reconcile focused review evidence into a final readiness verdict.

@@ -1,4 +1,6 @@
 interface:
   display_name: "Rust Scientific Correctness"
   short_description: "Audit numerical and scientific correctness"
-  default_prompt: "Use $rust-scientific-correctness to audit this Rust scientific code for mathematical validity, numerical robustness, independent validation, and reproducibility."
+  default_prompt: >-
+    Use $rust-scientific-correctness to audit this Rust scientific code for mathematical validity, numerical robustness, independent validation, and
+    reproducibility.

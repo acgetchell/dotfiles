@@ -72,9 +72,15 @@ def load_notebook(path: Path) -> dict[str, Any]:
         raise FileNotFoundError(msg)
     with path.open(encoding="utf-8") as handle:
         notebook = json.load(handle)
-    if notebook.get("nbformat") != 4:
-        msg = f"{path}: expected nbformat 4, got {notebook.get('nbformat')!r}"
+    nbformat = notebook.get("nbformat")
+    if isinstance(nbformat, bool) or not isinstance(nbformat, int) or nbformat != 4:
+        msg = f"{path}: expected nbformat to be the JSON integer 4, got {nbformat!r}"
         raise ValueError(msg)
+    for index, cell in enumerate(notebook.get("cells", []), start=1):
+        metadata = cell.get("metadata")
+        if not isinstance(metadata, dict):
+            msg = f"{path}: cell {index} metadata must be a JSON object, got {type(metadata).__name__}"
+            raise TypeError(msg)
     return notebook
 
 

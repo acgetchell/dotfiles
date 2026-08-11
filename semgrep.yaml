@@ -23,6 +23,7 @@ rules:
     pattern-either:
       - pattern-regex: '(?ms)^\s*(?:@echo\s+"?\s*)?just\s+fix\b[^\n]*(?:\n\s*(?:#[^\n]*)?)*?\n\s*(?:@echo\s+"?\s*)?just\s+check\b'
       - pattern-regex: '(?ms)^\s*(?:@echo\s+"?\s*)?just\s+python-fix\b[^\n]*(?:\n\s*(?:#[^\n]*)?)*?\n\s*(?:@echo\s+"?\s*)?just\s+python-check\b'
+      - pattern-regex: '(?ms)^\s*(?:@echo\s+"?\s*)?just\s+yaml-fix\b[^\n]*(?:\n\s*(?:#[^\n]*)?)*?\n\s*(?:@echo\s+"?\s*)?just\s+yaml-check\b'
 
   - id: dotfiles.github-actions.external-action-sha-pinned
     languages:
@@ -56,7 +57,23 @@ rules:
         - "/tests/semgrep/.github/workflows/**/*.yml"
         - "/tests/semgrep/.github/workflows/**/*.yaml"
     patterns:
-      - pattern-regex: '(?m)^\s*uses:\s*(?!\./)(?!docker://)(?!(?:actions/checkout|actions/setup-python|actions/cache|astral-sh/setup-uv|github/codeql-action/upload-sarif|taiki-e/cache-cargo-install-action|zizmorcore/zizmor-action)@)[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)?@'
+      - pattern-regex: |-
+          (?mx)
+          ^\s*uses:\s*
+          (?!\./)
+          (?!docker://)
+          (?!
+            (?:
+              actions/checkout
+              |actions/setup-python
+              |actions/cache
+              |astral-sh/setup-uv
+              |github/codeql-action/upload-sarif
+              |taiki-e/cache-cargo-install-action
+              |zizmorcore/zizmor-action
+            )@
+          )
+          [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)?@
 
   - id: dotfiles.github-actions.external-action-version-comment
     languages:
@@ -92,7 +109,17 @@ rules:
         - "/tests/semgrep/.github/workflows/**/*.yml"
         - "/tests/semgrep/.github/workflows/**/*.yaml"
     patterns:
-      - pattern-regex: '(?m)^[ \t]*(?:-[ \t]*)?uses:[ \t]*actions/checkout@[a-fA-F0-9]{40}[^\n]*(?:\n(?![ \t]*-[ \t]+[A-Za-z_-]+:)(?![ \t]*persist-credentials:[ \t]*false\b)[^\n]*)*(?=\n[ \t]*-[ \t]+[A-Za-z_-]+:|\z)'
+      - pattern-regex: |-
+          (?mx)
+          ^[ \t]*(?:-[ \t]*)?
+          uses:[ \t]*actions/checkout@[a-fA-F0-9]{40}[^\n]*
+          (?:
+            \n
+            (?![ \t]*-[ \t]+[A-Za-z_-]+:)
+            (?![ \t]*persist-credentials:[ \t]*false\b)
+            [^\n]*
+          )*
+          (?=\n[ \t]*-[ \t]+[A-Za-z_-]+:|\z)
 
   - id: dotfiles.github-actions.no-pull-request-target
     languages:
@@ -148,11 +175,78 @@ rules:
     patterns:
       - pattern-regex: '(?m)^\s*(?:run:\s*)?uv\s+sync\b(?![^\n]*\s--locked\b)[^\n]*$'
 
+  - id: dotfiles.tooling.uv-run-locked
+    languages:
+      - regex
+    severity: WARNING
+    message: "Use uv run --locked in repository tooling so lockfile drift fails instead of resolving implicitly."
+    metadata:
+      category: reproducibility
+      rationale: "Check, CI, and support commands should execute only the dependency graph committed in uv.lock."
+    paths:
+      include:
+        - "/justfile"
+        - "/bin/**/*.sh"
+        - "/.github/workflows/**/*.yml"
+        - "/.github/workflows/**/*.yaml"
+        - "/tests/semgrep/tooling/**/*.sh"
+    pattern-regex: |-
+      (?mx)
+      ^\s*
+      (?:run:\s*)?
+      (?:
+        [A-Za-z_][A-Za-z0-9_]*=
+        (?:"[^"\n]*"|'[^'\n]*'|[^\s\n]+)
+        \s+
+      )*
+      uv\s+run\b
+      (?![^\n]*\s--locked(?:\s|$))
+      [^\n]*$
+
+  - id: dotfiles.github-actions.automerge-head-safe-squash
+    languages:
+      - regex
+    severity: WARNING
+    message: "Auto-merge with --squash and --match-head-commit so the intended PR head and merge strategy are enforced."
+    metadata:
+      category: security
+      rationale: "A superseded Dependabot head must not merge, and automated dependency updates use the repository's squash policy."
+    paths:
+      include:
+        - "/.github/workflows/**/*.yml"
+        - "/.github/workflows/**/*.yaml"
+        - "/tests/semgrep/.github/workflows/**/*.yml"
+        - "/tests/semgrep/.github/workflows/**/*.yaml"
+    pattern-regex: |-
+      (?mx)^\s*(?:run:\s*)?gh\s+pr\s+merge\b
+      (?=[^\n]*\s--auto\b)
+      (?!(?=[^\n]*\s--squash\b)(?=[^\n]*\s--match-head-commit\b))
+      [^\n]*$
+
+  - id: dotfiles.github-actions.coderabbit-token-confined
+    languages:
+      - regex
+    severity: WARNING
+    message: "Use CODERABBIT_REVIEW_TOKEN only in the reviewed Dependabot auto-merge workflow."
+    metadata:
+      category: security
+      rationale: "The user PAT should not spread to unrelated workflow triggers or jobs."
+    paths:
+      include:
+        - "/.github/workflows/**/*.yml"
+        - "/.github/workflows/**/*.yaml"
+        - "/tests/semgrep/.github/workflows/**/*.yml"
+        - "/tests/semgrep/.github/workflows/**/*.yaml"
+      exclude:
+        - "/.github/workflows/dependabot-auto-merge.yml"
+        - "/.github/workflows/dependabot-auto-merge.yaml"
+    pattern-regex: '\bCODERABBIT_REVIEW_TOKEN\b'
+
   - id: dotfiles.brewfile.no-cargo-installed-tools
     languages:
       - regex
     severity: WARNING
-    message: "Install just and zizmor through cargo, not Homebrew."
+    message: "Install dprint, just, and zizmor through cargo, not Homebrew."
     metadata:
       category: maintainability
       rationale: "Bootstrap pins these Rust tools with cargo install --locked, matching the other Rust repos."
@@ -160,7 +254,30 @@ rules:
       include:
         - "/Brewfile"
         - "/tests/semgrep/Brewfile"
-    pattern-regex: '(?m)^brew\s+"(?:just|zizmor)"(?:\s|$)'
+    pattern-regex: '(?m)^brew\s+"(?:dprint|just|zizmor)"(?:\s|$)'
+
+  - id: dotfiles.portability.no-user-home-paths
+    languages:
+      - regex
+    severity: WARNING
+    message: "Use $HOME, ~, or a placeholder instead of a committed user-specific home path."
+    metadata:
+      category: portability
+      rationale: "Public dotfiles must remain reusable across users and machines."
+    paths:
+      include:
+        - "/**/*.md"
+        - "/**/*.sh"
+        - "/**/*.toml"
+        - "/**/*.yaml"
+        - "/**/*.yml"
+        - "/justfile"
+        - "/tests/semgrep/portability/**/*.txt"
+    pattern-regex: |-
+      (?mx)(?:/Users|/home)/
+      (?!<[^/\n]+>(?:/|$))
+      (?!\$(?:\{?[A-Za-z_][A-Za-z0-9_]*\}?)(?:/|$))
+      [A-Za-z0-9._-]+(?:/|$)
 
   - id: dotfiles.shell.no-unreviewed-curl-shell
     languages:
