@@ -25,23 +25,25 @@ scope:
   fingerprints, instructions, inspection commands, external limitations
 capability_gate:
   aggregate evidence source, concurrent limit and active count, optional
-  lifetime creations and lifecycle semantics, full-plan completion forecast,
-  isolation status, early result; never task messages, reports, findings,
-  outputs, or payloads
+  lifetime creations and lifecycle semantics, configured/effective worker
+  budget ceiling, isolation status, early result; never task messages, reports,
+  findings, outputs, or payloads
 budget_plan:
-  hard deadline or unbounded-by-request, full-cap critical path, coordinator
-  reserve, validation reserve, fix/revalidation and final-reconciliation
-  reserves, remaining dispatch window, completion guarantee, stop policy, and
+  configured and effective per-root worker budget, telemetry basis, complete
+  selected requirements and nodes, coalesced validator units, synthesis nodes,
+  recovery/finalization reserve, execution epochs and fresh-root continuations,
+  dispatch decision, hard deadline or unbounded-by-request, full-cap
+  critical path, time reserves, remaining dispatch window, stop policy, and
   nodes the deadline prevented from running
 routing_decisions[]:
-  surface, authority skill/path/reference, status=consulted,
-  selected leaves with reasons, skipped leaves with reasons, applicable static
-  routing/repository references passed to workers
+  catalog/router/rule IDs, exact skill/path, disposition, reason, applicability
+  evidence, owned paths, shared owners, exact reuse or user exclusion,
+  applicable static references, validation requirements, synthesis dependency
 nodes[]:
   node ID, exact skill/path, selection reason, mode, owned paths,
   predecessors, instruction and static routing/repository references, budgets,
-  dispatch fingerprints, result status,
-  complete accepted result or blocked record
+  dispatch fingerprints, accepted/blocked/invalidated-stale result status,
+  complete accepted result, blocked record, or stale invalidation record
 worker_attempts[]:
   attempt ID, node ID, creation ordinal, created=yes/no, skill loaded=yes/no,
   result returned=yes/no, elapsed time, remaining deadline, blocker; never infer
@@ -50,8 +52,11 @@ validation_requirements[]:
   requirement ID, owning skill or routing authority, exact commands,
   state/configuration/selection identity, dependency policy, disposition,
   satisfying validation node or ledger entry
+validation_units[]:
+  unit ID, every requirement ID satisfied, exact coalescing identity, command or
+  canonical recipe, candidate evidence, selected/omitted status
 independent_checks[]:
-  review-agent node ID, exact change target, dispatch fingerprints,
+  repository-independent-review node ID, exact change target, dispatch fingerprints,
   native report, graph finding IDs, status, rerun or invalidation history
 findings[]:
   finding ID, severity, owning node/skill, summary, evidence,
@@ -72,12 +77,18 @@ validators_not_run[]:
 deadline_events[]:
   elapsed time, remaining dispatch window, active worker action, and every node
   blocked by global-deadline-exhausted
+resume_manifest:
+  exact captured fingerprints, failure reason, undispatched and unaccepted
+  nodes, outstanding validator units and syntheses, unresolved handoffs, future
+  execution epochs, journal/raw-report location, and whether a fresh root task
+  may be required
 ```
 
 Keep complete node reports unchanged. The journal adds cross-node indexes; it
 does not replace raw reports with summaries.
 
-Persist the journal and raw reports after every accepted or blocked node. Use
+Persist the journal and raw reports after every accepted, blocked, or
+invalidated/stale node. Use
 session-owned keyed storage when available; otherwise create a unique temporary
 directory outside the reviewed repository. Do not rely on conversation context
 alone. Record the storage mechanism and location in the journal and final
@@ -98,15 +109,16 @@ Show these sections before spawning the first worker.
 State authorization, capture mode, path boundary, base when applicable, and all
 three fingerprints.
 
-### Capability And Deadline Gate
+### Capability, Worker Budget, And Deadline Gate
 
-| Evidence source | Concurrent free/required | Lifetime creations remaining/planned | Full-cap critical path | Reserves | Hard deadline | Completion guarantee | Isolation | Result |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Evidence source | Concurrent free/required | Configured/effective root budget | Complete graph/current epoch nodes | Epoch count | Recovery/finalization reserve | Full-cap critical path | Hard deadline | Isolation | Result |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 
 Use aggregate capacity values only. Never reproduce payload text returned by an
-unsafe capacity mechanism. Use `not exposed; enforced incrementally` when the
-runtime supplies no lifetime count. State the hard-deadline and worker-creation
-stop policies.
+unsafe capacity mechanism. Use `not exposed; bounded by configured budget <N>`
+when the runtime supplies no lifetime count. Show that current-epoch nodes plus
+reserve fit the effective root budget and list every later fresh-root epoch.
+State the hard-deadline and worker-creation stop policies.
 
 ### Routing Authorities Consulted
 
@@ -115,21 +127,30 @@ stop policies.
 
 Routers in this table were consulted, not run as review workers.
 
-### Proposed Graph
+### Complete Graph And Epochs
 
-| Node | Skill | Mode | Why selected | Owned scope or target | Predecessors | Expected validation | Budget |
+| Node | Skill and exact path | Mode | Why selected | Owned scope or target | Predecessors | Expected validation | Epoch/budget |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 
 The budget cell must include elapsed/retry caps and maximum fresh-worker attempts
 for the node. These are safety/accounting bounds, not upfront reservations.
 
-### Meaningful Skips
+Follow with a compact `Validation Coalescing` table:
 
-| Skill or surface | Why skipped | Evidence reused instead |
-| --- | --- | --- |
+| Validator unit | Requirements satisfied | Reused command/recipe | Identity and compatibility basis | Candidate evidence |
+| --- | --- | --- | --- | --- |
 
-List only plausible skills or surfaces whose omission affects how the user
-interprets coverage. Do not pad this table with obviously irrelevant skills.
+List every declared validation requirement exactly once across the unit rows.
+
+### Exhaustive Routing Ledger
+
+| Catalog/rule | Router | Skill and path | Disposition | Applicability evidence | Scope/owners | Reuse or limitation |
+| --- | --- | --- | --- | --- | --- | --- |
+
+List every candidate owned by every consulted router exactly once. Do not call
+`not-applicable`, exact reuse, or user exclusion an executed skill. A
+budget-deferred, capability-blocked, failed, or unresolved row makes the plan
+incomplete.
 
 ### Supplied Validation Evidence
 
@@ -165,9 +186,10 @@ Lead with the practical result. Include counts for routers consulted, selected
 nodes, worker creation attempts, workers created, skills executed, accepted
 nodes, nodes blocked after execution, nodes blocked before execution, isolation
 failures, rerun nodes, independent checks, canonical findings by disposition,
-material changes, validation requirements by disposition, unique validator
-executions, validators not run, and nodes stopped by the hard deadline. State
-whether requested work is complete.
+material changes, validation requirements by disposition, coalesced validator
+units, unique validator executions, validators not run, per-root budget,
+reserve, execution epochs, and nodes stopped by the hard deadline.
+State `complete` or `incomplete` using the completion gate.
 
 ### Worker Lifecycle
 
@@ -188,7 +210,7 @@ Include every worker that actually loaded and executed its skill, including a
 worker that later returned a conforming blocked result. Exclude nodes blocked
 before worker creation or before skill loading; those belong in `Worker
 Lifecycle` and `Review Graph Evidence`. Include focused review, fix, dedicated
-`review-validator`, independent `review-agent`, revalidation, and
+`review-validator`, `repository-independent-review`, revalidation, and
 production-review synthesis nodes. Use the exact skill ID. Keep routers out of
 this table and do not describe the independent reviewer as a validator.
 
@@ -203,7 +225,7 @@ user can distinguish router reads from executed skills.
 Include every canonical finding plus duplicate and withdrawn records. Preserve
 the reason for deduplication or withdrawal.
 
-Preserve `review-agent` findings in their native report and assign stable graph
+Preserve independent-review findings in their native report and assign stable graph
 IDs for this table. Route each to the applicable owning surface without implying
 that a validator diagnosed it.
 
@@ -226,10 +248,13 @@ review-only.`
 Lead with P0/P1 items, then blocked nodes, untested configurations, environment
 limits, and accepted risks. Write `none` only when all are genuinely absent.
 
-### Meaningful Skips
+### Routing Dispositions And Exclusions
 
-Repeat the final skip decisions, including any scope change that made a planned
-node inapplicable.
+List every catalog candidate grouped by router with `selected`,
+`not-applicable`, exact verified reuse, or explicit user exclusion. Explain
+conflict resolutions and coverage limitations. A budget-deferred,
+capability-blocked, failed, unknown, or unresolved candidate belongs under
+remaining limitations and makes the graph incomplete.
 
 ### Validation Ledger
 
@@ -253,6 +278,15 @@ List every selected validation node without an accepted native result. Keep its
 commands out of the executed validation ledger. Write `none` only when all
 planned validators returned accepted results.
 
+### Resume Manifest
+
+When any node is undispatched or unaccepted, list its exact node ID, skill, mode,
+requirements, priority, dependencies, planned validator commands, and blocker.
+Include the captured fingerprints and persisted journal/raw-report location.
+State that retrying in the same root task does not reset a lifetime worker limit
+and whether a fresh root task may be required. Omit this section only for a
+complete graph.
+
 ### Review Graph Evidence
 
 | Node | Skill | Mode | Lifecycle status | Worker created | Skill executed | Scope/worktree/repository fingerprints | Skill/references loaded | Validators | Invalidated/revalidated |
@@ -263,6 +297,18 @@ both the stale evidence and its replacement rather than overwriting history.
 Use lifecycle statuses such as `accepted`, `blocked-after-execution`, and
 `blocked-before-execution`; never fabricate loaded references for an uncreated
 worker.
+
+### Review Evidence
+
+Derive this compatibility view from the exhaustive graph ledger:
+
+| Orchestrator | Status | Why selected or skipped | Scope handed off | Skills/references actually loaded | Validators |
+| --- | --- | --- | --- | --- | --- |
+
+Include exactly one row for `project-tooling-review`,
+`cpp-review-orchestrator`, `rust-review-orchestrator`,
+`python-review-orchestrator`, and `docs-review-orchestrator`. Use `selected`,
+`skipped`, or `blocked`; never imply that a consulted router executed.
 
 ### Repository State
 
@@ -276,7 +322,7 @@ out-of-repository validator artifacts separately.
 Do not send the final response until all applicable equalities hold:
 
 ```text
-selected nodes = accepted nodes + blocked-after-execution + blocked-before-execution
+selected nodes = accepted nodes + blocked-after-execution + blocked-before-execution + invalidated/stale nodes
 worker creation attempts = workers created + creation failures
 skills executed <= workers created
 canonical findings = fixed + remaining + accepted-risk + blocked
@@ -305,12 +351,12 @@ Also verify:
   `Validators Not Run`
 - every supplied standalone validator result has one journal import disposition;
   every reused import has a current graph validator result that verified it
-- every concrete change target has an accepted current `review-agent` result or
-  a meaningful skip/blocker; whole-repository baselines without a concrete diff
-  may skip this gate
-- every native `review-agent` finding has a stable graph finding ID and final
+- every concrete change target has an accepted current
+  `repository-independent-review` result; whole-repository baselines without a
+  concrete diff mark that catalog entry not applicable
+- every native independent-review finding has a stable graph finding ID and final
   disposition
-- no `review-agent` result is counted as validation evidence and no
+- no independent-review result is counted as validation evidence and no
   `review-validator` failure is promoted to a finding without reviewer diagnosis
 - routers are described as consulted, never as executed skills
 - capacity evidence contains safe aggregate concurrency and optional lifetime
@@ -320,3 +366,21 @@ Also verify:
   remains selected and is reported as blocked before execution
 - no completed worker was reused for a later node
 - no blocked node was replaced by same-context coordinator review
+- every invalidated/stale node is recorded as such until a current replacement
+  result is accepted; an unresolved stale node blocks `complete`
+- each execution epoch's nodes plus recovery/finalization reserve did not exceed
+  its effective root budget, and every epoch completed before `complete`
+- every declared validation requirement maps to exactly one coalesced validator
+  unit and every accepted evidence reuse maps back to all requirements it
+  satisfies
+- every consulted router catalog has exactly one decision per candidate and no
+  path, rule, owner, or applicability-evidence mismatch
+- every selected applicable specialist completed or has exact verified reuse;
+  no meaningful or budget skip satisfies applicability
+- every late handoff resolved and routing was revalidated after surface-changing
+  fixes
+- required documentation/citation coverage, baseline validation, independent
+  review, and language/repository syntheses completed
+- no undispatched or unaccepted node remains when the outcome says `complete`
+- matched fingerprints, zero isolation failures, synthesized final output, and
+  deduplicated findings are all proved before the outcome says `complete`

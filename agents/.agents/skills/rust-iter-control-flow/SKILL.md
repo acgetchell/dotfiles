@@ -23,10 +23,12 @@ Focus on newly added or modified Rust code that:
 ### Scope Modes
 
 Default mode:
+
 - Audit newly added or modified iterator chains, closures, loops, and pattern matches.
 - Ignore unrelated unchanged control flow unless it defines local style or invariants for the changed code.
 
 Whole-repo baseline mode:
+
 - Use when the user explicitly says "whole repo", "entire repo", "baseline audit", or similar.
 - Audit iterator/control-flow idioms across Rust source, tests, examples, and benches.
 - Prioritize findings by correctness/exhaustiveness risk, avoidable hot-path allocation, misleading closure capture, and control flow that hides invariants.
@@ -134,19 +136,23 @@ Check:
 ## Output Format
 
 ### Summary
+
 - PASS
 - NEEDS IMPROVEMENT
 - FAIL
 
 ### Findings
+
 - Concrete idiomatic improvements with file/function references
 - For each, state whether the issue is clarity, allocation, exhaustiveness, or capture
 
 ### Required Fixes
+
 - Iterator chain restructuring
 - Loop/iterator swaps
 - Pattern-matching simplifications
 - Exhaustiveness corrections
 
 ### Optional Improvements
+
 - Stylistic or readability suggestions that do not change semantics

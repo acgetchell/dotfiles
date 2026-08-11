@@ -1,0 +1,210 @@
+{
+  "allow_legacy_fixture": true,
+  "worker_budget": 12,
+  "recovery_finalization_reserve": 1,
+  "review_requirements": [
+    {
+      "requirement_id": "rust-scientific",
+      "skill_id": "rust-scientific-correctness",
+      "skill_path": "$SKILLS_ROOT/rust-scientific-correctness/SKILL.md",
+      "review_surface": ["src/matrix.rs"],
+      "reason": "matrix arithmetic and singularity behavior changed",
+      "priority": "correctness-invariants",
+      "synthesis_dependency": "rust-synthesis",
+      "required": false,
+      "static_references": ["$SKILLS_ROOT/rust-review-orchestrator/references/la-stack.md"],
+      "validation_requirement_ids": ["current-host-ci"],
+      "owners": ["rust"]
+    },
+    {
+      "requirement_id": "rust-invariants",
+      "skill_id": "rust-invariant-state-transitions",
+      "skill_path": "$SKILLS_ROOT/rust-invariant-state-transitions/SKILL.md",
+      "review_surface": ["src/matrix.rs"],
+      "reason": "coordinated matrix state changes",
+      "priority": "correctness-invariants",
+      "synthesis_dependency": "rust-synthesis",
+      "required": false,
+      "static_references": ["$SKILLS_ROOT/rust-review-orchestrator/references/la-stack.md"],
+      "validation_requirement_ids": ["current-host-ci"],
+      "owners": ["rust"]
+    },
+    {
+      "requirement_id": "rust-errors",
+      "skill_id": "rust-error-variants",
+      "skill_path": "$SKILLS_ROOT/rust-error-variants/SKILL.md",
+      "review_surface": ["src/error.rs"],
+      "reason": "typed singularity errors changed",
+      "priority": "supporting-quality",
+      "synthesis_dependency": "rust-synthesis",
+      "required": false,
+      "static_references": ["$SKILLS_ROOT/rust-review-orchestrator/references/la-stack.md"],
+      "validation_requirement_ids": ["current-host-ci"],
+      "owners": ["rust"]
+    },
+    {
+      "requirement_id": "rust-tests",
+      "skill_id": "rust-test-quality",
+      "skill_path": "$SKILLS_ROOT/rust-test-quality/SKILL.md",
+      "review_surface": ["tests/matrix.rs"],
+      "reason": "matrix regression tests changed",
+      "priority": "supporting-quality",
+      "synthesis_dependency": "rust-synthesis",
+      "required": false,
+      "static_references": ["$SKILLS_ROOT/rust-review-orchestrator/references/la-stack.md"],
+      "validation_requirement_ids": ["current-host-ci"],
+      "owners": ["rust"]
+    },
+    {
+      "requirement_id": "rust-style",
+      "skill_id": "rust-style-hygiene",
+      "skill_path": "$SKILLS_ROOT/rust-style-hygiene/SKILL.md",
+      "review_surface": ["src/matrix.rs"],
+      "reason": "import and naming cleanup is plausible",
+      "priority": "optional-hygiene",
+      "synthesis_dependency": "rust-synthesis",
+      "required": false,
+      "static_references": ["$SKILLS_ROOT/rust-review-orchestrator/references/la-stack.md"],
+      "validation_requirement_ids": [],
+      "owners": ["rust"]
+    },
+    {
+      "requirement_id": "python-build",
+      "skill_id": "python-build-portability",
+      "skill_path": "$SKILLS_ROOT/python-build-portability/SKILL.md",
+      "review_surface": ["pyproject.toml", "python/bindings.py"],
+      "reason": "installed Python bindings and package metadata changed",
+      "priority": "supporting-quality",
+      "synthesis_dependency": "python-synthesis",
+      "required": false,
+      "static_references": [],
+      "validation_requirement_ids": ["python-package"],
+      "owners": ["python"]
+    },
+    {
+      "requirement_id": "python-parse",
+      "skill_id": "python-parse-dont-validate",
+      "skill_path": "$SKILLS_ROOT/python-parse-dont-validate/SKILL.md",
+      "review_surface": ["python/bindings.py"],
+      "reason": "raw dimensions enter invariant-bearing bindings",
+      "priority": "correctness-invariants",
+      "synthesis_dependency": "python-synthesis",
+      "required": false,
+      "static_references": [],
+      "validation_requirement_ids": ["current-host-ci"],
+      "owners": ["python"]
+    },
+    {
+      "requirement_id": "python-tests",
+      "skill_id": "python-test-quality",
+      "skill_path": "$SKILLS_ROOT/python-test-quality/SKILL.md",
+      "review_surface": ["python/tests/test_bindings.py"],
+      "reason": "binding tests changed",
+      "priority": "supporting-quality",
+      "synthesis_dependency": "python-synthesis",
+      "required": false,
+      "static_references": [],
+      "validation_requirement_ids": ["current-host-ci"],
+      "owners": ["python"]
+    },
+    {
+      "requirement_id": "docs-suite",
+      "skill_id": "repository-docs-review",
+      "skill_path": "$SKILLS_ROOT/repository-docs-review/SKILL.md",
+      "review_surface": ["README.md", "docs/usage.md"],
+      "reason": "active documentation suite changed",
+      "priority": "required-routing-synthesis",
+      "synthesis_dependency": "repository-synthesis",
+      "required": true,
+      "static_references": [],
+      "validation_requirement_ids": ["current-host-ci"],
+      "owners": ["documentation"]
+    },
+    {
+      "requirement_id": "docs-citations",
+      "skill_id": "scientific-citation-audit",
+      "skill_path": "$SKILLS_ROOT/scientific-citation-audit/SKILL.md",
+      "review_surface": ["CITATION.cff", "docs/algorithm.md"],
+      "reason": "scientific provenance and citation metadata changed",
+      "priority": "required-routing-synthesis",
+      "synthesis_dependency": "repository-synthesis",
+      "required": true,
+      "static_references": [],
+      "validation_requirement_ids": ["current-host-ci"],
+      "owners": ["documentation"]
+    }
+  ],
+  "validation_requirements": [
+    {
+      "requirement_id": "current-host-ci",
+      "source_state": ["scope", "worktree", "repository"],
+      "commands": ["just ci"],
+      "working_directories": ["/repo"],
+      "environment": "macos-arm64; locked dependencies",
+      "toolchain": "stable Rust and locked Python",
+      "features": ["default"],
+      "platform": "macos-arm64",
+      "artifact_owner": "repository-current-host",
+      "mutation_lock": "shared-readonly-build-root",
+      "canonical_recipe": "just ci",
+      "required": true,
+      "baseline": true
+    },
+    {
+      "requirement_id": "rust-current-host-ci",
+      "source_state": ["scope", "worktree", "repository"],
+      "commands": ["just ci"],
+      "working_directories": ["/repo"],
+      "environment": "macos-arm64; locked dependencies",
+      "toolchain": "stable Rust and locked Python",
+      "features": ["default"],
+      "platform": "macos-arm64",
+      "artifact_owner": "repository-current-host",
+      "mutation_lock": "shared-readonly-build-root",
+      "canonical_recipe": "just ci",
+      "required": true,
+      "baseline": false
+    },
+    {
+      "requirement_id": "python-package",
+      "source_state": ["scope", "worktree", "repository"],
+      "commands": ["uv build"],
+      "working_directories": ["/repo"],
+      "environment": "macos-arm64; locked dependencies",
+      "toolchain": "Python 3.14",
+      "features": ["wheel", "sdist"],
+      "platform": "macos-arm64",
+      "artifact_owner": "python-dist",
+      "mutation_lock": "isolated-dist-directory",
+      "canonical_recipe": "uv build",
+      "required": true,
+      "baseline": false
+    }
+  ],
+  "synthesis_nodes": [
+    {
+      "node_id": "rust-synthesis",
+      "skill_id": "rust-production-review",
+      "skill_path": "$SKILLS_ROOT/rust-production-review/SKILL.md",
+      "requirement_ids": [],
+      "coverage": ["Rust production synthesis"],
+      "predecessors": []
+    },
+    {
+      "node_id": "python-synthesis",
+      "skill_id": "python-production-review",
+      "skill_path": "$SKILLS_ROOT/python-production-review/SKILL.md",
+      "requirement_ids": [],
+      "coverage": ["Python production synthesis"],
+      "predecessors": []
+    },
+    {
+      "node_id": "repository-synthesis",
+      "skill_id": "repository-production-review",
+      "skill_path": "$SKILLS_ROOT/repository-production-review/SKILL.md",
+      "requirement_ids": [],
+      "coverage": ["Cross-language final synthesis"],
+      "predecessors": ["rust-synthesis", "python-synthesis"]
+    }
+  ]
+}

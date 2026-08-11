@@ -100,7 +100,7 @@ does not.
 Report:
 
 - scoped files and effects
-- each selected and meaningful skipped individual skill
+- each selected and not-selected individual skill with its reason
 - exact skill and reference files loaded
 - findings, fixes, and per-skill validators
 - the shared validation ledger, including any justified reruns

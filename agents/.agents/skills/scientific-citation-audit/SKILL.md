@@ -61,21 +61,27 @@ When fixing references:
 ## Output Format
 
 ### Citation Surface Inspected
+
 - Files and active docs reviewed.
 
 ### Mechanical Validation
+
 - DOI/link validation command and result.
 - Dead, malformed, or metadata-mismatched references.
 
 ### Credit Alignment
+
 - Algorithm/data-structure claims with correct credit.
 - Missing, weak, or misplaced credit.
 
 ### Changes Made
+
 - Files edited and why.
 
 ### Validation
+
 - Documentation/config validator run, or reason it was not run.
 
 ### Follow-ups
+
 - Optional literature additions, paper-reading tasks, or citation questions left for the maintainer.

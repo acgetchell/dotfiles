@@ -10,19 +10,39 @@ Coordinate a domain-neutral documentation review with the smallest applicable sp
 ## Ground Rules
 
 - Do not mutate git state unless explicitly requested in the current turn.
-- Read repository-local guidance and honor a parent `repo-review` scope without narrowing it silently.
+- Read repository-local guidance and honor any supplied parent scope without
+  narrowing it silently, including `repo-review legacy-grouped` outside
+  graph-routing mode.
 - Default to branch scope. Use staged-only, changed-file-only, release-readiness, or whole-repository scope when explicitly requested or handed off.
 - Treat an explicit release-readiness or release documentation audit as release-readiness. A request to review a named release patch, diff, or changed-file set remains bounded to that supplied surface unless the user asks to expand it.
 - In release-readiness or whole-suite mode, inspect every tracked active document and classify generated, template, archived, or excluded material.
 - Preserve generated-file ownership and authoritative source data.
 - Select scientific, citation, API, and academic skills from actual content, not repository labels.
 
+## Graph-Routing Mode
+
+When `review-graph` requests a declarative handoff, read
+[`review-graph/references/routing-handoff.md`](../review-graph/references/routing-handoff.md)
+and return its records instead of running this skill's standalone pass loop.
+Use every `docs-review-orchestrator` entry in
+[`routing-catalog.json`](../review-graph/references/routing-catalog.json) and
+return exactly one disposition per candidate. Select only documentation
+specialists justified by actual content, cite catalog rules and inspected claim
+evidence, expand exact skill paths, mark required documentation/citation
+coverage, and declare exact validators, priorities, owners, static truth-owner
+references, and repository synthesis dependencies. Do not load specialist
+bodies, validate, synthesize, edit, create subagents, or recursively invoke an
+orchestrator in graph-routing mode.
+
+Otherwise keep the standalone behavior below.
+
 ## Establish Scope And Routing
 
 1. Inspect the supplied scope or use read-only git discovery.
 2. Read [`references/check-routing.md`](references/check-routing.md).
 3. Select individual skills from the documented surface and claims.
-4. State selected and meaningfully skipped skills before loading their bodies.
+4. State selected and not-selected skills with reasons before loading their
+   bodies.
 5. Load repository-specific references only when both repository and concern match.
 
 ## Review Trace

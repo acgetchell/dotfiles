@@ -26,4 +26,3 @@ crate or closely related computational-geometry code.
   guarantees as correctness constraints.
 - Prefer fixes that preserve typed errors and layer-specific diagnostics over
   fast boolean shortcuts.
-

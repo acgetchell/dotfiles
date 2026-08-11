@@ -64,7 +64,7 @@ if command -v cargo >/dev/null 2>&1; then
   }
 
   install_cargo_tool just "$JUST_VERSION"
-  for tool in dprint zizmor; do
+  for tool in dprint rumdl zizmor; do
     pin_name="${tool}_version"
     version="$(just --justfile "$DOTFILES_DIR/justfile" --evaluate "$pin_name")"
     if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then

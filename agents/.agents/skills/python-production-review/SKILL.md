@@ -11,13 +11,20 @@ Perform a production-readiness review without repeating focused specialist passe
 
 ### Orchestrated Mode
 
-Use when `python-review-orchestrator` already selected and applied focused skills.
+Use when `review-graph` or `python-review-orchestrator` supplies accepted focused
+review evidence.
 
-- Read only this file.
-- Do not load the standalone checklist.
+- Do not load the standalone checklist in orchestrated mode.
+- In a `review-graph` synthesis node, read only this skill, the supplied
+  handoff and accepted evidence ledger, and the changed files needed to assess
+  cross-cutting integration.
 - Treat specialist findings and validation as established evidence.
 - Inspect cross-cutting integration and concerns that remain genuinely unowned.
 - Do not repeat parsing, CLI, scientific, notebook, support-tooling, packaging, or test checklists.
+- In a `review-graph` synthesis node, remain read-only and evidence-only. Do not
+  edit, run validators, route work, load another review skill, or create
+  subagents. Return missing or stale validation as an exact blocker for the
+  coordinator.
 
 ### Standalone Mode
 
@@ -88,20 +95,27 @@ Reconcile contracts across modules, installed entry points, generated artifacts,
 
 ## Final Validation
 
-Apply one validation ledger in both modes, keyed by source/environment state,
+Apply one validation ledger in all execution modes, keyed by source/environment state,
 built artifact and installation-target identity, Python/platform/dependency
-configuration, instrumentation, and exact validator or test selection. In
-orchestrated mode, consume the parent ledger; in standalone mode, create it.
-Reuse matching evidence and add validation only for an uncovered integration
-path. Rerun only after a relevant change invalidates the result, for a
-materially different configuration, or for explicit nondeterminism diagnosis.
-Do not run full CI solely because this is the final pass; follow repository
-requirements and escalate only when narrower non-overlapping coverage is
-insufficient.
+configuration, instrumentation, and exact validator or test selection. In graph
+synthesis mode, consume the accepted parent ledger without running or adding
+validators; return uncovered integration requirements to the coordinator as
+blockers. In standalone mode, create the ledger, reuse matching evidence, and
+add validation only for an uncovered integration path. In non-graph
+orchestrated mode, consume the parent ledger and follow its validation workflow
+for uncovered evidence. Rerun only after a relevant change invalidates the
+result, for a materially different configuration, or for explicit
+nondeterminism diagnosis. Do not run full CI solely because this is the final
+pass; follow repository requirements and escalate only when narrower
+non-overlapping coverage is insufficient.
 
 ## Output
 
-In orchestrated mode, synthesize specialist outcomes, remove duplicate findings, identify cross-cutting blockers, and name residual risk. In standalone mode, lead with findings ordered by severity and list focused skills or checklist sections used. Always report validation performed, reused ledger evidence, and meaningful limitations. End both modes with one verdict:
+In orchestrated mode, synthesize specialist outcomes, remove duplicate findings, identify cross-cutting blockers, and name residual risk. In standalone mode, lead with findings ordered by severity and list focused skills or checklist sections used. Always report validation performed, reused ledger evidence, and meaningful limitations.
+
+In a `review-graph` synthesis node, return table-ready fields for `Findings`,
+`Exact Blockers`, `Validator Results`, `Reused Ledger Evidence`, and
+`Readiness Verdict`. Use the dedicated `Readiness Verdict` field for one of:
 
 - **PASS**: no actionable production-readiness issue remains in scope.
 - **NEEDS IMPROVEMENT**: only non-blocking weaknesses or deferred strengthening remain.

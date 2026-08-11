@@ -11,7 +11,9 @@ Coordinate focused Python skills without copying their guidance. Select each ski
 
 - Do not mutate git state unless the user explicitly requests it in the current turn.
 - Respect repository-local instructions before inspecting or editing files.
-- Prefer changed-file scope. Use whole-repository mode only when explicitly requested or handed off as baseline scope by `repo-review`.
+- Prefer changed-file scope. Outside graph-routing mode, use whole-repository
+  mode only when explicitly requested or supplied as a parent baseline scope,
+  including `repo-review legacy-grouped`.
 - Honor a parent orchestrator's branch-scope file list instead of narrowing it to current worktree changes.
 - When asked to fix issues, implement safe actionable fixes as each pass finds them.
 - Use focused validators while iterating. Run full CI only when repository policy or cross-layer risk requires it.
@@ -20,6 +22,24 @@ Coordinate focused Python skills without copying their guidance. Select each ski
   configuration, instrumentation, and exact test selection. Use a wheel,
   sdist, installed tree, or entry-point digest when applicable. Reuse
   still-valid evidence instead of replaying it through broader recipes.
+
+## Graph-Routing Mode
+
+When `review-graph` requests a declarative handoff, read
+[`review-graph/references/routing-handoff.md`](../review-graph/references/routing-handoff.md)
+and return its records instead of running this skill's standalone pass loop.
+Use every `python-review-orchestrator` entry in
+[`routing-catalog.json`](../review-graph/references/routing-catalog.json) and
+return exactly one disposition per candidate, including the mandatory
+`python-production-review` synthesis entry. Select only surface-driven Python
+specialists, cite the catalog rule and inspected trigger evidence, expand exact
+skill paths, and declare exact validators, priorities, owners, and synthesis
+dependencies. Preserve the build-portability requirement for package mode,
+build metadata, installed modules, or entry points. Do not load specialist
+bodies, validate, synthesize, edit, create subagents, or recursively invoke an
+orchestrator in graph-routing mode.
+
+Otherwise keep the standalone behavior below.
 
 ## Establish Scope And Routing
 
@@ -30,7 +50,8 @@ Coordinate focused Python skills without copying their guidance. Select each ski
    reader before selecting skills; a status entry or filename is not evidence.
 3. Read [`references/check-routing.md`](references/check-routing.md).
 4. Select individual skills from changed behavior, not file extensions alone.
-5. State selected and meaningfully skipped skills before loading specialist bodies.
+5. State selected and not-selected skills with reasons before loading
+   specialist bodies.
 6. Load a repository-specific reference only when both the repository and its concern match.
 
 Validator selection is independent from skill selection. Running tests for changed code does not by itself require loading `python-test-quality`.
@@ -46,7 +67,9 @@ For each selected skill, record:
 - fixes applied
 - focused validation and result, or the matching ledger evidence reused
 
-When invoked by `repo-review`, provide table-ready evidence for the parent review. Name selected and skipped skills whose absence might otherwise appear accidental.
+When invoked through `repo-review legacy-grouped`, provide table-ready evidence
+for the parent review. Name selected and not-selected skills whose absence might
+otherwise appear accidental.
 
 ## Pass Order And Individual Selection
 
@@ -117,10 +140,11 @@ Lead with unresolved blockers. Then include:
 
 - files changed and why
 - selected skills and references actually loaded
-- meaningful skips
+- not-selected skills and reasons
 - fixes and cross-skill reconciliations
 - the non-overlapping validation ledger and results
 - untested configurations or external limitations
 - confirmation that git state was not mutated, when true
 
-When invoked by `repo-review`, return this evidence in the parent's requested table-ready form.
+When invoked through `repo-review legacy-grouped`, return this evidence in the
+parent's requested table-ready form.

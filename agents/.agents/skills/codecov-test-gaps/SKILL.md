@@ -12,10 +12,12 @@ The goal is not to chase coverage percentages. Use coverage as a signal to find 
 ## Scope Modes
 
 Default mode:
+
 - Start from the current branch, PR, or latest relevant Codecov run.
 - Prioritize patch coverage and existing gaps directly related to the current change.
 
 Whole-repo baseline mode:
+
 - Use when the user explicitly says "whole repo", "entire repo", "baseline audit", or similar.
 - Treat full project coverage as the primary signal, not only patch coverage.
 - Audit uncovered source, tests, examples, benches, and report configuration across the whole repository when artifacts expose them.
@@ -179,32 +181,38 @@ When the coverage gap overlaps a specialized review skill (`rust-test-quality`, 
 ## Output format
 
 ### Coverage source
+
 - Workflow run URL or ID, or PR Codecov comment / status used
 - Commit SHA the report was generated from
 - Branch / PR number reviewed
 - Report/artifact source used
 
 ### Patch coverage
+
 - Patch coverage percentage and the threshold from `codecov.yml`
 - Uncovered lines/branches in the changed code
 - Whether each gap was filled, excluded, or deferred and why
 
 ### Existing coverage gaps reviewed
+
 - Pre-existing uncovered code touched by this review
 - Why it was in scope for the current task
 - Decision: tested, excluded, or deferred
 
 ### Changes made
+
 - Tests added or updated
 - Behavior/invariants covered
 - `codecov.yml` updates, if any (with rationale)
 - Source-level exclusion markers added, if any (with rationale)
 
 ### Validation
+
 - Commands run
 - Pass/fail result
 - Any coverage rerun limitations
 
 ### Follow-ups
+
 - Remaining coverage gaps
 - Suggested future tests, exclusions, or `codecov.yml` adjustments

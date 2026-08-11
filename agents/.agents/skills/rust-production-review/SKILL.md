@@ -13,13 +13,17 @@ Prioritize observable defects, invariant corruption, unsoundness, scientifically
 
 ### Orchestrated final synthesis
 
-Use this mode when `rust-review-orchestrator` invokes the skill after focused passes.
+Use this mode when `review-graph` or `rust-review-orchestrator` invokes the skill
+after focused passes.
 
 - Consume prior scope, selected skills, explicit skips, findings, fixes, and validators.
 - Do not load the standalone checklist or rerun completed specialists.
 - Revisit an earlier concern only when later edits invalidate its evidence or the handoff exposes a contradiction.
 - Focus on residual dependency, unsafe, performance, simplification, validation, and cross-contract integration risk.
 - Deduplicate findings and issue the final severity and readiness verdict.
+- In a `review-graph` synthesis node, remain read-only and evidence-only. Do not
+  edit, run validators, route work, or create subagents. Return missing or stale
+  validation as an exact blocker for the coordinator.
 
 ### Standalone broad review
 
@@ -30,7 +34,9 @@ Use this mode only when invoked directly for a broad Rust, release-readiness, or
 - Read repository-local guidance before reviewing or editing.
 - Default to changed Rust files and nearby contract owners.
 - Use whole-repository baseline mode only when explicitly requested.
-- Keep diagnostic reviews read-only; make the smallest safe fixes when authorized.
+- Keep diagnostic reviews read-only. Apply fixes and run new validation only in
+  standalone mode when explicitly authorized; graph synthesis is always
+  read-only.
 - Do not mutate git state without explicit permission.
 - Verify current compiler, Cargo, dependency, and target behavior from authoritative sources when version sensitivity matters.
 - Treat compilation, tests, model checking, dynamic analysis, independent scientific evidence, and reasoning as complementary.
@@ -45,7 +51,7 @@ Record:
 - dependency changes, unsafe boundaries, performance claims, and available validators
 - user-owned or unrelated work that must remain untouched
 
-Provide table-ready evidence when invoked by an orchestrator.
+Provide table-ready evidence when invoked by an orchestrator or `review-graph`.
 
 ## Residual Workflow
 
@@ -69,7 +75,13 @@ Require measurement for non-obvious performance changes and proof before deletio
 
 ### 4. Reconcile validation and release risk
 
-Map every material behavior, API, feature, target, scientific, or state-transition change to evidence. Reuse valid specialist results and add only missing integration validators. Do not infer full support from one toolchain, target, feature set, test suite, or benchmark.
+Map every material behavior, API, feature, target, scientific, or
+state-transition change to evidence. In graph synthesis mode, consume accepted
+validation without running or adding validators; return uncovered integration
+requirements to the coordinator as blockers. In standalone mode, add only
+missing integration validators. In non-graph orchestrated mode, follow the
+parent validation workflow and add only uncovered evidence. Do not infer full
+support from one toolchain, target, feature set, test suite, or benchmark.
 
 If a late fix affects an earlier contract, return it to the owning skill and refresh its evidence before final classification.
 

@@ -24,10 +24,12 @@ Focus on newly added or modified files such as:
 ### Scope Modes
 
 Default mode:
+
 - Audit newly added or modified manifests, toolchain files, lint configuration, and crate-root attributes.
 - Ignore unrelated unchanged configuration unless it affects the changed manifest surface.
 
 Whole-repo baseline mode:
+
 - Use when the user explicitly says "whole repo", "entire repo", "baseline audit", or similar.
 - Audit all workspace manifests, committed lockfile policy, toolchain files, Cargo config, lint configuration, docs.rs metadata, and crate-root lint attributes.
 - Prioritize findings by release risk, semver impact, MSRV drift, feature breakage, unsafe/lint policy enforcement, and dependency correctness.
@@ -147,14 +149,17 @@ Before a release, also check:
 ## Output Format
 
 ### Summary
+
 - PASS
 - NEEDS IMPROVEMENT
 - FAIL
 
 ### Findings
+
 - Manifest, feature, MSRV, lint, or workspace issues with locations
 
 ### Required Fixes
+
 - Metadata corrections
 - Dependency reorganization or feature changes
 - MSRV/toolchain alignment
@@ -162,4 +167,5 @@ Before a release, also check:
 - Workspace or publish setting changes
 
 ### Optional Improvements
+
 - Future-friendly metadata, doc, or feature suggestions

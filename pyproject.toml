@@ -143,6 +143,20 @@ indent-style = "space"
 skip-magic-trailing-comma = true
 line-ending = "auto"
 
+[tool.rumdl]
+line-length = 160
+disable = [
+  "MD013",
+  "MD018",
+  "MD024",
+  "MD029",
+  "MD033",
+  "MD037",
+  "MD038",
+  "MD041",
+  "MD060",
+]
+
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = ["-ra", "--strict-markers", "--strict-config", "--color=yes"]

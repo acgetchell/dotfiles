@@ -16,14 +16,35 @@ The intent is to replace a maintainer manually invoking several C++ reviews. Do 
 - Use C++23, target-based CMake with checked-in presets, vcpkg manifest mode, doctest through CTest, `just` recipes, Semgrep, clang-format, and clang-tidy. Do not introduce parallel C++ toolchains unless the user explicitly requests one.
 - Respect repository-local instructions and exact recipe/preset names plus documented compiler, standard-library, triplet, dependency, and sanitizer support.
 - Prefer changed-file review by default. Use whole-repo baseline mode only when the user explicitly asks for a repository-wide or baseline audit.
-- When invoked by `repo-review`, honor its handed-off branch file list, diff, or baseline inventory instead of rediscovering a narrower scope.
+- Outside graph-routing mode, honor any handed-off branch file list, diff, or
+  baseline inventory. This includes the explicit `repo-review legacy-grouped`
+  path.
 - When the user asks to fix issues, implement actionable findings as each group discovers them unless the fix is blocked or unsafe.
 - Select focused validators from touched risks. Do not run full CI by default.
 - Maintain one cross-group validation ledger. Reuse still-valid results and never rerun the same test selection under the same source/build/configuration state.
 
+## Graph-Routing Mode
+
+When `review-graph` requests a declarative handoff, read
+[`review-graph/references/routing-handoff.md`](../review-graph/references/routing-handoff.md)
+and return its records instead of running this skill's standalone grouped pass
+loop. Use every `cpp-review-orchestrator` entry in
+[`routing-catalog.json`](../review-graph/references/routing-catalog.json) and
+return exactly one disposition per candidate, including the mandatory
+`cpp-production-review` synthesis entry. Select only groups justified by the
+supplied C++ surface, cite the catalog rule and inspected trigger evidence,
+expand exact skill paths, attach applicable CDT++ references, and declare exact
+validation requirements, priorities, owners, and synthesis dependencies. Do
+not load specialist bodies, validate, synthesize, edit, create subagents, or
+recursively invoke an orchestrator in graph-routing mode.
+
+Otherwise keep the standalone behavior below.
+
 ## Review Trace
 
-When invoked by `repo-review`, begin with a handoff receipt naming the C++ scope, selected and skipped groups with reasons, and routing files to load.
+When invoked through `repo-review legacy-grouped`, begin with a handoff receipt
+naming the C++ scope, selected and skipped groups with reasons, and routing
+files to load.
 
 For each selected specialist group and the mandatory final synthesis, announce the group and focused skills before loading them. A group is complete only when the final summary can name its status, skill files loaded, files inspected, findings or explicit no-finding result, fixes, and focused validators. A remembered skill name or one blanket CI run is not grouped evidence.
 
@@ -166,7 +187,7 @@ End with:
 - each changed file and why
 - every selected and skipped group
 - focused skill and reference files actually loaded
-- table-ready evidence when invoked by `repo-review`
+- table-ready evidence when invoked through `repo-review legacy-grouped`
 - validators and results
 - non-overlapping validation ledger, including why any rerun was necessary
 - fixed findings and the mandatory Final Synthesis classification of every remaining risk, or an explicit no-residual-risk result

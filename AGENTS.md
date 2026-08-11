@@ -28,6 +28,11 @@ uv run python scripts/skill_validate.py <skill-dir>
 - In tracked docs and instructions, prefer `$HOME`, `~`, or placeholders over
   committed absolute paths such as `/Users/<name>/...`.
 
+## Markdown Validation
+
+- Run `just markdown-check` to validate tracked and untracked Markdown files.
+- Run `just markdown-fix` to apply safe rumdl fixes.
+
 ## Dotfiles Workflow
 
 - Use `just` recipes as the primary command surface when they exist.

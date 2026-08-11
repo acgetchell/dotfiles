@@ -38,7 +38,7 @@ updates:
     open-pull-requests-limit: 10
     labels:
       - "dependencies"
-      - "python:uv"
+      - "python"
     groups:
       dependencies:
         applies-to: version-updates

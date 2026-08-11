@@ -26,6 +26,7 @@ NON_BREW_TOOLS=(
   cargo   # rustup toolchain
   rustc   # rustup toolchain
   just    # cargo-installed (bin/bootstrap.sh)
+  rumdl   # cargo-installed (bin/bootstrap.sh)
   zizmor  # cargo-installed (bin/bootstrap.sh)
   ssh     # macOS system binary
 )
@@ -67,7 +68,6 @@ BREW_BIN_PAIRS=(
   "helm:helm"
   "jq:jq"
   "kubernetes-cli:kubectl"
-  "markdownlint-cli:markdownlint"
   "node:node"
   "pandoc:pandoc"
   "pkgconf:pkg-config"
@@ -107,7 +107,7 @@ done
 
 echo "==> Pinned tool versions"
 if command -v just >/dev/null 2>&1; then
-  for tool in dprint just uv zizmor; do
+  for tool in dprint just rumdl uv zizmor; do
     pin_name="${tool}_version"
     if ! expected_version="$(just --justfile "$DOTFILES_DIR/justfile" --evaluate "$pin_name")"; then
       fail "could not resolve $pin_name from $DOTFILES_DIR/justfile"

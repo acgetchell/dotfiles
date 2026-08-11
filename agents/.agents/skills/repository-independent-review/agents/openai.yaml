@@ -1,0 +1,6 @@
+interface:
+  display_name: "Repository Independent Review"
+  short_description: "Independently review a concrete repository change"
+  default_prompt: >-
+    Use $repository-independent-review to inspect the supplied concrete change and source-state fingerprints without receiving specialist conclusions, then
+    report actionable findings and exact evidence.

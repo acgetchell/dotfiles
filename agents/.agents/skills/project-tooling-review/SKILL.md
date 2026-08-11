@@ -14,13 +14,32 @@ Review the project command layer: the recipes, workflows, version pins, and docs
 - Use read-only git commands to discover scope when needed: `git --no-pager status --short`, `git --no-pager diff --stat`, `git --no-pager diff --name-status`, and `git --no-pager diff`.
 - Respect repository-local agent instructions before editing. If the repository documents development commands, read that guidance before changing recipes or workflows.
 - Prefer changed-file review by default. Use whole-repo baseline mode only when the user explicitly asks for "repo", "whole repo", "entire repo", "baseline audit", or equivalent.
-- When invoked by `repo-review` with a branch-scope file list or diff, honor that provided scope instead of rediscovering a narrower staged or worktree-only scope.
+- Honor an exact scope supplied by a parent coordinator instead of rediscovering
+  a narrower staged or worktree-only scope.
 - When checking whether a tool is "latest" or current, verify against live authoritative sources or local package-manager metadata. Do not rely on model memory for current versions.
 - For installed-tool drift, first record the resolved executable, installed version, and owning manager before comparing repo pins, docs, workflows, or remote latest metadata. A freshly upgraded local tool is evidence that must not be skipped just because no version file changed.
 
+## Review-Graph Dispatch
+
+When `review-graph` dispatches this skill as a worker node:
+
+- honor its exact node scope, selection reasons, instructions, references,
+  fingerprints, and authorization
+- apply only `project-tooling-review`; do not create subagents or load another
+  review skill
+- keep audit and revalidation nodes read-only; edit only in an explicitly
+  authorized fix node
+- execute only the validation assigned to the node; report additional needs as
+  catalog handoffs instead of broadening the dispatch
+- return the exact Review Node Result required by the graph's node contract
+
+Otherwise use the standalone workflow below. The explicit
+`repo-review legacy-grouped` path is standalone behavior, not graph evidence.
+
 ## Review Trace
 
-When invoked by `repo-review`, begin with a handoff receipt that names:
+When invoked through `repo-review legacy-grouped`, begin with a handoff receipt
+that names:
 
 - the parent branch scope and tooling-owned file list or file count handed off
 - selected tooling surfaces and why they apply
@@ -31,7 +50,10 @@ After loading each reference file, keep its name in the running trace for the fi
 
 Evidence is grouped by tooling surface. A surface is complete only when the final summary can name the surface status (`selected` or `skipped`), reference files loaded for that surface, changed files or command owners inspected, findings or explicit no-finding result, fixes applied, and the focused validator run for that surface. Running a broad validator does not by itself count as reviewing every tooling surface.
 
-When invoked by `repo-review`, provide table-ready evidence for the parent `Review Evidence` table: selected tooling surfaces, reference files loaded, validators run, version checks performed, and any skipped surfaces that might otherwise look missing.
+In `legacy-grouped` mode, provide table-ready evidence for the parent `Review
+Evidence` table: selected tooling surfaces, reference files loaded, validators
+run, version checks performed, and any skipped surfaces that might otherwise
+look missing.
 
 ## Scope Routing
 
@@ -124,7 +146,8 @@ For each applicable tooling surface:
 1. Read the relevant reference file.
 2. Inspect changed files and nearby command owners.
 3. Record explicit findings or a no-finding result for that surface.
-4. Implement minimal fixes for real tooling drift, safety, or validation issues.
+4. Implement minimal fixes for real tooling drift, safety, or validation issues
+   only when fixes are authorized; otherwise record remediation without editing.
 5. Run the focused validator for the surface when available.
 6. If validation fails, fix and rerun the same validator before moving on.
 7. Record changed files, commands, and the surface outcome for the final summary.
@@ -140,7 +163,7 @@ End with a concise summary that helps the maintainer review unstaged changes by 
 - each file changed and why
 - tooling surfaces reviewed
 - reference files actually loaded
-- table-ready evidence for `repo-review` when invoked by the meta-orchestrator
+- table-ready evidence when invoked through `repo-review legacy-grouped`
 - validators run and their results
 - version checks performed and whether they were live or local-only
 - managed tool updates performed, before/after versions, and `justfile` or GitHub Actions pins updated
