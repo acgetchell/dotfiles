@@ -51,9 +51,10 @@ defaults write com.apple.driver.AppleBluetoothMultitouch.trackpad Clicking -bool
 echo "==> Window tiling"
 # Rectangle (Brewfile cask) owns drag-to-edge tiling; disable the native
 # macOS edge-drag tiling so both do not respond to the same gesture.
-# Option-drag tiling is left enabled as an escape hatch.
+# Option-drag tiling remains explicitly enabled as an escape hatch.
 defaults write com.apple.WindowManager EnableTilingByEdgeDrag -bool false
 defaults write com.apple.WindowManager EnableTopTilingByEdgeDrag -bool false
+defaults write com.apple.WindowManager EnableTilingOptionAccelerator -bool true
 
 echo "==> Restarting Dock and Finder"
 killall Dock 2>/dev/null || true

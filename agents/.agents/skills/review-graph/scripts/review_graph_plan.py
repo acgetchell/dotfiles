@@ -1327,7 +1327,10 @@ def assess_migration_trials(trials: Sequence[MigrationTrial], *, required_consec
             blockers.extend(active_failure_blockers[mode])
             blockers.append(f"{mode} has {streak} consecutive accepted trials; requires {required_consecutive}")
     if not any(
-        not _migration_trial_blockers(trial) and trial.worker_failure_forced is True and trial.recovery_completed and trial.grouped_fallback_completed
+        not _migration_trial_blockers(trial)
+        and trial.worker_failure_forced is True
+        and trial.recovery_completed is True
+        and trial.grouped_fallback_completed is True
         for trial in trials
     ):
         blockers.append("no accepted forced worker-failure trial completed grouped fallback")

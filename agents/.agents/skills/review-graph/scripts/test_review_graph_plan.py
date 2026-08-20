@@ -852,6 +852,29 @@ def test_migration_gate_requires_explicit_forced_worker_failure_evidence() -> No
     assert "no accepted forced worker-failure trial completed grouped fallback" in result.blockers
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("recovery_completed", 1), ("recovery_completed", "complete"), ("grouped_fallback_completed", 1), ("grouped_fallback_completed", "complete")],
+)
+def test_migration_gate_requires_exact_true_for_recovery_evidence(field: str, value: object) -> None:
+    trials = tuple(
+        _migration_trial(
+            f"{mode}-{ordinal}",
+            mode,
+            forced_worker_failure=mode == "branch-read-only" and ordinal == 1,
+            multi_epoch=mode == "baseline-release" and ordinal == 1,
+        )
+        for mode in ("branch-read-only", "baseline-release", "review-and-fix")
+        for ordinal in range(1, 4)
+    )
+    malformed_trial = replace(trials[0], **{field: value})
+
+    result = assess_migration_trials((malformed_trial, *trials[1:]))
+
+    assert not result.feasible
+    assert "no accepted forced worker-failure trial completed grouped fallback" in result.blockers
+
+
 def test_migration_gate_allows_a_recovered_trailing_streak() -> None:
     old_failure = replace(_migration_trial("old-failure", "branch-read-only"), observed_applicable_skill_ids=())
     recovered_trials = tuple(
