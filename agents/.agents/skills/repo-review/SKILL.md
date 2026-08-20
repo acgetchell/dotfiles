@@ -55,9 +55,10 @@ When the user explicitly requests `isolated`, `isolated-graph`, or
 and follow its matching profile. An isolation preference may fall back to
 grouped delivery; an isolated-only request may not.
 
-## Compatibility Report
+## Compatibility Report (Grouped Or Isolated Execution Only)
 
-Lead with findings and unresolved blockers. Include:
+For grouped or isolated execution, lead with findings and unresolved blockers.
+Do not emit this report in graph-routing mode. Include:
 
 | Orchestrator | Status | Why selected or skipped | Scope handed off | Skills/references actually loaded | Validators |
 | --- | --- | --- | --- | --- | --- |

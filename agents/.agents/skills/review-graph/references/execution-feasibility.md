@@ -65,8 +65,9 @@ Before repository capture, router loading, or graph construction:
 3. Require at least one free concurrent slot.
 4. Choose a positive per-root fresh-worker budget, defaulting to 24, and reserve
    at least one creation for recovery and finalization.
-5. When authoritative lifetime capacity is available, require it to exceed the
-   reserve and use the smaller configured or authoritative value.
+5. Require authoritative lifetime capacity to guarantee the bounded initial
+   plan beyond the reserve, and use the smaller configured or authoritative
+   value.
 6. Record the evidence source, values, configured and effective budgets,
    reserve, and gate result outside the reviewed repository.
 
@@ -99,10 +100,17 @@ For an isolation preference:
 - If capability fails before the first worker, run grouped delivery.
 - If the first worker cannot be created, discard plan-only work and run grouped
   delivery.
+- If a worker is created but its skill cannot load or execute before producing
+  accepted evidence, record
+  `blocked-after-creation-before-skill-execution`. Discard pre-acceptance
+  plan-only work and run complete grouped passes for every applicable surface.
 - If creation or capacity fails after isolated evidence was accepted, preserve
   those reports as supplemental evidence, then run complete grouped passes for
   every applicable surface. Label the result `grouped with partial isolated
   evidence`; do not claim isolated completion.
+- Apply that same post-acceptance handling when a created worker fails to load
+  its skill or execute: preserve earlier accepted reports as supplemental
+  evidence and label the result `grouped with partial isolated evidence`.
 - If a global deadline prevents more isolated dispatch but still leaves useful
   review time, spend the remaining time on the highest-risk grouped surface
   passes and account for unreviewed surfaces.
@@ -111,9 +119,10 @@ Do not return only a resume manifest while grouped review remains possible. A
 resume manifest may accompany the mixed result, but it cannot replace findings
 and grouped evidence.
 
-For isolated-only execution, stop after the first capability, creation, or
-deadline failure, preserve accepted reports, and emit the exact resume manifest.
-Never substitute grouped evidence against the user's isolation requirement.
+For isolated-only execution, stop after the first capability, creation,
+`blocked-after-creation-before-skill-execution`, or deadline failure, preserve
+accepted reports, and emit the exact resume manifest. Never substitute grouped
+evidence against the user's isolation requirement.
 
 ## Isolated-Only Blocked Report
 

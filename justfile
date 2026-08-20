@@ -6,10 +6,10 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 export UV_CACHE_DIR := env_var_or_default("UV_CACHE_DIR", ".uv-cache")
 
 python_paths := "agents/.agents/skills scripts"
-dprint_version := "0.55.2"
+dprint_version := "0.56.0"
 just_version := "1.58.0"
-rumdl_version := "0.2.53"
-uv_version := "0.12.3"
+rumdl_version := "0.2.58"
+uv_version := "0.12.5"
 zizmor_version := "1.29.0"
 
 _ensure-actionlint:
@@ -252,6 +252,31 @@ semgrep-test: _ensure-uv
 setup:
     DOTFILES_DIR="$PWD" bin/bootstrap.sh
     just python-sync
+
+# Update the Homebrew bundle, uv lock, and repository-owned Cargo tools.
+update: update-dependencies update-cargo-tools
+    @echo "Repository dependencies and tools updated."
+
+# Update the Cargo CLI tools installed by bootstrap.sh and reconcile their pins.
+update-cargo-tools:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if ! command -v cargo-install-update >/dev/null 2>&1; then
+        echo "'cargo-install-update' not found. Install it with:"
+        echo "   cargo install --locked cargo-update"
+        exit 1
+    fi
+
+    packages=(dprint just rumdl zizmor)
+    cargo install-update --locked "${packages[@]}"
+    uv run --locked python scripts/update_tool_pins.py --justfile justfile
+
+# Upgrade Brewfile dependencies and the complete uv development environment.
+update-dependencies: _ensure-brew
+    brew bundle upgrade --file="$PWD/Brewfile"
+    uv lock --upgrade
+    uv sync --locked --group dev
 
 shell-check:
     bash -n bin/bootstrap.sh bin/macos-defaults.sh bin/resolve-just-version.sh bin/verify.sh

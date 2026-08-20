@@ -132,12 +132,16 @@ acceptance, resume, and completion decisions.
 7. Run language and repository synthesis only after their required predecessor
    evidence is accepted.
 
-If worker creation or safe capacity fails before the first accepted node,
-discard the plan-only work and run grouped delivery unless the request is
-isolated-only. If it fails later, preserve accepted isolated reports as
-supplemental evidence, run complete grouped surface passes for the applicable
-scope, and label the final profile `grouped with partial isolated evidence`.
-Never return only a resume manifest when grouped delivery remains possible.
+Classify a worker that is created but fails to load its skill or execute before
+producing accepted evidence as
+`blocked-after-creation-before-skill-execution`. For isolated-only execution,
+stop and emit the resume manifest. Otherwise, discard pre-acceptance plan-only
+work and run grouped delivery, or preserve already accepted isolated reports as
+supplemental evidence and run complete grouped passes for the applicable scope.
+Label post-acceptance fallback `grouped with partial isolated evidence`. Apply
+the same pre-acceptance versus post-acceptance handling when worker creation or
+safe capacity fails. Never return only a resume manifest when grouped delivery
+remains possible.
 
 Report isolated completion only when every required node, validator, synthesis,
 fingerprint, routing handoff, and epoch passes the planner's completion gate.

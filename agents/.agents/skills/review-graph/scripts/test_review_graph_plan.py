@@ -107,10 +107,18 @@ def test_grouped_delivery_is_the_default_without_capacity_diagnosis() -> None:
 
 
 def test_explicit_isolation_uses_isolated_profile_when_capability_is_safe() -> None:
-    result = select_execution_profile(isolated_requested=True, fresh_workers_supported=True, capacity_metadata=_capacity(active=1))
+    result = select_execution_profile(isolated_requested=True, fresh_workers_supported=True, capacity_metadata=_capacity(remaining=2, active=1))
 
     assert result.feasible
     assert result.profile == "isolated"
+
+
+def test_explicit_isolation_uses_grouped_profile_when_lifetime_capacity_is_unknown() -> None:
+    result = select_execution_profile(isolated_requested=True, fresh_workers_supported=True, capacity_metadata=_capacity(active=1))
+
+    assert result.feasible
+    assert result.profile == "grouped"
+    assert "full bounded-plan fresh-worker creation capacity is not guaranteed" in result.blockers
 
 
 def test_isolation_preference_falls_back_to_grouped_delivery() -> None:
@@ -726,7 +734,7 @@ def test_meaningful_skip_cannot_satisfy_an_applicable_requirement() -> None:
     assert any("cannot complete through meaningful skips" in blocker for blocker in result.blockers)
 
 
-def _migration_trial(trial_id: str, mode: str, *, recovery: bool = False, multi_epoch: bool = False, grouped_fallback: bool = False) -> MigrationTrial:
+def _migration_trial(trial_id: str, mode: str, *, forced_worker_failure: bool = False, multi_epoch: bool = False) -> MigrationTrial:
     return MigrationTrial(
         trial_id=trial_id,
         mode=mode,
@@ -741,13 +749,14 @@ def _migration_trial(trial_id: str, mode: str, *, recovery: bool = False, multi_
         fingerprints_matched=True,
         report_complete=True,
         accepted=True,
-        recovery_completed=recovery,
+        recovery_completed=forced_worker_failure,
         multi_epoch_completed=multi_epoch,
         runtime_artifact_id=f"artifact://{trial_id}",
         runtime_artifact_verified=True,
         runtime_artifact_verifier="forward-trial-recorder",
         workers_created=1,
-        grouped_fallback_completed=grouped_fallback,
+        grouped_fallback_completed=forced_worker_failure,
+        worker_failure_forced=forced_worker_failure,
     )
 
 
@@ -756,9 +765,8 @@ def test_migration_gate_requires_three_consecutive_modes_recovery_and_epochs() -
         _migration_trial(
             f"{mode}-{ordinal}",
             mode,
-            recovery=mode == "branch-read-only" and ordinal == 1,
+            forced_worker_failure=mode == "branch-read-only" and ordinal == 1,
             multi_epoch=mode == "baseline-release" and ordinal == 1,
-            grouped_fallback=mode == "branch-read-only" and ordinal == 1,
         )
         for mode in ("branch-read-only", "baseline-release", "review-and-fix")
         for ordinal in range(1, 4)
@@ -804,15 +812,54 @@ def test_migration_gate_rejects_an_unverified_runtime_artifact() -> None:
     assert any("runtime trial artifact was not independently verified" in blocker for blocker in result.blockers)
 
 
+@pytest.mark.parametrize(
+    ("changes", "expected_blocker"),
+    [
+        ({"runtime_artifact_id": "  "}, "has no runtime trial artifact"),
+        ({"runtime_artifact_verifier": "\t"}, "runtime trial artifact was not independently verified"),
+        ({"runtime_artifact_verified": 1}, "runtime trial artifact was not independently verified"),
+        ({"workers_created": True}, "has an invalid runtime worker count"),
+        ({"workers_created": 1.5}, "has an invalid runtime worker count"),
+    ],
+)
+def test_migration_gate_rejects_malformed_runtime_evidence(changes: dict[str, object], expected_blocker: str) -> None:
+    trial = replace(_migration_trial("branch-1", "branch-read-only"), **changes)
+
+    result = assess_migration_trials((trial,))
+
+    assert not result.feasible
+    assert any(expected_blocker in blocker for blocker in result.blockers)
+
+
+def test_migration_gate_requires_explicit_forced_worker_failure_evidence() -> None:
+    trials = tuple(
+        replace(
+            _migration_trial(
+                f"{mode}-{ordinal}",
+                mode,
+                forced_worker_failure=mode == "branch-read-only" and ordinal == 1,
+                multi_epoch=mode == "baseline-release" and ordinal == 1,
+            ),
+            worker_failure_forced=False,
+        )
+        for mode in ("branch-read-only", "baseline-release", "review-and-fix")
+        for ordinal in range(1, 4)
+    )
+
+    result = assess_migration_trials(trials)
+
+    assert not result.feasible
+    assert "no accepted forced worker-failure trial completed grouped fallback" in result.blockers
+
+
 def test_migration_gate_allows_a_recovered_trailing_streak() -> None:
     old_failure = replace(_migration_trial("old-failure", "branch-read-only"), observed_applicable_skill_ids=())
     recovered_trials = tuple(
         _migration_trial(
             f"{mode}-{ordinal}",
             mode,
-            recovery=mode == "branch-read-only" and ordinal == 1,
+            forced_worker_failure=mode == "branch-read-only" and ordinal == 1,
             multi_epoch=mode == "baseline-release" and ordinal == 1,
-            grouped_fallback=mode == "branch-read-only" and ordinal == 1,
         )
         for mode in ("branch-read-only", "baseline-release", "review-and-fix")
         for ordinal in range(1, 4)

@@ -461,6 +461,7 @@ class MigrationTrial:
     runtime_artifact_verifier: str | None = None
     workers_created: int = 0
     grouped_fallback_completed: bool = False
+    worker_failure_forced: bool = False
 
 
 @dataclass(frozen=True)
@@ -1274,11 +1275,13 @@ def _migration_trial_blockers(trial: MigrationTrial) -> tuple[str, ...]:
         blockers.append(f"{trial.trial_id} missed applicable skills: {', '.join(missing_skills)}")
     if trial.unexpected_skill_ids:
         blockers.append(f"{trial.trial_id} has unexplained extra skills: {', '.join(trial.unexpected_skill_ids)}")
-    if not trial.runtime_artifact_id:
+    if not isinstance(trial.runtime_artifact_id, str) or not trial.runtime_artifact_id.strip():
         blockers.append(f"{trial.trial_id} has no runtime trial artifact")
-    elif not trial.runtime_artifact_verified or not trial.runtime_artifact_verifier:
+    elif trial.runtime_artifact_verified is not True or not isinstance(trial.runtime_artifact_verifier, str) or not trial.runtime_artifact_verifier.strip():
         blockers.append(f"{trial.trial_id} runtime trial artifact was not independently verified")
-    if trial.workers_created < 1:
+    if not isinstance(trial.workers_created, int) or isinstance(trial.workers_created, bool):
+        blockers.append(f"{trial.trial_id} has an invalid runtime worker count")
+    elif trial.workers_created < 1:
         blockers.append(f"{trial.trial_id} created no runtime workers")
     missing_findings = sorted(expected_findings - observed_findings)
     if missing_findings:
@@ -1323,7 +1326,10 @@ def assess_migration_trials(trials: Sequence[MigrationTrial], *, required_consec
         if streak < required_consecutive:
             blockers.extend(active_failure_blockers[mode])
             blockers.append(f"{mode} has {streak} consecutive accepted trials; requires {required_consecutive}")
-    if not any(not _migration_trial_blockers(trial) and trial.recovery_completed and trial.grouped_fallback_completed for trial in trials):
+    if not any(
+        not _migration_trial_blockers(trial) and trial.worker_failure_forced is True and trial.recovery_completed and trial.grouped_fallback_completed
+        for trial in trials
+    ):
         blockers.append("no accepted forced worker-failure trial completed grouped fallback")
     if not any(not _migration_trial_blockers(trial) and trial.multi_epoch_completed for trial in trials):
         blockers.append("no accepted multi-epoch fresh-root continuation trial completed")
@@ -1464,6 +1470,8 @@ def select_execution_profile(
     else:
         capacity = assess_worker_capacity(capacity_metadata, required_fresh_worker_creations=max(1, selected_budget.recovery_finalization_reserve + 1))
         blockers.extend(capacity.blockers)
+        if capacity.feasible and capacity.full_plan_creation_capacity_guaranteed is not True:
+            blockers.append("full bounded-plan fresh-worker creation capacity is not guaranteed")
 
     if not blockers:
         return ExecutionProfileAssessment(

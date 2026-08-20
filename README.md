@@ -129,12 +129,21 @@ just brew-cleanup-preview
 # Uninstall the previewed formulae/casks and perform Homebrew cache cleanup
 just brew-cleanup
 
+# Upgrade the Brewfile, uv lock/environment, and repository-owned Cargo tools
+just update
+
 # Snapshot the current machine for review, without committing it
 brew bundle dump --file=~/projects/dotfiles/Brewfile.local --force --describe
 ```
 
 `Brewfile.local` is gitignored. Use it to audit one-off apps before deciding whether they belong in the committed foundational `Brewfile`.
 `just brew-cleanup-preview` never passes Homebrew's destructive `--force` flag. Homebrew returns status 1 when the preview finds cleanup candidates; the recipe treats that documented result as a successful preview while preserving actual errors. `just brew-cleanup` asks for confirmation before passing `--force` and applying that cleanup.
+
+`just update` upgrades only dependencies declared by the Brewfile and uv lock plus
+the Cargo-installed `dprint`, `just`, `rumdl`, and `zizmor` tools owned by
+`bootstrap.sh`. It then atomically reconciles their `justfile` pins, including
+the Homebrew-managed `uv` version. The Cargo tool update requires
+`cargo-install-update` from the `cargo-update` package.
 
 `bin/verify.sh` derives its cask and CLI checks from the Brewfile, so removing an entry there never causes a stale verify failure. It also surfaces `brew missing` output as warnings; some casks (e.g. `mactex`) declare Homebrew dependencies they actually bundle themselves, so those lines are informational rather than fatal.
 

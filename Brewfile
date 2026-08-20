@@ -56,6 +56,7 @@ cask "obsidian"                       # Markdown knowledge base
 cask "pgadmin4"                       # PostgreSQL administration GUI
 cask "proton-mail-bridge"             # Proton Mail IMAP/SMTP bridge
 cask "protonvpn"                      # Proton VPN client
+cask "rectangle-pro"                  # keyboard-driven window manager (paid; needs license)
 cask "slack"                          # team chat client
 cask "steam"                          # Steam game launcher
 cask "tailscale-app"                  # Tailscale VPN client (`tailscale`)

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust Ecosystem Release Train"
+  short_description: "Coordinate synchronized Rust ecosystem releases"
+  default_prompt: "Use $rust-ecosystem-release-train to plan the next synchronized crates.io release across the public Rust repositories."

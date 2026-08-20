@@ -123,6 +123,7 @@ known-first-party = [
   "semgrep_fixture_config",
   "skill_validate",
   "stow_verify",
+  "update_tool_pins",
   "validate_reference_dois",
 ]
 force-single-line = false
