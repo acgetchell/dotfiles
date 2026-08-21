@@ -21,6 +21,20 @@ Before planning or changing a release:
 Exclude private or unpublished repositories from this public skill. Do not
 infer or expose their names, dependencies, issues, or release plans.
 
+## Authorization Boundary
+
+Release planning and readiness assessment are read-only by default. Inspect
+repository files, GitHub metadata, crates.io state, and official Rust sources,
+but do not create, edit, move, close, or publish issues, milestones, dependency
+links, releases, repository content, or crates without explicit user
+authorization for those mutations.
+
+Before requesting authorization, preview the exact issues, milestones,
+dependency relationships, release records, repository edits, and publication
+steps intended for each repository. Authorization to plan or assess readiness
+does not authorize external or repository mutation, and publication requires
+explicit authorization even when the rest of the train is already approved.
+
 ## Enforce The Release Contract
 
 - Synchronize ecosystem releases at intentional stable Rust boundaries.
@@ -70,8 +84,8 @@ official Rust release sources for schedules and final release notes.
 
 ## Build The Release Plan
 
-1. Create or identify one Rust-adoption issue and one release-capstone issue
-   for each participating release.
+1. Identify or propose one Rust-adoption issue and one release-capstone issue
+   for each participating release; create them only after authorization.
 2. Treat a release milestone as a publication contract. Review every open item;
    keep genuine release gates and move unrelated work rather than silently
    delaying the train.

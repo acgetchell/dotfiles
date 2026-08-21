@@ -1,15 +1,15 @@
 # Review Execution Feasibility
 
 Use this contract only when the user explicitly requests isolated execution.
-Ordinary `review-graph` and `repo-review` requests use grouped delivery and do
-not inspect worker capacity.
+Ordinary `review-graph` and `repo-review` requests use adaptive grouped
+execution and do not inspect worker capacity before routing.
 
 ## Contents
 
 - [Profile Selection](#profile-selection)
 - [Safe Runtime Evidence](#safe-runtime-evidence)
 - [Isolated Capability Gate](#isolated-capability-gate)
-- [Schedule And Deadline](#schedule-and-deadline)
+- [Isolated Epoch Schedule](#isolated-epoch-schedule)
 - [Failure And Fallback](#failure-and-fallback)
 - [Isolated-Only Blocked Report](#isolated-only-blocked-report)
 
@@ -18,10 +18,11 @@ not inspect worker capacity.
 Interpret explicit requests as follows:
 
 - `isolated`, `isolated-graph`, or equivalent: prefer isolated execution and
-  fall back to grouped delivery when it is unavailable.
+  fall back to adaptive grouped execution when it is unavailable.
 - `isolated-only`, `no grouped fallback`, or equivalent: require isolated
   execution and block when it is unavailable.
-- no isolation wording: select grouped delivery without running this gate.
+- no isolation wording: select adaptive grouped execution without running this
+  gate.
 
 Use `select_execution_profile` in `scripts/review_graph_plan.py` as the
 deterministic model. Missing safe telemetry is a reason to select grouped
@@ -50,10 +51,10 @@ messages, results, or outputs. Never create a dummy worker to probe capacity.
 Do not infer active count or release behavior from a documented concurrency
 limit.
 
-When safe aggregate metadata is unavailable, choose grouped delivery. When a
+When safe aggregate metadata is unavailable, choose adaptive grouped execution. When a
 mechanism unexpectedly exposes task content, retain only the sensitive field
 paths needed to identify the isolation failure, discard the values, and choose
-grouped delivery unless isolation is mandatory.
+adaptive grouped execution unless isolation is mandatory.
 
 ## Isolated Capability Gate
 
@@ -65,16 +66,17 @@ Before repository capture, router loading, or graph construction:
 3. Require at least one free concurrent slot.
 4. Choose a positive per-root fresh-worker budget, defaulting to 24, and reserve
    at least one creation for recovery and finalization.
-5. Require authoritative lifetime capacity to guarantee the bounded initial
-   plan beyond the reserve, and use the smaller configured or authoritative
-   value.
+5. Set the effective per-root budget to the smaller configured or authoritative
+   lifetime value. Require that effective budget to fit at least one execution
+   worker plus the reserve.
 6. Record the evidence source, values, configured and effective budgets,
    reserve, and gate result outside the reviewed repository.
 
 If this gate fails, do not load isolated routers or create an isolated node
-plan. Select grouped delivery immediately unless the request is isolated-only.
+plan. Select adaptive grouped execution immediately unless the request is
+isolated-only.
 
-## Schedule And Deadline
+## Isolated Epoch Schedule
 
 After exhaustive isolated routing creates the complete node plan, count every
 audit, validation, independent-review, synthesis, fix, revalidation, and planned
@@ -88,40 +90,43 @@ Never remove applicable coverage to make an epoch fit. Dispatch sequentially so
 peak worker concurrency remains one. A future epoch keeps isolated completion
 incomplete.
 
-Treat a user or runtime time budget as a hard deadline. Before each dispatch,
-use `bounded_node_dispatch_seconds` or an equivalent monotonic calculation.
-Preserve time for coordinator reconciliation. When no dispatch window remains,
-account for every unrun node and apply the fallback rules below.
+Apply the shared hard-deadline contract in
+[`planning-contract.md`](planning-contract.md#hard-deadline-contract) to every
+isolated dispatch. Epoch partitioning does not relax that deadline or its
+reconciliation reserves.
 
 ## Failure And Fallback
 
 For an isolation preference:
 
-- If capability fails before the first worker, run grouped delivery.
-- If the first worker cannot be created, discard plan-only work and run grouped
-  delivery.
+- If capability fails before capture, run adaptive grouped execution.
+- If the gate or a dispatch fails before any isolated evidence is accepted,
+  preserve the attempt and select adaptive grouped execution; do not label the
+  result mixed.
+- If a planned worker cannot be created, preserve the routing and node identity
+  and execute that missing node adaptively.
 - If a worker is created but its skill cannot load or execute before producing
   accepted evidence, record
-  `blocked-after-creation-before-skill-execution`. Discard pre-acceptance
-  plan-only work and run complete grouped passes for every applicable surface.
+  `blocked-after-creation-before-skill-execution`, then execute that missing
+  node adaptively.
 - If creation or capacity fails after isolated evidence was accepted, preserve
-  those reports as supplemental evidence, then run complete grouped passes for
-  every applicable surface. Label the result `grouped with partial isolated
-  evidence`; do not claim isolated completion.
+  accepted proof objects and continue the remaining graph adaptively. Once
+  grouped fallback executes, label the result `mixed` with partial isolated
+  evidence; do not claim isolated completion.
 - Apply that same post-acceptance handling when a created worker fails to load
-  its skill or execute: preserve earlier accepted reports as supplemental
-  evidence and label the result `grouped with partial isolated evidence`.
+  its skill or execute: preserve earlier accepted proof objects and continue
+  only missing or invalidated nodes adaptively.
 - If a global deadline prevents more isolated dispatch but still leaves useful
-  review time, spend the remaining time on the highest-risk grouped surface
-  passes and account for unreviewed surfaces.
+  review time, continue dependency-ready adaptive nodes and account for every
+  node the deadline leaves incomplete.
 
-Do not return only a resume manifest while grouped review remains possible. A
-resume manifest may accompany the mixed result, but it cannot replace findings
-and grouped evidence.
+Do not return only a resume manifest while adaptive review remains possible. A
+resume manifest may accompany the mixed result, but it cannot replace accepted
+findings and proof evidence.
 
 For isolated-only execution, stop after the first capability, creation,
 `blocked-after-creation-before-skill-execution`, or deadline failure, preserve
-accepted reports, and emit the exact resume manifest. Never substitute grouped
+accepted reports, and emit the exact resume manifest. Never substitute adaptive
 evidence against the user's isolation requirement.
 
 ## Isolated-Only Blocked Report

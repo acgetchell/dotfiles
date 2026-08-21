@@ -1,6 +1,6 @@
 ---
 name: review-validator
-description: "Plan and execute repository validation against a captured source state, either by discovering canonical repository commands for a branch, staged or worktree changes, a release, or a whole-repository request, or by executing an exact review-graph dispatch. Always show a standalone outcome and portable review-graph ledger evidence. Return reproducible, fingerprinted pass, fail, blocked, reused, or not-applicable evidence without reviewing code, diagnosing findings, applying fixes, or broadening scope."
+description: "Plan and execute repository validation against a captured source state, either standalone or from an exact review-graph dispatch. Return reproducible fingerprinted validation evidence that review-graph can persist, verify, map to requirements, and reuse without reviewing code, diagnosing findings, applying fixes, or broadening scope."
 ---
 
 # Review Validator
@@ -14,12 +14,21 @@ Read [references/result-contract.md](references/result-contract.md) before
 planning or executing validation. Use its invocation, dispatch, and result
 formats verbatim.
 
+For a graph dispatch, also follow the shared
+[`review-graph` evidence contract](../review-graph/references/evidence-contract.md).
+The graph persists the complete native result and verifies the resulting
+`ValidationEvidence`; this skill does not claim that its own narrative is a
+transferable proof.
+
 ## Select The Invocation Mode
 
 - Use `graph-dispatched` mode whenever the request identifies itself as a graph
   dispatch or comes from `review-graph`, whether or not its Validation Dispatch
   is complete. Require every field; return `blocked` for any omission instead of
   falling through to discovery, re-planning, or broader commands.
+- Honor the exact `execution_location` in a graph dispatch. A worker and an
+  adaptive coordinator execution run the same validation unit and return the
+  same native result. Do not create another worker in either case.
 - Treat one graph dispatch as one already-coalesced validation unit. Verify its
   complete coalescing identity and requirement-to-evidence mapping. Do not split
   it into one execution per requirement when one command or canonical recipe
@@ -144,8 +153,9 @@ formats verbatim.
   identity match the internal dispatch. The parent independently rechecks state
   after all workers, preserves each native status and execution record, and
   computes the final status using the normal precedence rules.
-- In graph-dispatched mode, remain a leaf worker. Do not spawn subagents; the
-  graph already creates one validator node per independent validation unit.
+- In graph-dispatched mode, remain a leaf execution unit. Do not spawn
+  subagents; the graph owns executor placement and one validator node per
+  independent validation unit.
 - Serialization does not authorize source- or Git-mutating commands. Route those
   to sequential `review-graph` fix nodes, which must recapture source identity
   after each mutation; never execute them as validator units.
@@ -198,10 +208,11 @@ formats verbatim.
   configuration to make a command pass. Report unavailable tools, permissions,
   services, credentials, or platforms as blocked evidence.
 - Treat a failed command as validation evidence, not automatically as a product
-  finding. Leave diagnosis and ownership to `review-graph`, `review-agent`, or a
-  focused reviewer.
+  finding. Leave diagnosis and ownership to `review-graph`,
+  `repository-independent-review`, or a focused reviewer.
 
-`review-graph` still owns cross-node selection, deduplication, invalidation,
-retries, and routing. `review-agent` independently reviews a concrete change.
-This skill owns both planning and execution only for its standalone validation
-request.
+`review-graph` owns cross-node selection, executor placement, evidence
+acceptance, deduplication, invalidation, retries, routing, and final proof
+reconciliation. `repository-independent-review` independently reviews a
+concrete change. This skill owns both planning and execution only for its
+standalone validation request.

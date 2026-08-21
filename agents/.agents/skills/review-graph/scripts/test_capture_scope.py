@@ -202,6 +202,64 @@ def test_staged_fingerprint_ignores_unstaged_content(tmp_path: Path) -> None:
     assert first["captured_worktree_fingerprint"] != second["captured_worktree_fingerprint"]
 
 
+def test_captured_line_bounds_cover_base_deletions_and_no_final_newline(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    tracked = repo / "tracked.txt"
+    tracked.write_text("one\ntwo\nthree\n", encoding="utf-8")
+    _commit_all(repo)
+
+    tracked.write_text("short\nlast", encoding="utf-8")
+    modified = _capture(repo, "worktree", "--path", "tracked.txt")
+    tracked.unlink()
+    deleted = _capture(repo, "worktree", "--path", "tracked.txt")
+    untracked = repo / "untracked.txt"
+    untracked.write_text("first\nsecond", encoding="utf-8")
+    no_final_newline = _capture(repo, "worktree", "--path", "untracked.txt")
+
+    assert modified["captured_path_line_bounds"] == {"tracked.txt": 3}
+    assert deleted["captured_path_line_bounds"] == {"tracked.txt": 3}
+    assert no_final_newline["captured_path_line_bounds"] == {"untracked.txt": 2}
+
+
+def test_staged_line_bounds_use_head_and_index_not_unstaged_worktree(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    tracked = repo / "tracked.txt"
+    deleted = repo / "deleted.txt"
+    tracked.write_text("one\ntwo\nthree\nfour\n", encoding="utf-8")
+    deleted.write_text("one\ntwo\nthree\n", encoding="utf-8")
+    _commit_all(repo)
+
+    tracked.write_text("staged\nlast", encoding="utf-8")
+    added = repo / "added.txt"
+    added.write_text("first\nsecond", encoding="utf-8")
+    link = repo / "linked.txt"
+    link.symlink_to("tracked.txt")
+    deleted.unlink()
+    _git(repo, "add", "tracked.txt", "added.txt", "linked.txt", "deleted.txt")
+    tracked.write_text("unstaged\nhas\nmany\nmore\nlines\nthan-index\n", encoding="utf-8")
+    added.write_text("unstaged\ncontent\nthat\nmust\nnot-count\n", encoding="utf-8")
+
+    manifest = _capture(repo, "staged")
+
+    assert manifest["captured_path_line_bounds"] == {"added.txt": 2, "deleted.txt": 3, "linked.txt": 0, "tracked.txt": 4}
+
+
+def test_branch_line_bounds_use_numeric_maximum_of_base_and_head(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    tracked = repo / "tracked.txt"
+    tracked.write_text("one\ntwo\nthree\nfour\n", encoding="utf-8")
+    _commit_all(repo)
+    tracked.write_text("short\nlast", encoding="utf-8")
+    _commit_all(repo)
+
+    manifest = _capture(repo, "branch", "--base", "HEAD~1", "--path", "tracked.txt")
+
+    assert manifest["captured_path_line_bounds"] == {"tracked.txt": 4}
+
+
 def test_absolute_path_through_repository_symlink_is_accepted(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     _init_repo(repo)

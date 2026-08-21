@@ -157,6 +157,12 @@ just macos-defaults
 
 The recipe asks for confirmation, then restarts Dock and Finder; appearance changes may need a logout/login. It is intentionally not part of `bootstrap.sh` — run it once per machine when the captured preferences are wanted.
 
+The default recipe leaves native macOS WindowManager tiling unchanged. To let
+an installed Rectangle Pro take over drag-to-edge tiling, run
+`just macos-defaults-rectangle-pro` and accept its separate confirmation. The
+takeover is skipped, without changing native tiling, when the Rectangle Pro
+cask is unavailable.
+
 ## Sanity checks
 
 Run the main check:

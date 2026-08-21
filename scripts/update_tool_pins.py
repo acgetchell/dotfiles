@@ -10,8 +10,22 @@ from pathlib import Path
 
 CARGO_PIN_TO_PACKAGE = {"dprint_version": "dprint", "just_version": "just", "rumdl_version": "rumdl", "zizmor_version": "zizmor"}
 PIN_TO_TOOL = {**CARGO_PIN_TO_PACKAGE, "uv_version": "uv"}
+MANAGED_CARGO_PACKAGES = frozenset(CARGO_PIN_TO_PACKAGE.values())
 PACKAGE_HEADER = re.compile(r"^(?P<package>[A-Za-z0-9_-]+) v(?P<version>[^\s:]+):$", re.MULTILINE)
-VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
+SEMANTIC_VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?")
+TOOL_VERSION = re.compile(rf"(?<![0-9A-Za-z_.+-])v?(?P<version>{SEMANTIC_VERSION.pattern})(?![0-9A-Za-z_.+-])")
+STABLE_VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]+")
+DIAGNOSTIC_LIMIT = 400
+
+
+def require_stable_version(version: str, tool: str) -> str:
+    """Require the stable numeric version syntax consumed by repository tooling."""
+    if STABLE_VERSION.fullmatch(version) is None:
+        msg = f"invalid installed version for {tool}: {version}; expected stable X.Y.Z"
+        raise ValueError(msg)
+    return version
 
 
 def parse_installed_packages(output: str) -> dict[str, str]:
@@ -23,20 +37,51 @@ def parse_installed_packages(output: str) -> dict[str, str]:
         if package in packages:
             msg = f"duplicate installed Cargo package: {package}"
             raise ValueError(msg)
-        if VERSION.fullmatch(version) is None:
+        if package in MANAGED_CARGO_PACKAGES:
+            packages[package] = require_stable_version(version, package)
+        elif SEMANTIC_VERSION.fullmatch(version) is None:
             msg = f"invalid installed version for {package}: {version}"
             raise ValueError(msg)
-        packages[package] = version
+        else:
+            packages[package] = version
     return packages
 
 
 def parse_tool_version(output: str, tool: str) -> str:
     """Extract one semantic version from a tool's version output."""
-    versions = {match.group(0) for match in re.finditer(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", output)}
+    versions = [match.group("version") for match in TOOL_VERSION.finditer(output)]
     if len(versions) != 1:
         msg = f"expected exactly one {tool} version, found {len(versions)}"
         raise ValueError(msg)
-    return versions.pop()
+    return require_stable_version(versions[0], tool)
+
+
+def sanitize_diagnostic(value: object) -> str:
+    """Return one bounded line without terminal control sequences."""
+    text = value.decode(errors="replace") if isinstance(value, bytes) else str(value)
+    text = ANSI_ESCAPE.sub("", text)
+    text = CONTROL_CHARACTERS.sub(" ", text)
+    text = " ".join(text.split())
+    if len(text) > DIAGNOSTIC_LIMIT:
+        return f"{text[: DIAGNOSTIC_LIMIT - 1]}…"
+    return text
+
+
+def format_failure(error: subprocess.CalledProcessError | subprocess.TimeoutExpired | OSError | ValueError) -> str:
+    """Preserve safe, useful context for expected update failures."""
+    if isinstance(error, subprocess.CalledProcessError):
+        summary = f"subprocess exited with status {error.returncode}"
+        detail = sanitize_diagnostic(error.stderr or error.stdout or "")
+    elif isinstance(error, subprocess.TimeoutExpired):
+        summary = f"subprocess timed out after {error.timeout} seconds"
+        detail = sanitize_diagnostic(error.stderr or error.stdout or "")
+    elif isinstance(error, OSError):
+        summary = "subprocess could not start"
+        detail = sanitize_diagnostic(error)
+    else:
+        summary = "invalid tool state"
+        detail = sanitize_diagnostic(error)
+    return f"{summary}: {detail}" if detail else summary
 
 
 def update_pin_text(text: str, installed: dict[str, str]) -> tuple[str, dict[str, tuple[str, str]]]:
@@ -87,6 +132,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--justfile", type=Path, default=Path("justfile"), help="Just source containing repository tool pins")
+    parser.add_argument("--uv-executable", type=Path, required=True, help="Verified Homebrew-managed uv executable")
     return parser.parse_args(argv)
 
 
@@ -95,10 +141,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         cargo = subprocess.run(["cargo", "install", "--list"], check=True, capture_output=True, text=True, timeout=30)  # noqa: S607
-        uv = subprocess.run(["uv", "--version"], check=True, capture_output=True, text=True, timeout=30)  # noqa: S607
+        uv = subprocess.run([str(args.uv_executable), "--version"], check=True, capture_output=True, text=True, timeout=30)  # noqa: S603
         changes = reconcile_pins(args.justfile, cargo.stdout, uv.stdout)
-    except (OSError, subprocess.SubprocessError, ValueError) as error:
-        print(f"failed to update tool pins: {error}", file=sys.stderr)
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError) as error:
+        print(f"failed to update tool pins: {format_failure(error)}", file=sys.stderr)
         return 1
 
     if not changes:

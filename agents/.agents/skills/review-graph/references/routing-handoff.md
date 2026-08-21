@@ -1,14 +1,15 @@
 # Exhaustive Review Routing Handoff
 
-Use this contract whenever `repo-review`, a language orchestrator, or the
-documentation orchestrator acts as a routing authority for `review-graph`.
-Routers decide applicability; the graph validates closure and owns workers,
-validation, epochs, fixes, and synthesis.
+Use this contract when `review-graph` performs repository-layer routing or asks
+a language or documentation orchestrator for surface routing. Routers decide
+applicability; the graph validates closure and owns execution, evidence,
+validation, fixes, and synthesis.
 
 ## Routing Sequence
 
-1. Ask `repo-review` for the repository-layer ledger covering tooling, C++,
-   Rust, Python, documentation, independent review, and repository synthesis.
+1. Have `review-graph` produce the repository-layer ledger from
+   `repo-review/references/check-routing.md` and the deterministic repository
+   classifier. Do not invoke the `repo-review` compatibility entrypoint.
 2. For every selected surface router, request its complete surface ledger.
 3. Validate both layers against
    [`routing-catalog.json`](routing-catalog.json) before planning workers.
@@ -56,15 +57,18 @@ owners: every shared-file owner
 evidence_id: required for exact-evidence-reused, otherwise none
 ```
 
-Use only `selected` for applicable work requiring a worker. Routers must not use
-`budget-deferred` to reduce coverage; the graph partitions all selected work
-into execution epochs. `capability-blocked` and `failed` are explicit incomplete
-outcomes. `user-excluded` completes only the user-bounded scope and must remain
-visible as a coverage limitation.
+Use only `selected` for applicable required review work, regardless of whether
+a worker or the coordinator will execute it. Routers never assign execution
+location or epochs; the graph assigns placement after routing, and only isolated
+scheduling partitions selected work into epochs. Routers must not use
+`budget-deferred` to reduce coverage. `capability-blocked` and `failed` are
+explicit incomplete outcomes. `user-excluded` completes only the user-bounded
+scope and must remain visible as a coverage limitation.
 
 ## Repository-Layer Closure
 
-Return all `repo-review` catalog entries even when only one surface applies.
+Return all repository-layer `review-graph` catalog entries even when only one
+surface applies.
 Use the deterministic repository classifier in
 `scripts/review_graph_plan.py` as a conservative floor. A router may select
 additional owners from semantic evidence but may not mark a signaled owner
@@ -96,8 +100,9 @@ the graph can coalesce identical evidence.
 
 ## Late Handoffs
 
-Every accepted worker reports newly observed applicability by `catalog_id`,
-evidence, and affected surface. Revalidate the ledger after each audit and after
-every fix that changes repository surfaces. Add newly selected nodes before
-dependent synthesis. Unresolved, unknown, budget-deferred, capability-blocked,
-or failed handoffs keep the graph incomplete.
+Every accepted review execution, including coordinator execution, reports newly
+observed applicability by `catalog_id`, evidence, and affected surface.
+Revalidate the ledger after each audit and after every fix that changes
+repository surfaces. Add newly selected nodes before dependent synthesis.
+Unresolved, unknown, budget-deferred, capability-blocked, or failed handoffs
+keep the graph incomplete.

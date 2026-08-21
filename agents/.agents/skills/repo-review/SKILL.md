@@ -1,70 +1,40 @@
 ---
 name: repo-review
-description: "Coordinate complete read-only or explicitly requested review-and-fix work across C++, Rust, Python, project tooling, and documentation. Use for branch, PR, staged, release-readiness, whole-repository baseline, fix-all, or review-and-fix requests spanning multiple surfaces. Run the grouped surface-orchestrator workflow by default so the user receives findings; use review-graph's isolated profile only when explicitly requested. Also provide repository-layer graph-routing records for isolated review-graph execution."
+description: "Compatibility entrypoint for complete mixed-surface repository review and review-and-fix requests. Delegate branch, PR, staged, release-readiness, whole-repository, fix-all, and review-and-fix work to review-graph so every applicable review skill, validation result, and final proof uses one orchestration contract. Use a focused skill directly for one narrow surface."
 ---
 
 # Repo Review
 
-Deliver a mixed-surface repository review through the supported grouped profile.
-Use a focused skill directly for a single narrow surface.
+Delegate complete mixed-surface repository review to
+[`review-graph`](../review-graph/SKILL.md). This skill preserves the familiar
+`$repo-review` entrypoint; it does not implement a second coordinator.
 
-## Graph-Routing Mode
+## Delegation
 
-When `review-graph` explicitly requests `graph-routing`:
+1. Read the complete `review-graph` skill.
+2. Pass through the user's request, scope, authorization, base, exclusions,
+   deadline, and isolation preference unchanged.
+3. Follow the selected `review-graph` profile once and return its native final
+   result without adding a second routing, validation, or synthesis pass.
 
-1. Read [check routing](references/check-routing.md), then read
-   [`review-graph` routing handoff](../review-graph/references/routing-handoff.md).
-2. Use the repository entries in
-   [`routing-catalog.json`](../review-graph/references/routing-catalog.json) and
-   the planner's conservative repository classifier.
-3. Return one decision for every repository catalog entry, including tooling,
-   C++, Rust, Python, documentation, independent review, and repository
-   synthesis.
-4. Expand skill paths exactly and cite catalog rules, observed contracts,
-   owners, and reasons for every disposition.
-5. Select every classifier-signaled surface unless concrete semantic evidence
-   resolves the conflict. Preserve every shared owner.
-6. Select `repository-independent-review` for concrete change targets and
-   `repository-production-review` for final synthesis.
+Do not independently capture scope, inspect worker capacity, consult surface
+routers, invoke `review-validator`, run surface orchestrators, or synthesize a
+compatibility report. `review-graph` owns those actions and derives the
+five-surface compatibility view from its final proof.
 
-Return records only. Do not load surface orchestrator or leaf bodies, create
-subagents, review, validate, edit, or synthesize in graph-routing mode.
+For a request confined to one narrow review contract, use the applicable
+focused skill directly instead of this compatibility entrypoint.
 
-## Default Grouped Review
+## Behavioral Equivalence
 
-1. Read [check routing](references/check-routing.md) and
-   [grouped review](references/legacy-grouped-review.md) completely.
-2. Establish branch scope by default, including committed branch changes plus
-   staged, unstaged, and untracked work. Honor explicit staged-only,
-   changed-file-only, whole-repository baseline, or release-readiness scope.
-3. Select and run the applicable surface orchestrators sequentially. Read each
-   selected orchestrator's complete `SKILL.md`, give it the established scope,
-   and let it run its grouped specialist sequence and focused validation.
-4. Maintain one repository-wide validation ledger and resolve cross-surface
-   handoffs before final reporting.
-5. Apply fixes only when explicitly authorized, then rerun affected reviews and
-   validation.
+A completed `$repo-review` must be observationally equivalent to successively
+invoking every applicable leaf review skill against one captured source state,
+then validating and synthesizing their accepted results. Parallel workers,
+coalesced validators, exact evidence reuse, and coordinator fallback may change
+execution order or location, but never coverage, findings, validation
+attribution, or completion status.
 
-Do not load `review-graph` or inspect worker capacity for an ordinary grouped
-review. Unavailable subagents are not a blocker.
-
-## Explicit Isolated Review
-
-When the user explicitly requests `isolated`, `isolated-graph`, or
-`isolated-only`, read the complete [`review-graph` skill](../review-graph/SKILL.md)
-and follow its matching profile. An isolation preference may fall back to
-grouped delivery; an isolated-only request may not.
-
-## Compatibility Report (Grouped Or Isolated Execution Only)
-
-For grouped or isolated execution, lead with findings and unresolved blockers.
-Do not emit this report in graph-routing mode. Include:
-
-| Orchestrator | Status | Why selected or skipped | Scope handed off | Skills/references actually loaded | Validators |
-| --- | --- | --- | --- | --- | --- |
-
-Include exactly one row for `project-tooling-review`,
-`cpp-review-orchestrator`, `rust-review-orchestrator`,
-`python-review-orchestrator`, and `docs-review-orchestrator`. Also include
-changed files, validation, unresolved risks, final repository state, and
-confirmation of Git-state mutation or non-mutation.
+Require the final `RepositoryReviewProof` defined by
+[`review-graph` evidence contract](../review-graph/references/evidence-contract.md).
+Do not claim completion from an orchestrator table, routing ledger, worker plan,
+or conversation summary alone.

@@ -176,7 +176,9 @@ def test_execute_rejects_schema_invalid_notebook_before_client_creation(
 ) -> None:
     """Execute mode should report schema errors without constructing a client."""
     notebook_path = tmp_path / "invalid-schema.ipynb"
+    sensitive_value = "synthetic-sensitive-value-7b3f39"
     notebook = notebook_with_ids("invalid-cell")
+    notebook["cells"][0]["source"] = [sensitive_value]
     notebook["cells"][0].pop("cell_type")
     notebook_path.write_text(json.dumps(notebook), encoding="utf-8")
 
@@ -189,6 +191,7 @@ def test_execute_rejects_schema_invalid_notebook_before_client_creation(
 
     stderr = capsys.readouterr().err
     assert "notebook schema validation failed" in stderr
+    assert sensitive_value not in stderr
     assert "Traceback" not in stderr
 
 

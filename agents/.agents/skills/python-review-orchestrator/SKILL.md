@@ -12,8 +12,7 @@ Coordinate focused Python skills without copying their guidance. Select each ski
 - Do not mutate git state unless the user explicitly requests it in the current turn.
 - Respect repository-local instructions before inspecting or editing files.
 - Prefer changed-file scope. Outside graph-routing mode, use whole-repository
-  mode only when explicitly requested or supplied as a parent baseline scope,
-  including the default `repo-review` grouped profile.
+  mode only when explicitly requested or supplied as a parent baseline scope.
 - Honor a parent orchestrator's branch-scope file list instead of narrowing it to current worktree changes.
 - When asked to fix issues, implement safe actionable fixes as each pass finds them.
 - Use focused validators while iterating. Run full CI only when repository policy or cross-layer risk requires it.
@@ -67,9 +66,11 @@ For each selected skill, record:
 - fixes applied
 - focused validation and result, or the matching ledger evidence reused
 
-When invoked through the `repo-review` grouped profile, provide table-ready evidence
-for the parent review. Name selected and not-selected skills whose absence might
-otherwise appear accidental.
+When a caller supplies an established scope and requests the standalone pass
+loop, begin this trace with a handoff receipt naming the supplied scope and
+selected and not-selected skills, then provide table-ready evidence for the
+caller. Name not-selected skills whose absence might otherwise appear
+accidental.
 
 ## Pass Order And Individual Selection
 
@@ -146,5 +147,5 @@ Lead with unresolved blockers. Then include:
 - untested configurations or external limitations
 - confirmation that git state was not mutated, when true
 
-When invoked through the `repo-review` grouped profile, return this evidence in the
-parent's requested table-ready form.
+For a standalone parent handoff, return this evidence in the caller's requested
+table-ready form.

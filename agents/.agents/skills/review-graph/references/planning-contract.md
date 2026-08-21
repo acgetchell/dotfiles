@@ -1,8 +1,8 @@
 # Complete Review Graph Planning
 
-This contract applies only to the explicit isolated execution profile. Grouped
-delivery uses the surface-orchestrator workflow and validation ledger instead;
-it does not create one fresh worker per specialist or partition worker epochs.
+Use this contract to build the complete evidence graph for every execution
+profile. Adaptive grouped execution may place a node in a worker or the
+coordinator; isolated execution additionally partitions fresh-worker epochs.
 
 Read this contract before creating any worker. Use
 `scripts/review_graph_plan.py` as the deterministic authority for routing
@@ -12,6 +12,7 @@ closure, path validation, coalescing, epochs, acceptance, resume, and completion
 
 - [Routing Inputs](#routing-inputs)
 - [Worker Budget And Epochs](#worker-budget-and-epochs)
+- [Hard Deadline Contract](#hard-deadline-contract)
 - [Node And Validation Identity](#node-and-validation-identity)
 - [Scheduling And Discovery](#scheduling-and-discovery)
 - [Failure And Resume](#failure-and-resume)
@@ -36,13 +37,37 @@ match the catalog router, rule, skill, and resolved path exactly.
 
 Selected leaves require a concrete scope, evidence, reason, priority, owners,
 references, validators, and synthesis dependency. Convert every selected leaf
-to a required worker commitment. Convert a selected independent target to an
-`independent-review` node. Selected synthesis catalog entries must match the
-declared synthesis skill set exactly.
+to a required review commitment. Convert a selected independent target to an
+`independent-review` node. Preserve an `exact-evidence-reused` leaf or
+independent target as typed non-executable evidence with its exact
+requirement-to-evidence mapping; do not create a worker node for it. Selected
+synthesis catalog entries must match the declared synthesis skill set exactly.
+
+For exhaustive routing documents, normalize `captured_paths` and every
+`review_surface` as portable repository-relative paths. Every selected or
+exact-evidence-reused leaf and independent surface must be contained in the
+captured path set. Apply the same containment rule to declared additional-node
+coverage, which represents repository paths; reject traversal, absolute paths,
+normalized duplicates, and out-of-scope coverage before dispatch. Parse every
+document Boolean as an exact JSON Boolean and reject strings, numbers, and
+nulls rather than coercing their truthiness.
+
+For every selected or exactly reused independent-review path, record a
+trusted-capture `captured_path_line_bounds` entry derived from the bytes covered
+by the captured source identity. Before planning, independently recapture the
+exact repository root, mode, base ref, pathspecs, and source state; reject the
+document if any capture identity or declared line bound differs. Use the current
+captured side for present files, the captured base side for deleted files, and
+the greatest addressable line across the inspected sides when both are relevant;
+use zero only for a repository-level or otherwise non-line-bearing path. Reject
+missing, duplicate, negative, non-integer, or out-of-scope entries. Carry this
+ordered path/bound tuple in the plan digest and independent evidence
+expectation; a caller or result artifact cannot supply, substitute, or enlarge
+it.
 
 Allowed dispositions are:
 
-- `selected`: execute a required worker
+- `selected`: applicable required review work, regardless of executor
 - `not-applicable`: inspected trigger did not apply
 - `exact-evidence-reused`: current graph validator verified an exact report;
   require an evidence ID
@@ -50,18 +75,35 @@ Allowed dispositions are:
 - `budget-deferred`, `capability-blocked`, or `failed`: completion-blocking
 
 Routers do not own budgeting. Treat a router's `budget-deferred` decision as a
-blocker and schedule applicable work through graph epochs instead.
+blocker and retain the applicable work in the complete graph. Assign worker or
+coordinator execution only after routing. Partition into epochs only when
+scheduling isolated execution.
 
 ## Worker Budget And Epochs
 
-Use a positive per-root fresh-worker budget, defaulting to 24, and reserve at
-least one creation for recovery/finalization. When authoritative lifetime
-capacity is known, use its lower ceiling for the current root. Missing lifetime
-telemetry is unknown, not unlimited.
+Adaptive grouped execution does not require a lifetime worker budget. Schedule
+the complete dependency graph and use workers opportunistically without
+changing selected coverage.
 
-Plan the complete graph before dispatch. All selected leaves, required
-validators, independent review, syntheses, planned fixes, and revalidations
-remain in that graph. Partition the topological schedule into epochs satisfying:
+Exact reused review evidence is not part of the executable graph, consumes no
+worker creation, and receives no execution epoch or dependency edge. Its routed
+mapping remains a proof prerequisite for synthesis and completion.
+
+For isolated execution, use a positive per-root fresh-worker budget, defaulting
+to 24, and reserve at least one creation for recovery/finalization. When
+authoritative lifetime capacity is known, use its lower ceiling for the current
+root. Missing lifetime telemetry selects adaptive grouped execution unless the
+user required isolated-only.
+
+For every profile, plan the complete graph before dispatch. A transition plan
+may contain selected leaves, required validators, independent review,
+syntheses, planned fixes, and revalidations. After any fix runs, that plan and
+its source state are historical: persist its fix/revalidation reports in the
+invalidation history, recapture, reroute, and create a new final-state plan.
+The final plan used to derive `RepositoryReviewProofExpectation` contains only
+audit, independent-review, validation, and synthesis nodes plus exact
+non-executable reuse. For isolated execution, partition each plan's topological
+schedule into epochs satisfying:
 
 ```text
 nodes in one epoch + recovery/finalization reserve <= effective root budget
@@ -81,6 +123,28 @@ Persist:
 - routing ledger and requirement-to-node mapping
 - validation units and synthesis dependencies
 
+Execution epochs exist only for isolated scheduling (`isolated`,
+`isolated-only`, or the isolated portion preceding mixed fallback). Adaptive
+grouped execution has no epochs, and routing never assigns one.
+
+## Hard Deadline Contract
+
+Treat every user or runtime time budget as a hard deadline in grouped,
+isolated, isolated-only, and mixed execution. Record the monotonic deadline,
+per-node elapsed caps, and coordinator, validation, and fix/revalidation
+reserves in the plan. Before every worker dispatch or coordinator execution,
+use `bounded_node_dispatch_seconds` or an equivalent monotonic calculation to
+limit the node to the remaining dispatch window after all reserves.
+
+When no dispatch window remains, start no new node. Preserve and verify every
+accepted result, account for every unrun, unaccepted, or invalidated node, and
+use the profile's failure or resume behavior. A deadline never permits routing
+coverage to be deleted, a required node to be reclassified, or an incomplete
+proof to be reported complete. If useful time remains after isolated execution
+fails, an isolation preference may use grouped fallback under
+[`execution-feasibility.md`](execution-feasibility.md#failure-and-fallback);
+isolated-only may not.
+
 ## Node And Validation Identity
 
 Keep these concepts separate:
@@ -93,6 +157,31 @@ Keep these concepts separate:
 - exact evidence-reuse mapping
 - synthesis node
 - execution epoch
+
+The final proof must map every executable node in the recaptured final-state
+`GraphPlan` to one unique accepted evidence ID, including requirement-free
+synthesis. Reject a final proof expectation containing `fix` or `revalidation`
+nodes: those source-mutating transition reports belong only to separately
+verified invalidation history. Also reject missing planned nodes, reused
+evidence assigned to an executable node, and evidence identity that differs
+from the planned node. Each planned review node retains the planner-derived
+skill digest and ordered static-reference path/digest pairs. Each planned
+validator retains those provenance identities plus a canonical digest of its
+exact coalesced `ValidationUnit`. The bundle gate compares record expectations
+and envelopes to these plan-owned values; a caller cannot rebuild both sides
+around substituted skill bytes, references, commands, working directories, or
+canonical recipes.
+Allow accepted non-node review evidence only for the exact reuse IDs declared
+by the planner. Preserve each exact requirement-to-evidence mapping unchanged
+through the routing assessment, graph plan, proof expectation, and proof, and
+verify its complete envelope and artifact before accepting synthesis or
+completion.
+
+For each planned or exactly reused independent review, preserve the exact
+concrete change target and ordered normalized review-surface paths through the
+routing identity, `WorkerNode`, planner-derived evidence identity, dispatch
+expectation, and bundle gate. Neither the worker artifact nor a caller-supplied
+expectation may substitute a different target or path set.
 
 Coalesce review requirements only when all of these match:
 
@@ -143,17 +232,38 @@ Before and after every dispatch, verify all three source fingerprints. After an
 accepted audit or independent result, validate every routing handoff. A handoff
 is closed only when its catalog decision becomes selected, exact-reused, or
 explicitly user-excluded. Replan the complete remaining graph and epochs before
-dependent synthesis.
+dependent synthesis. In a proof attempt, `unresolved_handoff_ids` must equal the
+globally unique ordered concatenation of handoff IDs in accepted review
+evidence; a nonempty tuple blocks completion. After rerouting closes those
+discoveries, regenerate the affected accepted evidence without unresolved
+handoffs before final proof.
 
-After an authorized fix, recapture fingerprints, invalidate affected reports,
-rerun repository and affected surface routers, add newly applicable skills, and
-rerun affected validation, independent review, and synthesis. Record stale and
-replacement evidence rather than overwriting history.
+After an authorized fix, persist the S0→S1 fix and revalidation reports,
+recapture S1 fingerprints, invalidate affected S0 reports, rerun repository and
+affected surface routers, and build a fresh S1 plan without transition nodes.
+Add newly applicable skills and rerun affected audit, validation, independent
+review, and synthesis. Record stale, transition, and replacement evidence in
+invalidation history rather than overwriting history or importing S0→S1 nodes
+into the S1 proof.
+
+Derive the final `repository-production-review` synthesis edges in the planner.
+It must depend on every selected non-repository synthesis node in addition to
+the routed audits, validators, and additional nodes already assigned to it;
+caller-supplied predecessor lists may add constraints but may not omit these
+dependencies.
 
 ## Failure And Resume
 
-Stop creating workers after the first creation failure or exhausted current
-epoch. Preserve completed raw reports and emit a manifest containing:
+In adaptive grouped execution, a failed worker creation or pre-acceptance worker
+result selects coordinator execution for that exact node. Preserve the failed
+attempt, do not change routing, and continue independent work.
+
+In isolated execution, stop creating workers after the first creation failure
+or exhausted current epoch. An isolation preference may continue the missing
+graph adaptively after recording fallback. If no isolated evidence was accepted,
+the resulting profile is grouped, not mixed. Only accepted isolated evidence
+followed by actual grouped fallback selects mixed. Isolated-only preserves
+completed raw reports and emits a manifest containing:
 
 ```text
 captured fingerprints and verification command
@@ -166,9 +276,15 @@ outstanding validation mappings and syntheses
 unresolved handoffs and post-fix routing state
 ```
 
-Never substitute same-context analysis or a completed worker. A later root may
-resume only after matching all fingerprints and revalidating routing closure.
-If fingerprints changed, recapture and replan.
+Before emitting this manifest, require accepted and unaccepted node IDs to be
+known, unique, and disjoint. A failed node cannot be accepted and must appear in
+both undispatched and unaccepted output.
+
+Never substitute a completed worker for a later node. Coordinator execution is
+permitted only after adaptive execution or mixed fallback is declared and must
+produce the same accepted evidence envelope. A later root may resume only after
+matching all fingerprints and revalidating routing closure. If fingerprints
+changed, recapture and replan.
 
 Accept a result after its elapsed cap only when the complete native report
 arrived and every ordinary isolation, skill, reference, structure, and
@@ -189,9 +305,17 @@ Report `complete` only when:
 - baseline and all required validation completed
 - applicable language and repository synthesis completed
 - required independent review completed for a concrete change
-- all accepted reports have matching source fingerprints and no isolation
-  failure
+- all accepted reports have matching source fingerprints; isolated completion
+  additionally has no isolation failure
 - final findings, changes, validation, and lifecycle ledgers reconcile
+
+Bind completion to the exact planner-derived proof expectation and proof, the
+complete review and validation records, the typed artifact manifest, and the
+trusted verifier payload boundary. The completion gate must invoke the evidence
+bundle verifier itself and derive review, validation, synthesis,
+independent-review, and exact-reuse coverage only after it succeeds; caller
+lists and flags may only confirm the derived values and must fail on any
+inconsistency.
 
 `not-applicable`, exact verified reuse, and explicit user exclusion are routing
 dispositions, not executed skills. User exclusion may yield complete only for

@@ -11,6 +11,15 @@
 
 set -euo pipefail
 
+rectangle_pro_takeover=false
+if (( $# > 1 )) || { (( $# == 1 )) && [[ "$1" != "--rectangle-pro-takeover" ]]; }; then
+  echo "Usage: $0 [--rectangle-pro-takeover]" >&2
+  exit 2
+fi
+if (( $# == 1 )); then
+  rectangle_pro_takeover=true
+fi
+
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "macos-defaults.sh only applies to macOS." >&2
   exit 1
@@ -49,12 +58,21 @@ defaults write com.apple.AppleMultitouchTrackpad TrackpadThreeFingerDrag -bool f
 defaults write com.apple.driver.AppleBluetoothMultitouch.trackpad Clicking -bool false
 
 echo "==> Window tiling"
-# Rectangle (Brewfile cask) owns drag-to-edge tiling; disable the native
-# macOS edge-drag tiling so both do not respond to the same gesture.
-# Option-drag tiling remains explicitly enabled as an escape hatch.
-defaults write com.apple.WindowManager EnableTilingByEdgeDrag -bool false
-defaults write com.apple.WindowManager EnableTopTilingByEdgeDrag -bool false
-defaults write com.apple.WindowManager EnableTilingOptionAccelerator -bool true
+if [[ "$rectangle_pro_takeover" != true ]]; then
+  echo "Rectangle Pro takeover was not requested; leaving native WindowManager tiling unchanged."
+elif ! command -v brew >/dev/null 2>&1 || ! brew list --cask rectangle-pro >/dev/null 2>&1; then
+  echo "Rectangle Pro is unavailable; leaving native WindowManager tiling unchanged."
+else
+  defaults write com.knollsoft.Hookshot windowSnapping -bool true
+  killall "Rectangle Pro" 2>/dev/null || true
+  open -a "Rectangle Pro"
+
+  # Rectangle Pro owns drag-to-edge tiling; disable the native macOS gestures
+  # so both window managers do not respond to the same drag.
+  defaults write com.apple.WindowManager EnableTilingByEdgeDrag -bool false
+  defaults write com.apple.WindowManager EnableTopTilingByEdgeDrag -bool false
+  defaults write com.apple.WindowManager EnableTilingOptionAccelerator -bool true
+fi
 
 echo "==> Restarting Dock and Finder"
 killall Dock 2>/dev/null || true

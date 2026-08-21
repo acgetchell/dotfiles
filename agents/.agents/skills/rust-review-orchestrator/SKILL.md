@@ -16,8 +16,7 @@ Do not treat selecting a group as permission to load every skill listed in it. L
 - Respect repository-local instructions and documented MSRV, edition, feature, target, safety, and validation policy.
 - Prefer changed-file review. Use whole-repository baseline mode only when explicitly requested.
 - Outside graph-routing mode, honor any parent file list or diff instead of
-  rediscovering a narrower scope. This includes the default `repo-review`
-  grouped profile.
+  rediscovering a narrower scope.
 - When fixes are requested, implement verified findings within each selected skill before continuing.
 - Select focused validators; do not run full CI merely because orchestration is ending.
 - Maintain one cross-skill validation ledger keyed by source/build state,
@@ -52,9 +51,10 @@ For every selected skill:
 - load its `SKILL.md` completely and only directly relevant references
 - record files inspected, findings or explicit no-finding result, fixes, and validator evidence
 
-When invoked through the `repo-review` grouped profile, provide table-ready evidence
-naming selected groups, exact skills and references loaded, validators, fixes,
-and not-selected skills with reasons.
+When a caller supplies an established scope and requests the standalone pass
+loop, treat the initial trace as the handoff receipt and provide table-ready
+evidence naming selected groups, exact skills and references loaded, validators,
+fixes, and not-selected skills with reasons.
 
 ## Scope Routing
 

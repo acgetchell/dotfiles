@@ -3,23 +3,25 @@
 Use this contract to decide which review profile may be selected by default.
 Useful review delivery takes precedence over an unexecutable isolation plan.
 
-## Grouped Delivery Gate
+## Adaptive Delivery Gate
 
-Keep grouped delivery as the default while it:
+Keep adaptive grouped execution as the default while it:
 
-- selects every applicable tooling, C++, Rust, Python, and documentation
-  orchestrator for the requested scope
-- loads each selected orchestrator and its applicable focused skills
+- produces exhaustive repository and surface routing for the requested scope
+- executes every selected leaf skill in a worker when possible or the
+  coordinator when necessary
 - preserves shared-file ownership and cross-surface handoffs
-- returns findings or explicit no-finding outcomes for every selected surface
-- accounts for validation without replaying equivalent checks
+- returns accepted `ReviewEvidence` or an explicit blocker for every selected
+  requirement
+- dispatches validation through `review-validator` without replaying equivalent
+  checks
 - records blockers without discarding completed surface evidence
 - applies and revalidates fixes only when authorized
-- produces the five-row `Review Evidence` compatibility table
+- verifies `RepositoryReviewProof` and derives the five-row compatibility table
 
-A grouped review is incomplete when an applicable surface, required validator,
-or unresolved handoff is silently omitted. It is still useful when a visible
-blocker affects only part of the scope; report the partial evidence.
+An adaptive review is incomplete when an applicable requirement, required
+validator, or unresolved handoff is silently omitted. It is still useful when a
+visible blocker affects only part of the scope; report the partial evidence.
 
 ## Isolated Deterministic Gate
 
@@ -48,7 +50,7 @@ consecutive accepted forward trials for each major mode:
 - whole-repository baseline or release readiness
 - review-and-fix
 
-Also require one forced worker-creation failure with successful grouped fallback
+Also require one forced worker-creation failure with successful adaptive fallback
 and one isolated graph continued across multiple fresh-root epochs.
 
 Each trial must demonstrate:
@@ -68,12 +70,13 @@ fixtures are not forward-trial artifacts and cannot promote the isolated
 profile outside the test process.
 
 A failing isolated trial resets its consecutive count and keeps isolated
-execution explicit-only. It must never disable grouped review delivery.
+execution explicit-only. It must never disable adaptive review delivery.
 
 ## Compatibility Policy
 
-Keep `repo-review` as the grouped default and repository routing authority.
-Allow users to request `isolated` with transparent fallback or `isolated-only`
-without fallback. Never describe grouped evidence as isolated, and never return
-only isolated planning artifacts when grouped delivery remains authorized and
-possible.
+Keep `review-graph` as the sole mixed-surface coordinator and repository routing
+authority. Keep `repo-review` as a compatibility entrypoint that delegates to
+it. Allow users to request `isolated` with transparent adaptive fallback or
+`isolated-only` without fallback. Never describe adaptive evidence as isolated,
+and never return only isolated planning artifacts when adaptive delivery remains
+authorized and possible.

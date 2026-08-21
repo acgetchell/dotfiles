@@ -189,9 +189,13 @@ markdown-fix: _ensure-rumdl
 
 markdown-lint: markdown-check
 
-[confirm("Apply captured macOS defaults (Dock, Finder, keyboard, trackpad) and restart Dock/Finder?")]
+[confirm("Apply captured macOS defaults (Dock, Finder, keyboard, trackpad) while leaving native window tiling unchanged, then restart Dock/Finder?")]
 macos-defaults:
     bin/macos-defaults.sh
+
+[confirm("Apply captured macOS defaults and let an installed Rectangle Pro take over edge tiling by disabling native macOS edge-drag gestures?")]
+macos-defaults-rectangle-pro:
+    bin/macos-defaults.sh --rectangle-pro-takeover
 
 python-check: _ensure-uv
     uv run --locked ruff format --check {{ python_paths }}
@@ -258,7 +262,7 @@ update: update-dependencies update-cargo-tools
     @echo "Repository dependencies and tools updated."
 
 # Update the Cargo CLI tools installed by bootstrap.sh and reconcile their pins.
-update-cargo-tools:
+update-cargo-tools: _ensure-brew
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -268,15 +272,29 @@ update-cargo-tools:
         exit 1
     fi
 
+    uv_executable="$(brew --prefix uv)/bin/uv"
+    if [[ ! -x "$uv_executable" ]]; then
+        echo "Homebrew-managed uv is unavailable at $uv_executable." >&2
+        exit 1
+    fi
+
     packages=(dprint just rumdl zizmor)
     cargo install-update --locked "${packages[@]}"
-    uv run --locked python scripts/update_tool_pins.py --justfile justfile
+    "$uv_executable" run --locked python scripts/update_tool_pins.py --justfile justfile --uv-executable "$uv_executable"
 
 # Upgrade Brewfile dependencies and the complete uv development environment.
 update-dependencies: _ensure-brew
+    #!/usr/bin/env bash
+    set -euo pipefail
+
     brew bundle upgrade --file="$PWD/Brewfile"
-    uv lock --upgrade
-    uv sync --locked --group dev
+    uv_executable="$(brew --prefix uv)/bin/uv"
+    if [[ ! -x "$uv_executable" ]]; then
+        echo "Homebrew-managed uv is unavailable at $uv_executable." >&2
+        exit 1
+    fi
+    "$uv_executable" lock --upgrade
+    "$uv_executable" sync --locked --group dev
 
 shell-check:
     bash -n bin/bootstrap.sh bin/macos-defaults.sh bin/resolve-just-version.sh bin/verify.sh
