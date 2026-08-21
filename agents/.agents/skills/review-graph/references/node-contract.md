@@ -522,5 +522,5 @@ no source or git-state mutation occurred. Accept `blocked` when it preserves
 every check that could run plus the exact unavailable target, observed mismatch,
 or detected mutation; its Result dispositions must reconcile with the observed
 identities, its handoffs must still match the typed tuple, and it must state one
-concrete limitation. Assign graph-finding IDs without rewriting the
-preserved native report.
+concrete limitation. Assign stable graph-finding IDs deterministically without
+rewriting the preserved native report.

@@ -25,9 +25,11 @@ infer or expose their names, dependencies, issues, or release plans.
 
 Release planning and readiness assessment are read-only by default. Inspect
 repository files, GitHub metadata, crates.io state, and official Rust sources,
-but do not create, edit, move, close, or publish issues, milestones, dependency
-links, releases, repository content, or crates without explicit user
-authorization for those mutations.
+but do not stage, commit, push, tag, checkout, reset, stash, create, edit, move,
+close, or publish issues, milestones, dependency links, releases, repository
+content, or crates without explicit user authorization in the current turn.
+Explicit authorization for these mutating operations is required before execution,
+including all existing repo and publication mutations.
 
 Before requesting authorization, preview the exact issues, milestones,
 dependency relationships, release records, repository edits, and publication
@@ -79,8 +81,15 @@ For every repository in the graph, inspect:
   these Python surfaces through `python-review-orchestrator` in orchestrated mode
   and include `python-production-review` synthesis in the evidence chain before
   declaring release readiness.
+- Python support-package versions, release/citation metadata, generated changelog
+  fragments, and documentation version snippets, validating against the shared
+  invariants in [`references/repositories.md`](references/repositories.md)
 - `semgrep.yaml`, repository-owned rules, fixtures, fixture validators, and
   Semgrep CI integration.
+
+After any release publication, perform post-publication package inspection and
+documentation/release verification for affected repositories with explicit evidence
+for each check before declaring a crate release-ready.
 
 Prefer repository files and native GitHub metadata over issue-body prose. Use
 official Rust release sources for schedules and final release notes.

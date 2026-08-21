@@ -48,9 +48,10 @@ node_id: stable graph identifier or standalone-validation-<scope-digest-prefix>
 invocation: graph-dispatched | standalone
 evidence_schema_version: 1
 execution_profile: standalone | grouped | isolated | isolated-only | mixed
-execution_location: worker | coordinator
-  (graph-dispatched only; standalone executors are recorded under each Execution
-  entry as `parent` or `subagent <node-id>`)
+execution_location: worker | coordinator | none
+  (graph-dispatched only uses worker or coordinator; standalone must be none and
+  records each executor under its `Execution` entry as `parent` or
+  `subagent <node-id>`)
 repository_root: absolute path
 request: exact validation request
 authorization: validation-only
@@ -80,8 +81,8 @@ expected_evidence: what successful execution must demonstrate
 dependency_policy: stop-on-failure | continue-independent
 execution_strategy: sequential | parallel-independent
 independence_basis: prerequisite and shared-resource analysis for every parallel unit, or none
-allowed_artifacts: exact approved records of path, kind, and repository status;
-  status is ignored or outside-repository
+allowed_artifacts: exact approved records of path, optional artifact ID, kind,
+  and repository status; status is ignored or outside-repository
 validation_ledger: exact reusable entries or none
 elapsed_time_budget: total budget and any per-command limits
 instruction_paths: applicable repository instructions
@@ -106,9 +107,10 @@ Return every heading, using `none` when a section has no entries.
 - Invocation: <graph-dispatched|standalone>
 - Evidence schema version: 1
 - Execution profile: <standalone|grouped|isolated|isolated-only|mixed>
-- Execution location: <worker|coordinator> for graph-dispatched results; for
-  standalone execution, record parent or subagent executor identity in each
-  `Execution` entry instead.
+- Execution location: <worker|coordinator|none>
+  - graph-dispatched results: worker or coordinator
+  - standalone results: none; record parent or subagent executor identity in each
+    `Execution` entry instead
 - Status: <passed|failed|blocked|reused|not-applicable>
 - Scope fingerprint: <digest|none>
 - Worktree fingerprint: <digest|none>
@@ -187,7 +189,7 @@ Return every heading, using `none` when a section has no entries.
   - Result: <passed|failed|blocked|not-run>
   - Exit code: <integer|none>
   - Elapsed: <duration|none>
-  - Evidence: <concise stdout/stderr facts, not an unsupported conclusion>
+  - Evidence: <concise stdout/stderr facts or artifact reference by approved path or artifact ID>
   - Log or artifact: <path outside source or none>
 
 Write `none` when no command executed.
@@ -201,6 +203,7 @@ Write `none` when no command executed.
 ## Artifacts
 
 - Path: <exact path>
+  - Artifact ID: <opaque ID|none>
   - Kind: <build|cache|coverage|log|other>
   - Repository status: <ignored|outside-repository>
 
@@ -255,7 +258,9 @@ typed evidence identity shown above.
 Accept a result only when:
 
 - evidence schema version, execution profile, and execution location equal the
-  actual dispatch; graph-dispatched execution does not create another worker
+  actual dispatch; graph-dispatched execution must use `worker` or `coordinator`
+  and standalone execution must use `none`; graph-dispatched execution does not
+  create another worker
 - `Invocation` identifies the actual mode
 - the Outcome Summary uppercase outcome matches `Status`, its counts reconcile
   exactly with Requirements and Executions, and review severities remain
@@ -295,7 +300,8 @@ Accept a result only when:
   environment equal the dispatched unit, `passed` uses exit code `0` plus
   concrete elapsed time and evidence, `failed` uses a nonzero integer exit code
   plus concrete elapsed time and evidence, and `blocked` or `not-run` fields
-  reconcile with their result
+  reconcile with their result; evidence may only reference artifact paths or
+  artifact IDs listed in `allowed_artifacts`
 - every candidate and executed command is classified from repository-owned
   evidence; mutating commands are never executed under `validation-only`
 - every parallel unit records a concrete independence basis; each subagent result
@@ -308,7 +314,7 @@ Accept a result only when:
   executed, `reused` means every nonempty requirement set was reused without
   execution, and `not-applicable` means the plan had zero requirements and zero
   commands because capture was empty or discovery proved no validation applied
-- artifacts exactly equal the dispatch-approved path, kind, and
+- artifacts exactly equal the dispatch-approved path or artifact ID, kind, and
   ignored/outside-repository status records; unapproved or tracked artifacts
   are rejected
 - `passed`, `failed`, `reused`, and `not-applicable` report no
