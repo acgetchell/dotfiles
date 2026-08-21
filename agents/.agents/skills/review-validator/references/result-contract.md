@@ -82,7 +82,8 @@ dependency_policy: stop-on-failure | continue-independent
 execution_strategy: sequential | parallel-independent
 independence_basis: prerequisite and shared-resource analysis for every parallel unit, or none
 allowed_artifacts: exact approved records of path, kind, repository status, and
-  optional expected artifact ID or SHA-256 digest; status is ignored or
+  optional expected artifact ID or content digest in the exact
+  `sha256:<64-lowercase-hex>` representation; status is ignored or
   outside-repository
 validation_ledger: exact reusable entries or none
 elapsed_time_budget: total budget and any per-command limits
@@ -91,6 +92,24 @@ skill_digest: digest of review-validator/SKILL.md
 reference_digests: exact path and digest for this result contract
 artifact_store: persistent session-owned or external result location
 ```
+
+### Canonical Validation Dispatch Digests
+
+Produce both dispatch digests with the graph planner's `_sha256_json`
+deterministic JSON serializer. The command-identity input is one object whose
+fields serialize in this order: `canonical_recipe`, `commands`, and
+`working_directories`. The environment input is one object whose fields
+serialize in this order: `allowed_artifacts`, `artifact_owner`, `environment`,
+`features`, `mutation_lock`, `platform`, and `toolchain`. Each element of
+`allowed_artifacts` is one object whose fields serialize in this order:
+`artifact_digest`, `artifact_id`, `kind`, `path`, and `repository_status`.
+
+Sort object keys lexicographically at every level; preserve array element
+order; serialize tuples as JSON arrays and absent optional values as JSON
+`null`; escape non-ASCII characters with JSON `\u` escapes; use `,` and `:` as
+separators without added whitespace or a trailing newline; then encode the JSON
+text as UTF-8. Hash those exact bytes with SHA-256 and report `sha256:` followed
+immediately by exactly 64 lowercase hexadecimal characters (`[0-9a-f]`).
 
 Do not accept phrases such as “run the relevant tests” in place of exact
 commands, configurations, or selections. Do not accept a state-verification
@@ -206,13 +225,14 @@ Write `none` when no command executed.
 
 - Path: <exact path>
   - Artifact ID: <opaque ID|none>
-  - Artifact digest: <lowercase sha256 digest>
+  - Artifact digest: <sha256: followed by exactly 64 lowercase hexadecimal characters>
   - Kind: <build|cache|coverage|log|other>
   - Repository status: <ignored|outside-repository>
 
 Compute each digest from the completed artifact before returning the result. A
-regular file uses `sha256:` followed by the lowercase hexadecimal SHA-256 of its
-raw bytes. A directory uses this canonical `directory-artifact-v1` format:
+regular file uses `sha256:` followed immediately by exactly 64 lowercase
+hexadecimal characters containing the SHA-256 of its raw bytes. A directory
+uses this canonical `directory-artifact-v1` format:
 
 1. Recursively enumerate regular files without following symbolic links. Empty
    directories contribute no records; reject symbolic links and other special
@@ -226,8 +246,9 @@ raw bytes. A directory uses this canonical `directory-artifact-v1` format:
    length, the path bytes, and the raw 32-byte SHA-256 digest of the file bytes.
 4. Form the exact outer digest input as the ASCII bytes
    `review-validator-directory-artifact-v1\0`, followed by the unsigned 64-bit
-   big-endian record count and the concatenated records. Report `sha256:` plus
-   the lowercase hexadecimal SHA-256 of those complete bytes.
+   big-endian record count and the concatenated records. Report `sha256:`
+   followed immediately by exactly 64 lowercase hexadecimal characters
+   containing the SHA-256 of those complete bytes.
 
 Digest generation and evidence acceptance must both use this exact format and
 must compare the regenerated digest before accepting the artifact. An artifact
@@ -318,9 +339,10 @@ Accept a result only when:
   working directories, environment/toolchain, features, platform, artifact
   ownership, and mutation/locking compatibility; every requirement maps
   exactly once to this unit and any candidate evidence
-- command and environment digests are derived canonically from the exact
-  coalesced dispatch fields, repeated exactly in the result, and match the
-  graph's independently derived `ValidationEvidenceExpectation` values
+- command and environment digests use the canonical validation-dispatch
+  serialization above over the exact coalesced dispatch fields, are repeated
+  exactly in the result, and match the graph's independently derived
+  `ValidationEvidenceExpectation` values
 - every executed command exactly matches the dispatch and reports working
   directory, executor, environment, result, exit code, elapsed time, evidence,
   and log or artifact references exactly once in the shown order; working directory and
@@ -343,11 +365,11 @@ Accept a result only when:
   execution, and `not-applicable` means the plan had zero requirements and zero
   commands because capture was empty or discovery proved no validation applied
 - artifacts exactly equal the dispatch-approved paths, kinds, and
-  ignored/outside-repository statuses; every reported artifact has a lowercase
-  SHA-256 digest regenerated from the completed file bytes or the canonical
-  `directory-artifact-v1` format above, and any expected artifact ID or digest
-  supplied by the dispatch matches exactly; unapproved or mismatched-identity
-  artifacts are rejected
+  ignored/outside-repository statuses; every reported artifact has a digest in
+  the exact `sha256:<64-lowercase-hex>` representation regenerated from the
+  completed file bytes or the canonical `directory-artifact-v1` format above,
+  and any expected artifact ID or digest supplied by the dispatch matches
+  exactly; unapproved or mismatched-identity artifacts are rejected
 - `passed`, `failed`, `reused`, and `not-applicable` report no
   source-controlled file or Git-state mutation; a blocked result reports any
   detected mutation exactly

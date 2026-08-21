@@ -223,9 +223,9 @@ python-typecheck: _ensure-uv
 semgrep: _ensure-brew _ensure-uv
     #!/usr/bin/env bash
     set -euo pipefail
-    uv_executable="$(brew --prefix uv)/bin/uv"
+    uv_executable="${UV_EXECUTABLE:-$(brew --prefix uv)/bin/uv}"
     if [[ ! -x "$uv_executable" ]]; then
-        echo "Homebrew-managed uv is unavailable at $uv_executable." >&2
+        echo "Selected uv executable is unavailable at $uv_executable." >&2
         exit 1
     fi
     files=()
@@ -262,9 +262,9 @@ semgrep: _ensure-brew _ensure-uv
 semgrep-test: _ensure-brew _ensure-uv
     #!/usr/bin/env bash
     set -euo pipefail
-    uv_executable="$(brew --prefix uv)/bin/uv"
+    uv_executable="${UV_EXECUTABLE:-$(brew --prefix uv)/bin/uv}"
     if [[ ! -x "$uv_executable" ]]; then
-        echo "Homebrew-managed uv is unavailable at $uv_executable." >&2
+        echo "Selected uv executable is unavailable at $uv_executable." >&2
         exit 1
     fi
     state_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-semgrep-state.XXXXXX")"
@@ -272,6 +272,14 @@ semgrep-test: _ensure-brew _ensure-uv
         rm -rf "$state_root"
     }
     trap cleanup EXIT
+
+    if [ -f /etc/ssl/cert.pem ]; then
+        export SSL_CERT_FILE="/etc/ssl/cert.pem"
+    elif [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+        export SSL_CERT_FILE="/etc/ssl/certs/ca-certificates.crt"
+    else
+        unset SSL_CERT_FILE
+    fi
 
     config_root="$state_root/configs"
     mkdir -p "$config_root"
@@ -288,14 +296,6 @@ semgrep-test: _ensure-brew _ensure-uv
         "$uv_executable" run --locked python scripts/semgrep_fixture_config.py "$fixture" "$PWD/semgrep.yaml" "$config_path"
         ((ordinary_fixture_count += 1))
     done < <(find tests/semgrep -type f ! -name '*.fixed' -print0)
-
-    if [ -f /etc/ssl/cert.pem ]; then
-        export SSL_CERT_FILE="/etc/ssl/cert.pem"
-    elif [ -f /etc/ssl/certs/ca-certificates.crt ]; then
-        export SSL_CERT_FILE="/etc/ssl/certs/ca-certificates.crt"
-    else
-        unset SSL_CERT_FILE
-    fi
 
     run_fixture_suite() {
         local config_path="$1"

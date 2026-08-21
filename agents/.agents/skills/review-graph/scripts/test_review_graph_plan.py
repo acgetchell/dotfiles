@@ -2979,6 +2979,28 @@ def test_validation_dispatch_digests_cover_every_coalescing_identity_field() -> 
     assert all(validation_environment_digest(item) != expectation.environment_digest for item in environment_variants)
 
 
+def test_validation_dispatch_digest_fixed_vectors() -> None:
+    expectation, _ = _validation_evidence()
+    unit = replace(
+        expectation.validation_unit,
+        canonical_recipe=None,
+        commands=("just check", "uv run pytest tests/test_é.py"),
+        working_directories=("/repo", "/repo/subdir"),
+        allowed_artifacts=(
+            ValidationArtifact(path="logs/é.txt", kind="log", repository_status="ignored", artifact_id="artifact://log", artifact_digest="sha256:" + "a" * 64),
+        ),
+        artifact_owner="validator",
+        environment="PYTHONUTF8=1",
+        features=("feature-a", "feature-b"),
+        mutation_lock="shared-read",
+        platform="darwin-arm64",
+        toolchain="python-3.14",
+    )
+
+    assert validation_command_identity_digest(unit) == "sha256:0a7cf4ab06b8269b3807b1d8727bd01a82aaf85d649be501f42745136843e93d"
+    assert validation_environment_digest(unit) == "sha256:b21bc5afe779633ac3609bc2bdca9df8f2e8c8296811867068636c6b280eb9cb"
+
+
 def test_isolated_validation_rejects_coordinator_evidence() -> None:
     state = ("scope", "worktree", "repository")
     (unit,), _ = coalesce_validation_requirements((_validation_requirement("V01"),))

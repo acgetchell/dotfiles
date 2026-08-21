@@ -96,4 +96,7 @@ jobs:
           tool: zizmor@${{ steps.tool_versions.outputs.zizmor_version }}
 
       - name: Run CI checks
-        run: just ci
+        run: |
+          UV_EXECUTABLE="$(command -v uv)"
+          export UV_EXECUTABLE
+          just ci
