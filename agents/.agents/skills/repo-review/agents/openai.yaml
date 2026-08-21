@@ -2,5 +2,6 @@ interface:
   display_name: "Repo Review"
   short_description: "Delegate complete reviews to Review Graph"
   default_prompt: >-
-    Use $repo-review to delegate this complete mixed-surface repository review
-    to $review-graph, preserving scope and applying fixes only when requested.
+    Use $review-graph as the sole mixed-surface review coordinator for this
+    complete repository review request, preserving scope and applying fixes only
+    when requested.

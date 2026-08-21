@@ -49,6 +49,8 @@ invocation: graph-dispatched | standalone
 evidence_schema_version: 1
 execution_profile: standalone | grouped | isolated | isolated-only | mixed
 execution_location: worker | coordinator
+  (graph-dispatched only; standalone executors are recorded under each Execution
+  entry as `parent` or `subagent <node-id>`)
 repository_root: absolute path
 request: exact validation request
 authorization: validation-only
@@ -104,7 +106,9 @@ Return every heading, using `none` when a section has no entries.
 - Invocation: <graph-dispatched|standalone>
 - Evidence schema version: 1
 - Execution profile: <standalone|grouped|isolated|isolated-only|mixed>
-- Execution location: <worker|coordinator>
+- Execution location: <worker|coordinator> for graph-dispatched results; for
+  standalone execution, record parent or subagent executor identity in each
+  `Execution` entry instead.
 - Status: <passed|failed|blocked|reused|not-applicable>
 - Scope fingerprint: <digest|none>
 - Worktree fingerprint: <digest|none>

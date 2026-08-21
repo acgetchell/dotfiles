@@ -75,7 +75,10 @@ For every repository in the graph, inspect:
 - open milestones, release issues, native dependency edges, and open PRs;
 - `justfile`, workflow files, Dependabot configuration, and action/tool pins;
 - `pyproject.toml`, `.python-version` when present, `uv.lock`, dependency groups,
-  overrides, and support-package version;
+  overrides, and support-package behavior; route any discovered repository edits on
+  these Python surfaces through `python-review-orchestrator` in orchestrated mode
+  and include `python-production-review` synthesis in the evidence chain before
+  declaring release readiness.
 - `semgrep.yaml`, repository-owned rules, fixtures, fixture validators, and
   Semgrep CI integration.
 
@@ -93,9 +96,14 @@ official Rust release sources for schedules and final release notes.
    release capstone of each upstream crate it consumes.
 4. Make downstream integration work depend on the upstream **published-release
    capstone**, not merely on the implementation issue that introduced an API.
-5. Work bottom-up. After each publication, update downstream Cargo requirements
-   and locks through the registry, then run the downstream contract validation.
-6. Keep the final ecosystem capstone open until the published crates resolve
+5. Work bottom-up. Before each publication, explicit authorization is required for
+   any mutation, including moving work items, adding dependency links, publishing
+   or closing issues, and updating any downstream Cargo or lockfile state. When
+   missing, emit reviewable proposals instead of applying direct changes.
+6. Work bottom-up. After each publication, update downstream Cargo
+   requirements/locks through the registry, then run downstream contract
+   validation; only execute those updates with explicit authorization.
+7. Keep the final ecosystem capstone open until the published crates resolve
    without overrides and the complete downstream validation passes.
 
 Before stable ships, finish compatible feature and defect work, audit beta
@@ -132,8 +140,11 @@ shared contract locally and in the repository that owns each change.
   release-capstone metadata.
 - Use `project-tooling-review` when implementing or auditing Just, CI, pins,
   Semgrep, uv, or repository-rule changes.
-- Use the relevant Rust or Python build-portability skill for dependency,
-  packaging, MSRV, or lockfile changes.
+- Use `python-review-orchestrator` in orchestrated mode for dependency,
+  packaging, release-surface, or lockfile work touching `pyproject.toml`, `uv.lock`,
+  support-package behavior, or other Python-owned surfaces; require an accepted
+  `python-production-review` synthesis pass before finalizing those release-ready
+  decisions.
 - Use `praxis-research` only when the release decision affects the planned
   scientific experiment; do not make independent maintenance appear
   scientifically mandatory.
