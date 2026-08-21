@@ -81,8 +81,9 @@ expected_evidence: what successful execution must demonstrate
 dependency_policy: stop-on-failure | continue-independent
 execution_strategy: sequential | parallel-independent
 independence_basis: prerequisite and shared-resource analysis for every parallel unit, or none
-allowed_artifacts: exact approved records of path, optional artifact ID, kind,
-  and repository status; status is ignored or outside-repository
+allowed_artifacts: exact approved records of path, kind, repository status, and
+  optional expected artifact ID or SHA-256 digest; status is ignored or
+  outside-repository
 validation_ledger: exact reusable entries or none
 elapsed_time_budget: total budget and any per-command limits
 instruction_paths: applicable repository instructions
@@ -189,8 +190,9 @@ Return every heading, using `none` when a section has no entries.
   - Result: <passed|failed|blocked|not-run>
   - Exit code: <integer|none>
   - Elapsed: <duration|none>
-  - Evidence: <concise stdout/stderr facts or artifact reference by approved path or artifact ID>
-  - Log or artifact: <path outside source or none>
+  - Evidence: <concise stdout/stderr facts>
+  - Log or artifact: <none or a JSON list of exact path, artifact_id, and
+    artifact_digest objects>
 
 Write `none` when no command executed.
 
@@ -204,8 +206,14 @@ Write `none` when no command executed.
 
 - Path: <exact path>
   - Artifact ID: <opaque ID|none>
+  - Artifact digest: <lowercase sha256 digest>
   - Kind: <build|cache|coverage|log|other>
   - Repository status: <ignored|outside-repository>
+
+Compute each digest from the completed artifact before returning the result. For
+a directory, digest a deterministic manifest containing every relative path and
+file digest. An artifact ID is a locator, not a substitute for the content
+digest.
 
 ## Source And Git State
 
@@ -296,13 +304,13 @@ Accept a result only when:
   graph's independently derived `ValidationEvidenceExpectation` values
 - every executed command exactly matches the dispatch and reports working
   directory, executor, environment, result, exit code, elapsed time, evidence,
-  and log or artifact exactly once in the shown order; working directory and
+  and log or artifact references exactly once in the shown order; working directory and
   environment equal the dispatched unit, `passed` uses exit code `0` plus
   concrete elapsed time and evidence, `failed` uses a nonzero integer exit code
   plus concrete elapsed time and evidence, and `blocked` or `not-run` fields
-  reconcile with their result; evidence must include concrete stdout/stderr facts
-  and, if it contains artifact path or artifact ID references, every such
-  reference must resolve to an entry in `allowed_artifacts`
+  reconcile with their result; evidence contains concrete stdout/stderr facts;
+  artifact references are `none` or a JSON list whose exact path, optional ID,
+  and required digest resolve to one reported artifact identity
 - every candidate and executed command is classified from repository-owned
   evidence; mutating commands are never executed under `validation-only`
 - every parallel unit records a concrete independence basis; each subagent result
@@ -315,9 +323,10 @@ Accept a result only when:
   executed, `reused` means every nonempty requirement set was reused without
   execution, and `not-applicable` means the plan had zero requirements and zero
   commands because capture was empty or discovery proved no validation applied
-- artifacts exactly equal the dispatch-approved path or artifact ID, kind, and
-  ignored/outside-repository status records; unapproved or tracked artifacts
-  are rejected
+- artifacts exactly equal the dispatch-approved paths, kinds, and
+  ignored/outside-repository statuses; every reported artifact has a lowercase
+  SHA-256 digest, and any expected artifact ID or digest supplied by the dispatch
+  matches exactly; unapproved or mismatched-identity artifacts are rejected
 - `passed`, `failed`, `reused`, and `not-applicable` report no
   source-controlled file or Git-state mutation; a blocked result reports any
   detected mutation exactly

@@ -34,6 +34,7 @@ from review_graph_plan import (
     RoutingLedgerAssessment,
     TimeBudget,
     TrustedArtifactVerifier,
+    ValidationArtifact,
     ValidationEvidence,
     ValidationEvidenceExpectation,
     ValidationRequirement,
@@ -481,8 +482,16 @@ def _validation_result_payload(expectation: ValidationEvidenceExpectation, evide
         ),
         "## Artifacts": (
             "\n".join(
-                f"- Path: {path}\n  - Kind: {kind}\n  - Repository status: {repository_status}"
-                for path, kind, repository_status in expectation.validation_unit.allowed_artifacts
+                "\n".join(
+                    (
+                        f"- Path: {artifact.path}",
+                        f"  - Artifact ID: {artifact.artifact_id or 'none'}",
+                        f"  - Artifact digest: {artifact.artifact_digest or 'sha256:' + 'a' * 64}",
+                        f"  - Kind: {artifact.kind}",
+                        f"  - Repository status: {artifact.repository_status}",
+                    )
+                )
+                for artifact in expectation.validation_unit.allowed_artifacts
             )
             or "none"
         ),
@@ -1197,6 +1206,49 @@ def test_graph_document_rejects_malformed_validation_configuration_text(value: o
     validation["environment"] = value
 
     with pytest.raises(ValueError, match="environment must be a bounded non-empty string"):
+        plan_from_document(document, repository_root=REPOSITORY_ROOT)
+
+
+def test_graph_document_preserves_optional_validation_artifact_identity() -> None:
+    document = _exhaustive_rust_document()
+    validation = cast("list[dict[str, object]]", document["validation_requirements"])[0]
+    artifact_digest = "sha256:" + "a" * 64
+    validation["allowed_artifacts"] = [
+        {
+            "path": "/external/review-validator/command.log",
+            "artifact_id": "artifact://command-log",
+            "artifact_digest": artifact_digest,
+            "kind": "log",
+            "repository_status": "outside-repository",
+        }
+    ]
+
+    plan = plan_from_document(document, repository_root=REPOSITORY_ROOT)
+
+    assert plan.coalesced_validation_units[0].allowed_artifacts == (
+        ValidationArtifact(
+            path="/external/review-validator/command.log",
+            artifact_id="artifact://command-log",
+            artifact_digest=artifact_digest,
+            kind="log",
+            repository_status="outside-repository",
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "artifact",
+    [
+        {"path": "/external/log", "artifact_id": 1, "kind": "log", "repository_status": "outside-repository"},
+        {"path": "/external/log", "artifact_digest": "sha256:invalid", "kind": "log", "repository_status": "outside-repository"},
+    ],
+)
+def test_graph_document_rejects_malformed_validation_artifact_identity(artifact: dict[str, object]) -> None:
+    document = _exhaustive_rust_document()
+    validation = cast("list[dict[str, object]]", document["validation_requirements"])[0]
+    validation["allowed_artifacts"] = [artifact]
+
+    with pytest.raises(ValueError, match=r"allowed artifacts|allowed_artifacts"):
         plan_from_document(document, repository_root=REPOSITORY_ROOT)
 
 
@@ -2714,7 +2766,9 @@ def test_validation_native_provenance_artifacts_and_ledger_are_dispatch_bound() 
     assert any("Validation Ledger Export" in blocker for blocker in blockers)
 
     external_unit = replace(
-        expectation.validation_unit, artifact_owner="external", allowed_artifacts=(("/external/review-validator/command.log", "log", "outside-repository"),)
+        expectation.validation_unit,
+        artifact_owner="external",
+        allowed_artifacts=(ValidationArtifact(path="/external/review-validator/command.log", kind="log", repository_status="outside-repository"),),
     )
     external_expectation = validation_evidence_expectation(
         external_unit,
@@ -2732,6 +2786,65 @@ def test_validation_native_provenance_artifacts_and_ledger_are_dispatch_bound() 
     assert any(
         "artifact paths do not match its dispatch" in blocker
         for blocker in _validation_native_result_blockers(unapproved_external, external_expectation, external_evidence)
+    )
+
+
+def test_validation_native_artifact_references_require_matching_content_identity() -> None:
+    expectation, evidence = _validation_evidence()
+    artifact_digest = "sha256:" + "a" * 64
+    unit = replace(
+        expectation.validation_unit,
+        artifact_owner="external",
+        allowed_artifacts=(
+            ValidationArtifact(
+                path="/external/review-validator/command.log",
+                artifact_id="artifact://command-log",
+                artifact_digest=artifact_digest,
+                kind="log",
+                repository_status="outside-repository",
+            ),
+        ),
+    )
+    expectation = validation_evidence_expectation(
+        unit,
+        skill_path=expectation.skill_path,
+        skill_digest=expectation.skill_digest,
+        reference_digests=expectation.reference_digests,
+        execution_profile=expectation.execution_profile,
+        execution_location=expectation.execution_location,
+    )
+    evidence = replace(evidence, environment_digest=expectation.environment_digest)
+    reference = json.dumps(
+        [{"path": "/external/review-validator/command.log", "artifact_id": "artifact://command-log", "artifact_digest": artifact_digest}],
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    content = _validation_result_payload(expectation, evidence).replace(b"  - Log or artifact: none", f"  - Log or artifact: {reference}".encode(), 1)
+
+    assert not _validation_native_result_blockers(content, expectation, evidence)
+
+    mismatched_digest = "sha256:" + "b" * 64
+    mismatched_reference_value = reference.replace(artifact_digest, mismatched_digest)
+    mismatched_reference = _replace_in_native_section(
+        content, "## Executions", "## Reused Evidence", f"  - Log or artifact: {reference}", f"  - Log or artifact: {mismatched_reference_value}"
+    )
+    mismatched_artifact = _replace_in_native_section(content, "## Artifacts", "## Source And Git State", artifact_digest, mismatched_digest)
+    mismatched_artifact_id = _replace_in_native_section(
+        content, "## Artifacts", "## Source And Git State", "  - Artifact ID: artifact://command-log", "  - Artifact ID: artifact://other-log"
+    )
+    missing_artifact_digest = _replace_in_native_section(
+        content, "## Artifacts", "## Source And Git State", f"  - Artifact digest: {artifact_digest}", "  - Artifact digest: none"
+    )
+    unstructured_reference = _replace_in_native_section(
+        content, "## Executions", "## Reused Evidence", f"  - Log or artifact: {reference}", "  - Log or artifact: /external/review-validator/command.log"
+    )
+
+    assert any("artifact reference does not match" in blocker for blocker in _validation_native_result_blockers(mismatched_reference, expectation, evidence))
+    assert any("approved content digest" in blocker for blocker in _validation_native_result_blockers(mismatched_artifact, expectation, evidence))
+    assert any("approved artifact ID" in blocker for blocker in _validation_native_result_blockers(mismatched_artifact_id, expectation, evidence))
+    assert any("requires a lowercase SHA-256" in blocker for blocker in _validation_native_result_blockers(missing_artifact_digest, expectation, evidence))
+    assert any(
+        "artifact references are not valid JSON" in blocker for blocker in _validation_native_result_blockers(unstructured_reference, expectation, evidence)
     )
 
 

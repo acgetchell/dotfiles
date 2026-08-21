@@ -230,8 +230,13 @@ semgrep: _ensure-uv
         fi
     done < <(git ls-files -co --exclude-standard -z)
     if ((${#files[@]})); then
-        semgrep_version_cache_path="$(mktemp "${TMPDIR:-/tmp}/dotfiles-semgrep-version.XXXXXX")"
-        semgrep_log_file="$(mktemp "${TMPDIR:-/tmp}/dotfiles-semgrep.XXXXXX.log")"
+        semgrep_tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-semgrep.XXXXXX")"
+        cleanup() {
+            rm -rf "$semgrep_tmp_dir"
+        }
+        trap cleanup EXIT
+        semgrep_version_cache_path="$semgrep_tmp_dir/version-cache"
+        semgrep_log_file="$semgrep_tmp_dir/semgrep.log"
         if [ -f /etc/ssl/cert.pem ]; then
             export SSL_CERT_FILE="/etc/ssl/cert.pem"
         elif [ -f /etc/ssl/certs/ca-certificates.crt ]; then
@@ -239,7 +244,6 @@ semgrep: _ensure-uv
         else
             unset SSL_CERT_FILE
         fi
-        trap 'rm -f "${semgrep_version_cache_path}" "${semgrep_log_file}"' EXIT
         SEMGREP_VERSION_CACHE_PATH="$semgrep_version_cache_path" \
             SEMGREP_LOG_FILE="$semgrep_log_file" \
             SEMGREP_SEND_METRICS=off \
@@ -253,37 +257,59 @@ semgrep: _ensure-uv
 semgrep-test: _ensure-uv
     #!/usr/bin/env bash
     set -euo pipefail
-    config_dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-semgrep-config.XXXXXX")"
     state_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-semgrep-state.XXXXXX")"
     cleanup() {
-        rm -rf "$config_dir" "$state_root"
+        rm -rf "$state_root"
     }
     trap cleanup EXIT
 
+    config_root="$state_root/configs"
+    mkdir -p "$config_root"
+    hidden_fixtures=()
+    ordinary_fixture_count=0
     while IFS= read -r -d '' fixture; do
         rel="${fixture#tests/semgrep/}"
-        config_path="$config_dir/${rel%.*}.yaml"
-        state_dir="$state_root/${rel%.*}"
-        mkdir -p "$(dirname "$config_path")"
-        mkdir -p "$state_dir"
-        uv run --locked python scripts/semgrep_fixture_config.py "$fixture" "$PWD/semgrep.yaml" "$config_path"
-        semgrep_log_file="$(mktemp "${TMPDIR:-/tmp}/dotfiles-semgrep-fixture.XXXXXX.log")"
-        semgrep_version_cache_path="$(mktemp "${TMPDIR:-/tmp}/dotfiles-semgrep-version-fixture.XXXXXX")"
-        if [ -f /etc/ssl/cert.pem ]; then
-            export SSL_CERT_FILE="/etc/ssl/cert.pem"
-        elif [ -f /etc/ssl/certs/ca-certificates.crt ]; then
-            export SSL_CERT_FILE="/etc/ssl/certs/ca-certificates.crt"
-        else
-            unset SSL_CERT_FILE
+        if [[ "$rel" == .* ]]; then
+            hidden_fixtures+=("$fixture")
+            continue
         fi
-        SEMGREP_VERSION_CACHE_PATH="$semgrep_version_cache_path" \
-            SEMGREP_LOG_FILE="$semgrep_log_file" \
+        config_path="$config_root/${rel}.yaml"
+        mkdir -p "$(dirname "$config_path")"
+        uv run --locked python scripts/semgrep_fixture_config.py "$fixture" "$PWD/semgrep.yaml" "$config_path"
+        ((ordinary_fixture_count += 1))
+    done < <(find tests/semgrep -type f ! -name '*.fixed' -print0)
+
+    if [ -f /etc/ssl/cert.pem ]; then
+        export SSL_CERT_FILE="/etc/ssl/cert.pem"
+    elif [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+        export SSL_CERT_FILE="/etc/ssl/certs/ca-certificates.crt"
+    else
+        unset SSL_CERT_FILE
+    fi
+
+    run_fixture_suite() {
+        local config_path="$1"
+        local target="$2"
+        local state_dir
+        state_dir="$(mktemp -d "$state_root/suite.XXXXXX")"
+        SEMGREP_VERSION_CACHE_PATH="$state_dir/version-cache" \
+            SEMGREP_LOG_FILE="$state_dir/semgrep.log" \
             SEMGREP_SEND_METRICS=off \
             OTEL_SDK_DISABLED=true \
             SEMGREP_SETTINGS_FILE="$state_dir/settings.yml" \
-            uv run --locked semgrep scan --disable-version-check --metrics off --test --strict --config "$config_path" "$fixture"
-        rm -f "$semgrep_log_file" "$semgrep_version_cache_path"
-    done < <(find tests/semgrep -type f ! -name '*.fixed' -print0)
+            uv run --locked semgrep scan --disable-version-check --metrics off --test --strict --config "$config_path" "$target"
+    }
+
+    if ((ordinary_fixture_count)); then
+        run_fixture_suite "$config_root" tests/semgrep
+    fi
+
+    for fixture in "${hidden_fixtures[@]}"; do
+        hidden_state_dir="$(mktemp -d "$state_root/hidden.XXXXXX")"
+        config_path="$hidden_state_dir/config.yaml"
+        uv run --locked python scripts/semgrep_fixture_config.py "$fixture" "$PWD/semgrep.yaml" "$config_path"
+        run_fixture_suite "$config_path" "$fixture"
+    done
 
 setup:
     DOTFILES_DIR="$PWD" bin/bootstrap.sh

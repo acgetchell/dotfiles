@@ -53,6 +53,7 @@ MAX_NATIVE_EVIDENCE_BLOCK_BYTES = 65_536
 MAX_NATIVE_SECTION_BYTES = 65_536
 MAX_NATIVE_IDENTIFIER_LENGTH = 4_096
 MAX_NATIVE_IDENTIFIER_COUNT = 1_024
+_SHA256_DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}")
 _REVIEW_RESULT_SECTIONS = (
     "## Skill Loading",
     "## State Verification",
@@ -337,6 +338,17 @@ class ReviewRequirement:
 
 
 @dataclass(frozen=True)
+class ValidationArtifact:
+    """One path approved for validator output and its optional expected identity."""
+
+    path: str
+    kind: str
+    repository_status: str
+    artifact_id: str | None = None
+    artifact_digest: str | None = None
+
+
+@dataclass(frozen=True)
 class ValidationRequirement:
     """One declared validation need before compatible needs are coalesced."""
 
@@ -364,7 +376,7 @@ class ValidationRequirement:
     execution_strategy: str = "sequential"
     independence_basis: str = "none"
     planning_blocker: str | None = None
-    allowed_artifacts: tuple[tuple[str, str, str], ...] = ()
+    allowed_artifacts: tuple[ValidationArtifact, ...] = ()
     canonical_recipe: str | None = None
     evidence_id: str | None = None
     required: bool = True
@@ -396,7 +408,7 @@ class ValidationUnit:
     execution_strategy: str
     independence_basis: str
     planning_blocker: str | None
-    allowed_artifacts: tuple[tuple[str, str, str], ...]
+    allowed_artifacts: tuple[ValidationArtifact, ...]
     canonical_recipe: str | None
     evidence_ids: tuple[str, ...]
     required: bool
@@ -1486,12 +1498,20 @@ def coalesce_validation_requirements(requirements: Sequence[ValidationRequiremen
         if normalized_captured_paths != item.captured_paths:
             msg = f"validation requirement {item.requirement_id} captured_paths must be normalized"
             raise ValueError(msg)
-        if _duplicate_values(tuple(path for path, _, _ in item.allowed_artifacts)) or any(
-            not _nonempty_text(path)
-            or len(path) > MAX_NATIVE_IDENTIFIER_LENGTH
-            or kind not in {"build", "cache", "coverage", "log", "other"}
-            or repository_status not in {"ignored", "outside-repository"}
-            for path, kind, repository_status in item.allowed_artifacts
+        artifact_paths = tuple(artifact.path for artifact in item.allowed_artifacts)
+        artifact_ids = tuple(artifact.artifact_id for artifact in item.allowed_artifacts if artifact.artifact_id is not None)
+        if (
+            _duplicate_values(artifact_paths)
+            or _duplicate_values(artifact_ids)
+            or any(
+                not _nonempty_text(artifact.path)
+                or len(artifact.path) > MAX_NATIVE_IDENTIFIER_LENGTH
+                or artifact.kind not in {"build", "cache", "coverage", "log", "other"}
+                or artifact.repository_status not in {"ignored", "outside-repository"}
+                or (artifact.artifact_id is not None and (not _nonempty_text(artifact.artifact_id) or len(artifact.artifact_id) > MAX_NATIVE_IDENTIFIER_LENGTH))
+                or (artifact.artifact_digest is not None and _SHA256_DIGEST_RE.fullmatch(artifact.artifact_digest) is None)
+                for artifact in item.allowed_artifacts
+            )
         ):
             msg = f"validation requirement {item.requirement_id} has invalid allowed artifacts"
             raise ValueError(msg)
@@ -2460,7 +2480,7 @@ def _validation_environment_identity(unit: ValidationUnit) -> str:
     return json.dumps(
         {
             "artifact_owner": unit.artifact_owner,
-            "allowed_artifacts": unit.allowed_artifacts,
+            "allowed_artifacts": [asdict(artifact) for artifact in unit.allowed_artifacts],
             "environment": unit.environment,
             "features": list(unit.features),
             "mutation_lock": unit.mutation_lock,
@@ -2500,19 +2520,88 @@ def _validation_reused_evidence_blockers(body: str, expectation: ValidationEvide
     return tuple(blockers)
 
 
-def _validation_artifact_blockers(body: str, expectation: ValidationEvidenceExpectation) -> tuple[str, ...]:
+def _validation_artifact_blockers(body: str, expectation: ValidationEvidenceExpectation) -> tuple[tuple[ValidationArtifact, ...], tuple[str, ...]]:
     expected = expectation.validation_unit.allowed_artifacts
     if not expected:
-        return () if body == "none" else ("native validation result claims artifacts absent from its dispatch",)
+        blockers = () if body == "none" else ("native validation result claims artifacts absent from its dispatch",)
+        return (), blockers
     records = _native_records(body, "Path")
     blockers: list[str] = []
-    if tuple(path for path, _ in records) != tuple(path for path, _, _ in expected):
+    if tuple(path for path, _ in records) != tuple(artifact.path for artifact in expected):
         blockers.append("native validation result artifact paths do not match its dispatch")
-    for (path, record_body), (_, expected_kind, expected_status) in zip(records, expected, strict=False):
-        fields, field_blockers = _native_record_fields(record_body, section=f"Artifact {path}", labels=("Kind", "Repository status"))
+    reported: list[ValidationArtifact] = []
+    for (path, record_body), approved in zip(records, expected, strict=False):
+        fields, field_blockers = _native_record_fields(
+            record_body, section=f"Artifact {path}", labels=("Artifact ID", "Artifact digest", "Kind", "Repository status")
+        )
         blockers.extend(field_blockers)
-        if fields.get("Kind") != expected_kind or fields.get("Repository status") != expected_status:
+        artifact_id = fields.get("Artifact ID")
+        artifact_id = None if artifact_id == "none" else artifact_id
+        artifact_digest = fields.get("Artifact digest")
+        artifact_digest = None if artifact_digest == "none" else artifact_digest
+        if artifact_digest is None or _SHA256_DIGEST_RE.fullmatch(artifact_digest) is None:
+            blockers.append(f"native validation result artifact {path} requires a lowercase SHA-256 content digest")
+        if artifact_id is not None and (not _nonempty_text(artifact_id) or len(artifact_id) > MAX_NATIVE_IDENTIFIER_LENGTH):
+            blockers.append(f"native validation result artifact {path} has an invalid artifact ID")
+        if fields.get("Kind") != approved.kind or fields.get("Repository status") != approved.repository_status:
             blockers.append(f"native validation result artifact {path} does not match its approved kind and repository status")
+        if approved.artifact_id is not None and artifact_id != approved.artifact_id:
+            blockers.append(f"native validation result artifact {path} does not match its approved artifact ID")
+        if approved.artifact_digest is not None and artifact_digest != approved.artifact_digest:
+            blockers.append(f"native validation result artifact {path} does not match its approved content digest")
+        reported.append(
+            ValidationArtifact(
+                path=path,
+                kind=fields.get("Kind", ""),
+                repository_status=fields.get("Repository status", ""),
+                artifact_id=artifact_id,
+                artifact_digest=artifact_digest,
+            )
+        )
+    reported_ids = tuple(artifact.artifact_id for artifact in reported if artifact.artifact_id is not None)
+    if _duplicate_values(reported_ids):
+        blockers.append("native validation result artifact IDs must be unique")
+    return tuple(reported), tuple(blockers)
+
+
+def _validation_execution_artifact_reference_blockers(value: str | None, artifacts: Sequence[ValidationArtifact], *, execution_id: str) -> tuple[str, ...]:
+    if value == "none":
+        return ()
+    if value is None:
+        return (f"native validation result Execution {execution_id} has no artifact-reference record",)
+    try:
+        raw_references = json.loads(value)
+    except json.JSONDecodeError:
+        return (f"native validation result Execution {execution_id} artifact references are not valid JSON",)
+    expected_keys = {"artifact_digest", "artifact_id", "path"}
+    if (
+        not isinstance(raw_references, list)
+        or not raw_references
+        or any(not isinstance(reference, Mapping) or set(reference) != expected_keys for reference in raw_references)
+    ):
+        return (f"native validation result Execution {execution_id} artifact references must be a non-empty list of exact identity objects",)
+    approved_by_path = {artifact.path: artifact for artifact in artifacts}
+    blockers: list[str] = []
+    paths: list[str] = []
+    for reference in raw_references:
+        path = reference["path"]
+        artifact_id = reference["artifact_id"]
+        artifact_digest = reference["artifact_digest"]
+        if (
+            not isinstance(path, str)
+            or not _nonempty_text(path)
+            or (artifact_id is not None and not isinstance(artifact_id, str))
+            or not isinstance(artifact_digest, str)
+            or _SHA256_DIGEST_RE.fullmatch(artifact_digest) is None
+        ):
+            blockers.append(f"native validation result Execution {execution_id} has a malformed artifact reference")
+            continue
+        paths.append(path)
+        approved = approved_by_path.get(path)
+        if approved is None or (artifact_id, artifact_digest) != (approved.artifact_id, approved.artifact_digest):
+            blockers.append(f"native validation result Execution {execution_id} artifact reference does not match a reported artifact identity")
+    if _duplicate_values(paths):
+        blockers.append(f"native validation result Execution {execution_id} artifact references must be unique")
     return tuple(blockers)
 
 
@@ -2546,7 +2635,7 @@ def _validation_ledger_expected_fields(expectation: ValidationEvidenceExpectatio
 def _validation_coalescing_identity(unit: ValidationUnit) -> str:
     return json.dumps(
         {
-            "allowed_artifacts": unit.allowed_artifacts,
+            "allowed_artifacts": [asdict(artifact) for artifact in unit.allowed_artifacts],
             "artifact_owner": unit.artifact_owner,
             "canonical_recipe": unit.canonical_recipe,
             "commands": unit.commands,
@@ -2666,6 +2755,8 @@ def _validation_native_sections_blockers(  # noqa: C901, PLR0912, PLR0915
             continue
         requirement_dispositions.append(dispositions[0])
 
+    reported_artifacts, artifact_blockers = _validation_artifact_blockers(sections["## Artifacts"], expectation)
+    blockers.extend(artifact_blockers)
     executions_body = sections["## Executions"]
     execution_records = () if executions_body == "none" else _native_records(executions_body, "Execution ID")
     execution_ids = tuple(execution_id for execution_id, _ in execution_records)
@@ -2728,6 +2819,7 @@ def _validation_native_sections_blockers(  # noqa: C901, PLR0912, PLR0915
                 blockers.append(f"native validation result not-run Execution {execution_id} requires elapsed none")
             if execution_evidence is None or execution_evidence == "none":
                 blockers.append(f"native validation result Execution {execution_id} requires concrete evidence")
+            blockers.extend(_validation_execution_artifact_reference_blockers(fields.get("Log or artifact"), reported_artifacts, execution_id=execution_id))
 
     expected_commands = expectation.validation_unit.commands
     if evidence.status in {"passed", "failed"} and tuple(execution_commands) != expected_commands:
@@ -2743,7 +2835,6 @@ def _validation_native_sections_blockers(  # noqa: C901, PLR0912, PLR0915
     elif expectation.validation_unit.dependency_policy == "continue-independent" and "not-run" in execution_results:
         blockers.append("native validation result violates its continue-independent dependency policy")
     blockers.extend(_validation_reused_evidence_blockers(sections["## Reused Evidence"], expectation, evidence))
-    blockers.extend(_validation_artifact_blockers(sections["## Artifacts"], expectation))
 
     dispositions = tuple(requirement_dispositions)
     results = tuple(execution_results)
@@ -2959,7 +3050,7 @@ def validation_environment_digest(unit: ValidationUnit) -> str:
     return _sha256_json(
         {
             "artifact_owner": unit.artifact_owner,
-            "allowed_artifacts": unit.allowed_artifacts,
+            "allowed_artifacts": [asdict(artifact) for artifact in unit.allowed_artifacts],
             "environment": unit.environment,
             "features": unit.features,
             "mutation_lock": unit.mutation_lock,
@@ -4418,19 +4509,27 @@ def _source_state_field(item: Mapping[str, Any]) -> tuple[str, str, str]:
     return scope, worktree, repository
 
 
-def _allowed_artifacts_field(item: Mapping[str, Any]) -> tuple[tuple[str, str, str], ...]:
+def _allowed_artifacts_field(item: Mapping[str, Any]) -> tuple[ValidationArtifact, ...]:
     value = item.get("allowed_artifacts", [])
-    expected_keys = {"kind", "path", "repository_status"}
-    if not isinstance(value, list) or any(not isinstance(entry, Mapping) or set(entry) != expected_keys for entry in value):
-        msg = "allowed_artifacts must be a list of exact path/kind/repository_status objects"
+    required_keys = {"kind", "path", "repository_status"}
+    optional_keys = {"artifact_digest", "artifact_id"}
+    if not isinstance(value, list) or any(
+        not isinstance(entry, Mapping) or not required_keys.issubset(entry) or not set(entry).issubset(required_keys | optional_keys) for entry in value
+    ):
+        msg = "allowed_artifacts must be a list of path/kind/repository_status objects with optional artifact identity"
         raise ValueError(msg)
-    result: list[tuple[str, str, str]] = []
+    result: list[ValidationArtifact] = []
     for entry in value:
         path, kind, repository_status = entry["path"], entry["kind"], entry["repository_status"]
         if not all(isinstance(field, str) for field in (path, kind, repository_status)):
-            msg = "allowed_artifacts fields must be strings"
+            msg = "allowed_artifacts path, kind, and repository_status must be strings"
             raise ValueError(msg)
-        result.append((path, kind, repository_status))
+        artifact_id = entry.get("artifact_id")
+        artifact_digest = entry.get("artifact_digest")
+        if (artifact_id is not None and not isinstance(artifact_id, str)) or (artifact_digest is not None and not isinstance(artifact_digest, str)):
+            msg = "allowed_artifacts artifact_id and artifact_digest must be strings or null"
+            raise ValueError(msg)
+        result.append(ValidationArtifact(path=path, kind=kind, repository_status=repository_status, artifact_id=artifact_id, artifact_digest=artifact_digest))
     return tuple(result)
 
 
