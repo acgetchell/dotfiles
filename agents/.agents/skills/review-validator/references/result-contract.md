@@ -300,8 +300,9 @@ Accept a result only when:
   environment equal the dispatched unit, `passed` uses exit code `0` plus
   concrete elapsed time and evidence, `failed` uses a nonzero integer exit code
   plus concrete elapsed time and evidence, and `blocked` or `not-run` fields
-  reconcile with their result; evidence may only reference artifact paths or
-  artifact IDs listed in `allowed_artifacts`
+  reconcile with their result; evidence must include concrete stdout/stderr facts
+  and, if it contains artifact path or artifact ID references, every such
+  reference must resolve to an entry in `allowed_artifacts`
 - every candidate and executed command is classified from repository-owned
   evidence; mutating commands are never executed under `validation-only`
 - every parallel unit records a concrete independence basis; each subagent result

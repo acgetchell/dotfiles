@@ -217,6 +217,9 @@ python-sync: _ensure-uv
 python-typecheck: _ensure-uv
     uv run --locked ty check {{ python_paths }} --error all
 
+# Harden semgrep execution for CI/sandboxes:
+# use explicit temporary cache/log paths, disable version checks and metrics,
+# and prefer system CA certs so checks work when HOME/.cache paths are restricted.
 semgrep: _ensure-uv
     #!/usr/bin/env bash
     set -euo pipefail
@@ -227,11 +230,26 @@ semgrep: _ensure-uv
         fi
     done < <(git ls-files -co --exclude-standard -z)
     if ((${#files[@]})); then
-        uv run --locked semgrep --metrics off --error --strict --timeout 120 --config semgrep.yaml "${files[@]}"
+        semgrep_version_cache_path="$(mktemp "${TMPDIR:-/tmp}/dotfiles-semgrep-version.XXXXXX")"
+        semgrep_log_file="$(mktemp "${TMPDIR:-/tmp}/dotfiles-semgrep.XXXXXX.log")"
+        if [ -f /etc/ssl/cert.pem ]; then
+            export SSL_CERT_FILE="/etc/ssl/cert.pem"
+        elif [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+            export SSL_CERT_FILE="/etc/ssl/certs/ca-certificates.crt"
+        else
+            unset SSL_CERT_FILE
+        fi
+        trap 'rm -f "${semgrep_version_cache_path}" "${semgrep_log_file}"' EXIT
+        SEMGREP_VERSION_CACHE_PATH="$semgrep_version_cache_path" \
+            SEMGREP_LOG_FILE="$semgrep_log_file" \
+            SEMGREP_SEND_METRICS=off \
+            OTEL_SDK_DISABLED=true \
+            uv run --locked semgrep --disable-version-check --metrics off --error --strict --timeout 120 --config semgrep.yaml "${files[@]}"
     else
         echo "No repository files found to scan."
     fi
 
+# Keep fixture semgrep tests robust under the same CI/sandbox constraints.
 semgrep-test: _ensure-uv
     #!/usr/bin/env bash
     set -euo pipefail
@@ -249,8 +267,22 @@ semgrep-test: _ensure-uv
         mkdir -p "$(dirname "$config_path")"
         mkdir -p "$state_dir"
         uv run --locked python scripts/semgrep_fixture_config.py "$fixture" "$PWD/semgrep.yaml" "$config_path"
-
-        SEMGREP_SEND_METRICS=off SEMGREP_SETTINGS_FILE="$state_dir/settings.yml" uv run --locked semgrep scan --metrics off --test --strict --config "$config_path" "$fixture"
+        semgrep_log_file="$(mktemp "${TMPDIR:-/tmp}/dotfiles-semgrep-fixture.XXXXXX.log")"
+        semgrep_version_cache_path="$(mktemp "${TMPDIR:-/tmp}/dotfiles-semgrep-version-fixture.XXXXXX")"
+        if [ -f /etc/ssl/cert.pem ]; then
+            export SSL_CERT_FILE="/etc/ssl/cert.pem"
+        elif [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+            export SSL_CERT_FILE="/etc/ssl/certs/ca-certificates.crt"
+        else
+            unset SSL_CERT_FILE
+        fi
+        SEMGREP_VERSION_CACHE_PATH="$semgrep_version_cache_path" \
+            SEMGREP_LOG_FILE="$semgrep_log_file" \
+            SEMGREP_SEND_METRICS=off \
+            OTEL_SDK_DISABLED=true \
+            SEMGREP_SETTINGS_FILE="$state_dir/settings.yml" \
+            uv run --locked semgrep scan --disable-version-check --metrics off --test --strict --config "$config_path" "$fixture"
+        rm -f "$semgrep_log_file" "$semgrep_version_cache_path"
     done < <(find tests/semgrep -type f ! -name '*.fixed' -print0)
 
 setup:
