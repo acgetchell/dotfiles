@@ -1,204 +1,183 @@
 ---
 name: review-graph
-description: "Execute complete mixed-surface repository reviews as an auditable graph of isolated skill workers with exhaustive C++/Rust/Python/tooling/documentation routing, exact skill-path proof, coalesced validation, independent change review, bounded resumable epochs, late-handoff closure, and repository synthesis. Use for branch, PR, staged, release-readiness, whole-repository baseline, fix-all, or review-and-fix work spanning multiple repository surfaces; use a focused skill directly for one narrow surface."
+description: "Coordinate complete mixed-surface repository reviews across C++, Rust, Python, tooling, and documentation. Route every applicable review skill, run independent work in subagents when possible with coordinator fallback, dispatch validation through review-validator, and combine versioned fingerprinted evidence into one reusable repository proof. Use for branch, PR, staged, release-readiness, whole-repository, fix-all, or review-and-fix work spanning multiple surfaces."
 ---
 
 # Review Graph
 
-Act only as the graph coordinator. Capture scope, obtain exhaustive routing,
-plan every applicable skill, dispatch fresh workers, preserve raw evidence, and
-enforce completion. Never replace an isolated worker with coordinator analysis.
+Deliver the same coverage and result as successively invoking every applicable
+review skill against one captured source state. Prefer parallel workers when
+they are safe and useful, but never let worker availability change coverage.
 
-Read these references completely before their corresponding phase:
+Read the [evidence contract](references/evidence-contract.md) before capture,
+routing, dispatch, validation, or reuse. Use
+`scripts/review_graph_plan.py` as the deterministic authority for routing
+closure, evidence acceptance, validation mapping, invalidation, and final proof
+reconciliation.
 
-- before planning: [bounded planning](references/planning-contract.md) and
-  [execution feasibility](references/execution-feasibility.md)
-- before routing: [routing handoff](references/routing-handoff.md); use
-  [routing catalog](references/routing-catalog.json) through the planner
-- before dispatch: [node contract](references/node-contract.md)
-- before finalization: [report contract](references/report-contract.md) and
-  [replacement acceptance](references/migration-acceptance.md)
+## Choose The Execution Profile
 
-Use `scripts/capture_scope.py` for source capture and
-`scripts/review_graph_plan.py` for catalog validation, graph planning, epochs,
-acceptance, resume, and completion decisions.
+Choose exactly one profile:
 
-## Guarantees
+- **Adaptive grouped** is the default for ordinary `$review-graph` and
+  `$repo-review` requests. Dispatch independent review nodes to subagents when
+  possible. Execute the same node in the coordinator when a worker is
+  unavailable. Both locations must return the same evidence contract.
+- **Isolated** is an explicit preference. Require a fresh no-inherited-turn
+  worker for each node. A gate or dispatch failure before any accepted isolated
+  evidence selects adaptive grouped execution, not mixed. After accepted
+  isolated evidence, preserve it and continue the missing graph through
+  adaptive grouped execution; label the result mixed only when that grouped
+  fallback actually runs.
+- **Isolated-only** is an explicit hard requirement. Block and emit the resume
+  manifest instead of using coordinator fallback.
 
-- Create every node in a fresh worker with no inherited turns; use
-  `fork_turns: "none"` when supported.
-- Invoke exactly one skill per worker and never reuse a completed worker.
-- Require the planned absolute skill path, matching frontmatter name, required
-  reference paths, and complete native report. Require matching before/after
-  fingerprints for completed or no-findings read-only nodes, the recorded
-  blocker identity for blocked nodes, and the expected pre-edit identity plus
-  changed-as-reported post-edit identity for authorized fix nodes.
-- Preserve complete worker reports unchanged outside the reviewed repository in
-  a coordinator-owned journal.
-- Keep audit, validation, independent-review, synthesis, and revalidation nodes
-  source-read-only. Edit only in authorized fix nodes and never concurrently.
-- Do not mutate Git state unless explicitly requested.
-- Describe routers as consulted, not executed skills.
+Use `select_execution_profile` only for an explicit isolation request. Missing
+safe capacity telemetry selects adaptive grouped execution. Ordinary adaptive
+reviews do not inspect worker capacity before routing; a failed best-effort
+worker creation simply selects coordinator execution for that node.
 
-## 0. Preflight Capability
+## Capture And Authorization
 
-1. Inspect only authoritative aggregate worker-capacity metadata. Never probe
-   capacity with a dummy worker or a surface exposing other task content.
-2. Require fresh no-inherited-turn workers and one free slot. Treat known zero
-   creation capacity as blocked; treat unavailable lifetime telemetry as
-   unknown, not unlimited.
-3. Verify that catalog-routed independent, specialist, and synthesis skills
-   resolve through the routing catalog. Resolve `review-validator` separately
-   through the planner's approved skill-root path and frontmatter check.
-4. Choose a positive per-root worker budget, defaulting to 24, and reserve at
-   least one creation for recovery/finalization. Increase the reserve for fixes
-   and reruns.
-5. If capability cannot start the first epoch, report blocked without loading
-   routers or performing a substitute review.
+- Read repository instructions before reviewing or editing.
+- Capture branch scope by default. Honor explicit staged, worktree, pull-request,
+  release, baseline, path, base, and exclusion requests.
+- Use `scripts/capture_scope.py` to record scope, worktree, and repository-state
+  fingerprints once before routing.
+- Treat fixes as unauthorized unless explicitly requested. Never mutate Git
+  state.
+- Persist the graph journal, native results, evidence envelopes, and artifact
+  manifest outside conversation context.
 
-## 1. Capture Scope
+## Exhaustive Routing
 
-1. Read repository instructions and determine review-only versus authorized
-   review-and-fix behavior.
-2. Default to branch scope: compare to the explicit PR/base or inferred default
-   branch and include committed branch changes plus staged, unstaged, and
-   untracked work.
-3. Use staged-only or changed-file-only only when explicitly requested. Use
-   baseline only for an explicit whole-repository review, including tracked
-   files when the worktree is clean.
-4. For release readiness, keep code/tooling branch scope but expand the docs
-   slice to every tracked active document, excluding designated archives unless
-   requested.
-5. Run `capture_scope.py`, then retain scope, worktree, and repository-state
-   fingerprints and the exact verification command. Map staged-only to
-   `staged`, changed-worktree-only to `worktree`, PR/release code scope to
-   `branch`, and whole-repository scope to `baseline`.
-6. Recheck all fingerprints before and after each node. Stop, invalidate,
-   recapture, and replan after unexpected state changes.
+Read completely:
 
-## 2. Close Repository And Surface Routing
+1. [`repo-review` check routing](../repo-review/references/check-routing.md)
+2. [routing handoff](references/routing-handoff.md)
+3. [routing catalog](references/routing-catalog.json) through the planner
 
-1. Request `repo-review` in `graph-routing` mode for every repository catalog
-   entry. Compare its surface decisions with the planner's conservative path
-   classifier and resolve every conflict.
-2. Request graph-routing mode from every selected C++, Rust, Python, or docs
-   router. `project-tooling-review` is a direct leaf.
-3. Require one decision per candidate in every consulted router catalog. Reject
-   silence, duplicates, unknown skills, path/frontmatter mismatches, missing
-   rules/evidence, missing owners, or absent required references.
-4. Select specialists from observed contracts, not merely extensions. Retain
-   all shared-file owners. Apply deterministic guards such as packaged Python
-   requiring `python-build-portability`.
-5. Select `repository-independent-review` for every concrete change target and
-   mark it not applicable only for a pure whole-repository baseline.
-6. Select every applicable language synthesis and always select
-   `repository-production-review` for final reconciliation.
+`review-graph` owns repository-layer routing. Apply the deterministic repository
+classifier as a conservative floor and return one decision for every
+repository-layer catalog entry. Consult each selected surface orchestrator in
+its `graph-routing` mode for one disposition per surface candidate. Routers
+return records only; they are not executed review skills.
 
-Do not permit routers to budget-defer applicable work. `not-applicable`, exact
-verified reuse, and explicit user exclusion are non-execution dispositions;
-capability-blocked and failed dispositions make the graph incomplete.
+Convert every selected leaf, independent review, validator, synthesis, fix, and
+revalidation requirement to the complete graph. A selected applicable skill may
+complete only through accepted current evidence or exact verified reuse. Record
+every non-applicable and user-excluded candidate; budget and worker availability
+never make an applicable skill disappear.
 
-## 3. Plan The Complete Required Graph
+`selected` identifies applicable required review work, regardless of whether a
+worker or the coordinator will execute it. Assign execution location only after
+routing closes. Execution epochs belong only to isolated scheduling; adaptive
+grouped execution schedules the complete dependency graph without epochs.
 
-Before creating a worker:
+## Plan And Execute Review Nodes
 
-1. Convert every selected leaf disposition into a required worker commitment.
-2. Key each commitment by its complete task identity: exact mode prompt,
-   task-local input, requirement ownership, validator command, configuration,
-   and selection identity, skill paths, scopes, references, synthesis owners,
-   and compatible validator identities. Coalesce only when every field matches
-   exactly; otherwise preserve separate commitments and their owners.
-3. Add one required baseline `review-validator` unit, selected language
-   syntheses, independent review, repository synthesis, planned fixes, and
-   affected revalidations.
-4. Topologically schedule the complete graph. Partition it into deterministic
-   per-root epochs whose nodes plus reserve do not exceed the effective budget.
-   Never remove an applicable skill to make an epoch fit.
-5. Show the complete node count, epoch boundaries, required fresh-root
-   continuations, routing closure, exact skill paths, validator mappings,
-   synthesis dependencies, and reserve before dispatch.
+Read [bounded planning](references/planning-contract.md) and
+[node contract](references/node-contract.md) before dispatch. Give every node
+its exact skill path, skill digest, reference digests, owned scope,
+fingerprints, authorization, validation requirement IDs, and artifact location.
 
-An unfinished epoch or required future epoch keeps the result incomplete. A
-fresh root may resume accepted evidence only when all three fingerprints still
-match; otherwise recapture and replan.
+For adaptive grouped execution:
 
-## 4. Dispatch And Accept
+1. Dispatch dependency-independent read-only review nodes to separate subagents
+   concurrently when safe worker creation is available.
+2. When a worker cannot be created, or fails before accepted evidence, run that
+   exact node successively in the coordinator. Do not reroute, broaden, or omit
+   it.
+3. Join at a barrier, persist every native result, create its `ReviewEvidence`
+   envelope, and run `assess_review_evidence`.
+4. Resolve late handoffs and add newly applicable nodes before dependent
+   validation or synthesis.
 
-For each dependency-ready node in the current epoch:
+For isolated execution, also read
+[execution feasibility](references/execution-feasibility.md). Use the lower
+configured or authoritative lifetime capacity as the effective per-root budget,
+preserve the recovery reserve, and run exactly one skill in each fresh worker.
+Adaptive evidence is accepted only after fallback is declared; it never proves
+isolated completion.
 
-1. Recheck fingerprints and remaining per-root capacity.
-2. Fill the exact mode prompt in `node-contract.md`. Pass only task-local input.
-   Never leak specialist conclusions to audit, validation, or independent
-   review nodes.
-3. Journal the attempt, create one fresh worker, and wait for its result before
-   reusing shared capacity. Preserve its complete native report.
-4. Independently rerun state verification and apply the acceptance gate.
-5. Accept timed-out work only when a complete conforming report arrived and all
-   normal isolation, path, reference, scope, and fingerprint proofs pass.
-6. Map validation reuse only when command, configuration, environment,
-   artifact, selection, and fingerprints match exactly and a graph validator
-   verifies it.
+Read-only nodes sharing one captured state may run concurrently. Fix nodes are
+always serialized. After each authorized fix, recapture state, begin a new
+evidence epoch, invalidate affected evidence, reroute changed surfaces, and
+rerun only stale or newly required nodes.
 
-On worker-creation failure, stop dispatch, preserve completed reports, and emit
-the exact resume manifest. Mark the failed and later nodes blocked before
-execution. Never claim that another attempt in the same root resets capacity.
+### Bound Repair Convergence
 
-## 5. Reopen Routing From Discoveries
+Do not seek an automatic whole-repository fixed point. For review-and-fix work,
+the default repair budget is two source-mutating epochs after the initial review
+barrier: one batched repair epoch and, when the closeout review finds a new
+actionable defect, one follow-up repair epoch. A different budget requires an
+explicit user request.
 
-After every accepted audit or independent-review result and every post-fix
-routing rerun:
+- Batch compatible confirmed fixes before recapturing. Keep fix execution
+  serialized, but do not create a new evidence epoch for every individual edit.
+- After a repair batch, recapture once and rerun only invalidated review nodes,
+  newly applicable nodes, their validators, and downstream synthesis. Preserve
+  unaffected evidence only when the planner's exact reuse gate proves its
+  covered source and skill/reference identities unchanged.
+- Run broad canonical CI once after the last planned mutation. Earlier repair
+  epochs use the narrow checks required by their finding owners.
+- Run at most one full-scope independent closeout review automatically. If it
+  finds a defect and repair budget remains, apply the follow-up batch and run
+  targeted independent revalidation of that batch; do not restart the complete
+  repository review automatically.
+- When the budget is exhausted, or a required current-state proof cannot close,
+  stop with the accepted partial result and exact resume manifest. Report every
+  remaining finding or stale requirement explicitly; never imply completion.
 
-1. Validate each routing handoff by catalog ID and evidence.
-2. Re-run the owning router ledger when a handoff changes applicability.
-3. Reconcile additions, removals, replacements, and every changed disposition,
-   including changes to not-applicable, exact verified reuse, or explicit user
-   exclusion.
-4. Retire non-executable and replaced nodes from dispatch and dependency sets,
-   invalidate their dependent evidence, preserve completed evidence that remains
-   valid, and recompute the graph and epochs before dependent synthesis.
-5. Block synthesis while any handoff is unknown or unresolved.
+An explicit request to continue may start another bounded run from the resume
+manifest. Unchanged external state or the absence of a proof is not permission
+to keep retrying indefinitely.
 
-After every authorized fix, recapture fingerprints, invalidate affected audit,
-validation, independent-review, and synthesis evidence, and rerun repository
-and affected surface routing. Apply the full reconciliation above to the rerun.
+## Validation
 
-## 6. Synthesize And Fix
+Collect validation requirements from accepted review results. Coalesce only
+requirements with identical source, command or canonical recipe, working
+directory, environment/toolchain, features, platform, artifact ownership, and
+mutation/locking identity.
 
-Run each language production-review skill in a fresh synthesis-only worker after
-all of its leaves and validators are accepted. Do not rerun specialist analysis.
+Dispatch every coalesced unit through
+[`review-validator`](../review-validator/SKILL.md). In adaptive execution it may
+run in a worker or the coordinator; in isolated execution it must run in its own
+fresh worker. Persist the complete native Validation Result, create
+`ValidationEvidence`, and run `assess_validation_evidence`. A failed validator
+is evidence for its review owner, not automatically a finding.
 
-Run `repository-production-review` only after repository/surface routing is
-closed and all language, docs, tooling, validation, independent-review, and
-epoch evidence is accepted. Give it complete predecessor reports and mappings;
-it may not capture, route, validate, edit, or create workers.
+Reuse prior evidence only after recapturing state and verifying the artifact,
+schema, result digest, skill/reference digests, command/environment identity,
+and exact selection. Mark mismatches stale and run the affected node.
 
-For authorized fixes:
+## Synthesis And Completion
 
-1. Finish the read-only graph and assign each finding one owner.
-2. Run one fresh single-skill fix worker at a time.
-3. Recapture, reroute, and invalidate affected evidence after every edit.
-4. Run coalesced validation, owner revalidation, fresh independent review, and
-   affected syntheses.
-5. Stop at the declared iteration limit or a recorded blocker.
+Run surface synthesis only after its selected review and validation evidence is
+accepted. Run repository synthesis only after all required surface evidence,
+independent review, validation mappings, handoffs, exclusions, and invalidation
+history are available. Synthesis may deduplicate and reconcile findings; it may
+not perform missing review or validation.
 
-## 7. Report
+Construct and verify one `RepositoryReviewProof`. Report `complete` only when:
 
-Use `report-contract.md`. Include the exhaustive routing ledger, classifier
-signals and conflict resolutions, exact skills/paths/references, complete graph
-and epoch lifecycle, exact reuse and user exclusions, unresolved blockers,
-findings and changes, validation mappings, raw artifacts, resume manifest, and
-final repository state.
+- every applicable review requirement maps exactly once to accepted non-stale
+  review evidence
+- every required validation requirement maps exactly once to accepted
+  validation evidence
+- every handoff is resolved and post-fix routing is current
+- final repository synthesis is accepted
+- the persisted artifact manifest and source fingerprints verify
 
-Derive the legacy `Review Evidence` rows for tooling, C++, Rust, Python, and
-documentation from graph evidence so `repo-review` callers retain a familiar
-summary.
+## Final Report
 
-Report `complete` only when the planner's completion gate passes: every required
-node has an accepted terminal status or an explicit non-execution disposition;
-no required node is blocked, failed, undispatched, unaccepted, stale without an
-accepted replacement, or otherwise unresolved; unresolved blockers and failures
-are both zero; no applicable requirement was skipped; no future epoch remains;
-routing and handoffs are closed; post-change routing was revalidated; required
-validation, independent review, and synthesis are accepted; fingerprints match;
-isolation has no failure; and the final report reconciles. Otherwise lead with
-`incomplete` and the exact resumption work.
+Lead with findings and blockers. State the execution profile and whether the
+proof is complete. Include changes, validation, unresolved risks, exact skills
+and references executed, artifact-manifest location, final source/Git state,
+and the five-row `Review Evidence` compatibility table derived from the proof.
+
+Include worker lifecycle and accepted evidence for every execution profile.
+For mixed, isolated, or isolated-only execution, also include isolation failures
+and incomplete epochs required by [report contract](references/report-contract.md).
+Never imply that routing, planning, skill loading, or an ancestor's summary
+constitutes accepted review evidence.

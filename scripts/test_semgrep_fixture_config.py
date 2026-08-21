@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Tests for semgrep_fixture_config.py."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 import pytest

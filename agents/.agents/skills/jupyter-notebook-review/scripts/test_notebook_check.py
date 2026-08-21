@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Tests for the Jupyter notebook review skill helper."""
 
-from __future__ import annotations
-
 import importlib.util
 import json
 import sys
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
+import nbclient
 import pytest
 
 SCRIPT = Path(__file__).with_name("notebook_check.py")
@@ -91,6 +91,24 @@ def test_load_notebook_rejects_non_object_cell_metadata(tmp_path: Path, metadata
     assert f"cell 1 metadata must be a JSON object, got {type(metadata).__name__}" in str(error.value)
 
 
+@pytest.mark.parametrize(("metadata", "present"), [(None, False), ([], True)])
+def test_load_notebook_rejects_missing_or_non_object_metadata(tmp_path: Path, metadata: object, present: bool) -> None:
+    """Top-level notebook metadata must be present and object-shaped."""
+    notebook_path = tmp_path / "invalid-notebook-metadata.ipynb"
+    notebook = notebook_with_ids("setup-code")
+    if present:
+        notebook["metadata"] = metadata
+    else:
+        notebook.pop("metadata")
+    notebook_path.write_text(json.dumps(notebook), encoding="utf-8")
+
+    with pytest.raises(TypeError, match=r"metadata must be a JSON object") as error:
+        MODULE.load_notebook(notebook_path)
+
+    assert str(notebook_path) in str(error.value)
+    assert f"metadata must be a JSON object, got {type(metadata).__name__}" in str(error.value)
+
+
 @pytest.mark.parametrize("nbformat", [4.0, True])
 def test_load_notebook_rejects_non_integer_nbformat_four(tmp_path: Path, nbformat: Any) -> None:
     """Numeric equality must not admit floats or Booleans as nbformat 4."""
@@ -104,3 +122,97 @@ def test_load_notebook_rejects_non_integer_nbformat_four(tmp_path: Path, nbforma
 
     assert str(notebook_path) in str(error.value)
     assert f"expected nbformat to be the JSON integer 4, got {nbformat!r}" in str(error.value)
+
+
+@pytest.mark.parametrize(
+    ("notebook", "message"),
+    [
+        ([], "notebook root must be a JSON object, got list"),
+        ({"metadata": {}, "nbformat": 4}, "cells must be a JSON array, got NoneType"),
+        ({"metadata": {}, "nbformat": 4, "cells": [None]}, "cell 1 must be a JSON object, got NoneType"),
+        (
+            {"metadata": {}, "nbformat": 4, "cells": [{"cell_type": "markdown", "metadata": {}, "source": ["valid", 1]}]},
+            "cell 1 cell source list items must all be strings",
+        ),
+    ],
+)
+def test_load_notebook_rejects_malformed_container_shapes(tmp_path: Path, notebook: object, message: str) -> None:
+    """Malformed JSON containers should fail at the notebook boundary."""
+    notebook_path = tmp_path / "malformed.ipynb"
+    notebook_path.write_text(json.dumps(notebook), encoding="utf-8")
+
+    with pytest.raises(TypeError, match=message) as error:
+        MODULE.load_notebook(notebook_path)
+
+    assert str(notebook_path) in str(error.value)
+
+
+def test_main_reports_malformed_notebook_without_traceback(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Malformed notebook input should produce a concise CLI diagnostic."""
+    notebook_path = tmp_path / "malformed.ipynb"
+    notebook_path.write_text("[]", encoding="utf-8")
+
+    assert MODULE.main(["--summary", str(notebook_path)]) == 2
+
+    stderr = capsys.readouterr().err
+    assert "notebook root must be a JSON object" in stderr
+    assert "Traceback" not in stderr
+
+
+def test_execute_rejects_malformed_notebook_without_traceback(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Execute mode should validate notebook JSON before loading dependencies."""
+    notebook_path = tmp_path / "malformed.ipynb"
+    notebook_path.write_text("[]", encoding="utf-8")
+
+    assert MODULE.main(["--execute", str(notebook_path)]) == 2
+
+    stderr = capsys.readouterr().err
+    assert "notebook root must be a JSON object" in stderr
+    assert "Traceback" not in stderr
+
+
+def test_execute_rejects_schema_invalid_notebook_before_client_creation(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Execute mode should report schema errors without constructing a client."""
+    notebook_path = tmp_path / "invalid-schema.ipynb"
+    sensitive_value = "synthetic-sensitive-value-7b3f39"
+    notebook = notebook_with_ids("invalid-cell")
+    notebook["cells"][0]["source"] = [sensitive_value]
+    notebook["cells"][0].pop("cell_type")
+    notebook_path.write_text(json.dumps(notebook), encoding="utf-8")
+
+    def unexpected_client(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("NotebookClient must not be created for an invalid notebook schema")
+
+    monkeypatch.setattr(nbclient, "NotebookClient", unexpected_client)
+
+    assert MODULE.main(["--execute", str(notebook_path)]) == 2
+
+    stderr = capsys.readouterr().err
+    assert "notebook schema validation failed" in stderr
+    assert sensitive_value not in stderr
+    assert "Traceback" not in stderr
+
+
+def test_execute_reads_validated_notebook_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute mode should reuse the mapping loaded and validated by main."""
+    notebook_path = tmp_path / "valid.ipynb"
+    notebook_path.write_text(json.dumps(notebook_with_ids("overview")), encoding="utf-8")
+    executed_notebooks: list[object] = []
+
+    class RecordingNotebookClient:
+        def __init__(self, notebook: object, **_kwargs: object) -> None:
+            self.notebook = notebook
+
+        def execute(self) -> None:
+            executed_notebooks.append(self.notebook)
+
+    monkeypatch.setattr(nbclient, "NotebookClient", RecordingNotebookClient)
+    original_open = Path.open
+    with patch.object(Path, "open", autospec=True, side_effect=original_open) as open_mock:
+        assert MODULE.main(["--execute", str(notebook_path)]) == 0
+
+    notebook_reads = [call for call in open_mock.call_args_list if call.args and call.args[0] == notebook_path]
+    assert len(notebook_reads) == 1
+    assert len(executed_notebooks) == 1

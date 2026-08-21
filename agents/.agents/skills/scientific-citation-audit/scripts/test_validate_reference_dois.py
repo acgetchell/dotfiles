@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Fixture tests for validate_reference_dois.py."""
 
-from __future__ import annotations
-
 import contextlib
 import importlib.util
 import io
@@ -100,6 +98,20 @@ def test_validation_accepts_matching_title_author_and_year() -> None:
     assert result.status == MODULE.AuditStatus.OK
 
 
+def test_validation_reports_malformed_fetcher_response() -> None:
+    """Malformed resolver data should produce a failed audit result."""
+    entry = MODULE.DoiEntry(doi=MODULE.Doi.parse("10.1007/PL00009321"), line=1, entry="- Fixture entry.")
+
+    def malformed_fetcher(_doi: object, _timeout: float) -> dict[str, object]:
+        message = "DOI resolver response must be a JSON object"
+        raise TypeError(message)
+
+    result = MODULE.validate_entry(entry, 1.0, 0.45, fetcher=malformed_fetcher)
+
+    assert result.status == MODULE.AuditStatus.FAIL
+    assert result.message == "TypeError: DOI resolver response must be a JSON object"
+
+
 def test_empty_input_fails_without_allow_empty() -> None:
     """Empty audits fail loudly unless the caller opts out."""
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as handle:
@@ -142,6 +154,7 @@ TESTS = [
     test_extracts_raw_url_with_trailing_period,
     test_validation_flags_author_mismatch,
     test_validation_accepts_matching_title_author_and_year,
+    test_validation_reports_malformed_fetcher_response,
     test_empty_input_fails_without_allow_empty,
     test_invalid_threshold_is_rejected_by_argparse,
 ]

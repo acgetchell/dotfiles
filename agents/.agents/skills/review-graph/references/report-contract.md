@@ -1,5 +1,10 @@
 # Review Graph Reporting Contract
 
+Use this detailed contract for every `review-graph` profile. Adaptive execution
+records worker attempts and coordinator fallbacks exactly; it does not fabricate
+worker, epoch, or isolation evidence. Read `evidence-contract.md` for the
+versioned proof objects from which these views are derived.
+
 Use this contract for the coordinator-owned graph journal, the pre-dispatch
 plan, and the final user-facing report. The final answer must be self-contained;
 commentary and hidden worker reports are not substitutes for any required
@@ -42,8 +47,14 @@ routing_decisions[]:
 nodes[]:
   node ID, exact skill/path, selection reason, mode, owned paths,
   predecessors, instruction and static routing/repository references, budgets,
-  dispatch fingerprints, accepted/blocked/invalidated-stale result status,
+  skill/reference digests, dispatch fingerprints, execution location,
+  accepted/blocked/invalidated-stale result status,
   complete accepted result, blocked record, or stale invalidation record
+review_evidence[]:
+  schema version, evidence ID, node and requirement IDs, execution location,
+  skill/reference digests, fingerprints, native-result artifact and digest,
+  findings, validator requirements, handoffs, synthesis predecessor evidence
+  IDs, parsed native Machine Evidence, acceptance and stale status
 worker_attempts[]:
   attempt ID, node ID, creation ordinal, created=yes/no, skill loaded=yes/no,
   result returned=yes/no, elapsed time, remaining deadline, blocker; never infer
@@ -67,11 +78,15 @@ changes[]:
 validation_ledger[]:
   exact command, all three evidence fingerprints, environment/configuration,
   result, source node, reused-by nodes
+validation_evidence[]:
+  schema version, evidence and node IDs, mapped requirements, fingerprints,
+  command/environment digests, native-result artifact and digest, acceptance
 supplied_validation_evidence[]:
   evidence ID, complete standalone Validation Result or artifact, import
   disposition, identity comparison, graph verifier node, reused-by nodes
 invalidation_events[]:
-  invalidated node/evidence, cause, replacement revalidation/synthesis
+  invalidated node/evidence, cause, persisted fix/revalidation transition
+  reports, source-state boundary, and replacement final-state evidence
 validators_not_run[]:
   node and requirement IDs, exact planned commands, pre-execution blocker
 deadline_events[]:
@@ -82,7 +97,19 @@ resume_manifest:
   nodes, outstanding validator units and syntheses, unresolved handoffs, future
   execution epochs, journal/raw-report location, and whether a fresh root task
   may be required
+repository_review_proof:
+  complete review and validation requirement mappings, accepted and stale
+  evidence IDs, unresolved handoffs, final synthesis evidence, artifact manifest
+  identity, verifier, and deterministic acceptance result
 ```
+
+Final proof records contain only recaptured final-state audit,
+independent-review, validation, and synthesis evidence plus exact
+non-executable reuse. Keep prior `fix` and `revalidation` native reports in
+`invalidation_events`; never list them as accepted final proof nodes. For every
+accepted artifact, retain the exact UTF-8 Markdown, parsed canonical Machine
+Evidence object, and heading-validation result so a future agent can repeat the
+same semantic gate from trusted bytes.
 
 Keep complete node reports unchanged. The journal adds cross-node indexes; it
 does not replace raw reports with summaries.
@@ -97,12 +124,13 @@ reporting limitation, not permission to discard or compress raw evidence.
 
 ## Pre-dispatch Output
 
-If the early capability gate fails or the initial hard deadline leaves no
-dispatch window, use only the concise blocked format in
-`execution-feasibility.md`. Do not load routers after an early failure or
-display a provisional plan as executable when no first worker can run.
+For explicit isolation, if the early capability gate fails or the initial hard
+deadline leaves no dispatch window, use the concise format in
+`execution-feasibility.md`. An isolation preference then starts adaptive
+execution; isolated-only stops. Adaptive grouped execution does not run this
+early capacity gate.
 
-Show these sections before spawning the first worker.
+Show the applicable sections before the first review execution.
 
 ### Scope
 
@@ -115,8 +143,9 @@ three fingerprints.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 
 Use aggregate capacity values only. Never reproduce payload text returned by an
-unsafe capacity mechanism. Use `not exposed; bounded by configured budget <N>`
-when the runtime supplies no lifetime count. Show that current-epoch nodes plus
+unsafe capacity mechanism. When the runtime supplies no lifetime count, use the
+concise adaptive-fallback or isolated-only blocked report instead of presenting
+an executable isolated epoch. Otherwise show that current-epoch nodes plus
 reserve fit the effective root budget and list every later fresh-root epoch.
 State the hard-deadline and worker-creation stop policies.
 
@@ -184,21 +213,21 @@ Use the following sections in this order.
 
 Lead with the practical result. Include counts for routers consulted, selected
 nodes, worker creation attempts, workers created, skills executed, accepted
-nodes, nodes blocked after execution, nodes blocked before execution, isolation
+nodes, coordinator executions, nodes blocked after execution, nodes blocked before execution, isolation
 failures, rerun nodes, independent checks, canonical findings by disposition,
 material changes, validation requirements by disposition, coalesced validator
 units, unique validator executions, validators not run, per-root budget,
 reserve, execution epochs, and nodes stopped by the hard deadline.
 State `complete` or `incomplete` using the completion gate.
 
-### Worker Lifecycle
+### Execution Lifecycle
 
-| Attempt or node | Worker created | Skill loaded/executed | Result returned | Node outcome | Capacity consumed | Blocker |
-| --- | --- | --- | --- | --- | --- | --- |
+| Attempt or node | Execution location | Worker created | Skill loaded/executed | Result returned | Node outcome | Capacity consumed | Blocker |
+| --- | --- | --- | --- | --- | --- | --- | --- |
 
-Include every creation attempt and every node blocked before any attempt. A
-failed creation never counts as a skill execution. Show every later node blocked
-after a creation failure or hard-deadline exhaustion. A completed worker must
+Include every creation attempt, coordinator fallback, and node blocked before
+execution. A failed creation never counts as a skill execution; a later
+coordinator execution is a distinct lifecycle record. A completed worker must
 never appear as the worker for a later node.
 
 ### Skills Run
@@ -206,10 +235,10 @@ never appear as the worker for a later node.
 | Node | Skill | Mode | Why it ran | Owned surface | Status | Outcome |
 | --- | --- | --- | --- | --- | --- | --- |
 
-Include every worker that actually loaded and executed its skill, including a
-worker that later returned a conforming blocked result. Exclude nodes blocked
-before worker creation or before skill loading; those belong in `Worker
-Lifecycle` and `Review Graph Evidence`. Include focused review, fix, dedicated
+Include every worker or coordinator node that actually loaded and executed its
+skill, including a conforming blocked result. Exclude nodes blocked before any
+execution or before skill loading; those belong in `Execution Lifecycle` and
+`Review Graph Evidence`. Include focused review, fix, dedicated
 `review-validator`, `repository-independent-review`, revalidation, and
 production-review synthesis nodes. Use the exact skill ID. Keep routers out of
 this table and do not describe the independent reviewer as a validator.
@@ -289,8 +318,8 @@ complete graph.
 
 ### Review Graph Evidence
 
-| Node | Skill | Mode | Lifecycle status | Worker created | Skill executed | Scope/worktree/repository fingerprints | Skill/references loaded | Validators | Invalidated/revalidated |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Node | Skill | Mode | Lifecycle status | Execution location | Worker created | Skill executed | Scope/worktree/repository fingerprints | Skill/reference digests | Validators | Invalidated/revalidated |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 
 Include one row per selected node. If an invalidated node was rerun, identify
 both the stale evidence and its replacement rather than overwriting history.
@@ -324,7 +353,7 @@ Do not send the final response until all applicable equalities hold:
 ```text
 selected nodes = accepted nodes + blocked-after-execution + blocked-before-execution + invalidated/stale nodes
 worker creation attempts = workers created + creation failures
-skills executed <= workers created
+skills executed <= workers created + coordinator executions
 canonical findings = fixed + remaining + accepted-risk + blocked
 executed validators = unique validation-ledger execution entries
 planned validators = executed validators + validators not run
@@ -336,8 +365,8 @@ invalidated evidence = replaced evidence + explicitly unresolved stale evidence
 Also verify:
 
 - every worker lifecycle row has a journal node or creation attempt
-- every skills-run row has a created worker, a loaded skill, and an accepted or
-  blocked-after-execution result
+- every skills-run row has a worker or coordinator execution, a loaded skill,
+  and an accepted or blocked-after-execution result
 - every selected leaf appears in `Skills Run` or is explicitly
   blocked-before-execution without a claim that its skill ran
 - every finding ID appears in `Findings and Disposition`
@@ -359,15 +388,25 @@ Also verify:
 - no independent-review result is counted as validation evidence and no
   `review-validator` failure is promoted to a finding without reviewer diagnosis
 - routers are described as consulted, never as executed skills
-- capacity evidence contains safe aggregate concurrency and optional lifetime
-  metadata only; an absent lifetime count is not a blocker, and any isolation
-  failure is reported without reproducing leaked task content
-- every node prevented by worker-creation failure or hard-deadline exhaustion
+- isolation capacity evidence contains safe aggregate concurrency and lifetime
+  metadata only; an absent lifetime count selects adaptive execution, and any
+  isolation failure is reported without reproducing leaked task content
+- every node that received neither worker nor adaptive coordinator execution
   remains selected and is reported as blocked before execution
 - no completed worker was reused for a later node
-- no blocked node was replaced by same-context coordinator review
+- every adaptive coordinator fallback preserves the failed worker attempt and
+  executes the same node identity, scope, skill, and evidence contract
 - every invalidated/stale node is recorded as such until a current replacement
   result is accepted; an unresolved stale node blocks `complete`
+- every source-mutating fix and subsequent revalidation is preserved as
+  separately verified transition history, followed by recapture, rerouting,
+  and a final plan with no `fix` or `revalidation` executable node
+- every accepted native artifact has the contract's exact top heading and
+  ordered required headings, exactly one canonical bounded Machine Evidence
+  block, and payload fields matching its typed expectation, envelope, and
+  source/Git state
+- every synthesis native payload and typed envelope names exactly the accepted
+  predecessor evidence IDs derived from the planner-owned proof mapping
 - each execution epoch's nodes plus recovery/finalization reserve did not exceed
   its effective root budget, and every epoch completed before `complete`
 - every declared validation requirement maps to exactly one coalesced validator
@@ -382,5 +421,6 @@ Also verify:
 - required documentation/citation coverage, baseline validation, independent
   review, and language/repository syntheses completed
 - no undispatched or unaccepted node remains when the outcome says `complete`
-- matched fingerprints, zero isolation failures, synthesized final output, and
-  deduplicated findings are all proved before the outcome says `complete`
+- matched fingerprints, synthesized final output, deduplicated findings, and an
+  accepted `RepositoryReviewProof` are all proved before the outcome says
+  `complete`; isolated completion additionally requires zero isolation failures

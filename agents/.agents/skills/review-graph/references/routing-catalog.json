@@ -3,7 +3,7 @@
   "entries": [
     {
       "catalog_id": "repo.tooling",
-      "router_id": "repo-review",
+      "router_id": "review-graph",
       "rule_id": "repo-surface-tooling",
       "layer": "repository",
       "surface": "tooling",
@@ -17,7 +17,7 @@
     },
     {
       "catalog_id": "repo.cpp",
-      "router_id": "repo-review",
+      "router_id": "review-graph",
       "rule_id": "repo-surface-cpp",
       "layer": "repository",
       "surface": "cpp",
@@ -31,7 +31,7 @@
     },
     {
       "catalog_id": "repo.rust",
-      "router_id": "repo-review",
+      "router_id": "review-graph",
       "rule_id": "repo-surface-rust",
       "layer": "repository",
       "surface": "rust",
@@ -45,7 +45,7 @@
     },
     {
       "catalog_id": "repo.python",
-      "router_id": "repo-review",
+      "router_id": "review-graph",
       "rule_id": "repo-surface-python",
       "layer": "repository",
       "surface": "python",
@@ -59,7 +59,7 @@
     },
     {
       "catalog_id": "repo.documentation",
-      "router_id": "repo-review",
+      "router_id": "review-graph",
       "rule_id": "repo-surface-documentation",
       "layer": "repository",
       "surface": "documentation",
@@ -73,7 +73,7 @@
     },
     {
       "catalog_id": "repo.independent",
-      "router_id": "repo-review",
+      "router_id": "review-graph",
       "rule_id": "repo-concrete-change-independent",
       "layer": "finalization",
       "surface": "repository",
@@ -87,7 +87,7 @@
     },
     {
       "catalog_id": "repo.synthesis",
-      "router_id": "repo-review",
+      "router_id": "review-graph",
       "rule_id": "repo-final-synthesis",
       "layer": "finalization",
       "surface": "repository",

@@ -228,6 +228,79 @@ def _staged_fingerprint(*, git: str, repo: Path, head: str, pathspecs: Sequence[
     return digest.hexdigest()
 
 
+def _bytes_line_bound(value: bytes) -> int:
+    """Return the greatest one-based text line addressable in exact bytes."""
+    return value.count(b"\n") + int(bool(value) and not value.endswith(b"\n"))
+
+
+def _worktree_line_bound(path: Path) -> int | None:
+    """Return a stable regular-file line bound, zero for non-files, or None when absent."""
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return None
+    if not stat.S_ISREG(metadata.st_mode):
+        return 0
+    newlines = 0
+    bytes_read = 0
+    last_byte = b""
+    with path.open("rb") as stream:
+        while chunk := stream.read(_CHUNK_SIZE):
+            newlines += chunk.count(b"\n")
+            bytes_read += len(chunk)
+            last_byte = chunk[-1:]
+    final_metadata = path.lstat()
+    if (final_metadata.st_mode, final_metadata.st_size, final_metadata.st_mtime_ns) != (
+        metadata.st_mode,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+    ) or bytes_read != metadata.st_size:
+        message = f"file changed while deriving captured line bounds: {path}"
+        raise RuntimeError(message)
+    return newlines + int(bytes_read > 0 and last_byte != b"\n")
+
+
+def _git_blob_line_bound(git: str, repo: Path, revision: str, relative: str) -> int | None:
+    """Return one tree/index blob's line bound without interpreting symlinks as text."""
+    if revision == ":index":
+        records = tuple(record for record in _index_entry(git, repo, relative).split(b"\0") if record)
+        record = next((entry for entry in records if b" 0\t" in entry), None)
+        if record is None:
+            return None
+        metadata = record.split(b"\t", 1)[0].split()
+        if len(metadata) != 3:
+            message = f"could not parse captured Git index identity for {relative}"
+            raise RuntimeError(message)
+        mode, object_id, _stage = metadata
+        object_type = b"blob"
+    else:
+        records = tuple(record for record in _run_git(git, repo, _with_paths(("ls-tree", "-z", revision), (relative,))).split(b"\0") if record)
+        if not records:
+            return None
+        metadata = records[0].split(b"\t", 1)[0].split()
+        if len(metadata) < 3:
+            message = f"could not parse captured Git object identity for {relative}"
+            raise RuntimeError(message)
+        mode, object_type, object_id = metadata[:3]
+    if mode not in {b"100644", b"100755"} or object_type != b"blob":
+        return 0
+    return _bytes_line_bound(_run_git(git, repo, ("cat-file", "blob", os.fsdecode(object_id))))
+
+
+def _captured_path_line_bounds(*, git: str, repo: Path, mode: str, base_revision: str | None, paths: Sequence[str]) -> dict[str, int]:
+    """Derive maximum addressable lines from the exact captured source sides."""
+    bounds: dict[str, int] = {}
+    for relative in paths:
+        current = _git_blob_line_bound(git, repo, ":index", relative) if mode == "staged" else _worktree_line_bound(repo / relative)
+        base = _git_blob_line_bound(git, repo, base_revision, relative) if base_revision is not None else None
+        candidates = tuple(bound for bound in (current, base) if bound is not None)
+        if not candidates:
+            message = f"captured path has no current or base-side source identity: {relative}"
+            raise RuntimeError(message)
+        bounds[relative] = max(candidates)
+    return bounds
+
+
 def _repository_state_fingerprint(*, git: str, repo: Path, head: str, branch: str) -> str:
     """Hash HEAD, branch, index, tracked worktree, and nonignored untracked content."""
     tracked = _decode_zlist(_run_git(git, repo, ("ls-files", "-z")))
@@ -247,7 +320,7 @@ def _repository_state_fingerprint(*, git: str, repo: Path, head: str, branch: st
     return digest.hexdigest()
 
 
-def _scope_data(git: str, repo: Path, mode: str, base: str | None, pathspecs: Sequence[str]) -> dict[str, object]:
+def _scope_data(git: str, repo: Path, mode: str, base: str | None, pathspecs: Sequence[str]) -> dict[str, object]:  # noqa: PLR0915
     """Build the manifest fields for the requested review mode and path boundary."""
     if mode not in _CAPTURE_MODES:
         message = f"unsupported capture mode: {mode}"
@@ -299,6 +372,24 @@ def _scope_data(git: str, repo: Path, mode: str, base: str | None, pathspecs: Se
             repo=repo,
         )
 
+    captured_path_line_bounds = _captured_path_line_bounds(
+        git=git, repo=repo, mode=mode, base_revision=merge_base if mode == "branch" else head, paths=captured_scope_paths
+    )
+    confirmed_scope_fingerprint = (
+        _staged_fingerprint(git=git, repo=repo, head=head, pathspecs=pathspecs, paths=captured_scope_paths)
+        if mode == "staged"
+        else _worktree_fingerprint(
+            git=git,
+            identity=(("head", head.encode()), ("mode", mode.encode()), ("base-ref", (base_ref or "").encode()), ("merge-base", (merge_base or "").encode())),
+            pathspecs=pathspecs,
+            paths=captured_scope_paths,
+            repo=repo,
+        )
+    )
+    if confirmed_scope_fingerprint != scope_fingerprint:
+        message = "captured source changed while deriving path line bounds"
+        raise RuntimeError(message)
+
     worktree_paths_arguments = _with_paths(("diff", "--name-only", "--no-renames", "-z", "HEAD"), pathspecs)
     captured_worktree_paths = _decode_zlist(_run_git(git, repo, worktree_paths_arguments))
     captured_worktree_paths.extend(_decode_zlist(_run_git(git, repo, untracked_arguments)))
@@ -317,6 +408,7 @@ def _scope_data(git: str, repo: Path, mode: str, base: str | None, pathspecs: Se
         "base_ref": base_ref,
         "branch": branch or None,
         "capture_mode": mode,
+        "captured_path_line_bounds": captured_path_line_bounds,
         "captured_scope_paths": captured_scope_paths,
         "captured_worktree_fingerprint": captured_worktree_fingerprint,
         "head": head,

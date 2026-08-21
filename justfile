@@ -6,10 +6,10 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 export UV_CACHE_DIR := env_var_or_default("UV_CACHE_DIR", ".uv-cache")
 
 python_paths := "agents/.agents/skills scripts"
-dprint_version := "0.55.2"
+dprint_version := "0.56.0"
 just_version := "1.58.0"
-rumdl_version := "0.2.53"
-uv_version := "0.12.3"
+rumdl_version := "0.2.58"
+uv_version := "0.12.5"
 zizmor_version := "1.29.0"
 
 _ensure-actionlint:
@@ -189,9 +189,13 @@ markdown-fix: _ensure-rumdl
 
 markdown-lint: markdown-check
 
-[confirm("Apply captured macOS defaults (Dock, Finder, keyboard, trackpad) and restart Dock/Finder?")]
+[confirm("Apply captured macOS defaults (Dock, Finder, keyboard, trackpad) while leaving native window tiling unchanged, then restart Dock/Finder?")]
 macos-defaults:
     bin/macos-defaults.sh
+
+[confirm("Apply captured macOS defaults and let an installed Rectangle Pro take over edge tiling by disabling native macOS edge-drag gestures?")]
+macos-defaults-rectangle-pro:
+    bin/macos-defaults.sh --rectangle-pro-takeover
 
 python-check: _ensure-uv
     uv run --locked ruff format --check {{ python_paths }}
@@ -213,9 +217,17 @@ python-sync: _ensure-uv
 python-typecheck: _ensure-uv
     uv run --locked ty check {{ python_paths }} --error all
 
-semgrep: _ensure-uv
+# Harden semgrep execution for CI/sandboxes:
+# use explicit temporary cache/log paths, disable version checks and metrics,
+# and prefer system CA certs so checks work when HOME/.cache paths are restricted.
+semgrep: _ensure-brew _ensure-uv
     #!/usr/bin/env bash
     set -euo pipefail
+    uv_executable="${UV_EXECUTABLE:-$(brew --prefix uv)/bin/uv}"
+    if [[ ! -x "$uv_executable" ]]; then
+        echo "Selected uv executable is unavailable at $uv_executable." >&2
+        exit 1
+    fi
     files=()
     while IFS= read -r -d '' file; do
         if [[ -f "$file" && "$file" != tests/semgrep/* ]]; then
@@ -223,35 +235,134 @@ semgrep: _ensure-uv
         fi
     done < <(git ls-files -co --exclude-standard -z)
     if ((${#files[@]})); then
-        uv run --locked semgrep --metrics off --error --strict --timeout 120 --config semgrep.yaml "${files[@]}"
+        semgrep_tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-semgrep.XXXXXX")"
+        cleanup() {
+            rm -rf "$semgrep_tmp_dir"
+        }
+        trap cleanup EXIT
+        semgrep_version_cache_path="$semgrep_tmp_dir/version-cache"
+        semgrep_log_file="$semgrep_tmp_dir/semgrep.log"
+        if [ -f /etc/ssl/cert.pem ]; then
+            export SSL_CERT_FILE="/etc/ssl/cert.pem"
+        elif [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+            export SSL_CERT_FILE="/etc/ssl/certs/ca-certificates.crt"
+        else
+            unset SSL_CERT_FILE
+        fi
+        SEMGREP_VERSION_CACHE_PATH="$semgrep_version_cache_path" \
+            SEMGREP_LOG_FILE="$semgrep_log_file" \
+            SEMGREP_SEND_METRICS=off \
+            OTEL_SDK_DISABLED=true \
+            "$uv_executable" run --locked semgrep --disable-version-check --metrics off --error --strict --timeout 120 --config semgrep.yaml "${files[@]}"
     else
         echo "No repository files found to scan."
     fi
 
-semgrep-test: _ensure-uv
+# Keep fixture semgrep tests robust under the same CI/sandbox constraints.
+semgrep-test: _ensure-brew _ensure-uv
     #!/usr/bin/env bash
     set -euo pipefail
-    config_dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-semgrep-config.XXXXXX")"
+    uv_executable="${UV_EXECUTABLE:-$(brew --prefix uv)/bin/uv}"
+    if [[ ! -x "$uv_executable" ]]; then
+        echo "Selected uv executable is unavailable at $uv_executable." >&2
+        exit 1
+    fi
     state_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-semgrep-state.XXXXXX")"
     cleanup() {
-        rm -rf "$config_dir" "$state_root"
+        rm -rf "$state_root"
     }
     trap cleanup EXIT
 
+    if [ -f /etc/ssl/cert.pem ]; then
+        export SSL_CERT_FILE="/etc/ssl/cert.pem"
+    elif [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+        export SSL_CERT_FILE="/etc/ssl/certs/ca-certificates.crt"
+    else
+        unset SSL_CERT_FILE
+    fi
+
+    config_root="$state_root/configs"
+    mkdir -p "$config_root"
+    hidden_fixtures=()
+    ordinary_fixture_count=0
     while IFS= read -r -d '' fixture; do
         rel="${fixture#tests/semgrep/}"
-        config_path="$config_dir/${rel%.*}.yaml"
-        state_dir="$state_root/${rel%.*}"
+        if [[ "$rel" == .* ]]; then
+            hidden_fixtures+=("$fixture")
+            continue
+        fi
+        config_path="$config_root/${rel}.yaml"
         mkdir -p "$(dirname "$config_path")"
-        mkdir -p "$state_dir"
-        uv run --locked python scripts/semgrep_fixture_config.py "$fixture" "$PWD/semgrep.yaml" "$config_path"
-
-        SEMGREP_SEND_METRICS=off SEMGREP_SETTINGS_FILE="$state_dir/settings.yml" uv run --locked semgrep scan --metrics off --test --strict --config "$config_path" "$fixture"
+        "$uv_executable" run --locked python scripts/semgrep_fixture_config.py "$fixture" "$PWD/semgrep.yaml" "$config_path"
+        ((ordinary_fixture_count += 1))
     done < <(find tests/semgrep -type f ! -name '*.fixed' -print0)
+
+    run_fixture_suite() {
+        local config_path="$1"
+        local target="$2"
+        local state_dir
+        state_dir="$(mktemp -d "$state_root/suite.XXXXXX")"
+        SEMGREP_VERSION_CACHE_PATH="$state_dir/version-cache" \
+            SEMGREP_LOG_FILE="$state_dir/semgrep.log" \
+            SEMGREP_SEND_METRICS=off \
+            OTEL_SDK_DISABLED=true \
+            SEMGREP_SETTINGS_FILE="$state_dir/settings.yml" \
+            "$uv_executable" run --locked semgrep scan --disable-version-check --metrics off --test --strict --config "$config_path" "$target"
+    }
+
+    if ((ordinary_fixture_count)); then
+        run_fixture_suite "$config_root" tests/semgrep
+    fi
+
+    for fixture in "${hidden_fixtures[@]}"; do
+        hidden_state_dir="$(mktemp -d "$state_root/hidden.XXXXXX")"
+        config_path="$hidden_state_dir/config.yaml"
+        "$uv_executable" run --locked python scripts/semgrep_fixture_config.py "$fixture" "$PWD/semgrep.yaml" "$config_path"
+        run_fixture_suite "$config_path" "$fixture"
+    done
 
 setup:
     DOTFILES_DIR="$PWD" bin/bootstrap.sh
     just python-sync
+
+# Update the Homebrew bundle, uv lock, and repository-owned Cargo tools.
+update: update-dependencies update-cargo-tools
+    @echo "Repository dependencies and tools updated."
+
+# Update the Cargo CLI tools installed by bootstrap.sh and reconcile their pins.
+update-cargo-tools: _ensure-brew
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if ! command -v cargo-install-update >/dev/null 2>&1; then
+        echo "'cargo-install-update' not found. Install it with:"
+        echo "   cargo install --locked cargo-update"
+        exit 1
+    fi
+
+    uv_executable="$(brew --prefix uv)/bin/uv"
+    if [[ ! -x "$uv_executable" ]]; then
+        echo "Homebrew-managed uv is unavailable at $uv_executable." >&2
+        exit 1
+    fi
+
+    packages=(dprint just rumdl zizmor)
+    cargo install-update --locked "${packages[@]}"
+    "$uv_executable" run --locked python scripts/update_tool_pins.py --justfile justfile --uv-executable "$uv_executable"
+
+# Upgrade Brewfile dependencies and the complete uv development environment.
+update-dependencies: _ensure-brew
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    brew bundle upgrade --file="$PWD/Brewfile"
+    uv_executable="$(brew --prefix uv)/bin/uv"
+    if [[ ! -x "$uv_executable" ]]; then
+        echo "Homebrew-managed uv is unavailable at $uv_executable." >&2
+        exit 1
+    fi
+    "$uv_executable" lock --upgrade
+    "$uv_executable" sync --locked --group dev
 
 shell-check:
     bash -n bin/bootstrap.sh bin/macos-defaults.sh bin/resolve-just-version.sh bin/verify.sh

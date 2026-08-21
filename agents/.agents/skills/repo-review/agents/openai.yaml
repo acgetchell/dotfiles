@@ -1,6 +1,7 @@
 interface:
   display_name: "Repo Review"
-  short_description: "Run mixed repository reviews through review-graph"
+  short_description: "Delegate complete reviews to Review Graph"
   default_prompt: >-
-    Use $repo-review to run a graph-backed branch, PR, staged, release-readiness, or whole-repository review across C++, Rust, Python, tooling, and
-    documentation, applying fixes only when requested.
+    As the $repo-review agent, use $review-graph as the sole mixed-surface review
+    coordinator for this complete repository review request, preserving scope and
+    applying fixes only when requested.

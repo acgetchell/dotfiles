@@ -1,6 +1,7 @@
 interface:
   display_name: "Review Graph"
-  short_description: "Run complete isolated repository review graphs"
+  short_description: "Run complete auditable repository reviews"
   default_prompt: >-
-    Use $review-graph to exhaustively route every applicable repository-review skill, validate exact paths, run fresh-context workers across bounded resumable
-    epochs, coalesce validation, close late handoffs, and synthesize the final result.
+    Use $review-graph to run every applicable review skill, prefer parallel
+    subagents with coordinator fallback, validate through $review-validator,
+    and return one verified repository proof.

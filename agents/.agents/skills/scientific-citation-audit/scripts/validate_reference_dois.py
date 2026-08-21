@@ -7,8 +7,6 @@ with the local bibliography text, catching the common trust failure where a live
 DOI points to an unrelated paper.
 """
 
-from __future__ import annotations
-
 import argparse
 import json
 import math
@@ -322,7 +320,7 @@ def validate_entry(entry: DoiEntry, timeout: float, min_title_score: float, fetc
     """Validate one DOI and compare metadata with the bibliography entry."""
     try:
         metadata = CslMetadata.parse(fetcher(entry.doi, timeout))
-    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError, ValueError, json.JSONDecodeError, ssl.SSLError) as exc:
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError, TypeError, ValueError, json.JSONDecodeError, ssl.SSLError) as exc:
         return DoiResult(
             doi=entry.doi.value,
             line=entry.line,
