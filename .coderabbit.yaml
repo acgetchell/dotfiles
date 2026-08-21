@@ -34,30 +34,30 @@ reviews:
   labeling_instructions: []
   path_filters: []
   path_instructions:
+    - path: "agents/.agents/skills/**"
+      instructions: |
+        Validate every affected skill with
+        `just skill-check agents/.agents/skills/<skill-id>` and run
+        `just check-skills`. If `just` is unavailable, run
+        `uv run python scripts/skill_validate.py <skill-dir>` instead.
     - path: "agents/.agents/skills/**/SKILL.md"
       instructions: |
         These files are Codex skill instructions. Focus on accidental disclosure
         of private context, credentials, internal-only paths, or personal data;
         prompt clarity; scope control; and whether the skill asks agents to use
         safe, reviewable workflows.
-        Run `just skill-check agents/.agents/skills/<skill-id>` for each affected
-        skill and `just check-skills` for the complete skill suite.
     - path: "agents/.agents/skills/**/agents/*.{yaml,yml}"
       instructions: |
         These files expose skills to agent surfaces. Verify the YAML remains
         minimal, parseable, non-secret, and aligned with the corresponding
         skill instructions.
-        Run `just skill-check agents/.agents/skills/<skill-id>` for each affected
-        skill and `just check-skills` for the complete skill suite.
     - path: "agents/.agents/skills/**/scripts/*.py"
       instructions: |
         These are Python support scripts for reusable Codex skills. Focus on
         parser correctness, deterministic output, explicit error handling,
         subprocess discipline, fixture-backed tests, and compatibility with the
         repository Ruff and ty configuration.
-        Run `just skill-check agents/.agents/skills/<skill-id>` for each affected
-        skill and `just check-skills` for the complete skill suite. For changes
-        under `agents/.agents/skills/review-graph/**/*.py`, also run
+        For changes under `agents/.agents/skills/review-graph/**/*.py`, also run
         `uv run --locked pytest agents/.agents/skills/review-graph/scripts/test_review_graph_plan.py`.
     - path: "bin/*.sh"
       instructions: |

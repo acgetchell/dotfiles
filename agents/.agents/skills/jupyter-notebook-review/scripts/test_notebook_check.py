@@ -6,7 +6,9 @@ import json
 import sys
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
+import nbclient
 import pytest
 
 SCRIPT = Path(__file__).with_name("notebook_check.py")
@@ -167,3 +169,26 @@ def test_execute_rejects_malformed_notebook_without_traceback(tmp_path: Path, ca
     stderr = capsys.readouterr().err
     assert "notebook root must be a JSON object" in stderr
     assert "Traceback" not in stderr
+
+
+def test_execute_reads_validated_notebook_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute mode should reuse the mapping loaded and validated by main."""
+    notebook_path = tmp_path / "valid.ipynb"
+    notebook_path.write_text(json.dumps(notebook_with_ids("overview")), encoding="utf-8")
+    executed_notebooks: list[object] = []
+
+    class RecordingNotebookClient:
+        def __init__(self, notebook: object, **_kwargs: object) -> None:
+            self.notebook = notebook
+
+        def execute(self) -> None:
+            executed_notebooks.append(self.notebook)
+
+    monkeypatch.setattr(nbclient, "NotebookClient", RecordingNotebookClient)
+    original_open = Path.open
+    with patch.object(Path, "open", autospec=True, side_effect=original_open) as open_mock:
+        assert MODULE.main(["--execute", str(notebook_path)]) == 0
+
+    notebook_reads = [call for call in open_mock.call_args_list if call.args and call.args[0] == notebook_path]
+    assert len(notebook_reads) == 1
+    assert len(executed_notebooks) == 1

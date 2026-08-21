@@ -432,7 +432,7 @@ def lint(path: Path, options: LintOptions) -> int:
     return 0
 
 
-def execute(path: Path, repo_root: Path, timeout: int) -> int:
+def execute(path: Path, notebook: dict[str, Any], repo_root: Path, timeout: int) -> int:
     """Execute a notebook in memory without modifying it on disk."""
     try:
         import nbclient  # noqa: PLC0415 - optional dependency used only by --execute.
@@ -442,9 +442,9 @@ def execute(path: Path, repo_root: Path, timeout: int) -> int:
         return 1
 
     os.environ.setdefault("MPLBACKEND", "Agg")
-    with path.open(encoding="utf-8") as handle:
-        notebook = nbformat.read(handle, as_version=4)
-    client = nbclient.NotebookClient(notebook, timeout=timeout, kernel_name="python3", resources={"metadata": {"path": str(repo_root)}})
+    executable_notebook = nbformat.from_dict(notebook)
+    nbformat.validate(executable_notebook)
+    client = nbclient.NotebookClient(executable_notebook, timeout=timeout, kernel_name="python3", resources={"metadata": {"path": str(repo_root)}})
     client.execute()
     print(f"OK executed {path}")
     return 0
@@ -489,8 +489,8 @@ def main(argv: list[str] | None = None) -> int:
                     project_root=args.repo_root,
                 ),
             )
-        load_notebook(args.notebook)
-        return execute(args.notebook, args.repo_root, args.timeout)
+        notebook = load_notebook(args.notebook)
+        return execute(args.notebook, notebook, args.repo_root, args.timeout)
     except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as error:
         print(f"notebook_check: {error}", file=sys.stderr)
         return 2
