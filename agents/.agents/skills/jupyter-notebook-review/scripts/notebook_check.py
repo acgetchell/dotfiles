@@ -442,8 +442,12 @@ def execute(path: Path, notebook: dict[str, Any], repo_root: Path, timeout: int)
         return 1
 
     os.environ.setdefault("MPLBACKEND", "Agg")
-    executable_notebook = nbformat.from_dict(notebook)
-    nbformat.validate(executable_notebook)
+    try:
+        executable_notebook = nbformat.from_dict(notebook)
+        nbformat.validate(executable_notebook)
+    except nbformat.ValidationError as error:
+        msg = f"{path}: notebook schema validation failed: {error.message}"
+        raise ValueError(msg) from error
     client = nbclient.NotebookClient(executable_notebook, timeout=timeout, kernel_name="python3", resources={"metadata": {"path": str(repo_root)}})
     client.execute()
     print(f"OK executed {path}")

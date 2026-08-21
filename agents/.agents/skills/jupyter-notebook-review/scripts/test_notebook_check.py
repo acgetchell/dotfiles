@@ -171,6 +171,27 @@ def test_execute_rejects_malformed_notebook_without_traceback(tmp_path: Path, ca
     assert "Traceback" not in stderr
 
 
+def test_execute_rejects_schema_invalid_notebook_before_client_creation(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Execute mode should report schema errors without constructing a client."""
+    notebook_path = tmp_path / "invalid-schema.ipynb"
+    notebook = notebook_with_ids("invalid-cell")
+    notebook["cells"][0].pop("cell_type")
+    notebook_path.write_text(json.dumps(notebook), encoding="utf-8")
+
+    def unexpected_client(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("NotebookClient must not be created for an invalid notebook schema")
+
+    monkeypatch.setattr(nbclient, "NotebookClient", unexpected_client)
+
+    assert MODULE.main(["--execute", str(notebook_path)]) == 2
+
+    stderr = capsys.readouterr().err
+    assert "notebook schema validation failed" in stderr
+    assert "Traceback" not in stderr
+
+
 def test_execute_reads_validated_notebook_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Execute mode should reuse the mapping loaded and validated by main."""
     notebook_path = tmp_path / "valid.ipynb"
