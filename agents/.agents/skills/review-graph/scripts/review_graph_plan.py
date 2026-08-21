@@ -1,7 +1,5 @@
 """Deterministic planning checks for review-graph orchestration."""
 
-from __future__ import annotations
-
 import argparse
 import fnmatch
 import json
@@ -1294,7 +1292,7 @@ def _migration_trial_blockers(trial: MigrationTrial) -> tuple[str, ...]:
         (trial.report_complete, "report"),
         (trial.accepted, "accepted outcome"),
     ):
-        if not condition:
+        if condition is not True:
             blockers.append(f"{trial.trial_id} failed {label}")
     return tuple(blockers)
 
@@ -1445,6 +1443,38 @@ def assess_worker_capacity(metadata: Mapping[str, Any], *, required_fresh_worker
     )
 
 
+def _malformed_execution_profile_assessment(
+    *, isolated_requested: object, isolated_only: object, fresh_workers_supported: object, budget: WorkerBudget
+) -> ExecutionProfileAssessment | None:
+    """Return the fail-closed profile for malformed boundary values."""
+    input_blockers = [
+        f"{field} must be a boolean"
+        for field, value in (("isolated_requested", isolated_requested), ("isolated_only", isolated_only), ("fresh_workers_supported", fresh_workers_supported))
+        if not isinstance(value, bool)
+    ]
+    input_blockers.extend(
+        f"{field} must be a non-boolean integer"
+        for field, value in (("worker budget total", budget.total), ("worker budget recovery/finalization reserve", budget.recovery_finalization_reserve))
+        if not isinstance(value, int) or isinstance(value, bool)
+    )
+    if not input_blockers:
+        return None
+
+    strict_isolated_only = isolated_only is True or not isinstance(isolated_only, bool)
+    return ExecutionProfileAssessment(
+        feasible=not strict_isolated_only,
+        blockers=tuple(input_blockers),
+        profile="blocked" if strict_isolated_only else "grouped",
+        reason=(
+            "malformed isolated-only execution inputs cannot be used safely"
+            if strict_isolated_only
+            else "malformed isolation preference inputs require grouped delivery"
+        ),
+        isolated_requested=isolated_requested is True or strict_isolated_only,
+        isolated_only=strict_isolated_only,
+    )
+
+
 def select_execution_profile(
     *,
     isolated_requested: bool = False,
@@ -1454,7 +1484,13 @@ def select_execution_profile(
     budget: WorkerBudget | None = None,
 ) -> ExecutionProfileAssessment:
     """Choose useful grouped delivery unless strict isolation is both requested and feasible."""
-    selected_budget = budget or WorkerBudget()
+    selected_budget = budget if budget is not None else WorkerBudget()
+    malformed = _malformed_execution_profile_assessment(
+        isolated_requested=isolated_requested, isolated_only=isolated_only, fresh_workers_supported=fresh_workers_supported, budget=selected_budget
+    )
+    if malformed is not None:
+        return malformed
+
     if isolated_only:
         isolated_requested = True
 
@@ -1753,7 +1789,11 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0915
         review_requirements = review_requirements_from_routing(routing_catalog, routing_decisions)
         routed_additional_nodes = independent_nodes_from_routing(routing_catalog, routing_decisions)
     else:
-        if not bool(document.get("allow_legacy_fixture", False)):
+        allow_legacy_fixture = document.get("allow_legacy_fixture", False)
+        if not isinstance(allow_legacy_fixture, bool):
+            msg = "allow_legacy_fixture must be a boolean"
+            raise ValueError(msg)
+        if allow_legacy_fixture is not True:
             msg = "graph documents require exhaustive routing_decisions; legacy review_requirements are test-fixture-only"
             raise ValueError(msg)
         routed_additional_nodes = ()

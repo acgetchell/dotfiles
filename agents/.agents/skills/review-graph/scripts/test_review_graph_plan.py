@@ -1,10 +1,9 @@
 """Regression tests for deterministic review-graph planning contracts."""
 
-from __future__ import annotations
-
 import json
 from dataclasses import asdict, replace
 from pathlib import Path
+from typing import cast
 
 import pytest
 from review_graph_plan import (
@@ -154,6 +153,55 @@ def test_isolated_only_blocks_when_safe_capacity_is_unavailable() -> None:
     assert result.profile == "blocked"
     assert result.blockers[0].startswith("isolation-failure:")
     assert "must not leak" not in result.blockers[0]
+
+
+@pytest.mark.parametrize("value", [1, "isolated"])
+def test_malformed_isolation_preference_uses_grouped_delivery(value: object) -> None:
+    result = select_execution_profile(isolated_requested=cast("bool", value), fresh_workers_supported=True, capacity_metadata=_capacity(remaining=2, active=1))
+
+    assert result.feasible
+    assert result.profile == "grouped"
+    assert "isolated_requested must be a boolean" in result.blockers
+
+
+@pytest.mark.parametrize("value", [1, "available"])
+def test_malformed_fresh_worker_support_uses_grouped_delivery(value: object) -> None:
+    result = select_execution_profile(isolated_requested=True, fresh_workers_supported=cast("bool", value), capacity_metadata=_capacity(remaining=2, active=1))
+
+    assert result.feasible
+    assert result.profile == "grouped"
+    assert "fresh_workers_supported must be a boolean" in result.blockers
+
+
+@pytest.mark.parametrize("value", [1, "isolated-only"])
+def test_malformed_isolated_only_request_blocks(value: object) -> None:
+    result = select_execution_profile(isolated_only=cast("bool", value), fresh_workers_supported=True, capacity_metadata=_capacity(remaining=2, active=1))
+
+    assert not result.feasible
+    assert result.profile == "blocked"
+    assert result.isolated_only
+    assert "isolated_only must be a boolean" in result.blockers
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected_blocker"),
+    [
+        ("total", True, "worker budget total must be a non-boolean integer"),
+        ("total", "24", "worker budget total must be a non-boolean integer"),
+        ("recovery_finalization_reserve", True, "worker budget recovery/finalization reserve must be a non-boolean integer"),
+        ("recovery_finalization_reserve", "1", "worker budget recovery/finalization reserve must be a non-boolean integer"),
+    ],
+)
+def test_malformed_worker_budget_uses_grouped_delivery(field: str, value: object, expected_blocker: str) -> None:
+    malformed_budget = replace(WorkerBudget(), **{field: value})
+
+    result = select_execution_profile(
+        isolated_requested=True, fresh_workers_supported=True, capacity_metadata=_capacity(remaining=2, active=1), budget=malformed_budget
+    )
+
+    assert result.feasible
+    assert result.profile == "grouped"
+    assert expected_blocker in result.blockers
 
 
 def test_packaged_python_support_tooling_requires_build_portability() -> None:
@@ -610,6 +658,12 @@ def test_graph_document_rejects_selected_only_legacy_routing_without_fixture_esc
         plan_from_document({"review_requirements": []})
 
 
+@pytest.mark.parametrize("allow_legacy_fixture", [1, "false"])
+def test_graph_document_rejects_non_boolean_legacy_fixture_escape_hatch(allow_legacy_fixture: object) -> None:
+    with pytest.raises(ValueError, match="allow_legacy_fixture must be a boolean"):
+        plan_from_document({"allow_legacy_fixture": allow_legacy_fixture, "review_requirements": []})
+
+
 def test_repeated_validation_requirements_coalesce_and_reuse_mapping_is_complete() -> None:
     requirements = (
         _validation_requirement("V-rust", evidence_id="ledger-current-host"),
@@ -824,6 +878,27 @@ def test_migration_gate_rejects_an_unverified_runtime_artifact() -> None:
 )
 def test_migration_gate_rejects_malformed_runtime_evidence(changes: dict[str, object], expected_blocker: str) -> None:
     trial = replace(_migration_trial("branch-1", "branch-read-only"), **changes)
+
+    result = assess_migration_trials((trial,))
+
+    assert not result.feasible
+    assert any(expected_blocker in blocker for blocker in result.blockers)
+
+
+@pytest.mark.parametrize("value", [1, "complete"])
+@pytest.mark.parametrize(
+    ("field", "expected_blocker"),
+    [
+        ("nodes_reconciled", "failed node lifecycle"),
+        ("validation_complete", "failed validation"),
+        ("synthesis_complete", "failed synthesis"),
+        ("fingerprints_matched", "failed fingerprints"),
+        ("report_complete", "failed report"),
+        ("accepted", "failed accepted outcome"),
+    ],
+)
+def test_migration_gate_rejects_malformed_success_evidence(field: str, expected_blocker: str, value: object) -> None:
+    trial = replace(_migration_trial("branch-1", "branch-read-only"), **{field: value})
 
     result = assess_migration_trials((trial,))
 

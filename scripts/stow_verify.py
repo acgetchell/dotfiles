@@ -6,8 +6,6 @@ repository and flags dangling symlinks left behind by renamed or removed
 packages or skills.
 """
 
-from __future__ import annotations
-
 import argparse
 import os
 import sys

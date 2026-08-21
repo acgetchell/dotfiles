@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Tests for stow_verify.py."""
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import TYPE_CHECKING
 

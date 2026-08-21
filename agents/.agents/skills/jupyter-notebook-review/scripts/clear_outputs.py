@@ -1,7 +1,5 @@
 """Clear outputs and execution counts from Jupyter notebooks."""
 
-from __future__ import annotations
-
 import argparse
 import sys
 import tempfile

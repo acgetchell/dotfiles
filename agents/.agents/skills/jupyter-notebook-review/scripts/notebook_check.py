@@ -1,7 +1,5 @@
 """Inspect, lint, and optionally execute Jupyter notebooks."""
 
-from __future__ import annotations
-
 import argparse
 import ast
 import json
@@ -13,7 +11,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, override
+from typing import Any, cast, override
 
 RUFF_EXTEND_IGNORE = "INP001"
 RUFF_LOCATION_RE = re.compile(r"\s*-->\s+.+?:(?P<line>\d+):(?P<column>\d+)")
@@ -58,7 +56,10 @@ def cell_source(cell: dict[str, Any]) -> str:
     """Return a notebook cell source as text."""
     source = cell.get("source", "")
     if isinstance(source, list):
-        return "".join(str(part) for part in source)
+        if not all(isinstance(part, str) for part in source):
+            msg = "cell source list items must all be strings"
+            raise TypeError(msg)
+        return "".join(cast("list[str]", source))
     if isinstance(source, str):
         return source
     msg = f"cell source must be a string or list of strings, got {type(source).__name__}"
@@ -71,16 +72,32 @@ def load_notebook(path: Path) -> dict[str, Any]:
         msg = f"notebook does not exist or is not a file: {path}"
         raise FileNotFoundError(msg)
     with path.open(encoding="utf-8") as handle:
-        notebook = json.load(handle)
+        loaded: object = json.load(handle)
+    if not isinstance(loaded, dict):
+        msg = f"{path}: notebook root must be a JSON object, got {type(loaded).__name__}"
+        raise TypeError(msg)
+    notebook = cast("dict[str, Any]", loaded)
     nbformat = notebook.get("nbformat")
     if isinstance(nbformat, bool) or not isinstance(nbformat, int) or nbformat != 4:
         msg = f"{path}: expected nbformat to be the JSON integer 4, got {nbformat!r}"
         raise ValueError(msg)
-    for index, cell in enumerate(notebook.get("cells", []), start=1):
+    cells = notebook.get("cells")
+    if not isinstance(cells, list):
+        msg = f"{path}: cells must be a JSON array, got {type(cells).__name__}"
+        raise TypeError(msg)
+    for index, cell in enumerate(cells, start=1):
+        if not isinstance(cell, dict):
+            msg = f"{path}: cell {index} must be a JSON object, got {type(cell).__name__}"
+            raise TypeError(msg)
         metadata = cell.get("metadata")
         if not isinstance(metadata, dict):
             msg = f"{path}: cell {index} metadata must be a JSON object, got {type(metadata).__name__}"
             raise TypeError(msg)
+        try:
+            cell_source(cell)
+        except TypeError as error:
+            msg = f"{path}: cell {index} {error}"
+            raise TypeError(msg) from error
     return notebook
 
 
@@ -452,22 +469,26 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     """Run the requested notebook check."""
     args = parse_args(sys.argv[1:] if argv is None else argv)
-    if args.summary:
-        summarize(args.notebook)
-        return 0
-    if args.lint:
-        return lint(
-            args.notebook,
-            LintOptions(
-                allow_outputs=args.allow_outputs,
-                strict=args.strict,
-                run_ruff=not args.no_ruff,
-                run_format=not args.no_format,
-                run_ty=not args.no_ty,
-                project_root=args.repo_root,
-            ),
-        )
-    return execute(args.notebook, args.repo_root, args.timeout)
+    try:
+        if args.summary:
+            summarize(args.notebook)
+            return 0
+        if args.lint:
+            return lint(
+                args.notebook,
+                LintOptions(
+                    allow_outputs=args.allow_outputs,
+                    strict=args.strict,
+                    run_ruff=not args.no_ruff,
+                    run_format=not args.no_format,
+                    run_ty=not args.no_ty,
+                    project_root=args.repo_root,
+                ),
+            )
+        return execute(args.notebook, args.repo_root, args.timeout)
+    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as error:
+        print(f"notebook_check: {error}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

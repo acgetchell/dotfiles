@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Tests for the Jupyter notebook review skill helper."""
 
-from __future__ import annotations
-
 import importlib.util
 import json
 import sys
@@ -104,3 +102,35 @@ def test_load_notebook_rejects_non_integer_nbformat_four(tmp_path: Path, nbforma
 
     assert str(notebook_path) in str(error.value)
     assert f"expected nbformat to be the JSON integer 4, got {nbformat!r}" in str(error.value)
+
+
+@pytest.mark.parametrize(
+    ("notebook", "message"),
+    [
+        ([], "notebook root must be a JSON object, got list"),
+        ({"nbformat": 4}, "cells must be a JSON array, got NoneType"),
+        ({"nbformat": 4, "cells": [None]}, "cell 1 must be a JSON object, got NoneType"),
+        ({"nbformat": 4, "cells": [{"cell_type": "markdown", "metadata": {}, "source": ["valid", 1]}]}, "cell 1 cell source list items must all be strings"),
+    ],
+)
+def test_load_notebook_rejects_malformed_container_shapes(tmp_path: Path, notebook: object, message: str) -> None:
+    """Malformed JSON containers should fail at the notebook boundary."""
+    notebook_path = tmp_path / "malformed.ipynb"
+    notebook_path.write_text(json.dumps(notebook), encoding="utf-8")
+
+    with pytest.raises(TypeError, match=message) as error:
+        MODULE.load_notebook(notebook_path)
+
+    assert str(notebook_path) in str(error.value)
+
+
+def test_main_reports_malformed_notebook_without_traceback(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Malformed notebook input should produce a concise CLI diagnostic."""
+    notebook_path = tmp_path / "malformed.ipynb"
+    notebook_path.write_text("[]", encoding="utf-8")
+
+    assert MODULE.main(["--summary", str(notebook_path)]) == 2
+
+    stderr = capsys.readouterr().err
+    assert "notebook root must be a JSON object" in stderr
+    assert "Traceback" not in stderr

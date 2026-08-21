@@ -1,7 +1,5 @@
 """Tests for the pre-just version resolver."""
 
-from __future__ import annotations
-
 import subprocess
 from pathlib import Path
 from shutil import which
