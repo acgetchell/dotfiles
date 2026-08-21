@@ -9,7 +9,7 @@ reviews:
   profile: chill
   request_changes_workflow: true
   high_level_summary: false
-  high_level_summary_placeholder: "@coderabbitai summary"
+  high_level_summary_placeholder: ""
   high_level_summary_in_walkthrough: false
   auto_title_placeholder: "@coderabbitai"
   auto_title_instructions: ""
@@ -40,17 +40,25 @@ reviews:
         of private context, credentials, internal-only paths, or personal data;
         prompt clarity; scope control; and whether the skill asks agents to use
         safe, reviewable workflows.
+        Run `just skill-check agents/.agents/skills/<skill-id>` for each affected
+        skill and `just check-skills` for the complete skill suite.
     - path: "agents/.agents/skills/**/agents/*.{yaml,yml}"
       instructions: |
         These files expose skills to agent surfaces. Verify the YAML remains
         minimal, parseable, non-secret, and aligned with the corresponding
         skill instructions.
+        Run `just skill-check agents/.agents/skills/<skill-id>` for each affected
+        skill and `just check-skills` for the complete skill suite.
     - path: "agents/.agents/skills/**/scripts/*.py"
       instructions: |
         These are Python support scripts for reusable Codex skills. Focus on
         parser correctness, deterministic output, explicit error handling,
         subprocess discipline, fixture-backed tests, and compatibility with the
         repository Ruff and ty configuration.
+        Run `just skill-check agents/.agents/skills/<skill-id>` for each affected
+        skill and `just check-skills` for the complete skill suite. For changes
+        under `agents/.agents/skills/review-graph/**/*.py`, also run
+        `uv run --locked pytest agents/.agents/skills/review-graph/scripts/test_review_graph_plan.py`.
     - path: "bin/*.sh"
       instructions: |
         These scripts bootstrap and verify a personal macOS dotfiles
@@ -194,15 +202,10 @@ knowledge_base:
   code_guidelines:
     enabled: true
     filePatterns:
-      - "agents/.agents/skills/**"
-      - "bin/**"
-      - ".github/workflows/**"
-      - "git/.gitconfig"
-      - "pyproject.toml"
-      - "justfile"
-      - "semgrep.yaml"
-      - "scripts/**"
-      - "tests/semgrep/**"
+      - "AGENTS.md"
+      - "README.md"
+      - "agents/.agents/skills/**/SKILL.md"
+      - "agents/.agents/skills/**/references/**/*.md"
   learnings:
     scope: auto
   issues:
@@ -221,4 +224,10 @@ code_generation:
     language: en-US
     path_instructions: []
   unit_tests:
-    path_instructions: []
+    path_instructions:
+      - path: "agents/.agents/skills/**/scripts/*.py"
+        instructions: |
+          Generate fixture-backed tests that cover parser correctness,
+          deterministic output, explicit error handling, and subprocess
+          discipline. Keep generated tests compatible with the repository's
+          Ruff and ty configuration.

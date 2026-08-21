@@ -831,6 +831,26 @@ def test_migration_gate_requires_three_consecutive_modes_recovery_and_epochs() -
     assert result.feasible
 
 
+@pytest.mark.parametrize("value", [1, "complete"])
+def test_migration_gate_rejects_malformed_multi_epoch_evidence(value: object) -> None:
+    trials = tuple(
+        _migration_trial(
+            f"{mode}-{ordinal}",
+            mode,
+            forced_worker_failure=mode == "branch-read-only" and ordinal == 1,
+            multi_epoch=mode == "baseline-release" and ordinal == 1,
+        )
+        for mode in ("branch-read-only", "baseline-release", "review-and-fix")
+        for ordinal in range(1, 4)
+    )
+    trials = tuple(replace(trial, multi_epoch_completed=cast("bool", value)) if trial.trial_id == "baseline-release-1" else trial for trial in trials)
+
+    result = assess_migration_trials(trials)
+
+    assert not result.feasible
+    assert "no accepted multi-epoch fresh-root continuation trial completed" in result.blockers
+
+
 def test_migration_gate_rejects_missing_applicable_skill_recall() -> None:
     trials = tuple(_migration_trial(f"branch-{ordinal}", "branch-read-only") for ordinal in range(1, 4))
     trials = (*trials, replace(_migration_trial("branch-failure", "branch-read-only"), observed_applicable_skill_ids=()))

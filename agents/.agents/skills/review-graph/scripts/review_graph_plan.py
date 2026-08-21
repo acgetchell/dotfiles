@@ -1332,7 +1332,7 @@ def assess_migration_trials(trials: Sequence[MigrationTrial], *, required_consec
         for trial in trials
     ):
         blockers.append("no accepted forced worker-failure trial completed grouped fallback")
-    if not any(not _migration_trial_blockers(trial) and trial.multi_epoch_completed for trial in trials):
+    if not any(not _migration_trial_blockers(trial) and trial.multi_epoch_completed is True for trial in trials):
         blockers.append("no accepted multi-epoch fresh-root continuation trial completed")
     return Assessment(not blockers, tuple(blockers))
 

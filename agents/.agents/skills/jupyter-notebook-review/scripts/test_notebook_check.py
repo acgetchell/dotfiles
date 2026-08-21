@@ -89,6 +89,24 @@ def test_load_notebook_rejects_non_object_cell_metadata(tmp_path: Path, metadata
     assert f"cell 1 metadata must be a JSON object, got {type(metadata).__name__}" in str(error.value)
 
 
+@pytest.mark.parametrize(("metadata", "present"), [(None, False), ([], True)])
+def test_load_notebook_rejects_missing_or_non_object_metadata(tmp_path: Path, metadata: object, present: bool) -> None:
+    """Top-level notebook metadata must be present and object-shaped."""
+    notebook_path = tmp_path / "invalid-notebook-metadata.ipynb"
+    notebook = notebook_with_ids("setup-code")
+    if present:
+        notebook["metadata"] = metadata
+    else:
+        notebook.pop("metadata")
+    notebook_path.write_text(json.dumps(notebook), encoding="utf-8")
+
+    with pytest.raises(TypeError, match=r"metadata must be a JSON object") as error:
+        MODULE.load_notebook(notebook_path)
+
+    assert str(notebook_path) in str(error.value)
+    assert f"metadata must be a JSON object, got {type(metadata).__name__}" in str(error.value)
+
+
 @pytest.mark.parametrize("nbformat", [4.0, True])
 def test_load_notebook_rejects_non_integer_nbformat_four(tmp_path: Path, nbformat: Any) -> None:
     """Numeric equality must not admit floats or Booleans as nbformat 4."""
@@ -108,9 +126,12 @@ def test_load_notebook_rejects_non_integer_nbformat_four(tmp_path: Path, nbforma
     ("notebook", "message"),
     [
         ([], "notebook root must be a JSON object, got list"),
-        ({"nbformat": 4}, "cells must be a JSON array, got NoneType"),
-        ({"nbformat": 4, "cells": [None]}, "cell 1 must be a JSON object, got NoneType"),
-        ({"nbformat": 4, "cells": [{"cell_type": "markdown", "metadata": {}, "source": ["valid", 1]}]}, "cell 1 cell source list items must all be strings"),
+        ({"metadata": {}, "nbformat": 4}, "cells must be a JSON array, got NoneType"),
+        ({"metadata": {}, "nbformat": 4, "cells": [None]}, "cell 1 must be a JSON object, got NoneType"),
+        (
+            {"metadata": {}, "nbformat": 4, "cells": [{"cell_type": "markdown", "metadata": {}, "source": ["valid", 1]}]},
+            "cell 1 cell source list items must all be strings",
+        ),
     ],
 )
 def test_load_notebook_rejects_malformed_container_shapes(tmp_path: Path, notebook: object, message: str) -> None:
@@ -130,6 +151,18 @@ def test_main_reports_malformed_notebook_without_traceback(tmp_path: Path, capsy
     notebook_path.write_text("[]", encoding="utf-8")
 
     assert MODULE.main(["--summary", str(notebook_path)]) == 2
+
+    stderr = capsys.readouterr().err
+    assert "notebook root must be a JSON object" in stderr
+    assert "Traceback" not in stderr
+
+
+def test_execute_rejects_malformed_notebook_without_traceback(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Execute mode should validate notebook JSON before loading dependencies."""
+    notebook_path = tmp_path / "malformed.ipynb"
+    notebook_path.write_text("[]", encoding="utf-8")
+
+    assert MODULE.main(["--execute", str(notebook_path)]) == 2
 
     stderr = capsys.readouterr().err
     assert "notebook root must be a JSON object" in stderr

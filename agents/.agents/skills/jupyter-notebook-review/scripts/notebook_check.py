@@ -77,6 +77,10 @@ def load_notebook(path: Path) -> dict[str, Any]:
         msg = f"{path}: notebook root must be a JSON object, got {type(loaded).__name__}"
         raise TypeError(msg)
     notebook = cast("dict[str, Any]", loaded)
+    notebook_metadata = notebook.get("metadata")
+    if not isinstance(notebook_metadata, dict):
+        msg = f"{path}: metadata must be a JSON object, got {type(notebook_metadata).__name__}"
+        raise TypeError(msg)
     nbformat = notebook.get("nbformat")
     if isinstance(nbformat, bool) or not isinstance(nbformat, int) or nbformat != 4:
         msg = f"{path}: expected nbformat to be the JSON integer 4, got {nbformat!r}"
@@ -485,6 +489,7 @@ def main(argv: list[str] | None = None) -> int:
                     project_root=args.repo_root,
                 ),
             )
+        load_notebook(args.notebook)
         return execute(args.notebook, args.repo_root, args.timeout)
     except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as error:
         print(f"notebook_check: {error}", file=sys.stderr)
