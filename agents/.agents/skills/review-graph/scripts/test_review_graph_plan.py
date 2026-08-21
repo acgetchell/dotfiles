@@ -486,7 +486,7 @@ def _validation_result_payload(expectation: ValidationEvidenceExpectation, evide
                     (
                         f"- Path: {artifact.path}",
                         f"  - Artifact ID: {artifact.artifact_id or 'none'}",
-                        f"  - Artifact digest: {artifact.artifact_digest or 'sha256:' + 'a' * 64}",
+                        f"  - Artifact digest: {artifact.artifact_digest or 'none'}",
                         f"  - Kind: {artifact.kind}",
                         f"  - Repository status: {artifact.repository_status}",
                     )
@@ -2780,7 +2780,11 @@ def test_validation_native_provenance_artifacts_and_ledger_are_dispatch_bound() 
     )
     external_evidence = replace(evidence, environment_digest=external_expectation.environment_digest)
     external_content = _validation_result_payload(external_expectation, external_evidence)
-    assert not _validation_native_result_blockers(external_content, external_expectation, external_evidence)
+    assert b"  - Artifact digest: none" in external_content
+    assert any(
+        "requires a lowercase SHA-256 content digest" in blocker
+        for blocker in _validation_native_result_blockers(external_content, external_expectation, external_evidence)
+    )
 
     unapproved_external = external_content.replace(b"- Path: /external/review-validator/command.log", b"- Path: /external/review-validator/unapproved.log", 1)
     assert any(

@@ -220,9 +220,14 @@ python-typecheck: _ensure-uv
 # Harden semgrep execution for CI/sandboxes:
 # use explicit temporary cache/log paths, disable version checks and metrics,
 # and prefer system CA certs so checks work when HOME/.cache paths are restricted.
-semgrep: _ensure-uv
+semgrep: _ensure-brew _ensure-uv
     #!/usr/bin/env bash
     set -euo pipefail
+    uv_executable="$(brew --prefix uv)/bin/uv"
+    if [[ ! -x "$uv_executable" ]]; then
+        echo "Homebrew-managed uv is unavailable at $uv_executable." >&2
+        exit 1
+    fi
     files=()
     while IFS= read -r -d '' file; do
         if [[ -f "$file" && "$file" != tests/semgrep/* ]]; then
@@ -248,15 +253,20 @@ semgrep: _ensure-uv
             SEMGREP_LOG_FILE="$semgrep_log_file" \
             SEMGREP_SEND_METRICS=off \
             OTEL_SDK_DISABLED=true \
-            uv run --locked semgrep --disable-version-check --metrics off --error --strict --timeout 120 --config semgrep.yaml "${files[@]}"
+            "$uv_executable" run --locked semgrep --disable-version-check --metrics off --error --strict --timeout 120 --config semgrep.yaml "${files[@]}"
     else
         echo "No repository files found to scan."
     fi
 
 # Keep fixture semgrep tests robust under the same CI/sandbox constraints.
-semgrep-test: _ensure-uv
+semgrep-test: _ensure-brew _ensure-uv
     #!/usr/bin/env bash
     set -euo pipefail
+    uv_executable="$(brew --prefix uv)/bin/uv"
+    if [[ ! -x "$uv_executable" ]]; then
+        echo "Homebrew-managed uv is unavailable at $uv_executable." >&2
+        exit 1
+    fi
     state_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-semgrep-state.XXXXXX")"
     cleanup() {
         rm -rf "$state_root"
@@ -275,7 +285,7 @@ semgrep-test: _ensure-uv
         fi
         config_path="$config_root/${rel}.yaml"
         mkdir -p "$(dirname "$config_path")"
-        uv run --locked python scripts/semgrep_fixture_config.py "$fixture" "$PWD/semgrep.yaml" "$config_path"
+        "$uv_executable" run --locked python scripts/semgrep_fixture_config.py "$fixture" "$PWD/semgrep.yaml" "$config_path"
         ((ordinary_fixture_count += 1))
     done < <(find tests/semgrep -type f ! -name '*.fixed' -print0)
 
@@ -297,7 +307,7 @@ semgrep-test: _ensure-uv
             SEMGREP_SEND_METRICS=off \
             OTEL_SDK_DISABLED=true \
             SEMGREP_SETTINGS_FILE="$state_dir/settings.yml" \
-            uv run --locked semgrep scan --disable-version-check --metrics off --test --strict --config "$config_path" "$target"
+            "$uv_executable" run --locked semgrep scan --disable-version-check --metrics off --test --strict --config "$config_path" "$target"
     }
 
     if ((ordinary_fixture_count)); then
@@ -307,7 +317,7 @@ semgrep-test: _ensure-uv
     for fixture in "${hidden_fixtures[@]}"; do
         hidden_state_dir="$(mktemp -d "$state_root/hidden.XXXXXX")"
         config_path="$hidden_state_dir/config.yaml"
-        uv run --locked python scripts/semgrep_fixture_config.py "$fixture" "$PWD/semgrep.yaml" "$config_path"
+        "$uv_executable" run --locked python scripts/semgrep_fixture_config.py "$fixture" "$PWD/semgrep.yaml" "$config_path"
         run_fixture_suite "$config_path" "$fixture"
     done
 

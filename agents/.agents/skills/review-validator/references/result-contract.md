@@ -210,10 +210,29 @@ Write `none` when no command executed.
   - Kind: <build|cache|coverage|log|other>
   - Repository status: <ignored|outside-repository>
 
-Compute each digest from the completed artifact before returning the result. For
-a directory, digest a deterministic manifest containing every relative path and
-file digest. An artifact ID is a locator, not a substitute for the content
-digest.
+Compute each digest from the completed artifact before returning the result. A
+regular file uses `sha256:` followed by the lowercase hexadecimal SHA-256 of its
+raw bytes. A directory uses this canonical `directory-artifact-v1` format:
+
+1. Recursively enumerate regular files without following symbolic links. Empty
+   directories contribute no records; reject symbolic links and other special
+   entries.
+2. Express each path relative to the artifact root with `/` separators,
+   normalize every component to Unicode NFC, encode it as UTF-8, and reject an
+   absolute path, `.`, `..`, an empty component, invalid UTF-8, or a normalized
+   path collision.
+3. Sort records by the unsigned lexicographic order of the normalized UTF-8
+   path bytes. For each file, append an unsigned 64-bit big-endian path-byte
+   length, the path bytes, and the raw 32-byte SHA-256 digest of the file bytes.
+4. Form the exact outer digest input as the ASCII bytes
+   `review-validator-directory-artifact-v1\0`, followed by the unsigned 64-bit
+   big-endian record count and the concatenated records. Report `sha256:` plus
+   the lowercase hexadecimal SHA-256 of those complete bytes.
+
+Digest generation and evidence acceptance must both use this exact format and
+must compare the regenerated digest before accepting the artifact. An artifact
+ID remains a separate locator and is never part of, or a substitute for, the
+content digest.
 
 ## Source And Git State
 
@@ -325,8 +344,10 @@ Accept a result only when:
   commands because capture was empty or discovery proved no validation applied
 - artifacts exactly equal the dispatch-approved paths, kinds, and
   ignored/outside-repository statuses; every reported artifact has a lowercase
-  SHA-256 digest, and any expected artifact ID or digest supplied by the dispatch
-  matches exactly; unapproved or mismatched-identity artifacts are rejected
+  SHA-256 digest regenerated from the completed file bytes or the canonical
+  `directory-artifact-v1` format above, and any expected artifact ID or digest
+  supplied by the dispatch matches exactly; unapproved or mismatched-identity
+  artifacts are rejected
 - `passed`, `failed`, `reused`, and `not-applicable` report no
   source-controlled file or Git-state mutation; a blocked result reports any
   detected mutation exactly
