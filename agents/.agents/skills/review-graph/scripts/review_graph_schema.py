@@ -122,7 +122,7 @@ def _diagnose(value: object, schema: dict[str, Any], root: dict[str, Any], path:
     if accepted and not _matches_type(value, accepted):
         output.append(SchemaDiagnostic(path, "type", f"observed {_type_name(value)}", _shape(schema), accepted))
         return
-    if "const" in schema and value != schema["const"]:
+    if "const" in schema and (_type_name(value) != _type_name(schema["const"]) or value != schema["const"]):
         expected = schema["const"]
         output.append(SchemaDiagnostic(path, "const", f"must equal {expected!r}", _shape(schema), (expected,)))
     enum = schema.get("enum")

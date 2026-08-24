@@ -218,7 +218,7 @@ environment and toolchain
 features/configuration and platform
 artifact owner
 mutation/locking compatibility
-expected workspace effects and isolation requirement
+expected workspace effects, isolation requirement, and exact isolation root
 ```
 
 Map every validation requirement to exactly one unit and accepted execution or
@@ -251,7 +251,8 @@ ledger: selected, exactly reused, and explicitly user-excluded catalog entries
 become `resolved_handoff_ids`; only genuinely new triggers remain in
 `unresolved_handoff_ids`. The two disjoint sets together equal the globally
 unique handoff IDs in accepted review evidence, and any unresolved ID blocks
-completion.
+completion. Persist the typed handoff-to-catalog mapping and verify it against
+the accepted artifact before deriving either classification.
 
 After an authorized fix, persist the S0→S1 fix and revalidation reports,
 recapture S1 fingerprints, invalidate affected S0 reports, rerun repository and

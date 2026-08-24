@@ -141,7 +141,8 @@ verified status provenance. `ignored` requires a tracked repository
 `.gitignore`; repository-local and global excludes are rejected. Declared
 workspace effects require trusted before/after filesystem and Git snapshots;
 unexpected tracked, untracked, or ignored outputs fail acceptance. Validators
-that can create source-adjacent intermediates run in an isolated tree.
+that can create source-adjacent intermediates run under the exact dispatched
+isolation root; outside-repository artifacts must resolve beneath that root.
 
 Use `synthesis-bundle` to verify accepted artifacts and derive the compact,
 hashed findings, mappings, validation, handoff, limitation, and artifact view.
@@ -151,7 +152,9 @@ Synthesis receives that bundle, never full predecessor reports.
 
 Run `reconcile-handoffs` before expansion. Selected, exactly reused, or
 user-excluded catalog entries resolve existing handoffs; only
-`new_routing_triggers` expand routing.
+`new_routing_triggers` expand routing. Final proof classification is derived
+from the typed catalog mappings reparsed from accepted evidence, not from
+caller-provided resolved IDs.
 
 After an authorized repair batch, run `advance-after-mutation`. It records an
 authorization upgrade when applicable, one serialized repair epoch and

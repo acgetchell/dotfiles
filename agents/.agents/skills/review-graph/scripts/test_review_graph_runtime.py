@@ -347,6 +347,73 @@ def test_review_payload_schema_reports_all_field_diagnostics() -> None:
     assert status["accepted_values"] == ["completed", "no-findings", "blocked"]
 
 
+@pytest.mark.parametrize("value", [1, 1.0])
+def test_review_payload_schema_rejects_numeric_true_constants(value: float) -> None:
+    with pytest.raises(SchemaValidationError) as captured:
+        require_schema({"command_policy_attested": value}, SCHEMA_ROOT / "review-payload-v1.schema.json")
+
+    diagnostics = cast("list[dict[str, Any]]", captured.value.as_dict()["diagnostics"])
+    assert any(item["path"] == "$.command_policy_attested" and item["code"] == "const" for item in diagnostics)
+
+
+@pytest.mark.parametrize("value", [True, False])
+def test_planning_schema_rejects_boolean_schema_versions(value: bool) -> None:
+    with pytest.raises(SchemaValidationError) as captured:
+        require_schema({"schema_version": value}, SCHEMA_ROOT / "planning-input-v1.schema.json")
+
+    diagnostics = cast("list[dict[str, Any]]", captured.value.as_dict()["diagnostics"])
+    assert any(item["path"] == "$.schema_version" for item in diagnostics)
+
+
+@pytest.mark.parametrize("exit_code", ["signal", "1.0", "+ 1", ""])
+def test_validation_payload_schema_rejects_nonnumeric_exit_code_strings(exit_code: str) -> None:
+    payload = {
+        "artifacts": [],
+        "executions": [
+            {
+                "artifact_paths": [],
+                "command": "true",
+                "evidence": "command completed",
+                "executor": "validation-001",
+                "exit_code": exit_code,
+                "result": "passed",
+                "working_directory": "/repo",
+            }
+        ],
+        "limitations": [],
+        "status": "passed",
+    }
+
+    with pytest.raises(SchemaValidationError) as captured:
+        require_schema(payload, SCHEMA_ROOT / "validation-payload-v1.schema.json")
+
+    diagnostics = cast("list[dict[str, Any]]", captured.value.as_dict()["diagnostics"])
+    assert any(item["path"] == "$.executions[0].exit_code" and item["code"] == "pattern" for item in diagnostics)
+
+
+@pytest.mark.parametrize("exit_code", [-9, None, "-9", "+12", "0", "none"])
+def test_validation_payload_schema_accepts_supported_exit_codes(exit_code: int | str | None) -> None:
+    require_schema(
+        {
+            "artifacts": [],
+            "executions": [
+                {
+                    "artifact_paths": [],
+                    "command": "true",
+                    "evidence": "command completed",
+                    "executor": "validation-001",
+                    "exit_code": exit_code,
+                    "result": "passed",
+                    "working_directory": "/repo",
+                }
+            ],
+            "limitations": [],
+            "status": "passed",
+        },
+        SCHEMA_ROOT / "validation-payload-v1.schema.json",
+    )
+
+
 @pytest.mark.parametrize(("attempt", "retry_allowed"), [(1, True), (2, False)])
 def test_compile_cli_allows_at_most_one_schema_retry(tmp_path: Path, capsys: pytest.CaptureFixture[str], attempt: int, retry_allowed: bool) -> None:
     request = tmp_path / f"request-{attempt}.json"
@@ -458,6 +525,27 @@ def test_compile_review_enforces_validator_owned_command_policy() -> None:
                 "payload": {
                     "command_policy_attested": True,
                     "commands_executed": ["just check-fast"],
+                    "files_inspected": ["src/error.rs"],
+                    "findings": [],
+                    "handoffs": [],
+                    "limitations": [],
+                    "nearby_contract_owners": [],
+                    "status": "no-findings",
+                    "validation_requirements": [],
+                },
+            }
+        )
+
+
+def test_compile_review_rejects_numeric_command_policy_attestation_without_policy() -> None:
+    with pytest.raises(ValueError, match="must attest to the dispatched command policy"):
+        compile_review(
+            {
+                "dispatch": _dispatch(),
+                "payload": {
+                    "changes": [],
+                    "command_policy_attested": 1,
+                    "commands_executed": [],
                     "files_inspected": ["src/error.rs"],
                     "findings": [],
                     "handoffs": [],
@@ -870,6 +958,23 @@ def test_dispatch_materialization_and_ready_nodes_are_plan_derived(tmp_path: Pat
     assert after_start["lifecycle"]["in_flight_node_ids"] == [started]
 
 
+def test_dispatch_materialization_reports_validation_node_without_unit(tmp_path: Path) -> None:
+    plan = _sparse_plan()
+    malformed = replace(plan, coalesced_validation_units=())
+
+    with pytest.raises(ValueError, match="validation node has no coalesced unit"):
+        materialize_dispatches(
+            {
+                "artifact_store": str(tmp_path),
+                "authorization": "review-only",
+                "plan": _json_plan(malformed),
+                "repository_root": str(SKILL_ROOT.parents[2]),
+                "source_state": ["scope", "worktree", "repository"],
+                "state_verification_command": "capture_scope.py --mode baseline",
+            }
+        )
+
+
 def test_independent_review_dispatch_excludes_coordinator_context(tmp_path: Path) -> None:
     plan = _sparse_plan()
     audit = next(node for node in plan.actual_worker_nodes if node.mode == "audit")
@@ -1007,6 +1112,16 @@ none
 """.encode()
 
     content, metadata = compile_independent_review({"dispatch": dispatch, "limitations": [], "status": "no-findings"}, native)
+    mutated_native = native.replace(b"- Git state mutated: no", b"- Git state mutated: yes", 1)
+    with pytest.raises(ValueError, match="native state proof failed validation"):
+        compile_independent_review({"dispatch": dispatch, "limitations": [], "status": "no-findings"}, mutated_native)
+
+    stale_dispatch = deepcopy(dispatch)
+    stale_dispatch["before_state"] = ["stale-scope", "worktree", "repository"]
+    stale_native = native.replace(b"- Before:\n  - Scope fingerprint: scope", b"- Before:\n  - Scope fingerprint: stale-scope", 1)
+    with pytest.raises(ValueError, match="observed fingerprints differ"):
+        compile_independent_review({"dispatch": stale_dispatch, "limitations": [], "status": "no-findings"}, stale_native)
+
     artifact_path = tmp_path / "independent.md"
     metadata_path = tmp_path / "independent.json"
     artifact_path.write_bytes(content)
@@ -1019,6 +1134,22 @@ none
     assert b"## Machine Evidence" in content
     assert metadata["native_input_digest"].startswith("sha256:")
     assert bundle["records"][0]["mode"] == "independent-review"
+
+    blocked_content, blocked_metadata = compile_independent_review(
+        {"dispatch": dispatch, "limitations": ["target; unavailable", "retry exhausted"], "status": "blocked"}, native
+    )
+    blocked_artifact_path = tmp_path / "blocked-independent.md"
+    blocked_metadata_path = tmp_path / "blocked-independent.json"
+    blocked_artifact_path.write_bytes(blocked_content)
+    blocked_metadata_path.write_text(json.dumps(blocked_metadata), encoding="utf-8")
+    blocked_bundle = build_synthesis_bundle(
+        {
+            "source_state": ["scope", "worktree", "repository"],
+            "sources": [{"artifact_path": str(blocked_artifact_path), "metadata_path": str(blocked_metadata_path)}],
+        }
+    )
+    assert blocked_metadata["normalized_record"]["limitations"] == ["target; unavailable; retry exhausted"]
+    assert blocked_bundle["records"][0]["limitations"] == ["target; unavailable; retry exhausted"]
 
 
 def test_compact_branch_runs_from_bootstrap_through_journal_and_final_proof(tmp_path: Path) -> None:  # noqa: PLR0915

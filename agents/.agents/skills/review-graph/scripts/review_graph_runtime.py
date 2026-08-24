@@ -25,6 +25,7 @@ from review_graph_plan import (
     ReviewEvidence,
     ReviewEvidenceExpectation,
     RoutingDecision,
+    RoutingDiscovery,
     TrustedArtifactVerifier,
     ValidationArtifact,
     ValidationEvidence,
@@ -34,7 +35,9 @@ from review_graph_plan import (
     WorkerNode,
     _file_identity_digest,
     _native_field_values,
+    _native_fingerprint_proof_blockers,
     _native_heading_blockers,
+    _native_mutation_blockers,
     _native_record_fields,
     _native_records,
     _native_repository_path_list,
@@ -409,7 +412,7 @@ def _review_command_policy_blockers(dispatch: dict[str, Any], payload: dict[str,
     commands = _text_list(payload, "commands_executed")
     raw_policy = dispatch.get("command_policy")
     if raw_policy is None:
-        return () if attested in {None, True} else ("review payload must attest to the dispatched command policy",)
+        return () if attested is None or attested is True else ("review payload must attest to the dispatched command policy",)
     if not isinstance(raw_policy, dict):
         return ("review dispatch command_policy must be an object",)
     if attested is not True:
@@ -543,6 +546,15 @@ def compile_review(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  #
         source_mutated=source_mutated,
         git_mutated=git_mutated,
         predecessor_evidence_ids=predecessor_evidence_ids,
+        routing_discoveries=tuple(
+            RoutingDiscovery(
+                handoff_id=handoff_id,
+                source_node_id=node_id,
+                catalog_id=_required_text(record, "catalog_id"),
+                evidence=_required_text(record, "observed_trigger"),
+            )
+            for handoff_id, record in handoffs
+        ),
     )
     canonical_payload = _canonical_json(payload)
     machine_payload = {
@@ -795,6 +807,22 @@ def compile_independent_review(document: dict[str, Any], native_content: bytes) 
     expected = _state(dispatch, "source_state")
     before = _state(dispatch, "before_state")
     after = _state(dispatch, "after_state")
+    native_state_blockers = (
+        *_native_fingerprint_proof_blockers(sections["## Fingerprint Proof"], FingerprintEvidence(expected=expected, before=before, after=after)),
+        *_native_mutation_blockers(
+            sections["## Git State"],
+            section="Git State",
+            source_label="Source-controlled files changed",
+            git_label="Git state mutated",
+            source_mutated=False,
+            git_mutated=False,
+        ),
+    )
+    if before != expected or after != expected:
+        native_state_blockers = (*native_state_blockers, "independent review observed fingerprints differ from the dispatched expected fingerprints")
+    if native_state_blockers:
+        msg = "independent native state proof failed validation: " + "; ".join(native_state_blockers)
+        raise ValueError(msg)
     skill_path = Path(_required_text(dispatch, "skill_path")).resolve()
     if not skill_path.is_file():
         msg = f"independent review skill file does not exist: {skill_path}"
@@ -854,6 +882,15 @@ def compile_independent_review(document: dict[str, Any], native_content: bytes) 
         raw_result_artifact_id=artifact_id,
         raw_result_digest="pending",
         report_complete=True,
+        routing_discoveries=tuple(
+            RoutingDiscovery(
+                handoff_id=handoff_id,
+                source_node_id=node_id,
+                catalog_id=_required_text(record, "catalog_id"),
+                evidence=_required_text(record, "observed_trigger"),
+            )
+            for handoff_id, record in handoffs
+        ),
     )
     results = tuple("matched" if observed == expected else "mismatched" for observed in (before, after))
     envelope = "\n".join(
@@ -927,36 +964,7 @@ def compile_independent_review(document: dict[str, Any], native_content: bytes) 
     if blockers:
         msg = "compiled independent review failed verification: " + "; ".join(blockers)
         raise ValueError(msg)
-    normalized = {
-        "artifact_digest": evidence.raw_result_digest,
-        "artifact_id": artifact_id,
-        "changes": [],
-        "evidence_id": evidence_id,
-        "files_inspected": list(planned_paths),
-        "findings": [
-            {
-                "evidence": fields["Evidence"],
-                "finding_id": finding_id,
-                "impact": fields["Impact"],
-                "location": fields["Location"],
-                "owner": fields["Owner"],
-                "remediation": fields["Remediation"],
-                "severity": fields["Severity"],
-                "summary": fields["Summary"],
-            }
-            for finding_id, fields in findings
-        ],
-        "handoffs": [{"handoff_id": handoff_id, **record} for handoff_id, record in handoffs],
-        "limitations": list(limitations),
-        "mode": "independent-review",
-        "node_id": node_id,
-        "record_type": "review",
-        "requirement_ids": list(evidence.requirement_ids),
-        "selection_reason": expectation.selection_reason,
-        "skill_id": "repository-independent-review",
-        "status": status,
-        "validation_requirements": [],
-    }
+    normalized = _independent_normalized_record(content, expectation, evidence)
     return content, {
         "artifact_digest": evidence.raw_result_digest,
         "evidence": asdict(evidence),
@@ -1053,6 +1061,16 @@ def _validation_unit(raw: dict[str, Any]) -> ValidationUnit:
     if not isinstance(raw_plans, list) or any(not isinstance(plan, list) or len(plan) != 7 for plan in raw_plans):
         msg = "validation_unit.requirement_plans must contain seven-field arrays"
         raise ValueError(msg)
+    isolation_root = raw.get("isolation_root")
+    if isolation_root is not None and (not isinstance(isolation_root, str) or not isolation_root.strip()):
+        msg = "validation_unit.isolation_root must be a non-empty string or null"
+        raise ValueError(msg)
+    if isinstance(isolation_root, str) and not Path(isolation_root).is_absolute():
+        msg = "validation_unit.isolation_root must be absolute"
+        raise ValueError(msg)
+    if raw.get("requires_isolation", False) and isolation_root is None:
+        msg = "validation_unit requiring isolation must declare isolation_root"
+        raise ValueError(msg)
     return ValidationUnit(
         node_id=_required_text(raw, "node_id"),
         requirement_ids=_text_list(raw, "requirement_ids"),
@@ -1083,6 +1101,7 @@ def _validation_unit(raw: dict[str, Any]) -> ValidationUnit:
         requirement_requests=_string_pairs(raw, "requirement_requests"),
         expected_workspace_effects=_string_tuple(raw, "expected_workspace_effects"),
         requires_isolation=raw.get("requires_isolation", False),
+        isolation_root=isolation_root,
     )
 
 
@@ -1150,6 +1169,10 @@ def _review_evidence(raw: dict[str, Any]) -> ReviewEvidence:
     if not isinstance(fingerprints, dict):
         msg = "review evidence fingerprints must be an object"
         raise TypeError(msg)
+    raw_discoveries = raw.get("routing_discoveries", [])
+    if not isinstance(raw_discoveries, list) or any(not isinstance(discovery, dict) for discovery in raw_discoveries):
+        msg = "review evidence routing_discoveries must be an object array"
+        raise TypeError(msg)
     return ReviewEvidence(
         schema_version=_required_int(raw, "schema_version"),
         evidence_id=_required_text(raw, "evidence_id"),
@@ -1175,6 +1198,15 @@ def _review_evidence(raw: dict[str, Any]) -> ReviewEvidence:
         source_mutated=_required_bool(raw, "source_mutated"),
         git_mutated=_required_bool(raw, "git_mutated"),
         predecessor_evidence_ids=_string_tuple(raw, "predecessor_evidence_ids"),
+        routing_discoveries=tuple(
+            RoutingDiscovery(
+                handoff_id=_required_text(discovery, "handoff_id"),
+                source_node_id=_required_text(discovery, "source_node_id"),
+                catalog_id=_required_text(discovery, "catalog_id"),
+                evidence=_required_text(discovery, "evidence"),
+            )
+            for discovery in raw_discoveries
+        ),
     )
 
 
@@ -1412,7 +1444,7 @@ def _path_allowed(path: str, allowed: tuple[str, ...]) -> bool:
 
 
 def _validation_workspace_audit(dispatch: dict[str, Any], unit: ValidationUnit) -> dict[str, object]:
-    required = bool(unit.allowed_artifacts or unit.expected_workspace_effects or unit.requires_isolation)
+    required = bool(unit.allowed_artifacts or unit.expected_workspace_effects or unit.requires_isolation or unit.isolation_root)
     if not required and "workspace_before" not in dispatch and "workspace_after" not in dispatch:
         return {"observed": False, "unexpected_paths": []}
     if "workspace_before" not in dispatch or "workspace_after" not in dispatch:
@@ -1435,6 +1467,11 @@ def _validation_workspace_audit(dispatch: dict[str, Any], unit: ValidationUnit) 
         inside = tuple(directory for directory in unit.working_directories if Path(directory).resolve(strict=False).is_relative_to(repository_root))
         if inside:
             msg = "source-mutating validation requires working directories outside the captured repository: " + ", ".join(inside)
+            raise ValueError(msg)
+        isolation_root = Path(unit.isolation_root or "").resolve(strict=False)
+        outside_root = tuple(directory for directory in unit.working_directories if not Path(directory).resolve(strict=False).is_relative_to(isolation_root))
+        if outside_root:
+            msg = "isolated validation working directories must be under the dispatched isolation root: " + ", ".join(outside_root)
             raise ValueError(msg)
     return {"changed_paths": list(changed), "observed": True, "unexpected_paths": []}
 
@@ -1912,7 +1949,10 @@ def _applicable_instruction_paths(repository_root: Path, owned_paths: tuple[str,
 def _materialized_command_policy(plan: GraphPlan, node: WorkerNode, authorized_duplicates: tuple[str, ...]) -> dict[str, object]:
     validator_commands = tuple(sorted({command for unit in plan.coalesced_validation_units for command in unit.commands}))
     if node.mode == "validation":
-        unit = next(unit for unit in plan.coalesced_validation_units if unit.node_id == node.node_id)
+        unit = next((unit for unit in plan.coalesced_validation_units if unit.node_id == node.node_id), None)
+        if unit is None:
+            msg = f"validation node has no coalesced unit: {node.node_id}"
+            raise ValueError(msg)
         return {
             "allowed_commands": list(unit.commands),
             "authorized_duplicate_commands": [],
@@ -2120,8 +2160,9 @@ def materialize_dispatches(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
             common["workspace_policy"] = {
                 "allowed_artifacts": [asdict(artifact) for artifact in unit.allowed_artifacts],
                 "expected_workspace_effects": list(unit.expected_workspace_effects),
+                "isolation_root": unit.isolation_root,
                 "requires_isolation": unit.requires_isolation,
-                "snapshots_required": bool(unit.allowed_artifacts or unit.expected_workspace_effects or unit.requires_isolation),
+                "snapshots_required": bool(unit.allowed_artifacts or unit.expected_workspace_effects or unit.requires_isolation or unit.isolation_root),
             }
             contract = "compact-validation"
         else:
@@ -2863,6 +2904,17 @@ def finalize_proof(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, P
     }
     handoff_reconciliation, unresolved_handoff_ids, handoff_blockers = _reconciled_handoffs(plan, normalized_by_evidence, accepted_review_ids)
     resolved_handoff_ids = tuple(sorted(str(record["handoff_id"]) for record in handoff_reconciliation if record["resolution"] == "resolved-by-current-plan"))
+    routing_discoveries = tuple(
+        sorted(
+            (
+                discovery
+                for evidence_id in accepted_review_ids
+                if isinstance(loaded[evidence_id][2], ReviewEvidence)
+                for discovery in cast("ReviewEvidence", loaded[evidence_id][2]).routing_discoveries
+            ),
+            key=lambda discovery: discovery.handoff_id,
+        )
+    )
     preblockers.extend(handoff_blockers)
 
     verifier_id = _defaulted_text(document, "verifier_id", "review-graph-runtime")
@@ -2893,6 +2945,7 @@ def finalize_proof(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, P
         artifact_manifest_digest=manifest.manifest_digest,
         verifier_id=verifier_id,
         resolved_handoff_ids=resolved_handoff_ids,
+        routing_discoveries=routing_discoveries,
     )
     review_record_list: list[tuple[ReviewEvidenceExpectation, ReviewEvidence]] = []
     for evidence_id in accepted_review_ids:

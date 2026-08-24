@@ -386,6 +386,7 @@ class ValidationRequirement:
     baseline: bool = False
     expected_workspace_effects: tuple[str, ...] = ()
     requires_isolation: bool = False
+    isolation_root: str | None = None
 
 
 @dataclass(frozen=True)
@@ -421,6 +422,7 @@ class ValidationUnit:
     requirement_requests: tuple[tuple[str, str], ...] = ()
     expected_workspace_effects: tuple[str, ...] = ()
     requires_isolation: bool = False
+    isolation_root: str | None = None
 
 
 @dataclass(frozen=True)
@@ -555,6 +557,7 @@ class ReviewEvidence:
     source_mutated: bool = False
     git_mutated: bool = False
     predecessor_evidence_ids: tuple[str, ...] = ()
+    routing_discoveries: tuple[RoutingDiscovery, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -650,6 +653,7 @@ class RepositoryReviewProof:
     artifact_manifest_digest: str
     verifier_id: str
     resolved_handoff_ids: tuple[str, ...] = ()
+    routing_discoveries: tuple[RoutingDiscovery, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1657,6 +1661,7 @@ def _validation_group_key(item: ValidationRequirement) -> tuple[object, ...]:
         item.allowed_artifacts,
         item.expected_workspace_effects,
         item.requires_isolation,
+        item.isolation_root,
     )
 
 
@@ -1693,6 +1698,12 @@ def coalesce_validation_requirements(requirements: Sequence[ValidationRequiremen
         normalized_captured_paths = _normalized_repository_paths(item.captured_paths, label=f"validation requirement {item.requirement_id} captured_paths")
         if normalized_captured_paths != item.captured_paths:
             msg = f"validation requirement {item.requirement_id} captured_paths must be normalized"
+            raise ValueError(msg)
+        if item.requires_isolation and item.isolation_root is None:
+            msg = f"validation requirement {item.requirement_id} requires an isolation root"
+            raise ValueError(msg)
+        if item.isolation_root is not None and (not _nonempty_text(item.isolation_root) or not Path(item.isolation_root).is_absolute()):
+            msg = f"validation requirement {item.requirement_id} isolation root must be an absolute path"
             raise ValueError(msg)
         artifact_paths = tuple(artifact.path for artifact in item.allowed_artifacts)
         artifact_ids = tuple(artifact.artifact_id for artifact in item.allowed_artifacts if artifact.artifact_id is not None)
@@ -1761,6 +1772,7 @@ def coalesce_validation_requirements(requirements: Sequence[ValidationRequiremen
             requirement_requests=tuple((item.requirement_id, item.request) for item in members),
             expected_workspace_effects=first.expected_workspace_effects,
             requires_isolation=first.requires_isolation,
+            isolation_root=first.isolation_root,
         )
         units.append(unit)
         mappings.extend(ValidationEvidenceMapping(item.requirement_id, node_id, item.evidence_id) for item in members)
@@ -2349,6 +2361,21 @@ def _native_mutation_blockers(  # noqa: PLR0913
     return tuple(blockers)
 
 
+def _native_routing_discovery_blockers(body: str, evidence: ReviewEvidence, *, section: str) -> tuple[str, ...]:
+    records = _native_records(body, "Handoff ID")
+    blockers: list[str] = []
+    if tuple(handoff_id for handoff_id, _record in records) != evidence.handoff_ids:
+        blockers.append(f"native review result {section} handoff IDs do not match its evidence envelope")
+        return tuple(blockers)
+    if tuple(discovery.handoff_id for discovery in evidence.routing_discoveries) != evidence.handoff_ids:
+        blockers.append("review evidence routing discoveries do not map every handoff ID exactly")
+        return tuple(blockers)
+    for discovery, (_handoff_id, record) in zip(evidence.routing_discoveries, records, strict=True):
+        blockers.extend(_native_values_blockers(record, section=section, label="Catalog ID", expected=(discovery.catalog_id,), indent="  "))
+        blockers.extend(_native_values_blockers(record, section=section, label="Observed trigger", expected=(discovery.evidence,), indent="  "))
+    return tuple(blockers)
+
+
 def _native_fingerprint_proof_blockers(body: str, fingerprints: FingerprintEvidence) -> tuple[str, ...]:
     blockers: list[str] = []
     lines = body.splitlines()
@@ -2566,8 +2593,7 @@ def _ordinary_review_native_blockers(  # noqa: C901, PLR0912
             blockers.append("native review result validation requirement IDs do not match its evidence envelope")
     elif sections["## Validation Requirements"] != "none":
         blockers.append("native review result Validation Requirements claims entries absent from its evidence envelope")
-    if _native_field_values(sections["## Handoffs"], "Handoff ID") != evidence.handoff_ids:
-        blockers.append("native review result handoff IDs do not match its evidence envelope")
+    blockers.extend(_native_routing_discovery_blockers(sections["## Handoffs"], evidence, section="Handoffs"))
     if expectation.mode == "synthesis" and expectation.predecessor_evidence_ids:
         blockers.extend(_native_nonempty_section_blockers(sections["## Predecessor Coverage"], section="Predecessor Coverage"))
     changes = sections["## Changes"]
@@ -2581,7 +2607,7 @@ def _ordinary_review_native_blockers(  # noqa: C901, PLR0912
     return tuple(blockers)
 
 
-def _independent_review_native_blockers(  # noqa: C901, PLR0912, PLR0915
+def _independent_review_native_blockers(  # noqa: C901, PLR0912
     sections: Mapping[str, str], expectation: ReviewEvidenceExpectation, evidence: ReviewEvidence
 ) -> tuple[str, ...]:
     blockers: list[str] = []
@@ -2603,8 +2629,7 @@ def _independent_review_native_blockers(  # noqa: C901, PLR0912, PLR0915
         blockers.append("native independent result finding IDs do not match its evidence envelope")
     routing_handoffs = sections["## Routing Handoffs"]
     if evidence.handoff_ids:
-        if _native_field_values(routing_handoffs, "Handoff ID") != evidence.handoff_ids:
-            blockers.append("native independent result routing handoff IDs do not match its evidence envelope")
+        blockers.extend(_native_routing_discovery_blockers(routing_handoffs, evidence, section="Routing Handoffs"))
     elif routing_handoffs != "none":
         blockers.append("native independent result Routing Handoffs claims entries absent from its evidence envelope")
     fingerprint_proof = sections["## Fingerprint Proof"]
@@ -2685,6 +2710,7 @@ def _validation_environment_identity(unit: ValidationUnit) -> str:
             "allowed_artifacts": [asdict(artifact) for artifact in unit.allowed_artifacts],
             "environment": unit.environment,
             "features": list(unit.features),
+            "isolation_root": unit.isolation_root,
             "mutation_lock": unit.mutation_lock,
             "platform": unit.platform,
             "toolchain": unit.toolchain,
@@ -2849,6 +2875,7 @@ def _validation_coalescing_identity(unit: ValidationUnit) -> str:
             "commands": unit.commands,
             "environment": unit.environment,
             "features": unit.features,
+            "isolation_root": unit.isolation_root,
             "mutation_lock": unit.mutation_lock,
             "platform": unit.platform,
             "source_state": unit.source_state,
@@ -3261,6 +3288,7 @@ def validation_environment_digest(unit: ValidationUnit) -> str:
             "allowed_artifacts": [asdict(artifact) for artifact in unit.allowed_artifacts],
             "environment": unit.environment,
             "features": unit.features,
+            "isolation_root": unit.isolation_root,
             "mutation_lock": unit.mutation_lock,
             "platform": unit.platform,
             "toolchain": unit.toolchain,
@@ -3349,6 +3377,18 @@ def assess_review_evidence(expectation: ReviewEvidenceExpectation, evidence: Rev
     blockers.extend(_identifier_tuple_blockers(evidence.finding_ids, label="review evidence finding IDs"))
     blockers.extend(_identifier_tuple_blockers(evidence.validation_requirement_ids, label="review evidence validation requirement IDs"))
     blockers.extend(_identifier_tuple_blockers(evidence.handoff_ids, label="review evidence handoff IDs"))
+    if any(not isinstance(discovery, RoutingDiscovery) for discovery in evidence.routing_discoveries):
+        blockers.append("review evidence routing discoveries must be typed")
+    else:
+        discovery_ids = tuple(discovery.handoff_id for discovery in evidence.routing_discoveries)
+        blockers.extend(_identifier_tuple_blockers(discovery_ids, label="review evidence routing discovery handoff IDs"))
+        if discovery_ids != evidence.handoff_ids:
+            blockers.append("review evidence routing discoveries do not map every handoff ID exactly")
+        if any(
+            discovery.source_node_id != evidence.node_id or not _nonempty_text(discovery.catalog_id) or not _nonempty_text(discovery.evidence)
+            for discovery in evidence.routing_discoveries
+        ):
+            blockers.append("review evidence routing discoveries have invalid node, catalog, or evidence provenance")
     blockers.extend(_identifier_tuple_blockers(evidence.predecessor_evidence_ids, label="review evidence predecessor evidence IDs"))
     if evidence.predecessor_evidence_ids != expectation.predecessor_evidence_ids:
         blockers.append("review evidence predecessor evidence IDs do not match the dispatch exactly")
@@ -3603,7 +3643,7 @@ def _planned_node_mapping_blockers(  # noqa: C901, PLR0912
     return tuple(blockers)
 
 
-def assess_repository_review_proof(  # noqa: C901
+def assess_repository_review_proof(  # noqa: C901, PLR0912
     expectation: RepositoryReviewProofExpectation, proof: RepositoryReviewProof
 ) -> Assessment:
     """Require complete, reusable evidence mappings before final synthesis is trusted."""
@@ -3636,6 +3676,14 @@ def assess_repository_review_proof(  # noqa: C901
     blockers.extend(_identifier_tuple_blockers(proof.stale_evidence_ids, label="stale evidence IDs"))
     blockers.extend(_identifier_tuple_blockers(proof.resolved_handoff_ids, label="resolved handoff IDs"))
     blockers.extend(_identifier_tuple_blockers(proof.unresolved_handoff_ids, label="unresolved handoff IDs"))
+    if any(not isinstance(discovery, RoutingDiscovery) for discovery in proof.routing_discoveries):
+        blockers.append("repository review proof routing discoveries must be typed")
+    else:
+        blockers.extend(
+            _identifier_tuple_blockers(
+                tuple(discovery.handoff_id for discovery in proof.routing_discoveries), label="repository review proof routing discovery handoff IDs"
+            )
+        )
     handoff_overlap = tuple(sorted(set(proof.resolved_handoff_ids) & set(proof.unresolved_handoff_ids)))
     if handoff_overlap:
         blockers.append("repository review proof handoffs cannot be both resolved and unresolved: " + ", ".join(handoff_overlap))
@@ -3683,6 +3731,36 @@ def _review_bundle_blockers(  # noqa: C901, PLR0912
     )
     if _duplicate_values(accepted_handoff_ids):
         blockers.append("accepted review evidence handoff IDs must be globally unique")
+    accepted_discoveries = tuple(
+        sorted(
+            (
+                discovery
+                for evidence_id in proof.accepted_review_evidence_ids
+                if evidence_id in by_id
+                for discovery in by_id[evidence_id][1].routing_discoveries
+            ),
+            key=lambda discovery: discovery.handoff_id,
+        )
+    )
+    proof_discoveries = (
+        tuple(sorted(proof.routing_discoveries, key=lambda discovery: discovery.handoff_id))
+        if all(isinstance(discovery, RoutingDiscovery) for discovery in proof.routing_discoveries)
+        else ()
+    )
+    if proof_discoveries != accepted_discoveries:
+        blockers.append("repository review proof routing discoveries do not equal verified accepted review evidence mappings")
+    decisions = {decision.catalog_id: decision.disposition for decision in proof_expectation.plan.routing_decisions}
+    resolved_dispositions = {"exact-evidence-reused", "selected", "user-excluded"}
+    derived_resolved_handoff_ids = tuple(
+        sorted(discovery.handoff_id for discovery in accepted_discoveries if decisions.get(discovery.catalog_id) in resolved_dispositions)
+    )
+    derived_unresolved_handoff_ids = tuple(
+        sorted(discovery.handoff_id for discovery in accepted_discoveries if decisions.get(discovery.catalog_id) not in resolved_dispositions)
+    )
+    if proof.resolved_handoff_ids != derived_resolved_handoff_ids:
+        blockers.append("repository review proof resolved handoffs do not match verified current routing decisions")
+    if proof.unresolved_handoff_ids != derived_unresolved_handoff_ids:
+        blockers.append("repository review proof unresolved handoffs do not match verified current routing decisions")
     accounted_handoff_ids = tuple(sorted((*proof.resolved_handoff_ids, *proof.unresolved_handoff_ids)))
     if accounted_handoff_ids != tuple(sorted(accepted_handoff_ids)):
         blockers.append("repository review proof resolved and unresolved handoffs do not equal accepted review evidence handoffs")
@@ -4723,7 +4801,7 @@ def _source_state_field(item: Mapping[str, Any]) -> tuple[str, str, str]:
 
 
 def _verified_artifact_status(  # noqa: C901, PLR0912, PLR0915
-    path: str, repository_status: str, repository_root: Path | None
+    path: str, repository_status: str, repository_root: Path | None, isolation_root: str | None = None
 ) -> tuple[str, str | None]:
     """Verify artifact isolation against repository-owned Git policy."""
     if not path.strip() or "\n" in path:
@@ -4737,6 +4815,20 @@ def _verified_artifact_status(  # noqa: C901, PLR0912, PLR0915
         resolved = candidate.resolve(strict=False)
         if repository_root is not None and resolved.is_relative_to(repository_root):
             msg = f"artifact declared outside-repository is inside the captured repository: {path}"
+            raise ValueError(msg)
+        if isolation_root is None:
+            msg = f"outside-repository artifact requires a dispatched isolation root: {path}"
+            raise ValueError(msg)
+        root = Path(isolation_root)
+        if not root.is_absolute():
+            msg = f"dispatched isolation root must be absolute: {isolation_root}"
+            raise ValueError(msg)
+        resolved_root = root.resolve(strict=False)
+        if repository_root is not None and resolved_root.is_relative_to(repository_root):
+            msg = f"dispatched isolation root is inside the captured repository: {isolation_root}"
+            raise ValueError(msg)
+        if not resolved.is_relative_to(resolved_root):
+            msg = f"outside-repository artifact is not under the dispatched isolation root: {path}"
             raise ValueError(msg)
         return "isolated-output-directory", None
     if repository_status != "ignored":
@@ -4789,7 +4881,7 @@ def _verified_artifact_status(  # noqa: C901, PLR0912, PLR0915
     return "repository-rule", provenance
 
 
-def _allowed_artifacts_field(item: Mapping[str, Any], repository_root: Path | None) -> tuple[ValidationArtifact, ...]:
+def _allowed_artifacts_field(item: Mapping[str, Any], repository_root: Path | None, isolation_root: str | None) -> tuple[ValidationArtifact, ...]:
     value = item.get("allowed_artifacts", [])
     required_keys = {"kind", "path", "repository_status"}
     optional_keys = {"artifact_digest", "artifact_id"}
@@ -4809,7 +4901,7 @@ def _allowed_artifacts_field(item: Mapping[str, Any], repository_root: Path | No
         if (artifact_id is not None and not isinstance(artifact_id, str)) or (artifact_digest is not None and not isinstance(artifact_digest, str)):
             msg = "allowed_artifacts artifact_id and artifact_digest must be strings or null"
             raise ValueError(msg)
-        status_source, status_rule = _verified_artifact_status(path, repository_status, repository_root)
+        status_source, status_rule = _verified_artifact_status(path, repository_status, repository_root, isolation_root)
         result.append(
             ValidationArtifact(
                 path=path,
@@ -5259,7 +5351,7 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0915
             execution_strategy=_bounded_text_field(item, "execution_strategy"),
             independence_basis=_bounded_text_field(item, "independence_basis"),
             planning_blocker=_optional_bounded_text_field(item, "planning_blocker"),
-            allowed_artifacts=_allowed_artifacts_field(item, repository_root),
+            allowed_artifacts=_allowed_artifacts_field(item, repository_root, _optional_bounded_text_field(item, "isolation_root")),
             canonical_recipe=_optional_bounded_text_field(item, "canonical_recipe"),
             evidence_id=_optional_bounded_text_field(item, "evidence_id"),
             required=_boolean_field(item, "required", default=True, label=f"validation requirement {item.get('requirement_id', '<unknown>')} required"),
@@ -5271,6 +5363,7 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0915
             requires_isolation=_boolean_field(
                 item, "requires_isolation", default=False, label=f"validation requirement {item.get('requirement_id', '<unknown>')} requires_isolation"
             ),
+            isolation_root=_optional_bounded_text_field(item, "isolation_root"),
         )
         for item in document.get("validation_requirements", [])
     )

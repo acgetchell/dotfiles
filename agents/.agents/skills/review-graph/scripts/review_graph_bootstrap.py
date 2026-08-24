@@ -87,6 +87,7 @@ def bootstrap_document(capture: dict[str, Any], template: dict[str, Any]) -> dic
             item.setdefault("canonical_recipe", None)
             item.setdefault("evidence_id", None)
             item.setdefault("expected_workspace_effects", [])
+            item.setdefault("isolation_root", None)
             item.setdefault("planning_blocker", None)
             item.setdefault("required", True)
             item.setdefault("requires_isolation", False)

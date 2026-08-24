@@ -199,6 +199,28 @@ def _findings(evidence: ReviewEvidence, *, independent: bool, location: str = "a
     return "\n".join(records)
 
 
+def _handoffs(evidence: ReviewEvidence) -> str:
+    discoveries = {discovery.handoff_id: discovery for discovery in evidence.routing_discoveries}
+    records: list[str] = []
+    for handoff_id in evidence.handoff_ids:
+        discovery = discoveries.get(handoff_id)
+        if discovery is None:
+            records.append(f"- Handoff ID: {handoff_id}")
+            continue
+        records.append(
+            "\n".join(
+                (
+                    f"- Handoff ID: {handoff_id}",
+                    f"  - Catalog ID: {discovery.catalog_id}",
+                    f"  - Observed trigger: {discovery.evidence}",
+                    "  - Reason: fixture routing discovery",
+                    "  - Scope: assigned-scope",
+                )
+            )
+        )
+    return "\n".join(records) or "none"
+
+
 def _review_result_payload(expectation: ReviewEvidenceExpectation, evidence: ReviewEvidence) -> bytes:
     independent = evidence.mode == "independent-review"
     changed_paths = expectation.planned_paths if evidence.source_mutated else ()
@@ -289,7 +311,7 @@ def _review_result_payload(expectation: ReviewEvidenceExpectation, evidence: Rev
             "## Scope Inspected": f"- Change target: {expectation.change_target}\n- Files: {planned_paths}",
             "## Findings": _findings(evidence, independent=True, location=f"{expectation.planned_paths[0]}:1"),
             "## No-Finding Evidence": "- Inspected: assigned scope and neighboring contracts" if evidence.status == "no-findings" else "none",
-            "## Routing Handoffs": "\n".join(f"- Handoff ID: {handoff_id}" for handoff_id in evidence.handoff_ids) or "none",
+            "## Routing Handoffs": _handoffs(evidence),
             "## Fingerprint Proof": _fingerprint_proof(evidence.fingerprints),
             "## Git State": "\n".join(
                 (
@@ -344,7 +366,7 @@ def _review_result_payload(expectation: ReviewEvidenceExpectation, evidence: Rev
                 if evidence.source_mutated
                 else "none"
             ),
-            "## Handoffs": "\n".join(f"- Handoff ID: {handoff_id}" for handoff_id in evidence.handoff_ids) or "none",
+            "## Handoffs": _handoffs(evidence),
             "## Limitations": "blocked inspection" if evidence.status == "blocked" else "none",
         }
     return _native_markdown(
@@ -1217,6 +1239,7 @@ def test_graph_document_preserves_optional_validation_artifact_identity() -> Non
     document = _exhaustive_rust_document()
     validation = cast("list[dict[str, object]]", document["validation_requirements"])[0]
     artifact_digest = "sha256:" + "a" * 64
+    validation["isolation_root"] = "/external/review-validator"
     validation["allowed_artifacts"] = [
         {
             "path": "/external/review-validator/command.log",
@@ -1239,6 +1262,7 @@ def test_graph_document_preserves_optional_validation_artifact_identity() -> Non
             status_source="isolated-output-directory",
         ),
     )
+    assert plan.coalesced_validation_units[0].isolation_root == "/external/review-validator"
 
 
 def test_validation_artifact_status_requires_repository_owned_ignore_rule(tmp_path: Path) -> None:
@@ -1273,6 +1297,14 @@ def test_validation_artifact_status_requires_repository_owned_ignore_rule(tmp_pa
     assert rule is not None
     assert rule.startswith("packages/.gitignore:")
 
+    source, rule = _verified_artifact_status("/external/review-validator/command.log", "outside-repository", REPOSITORY_ROOT, "/external/review-validator")
+    assert source == "isolated-output-directory"
+    assert rule is None
+    with pytest.raises(ValueError, match="not under the dispatched isolation root"):
+        _verified_artifact_status("/external/unapproved/command.log", "outside-repository", REPOSITORY_ROOT, "/external/review-validator")
+    with pytest.raises(ValueError, match="requires a dispatched isolation root"):
+        _verified_artifact_status("/external/review-validator/command.log", "outside-repository", REPOSITORY_ROOT)
+
 
 @pytest.mark.parametrize(
     "artifact",
@@ -1284,6 +1316,7 @@ def test_validation_artifact_status_requires_repository_owned_ignore_rule(tmp_pa
 def test_graph_document_rejects_malformed_validation_artifact_identity(artifact: dict[str, object]) -> None:
     document = _exhaustive_rust_document()
     validation = cast("list[dict[str, object]]", document["validation_requirements"])[0]
+    validation["isolation_root"] = "/external"
     validation["allowed_artifacts"] = [artifact]
 
     with pytest.raises(ValueError, match=r"allowed artifacts|allowed_artifacts"):
@@ -1484,6 +1517,17 @@ def _validation_requirement(requirement_id: str, *, command: str = "just ci", ev
         evidence_id=evidence_id,
         baseline=baseline,
     )
+
+
+def test_validation_isolation_root_partitions_coalescing_and_evidence_identity() -> None:
+    first = replace(_validation_requirement("V01"), isolation_root="/external/validation-a")
+    second = replace(_validation_requirement("V02"), isolation_root="/external/validation-b")
+
+    units, _mapping = coalesce_validation_requirements((first, second))
+
+    assert len(units) == 2
+    assert {unit.isolation_root for unit in units} == {"/external/validation-a", "/external/validation-b"}
+    assert validation_environment_digest(units[0]) != validation_environment_digest(units[1])
 
 
 def _synthesis(node_id: str = "rust-synthesis") -> WorkerNode:
@@ -2232,6 +2276,9 @@ def _independent_review_evidence(
         validation_requirement_ids=(),
         handoff_ids=handoff_ids,
         raw_result_artifact_id="artifact://independent-001",
+        routing_discoveries=tuple(
+            RoutingDiscovery(handoff_id, expectation.node_id, "rust.errors", "typed error contract discovered") for handoff_id in handoff_ids
+        ),
     )
     return expectation, evidence
 
@@ -2523,7 +2570,7 @@ def test_independent_native_result_rejects_an_omitted_typed_handoff() -> None:
 
     blockers = _review_native_result_blockers(omitted, expectation, evidence)
 
-    assert any("routing handoff IDs" in blocker for blocker in blockers)
+    assert any("Routing Handoffs handoff IDs" in blocker for blocker in blockers)
 
 
 def test_independent_native_result_rejects_all_none_and_unexpected_level_two_sections() -> None:
@@ -3049,7 +3096,7 @@ def test_validation_dispatch_digest_fixed_vectors() -> None:
     )
 
     assert validation_command_identity_digest(unit) == "sha256:0a7cf4ab06b8269b3807b1d8727bd01a82aaf85d649be501f42745136843e93d"
-    assert validation_environment_digest(unit) == "sha256:bbbb51e39a60dc5731b9b7c8c9cb68ac92bdde7f4e167e10952b014fe38996ea"
+    assert validation_environment_digest(unit) == "sha256:e143568fb0d1707c14dbc1fbe3530fc53be445f9f802b120cfda35d5cce412e7"
 
 
 def test_isolated_validation_rejects_coordinator_evidence() -> None:
@@ -4060,8 +4107,10 @@ def test_evidence_bundle_requires_proof_to_preserve_accepted_independent_handoff
     expectation = _repository_review_expectation(include_independent=True)
     expectation, proof, review_records, validation_records, _, _ = _verified_binding(expectation)
     handoff_id = "independent-001-handoff-1"
+    independent = next(evidence for record_expectation, evidence in review_records if record_expectation.mode == "independent-review")
+    discovery = RoutingDiscovery(handoff_id, independent.node_id, "rust.errors", "new typed error contract discovered")
     handoff_records = tuple(
-        (record_expectation, replace(evidence, handoff_ids=(handoff_id,)))
+        (record_expectation, replace(evidence, handoff_ids=(handoff_id,), routing_discoveries=(discovery,)))
         if record_expectation.mode == "independent-review"
         else (record_expectation, evidence)
         for record_expectation, evidence in review_records
@@ -4073,7 +4122,7 @@ def test_evidence_bundle_requires_proof_to_preserve_accepted_independent_handoff
     )
     preserved = assess_evidence_bundle(
         expectation,
-        replace(proof, unresolved_handoff_ids=(handoff_id,)),
+        replace(proof, unresolved_handoff_ids=(handoff_id,), routing_discoveries=(discovery,)),
         review_records=handoff_records,
         validation_records=validation_records,
         artifact_manifest=manifest,
@@ -4084,6 +4133,17 @@ def test_evidence_bundle_requires_proof_to_preserve_accepted_independent_handoff
     assert "repository review proof resolved and unresolved handoffs do not equal accepted review evidence handoffs" in omitted.blockers
     assert not preserved.feasible
     assert f"repository review proof has unresolved routing handoffs: {handoff_id}" in preserved.blockers
+
+    forged_resolution = assess_evidence_bundle(
+        expectation,
+        replace(proof, resolved_handoff_ids=(handoff_id,), routing_discoveries=(discovery,)),
+        review_records=handoff_records,
+        validation_records=validation_records,
+        artifact_manifest=manifest,
+        trusted_verifier=verifier,
+    )
+    assert not forged_resolution.feasible
+    assert "repository review proof resolved handoffs do not match verified current routing decisions" in forged_resolution.blockers
 
 
 def test_evidence_bundle_rejects_all_none_ordinary_review_sections() -> None:

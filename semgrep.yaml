@@ -309,3 +309,60 @@ rules:
         - "/bin/bootstrap.sh"
         - "/tests/semgrep/bin/**/*.sh"
     pattern-regex: '(?m)^PACKAGES=\([^)]*\bcodex\b'
+
+  - id: dotfiles.review-graph.no-bare-next
+    languages:
+      - python
+    severity: WARNING
+    message: "Use next(iterable, sentinel) and raise a domain-specific error instead of leaking StopIteration."
+    metadata:
+      category: correctness
+      rationale: "Review-graph boundaries must translate missing plan and evidence matches into stable diagnostics."
+    paths:
+      include:
+        - "/agents/.agents/skills/review-graph/scripts/**/*.py"
+        - "/tests/semgrep/review_graph/**/*.py"
+      exclude:
+        - "/agents/.agents/skills/review-graph/scripts/test_*.py"
+    pattern: next($ITERABLE)
+
+  - id: dotfiles.review-graph.compiler-uses-canonical-normalizer
+    languages:
+      - python
+    severity: WARNING
+    message: "Derive compiled normalized records through the canonical _*_normalized_record helper."
+    metadata:
+      category: correctness
+      rationale: "A second normalized-record builder can drift from artifact parsing and evidence reload semantics."
+    paths:
+      include:
+        - "/agents/.agents/skills/review-graph/scripts/review_graph_runtime.py"
+        - "/tests/semgrep/review_graph/**/*.py"
+    patterns:
+      - pattern-inside: |
+          def $COMPILER(...):
+            ...
+      - metavariable-regex:
+          metavariable: $COMPILER
+          regex: "^compile_(?:review|independent_review|validation)$"
+      - pattern: '{..., "record_type": $RECORD_TYPE, ...}'
+
+  - id: dotfiles.review-graph.boolean-membership-is-not-type-check
+    languages:
+      - python
+    severity: WARNING
+    message: "Use explicit identity or isinstance checks; boolean membership also matches integers 1 and 0."
+    metadata:
+      category: correctness
+      rationale: "Untrusted boundary values must not exploit Python's equality between True/1 or False/0."
+    paths:
+      include:
+        - "/agents/.agents/skills/review-graph/scripts/**/*.py"
+        - "/tests/semgrep/review_graph/**/*.py"
+      exclude:
+        - "/agents/.agents/skills/review-graph/scripts/test_*.py"
+    pattern-either:
+      - pattern: $VALUE in {..., True, ...}
+      - pattern: $VALUE not in {..., True, ...}
+      - pattern: $VALUE in {..., False, ...}
+      - pattern: $VALUE not in {..., False, ...}

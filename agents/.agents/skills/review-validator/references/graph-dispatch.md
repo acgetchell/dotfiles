@@ -14,8 +14,8 @@ Require:
 - execution location and fresh-context identity
 - exact commands, corresponding working directories, environment, toolchain,
   features, platform, artifact owner, and mutation lock
-- approved artifacts with status provenance; exact effects, isolation, and
-  snapshot policy
+- approved artifacts with status provenance; exact effects, absolute isolation
+  root, and snapshot policy
 - dependency policy and elapsed bounds
 
 Return `blocked` for any missing field. Do not fall through to standalone
@@ -27,7 +27,8 @@ discovery.
 2. Recheck that every dispatched command is non-mutating under repository-owned
    definitions or policy.
 3. Execute each command exactly once in order. Respect `stop-on-failure` or
-   `continue-independent`.
+   `continue-independent`. Isolated working directories and external artifacts
+   must remain beneath the dispatched isolation root.
 4. Record command, working directory, executor, result, exit code, elapsed time,
    concise output evidence, and approved artifact paths.
 5. Compute approved artifact content digests.

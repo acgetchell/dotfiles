@@ -52,6 +52,7 @@ execution_location: worker | coordinator
 worker_created, fresh_context: exact booleans
 status: completed | no-findings | blocked
 finding_ids, validation_requirement_ids, handoff_ids
+routing_discoveries: typed handoff ID, source node, catalog ID, and observed evidence
 predecessor_evidence_ids: exact accepted predecessor evidence for synthesis,
   otherwise empty
 raw_result_artifact_id, raw_result_digest
@@ -98,7 +99,8 @@ source_mutated, git_mutated: exact booleans
 Derive `command_identity_digest` canonically from the exact coalesced
 `ValidationUnit` commands, corresponding working directories, and canonical
 recipe. Derive `environment_digest` canonically from that same unit's
-environment, toolchain, features, platform, artifact owner, and mutation lock.
+environment, toolchain, features, platform, artifact owner, mutation lock, and
+exact isolation root.
 Construct the dispatch expectation with `validation_evidence_expectation`,
 which computes both digests from the unit; neither digest is an opaque caller
 assertion. Accept the result only when both envelope values equal those
@@ -197,6 +199,7 @@ required_validation_requirement_ids
 validation_requirement_evidence: requirement ID -> accepted validation evidence ID
 accepted_validation_evidence_ids
 stale_evidence_ids, resolved_handoff_ids, unresolved_handoff_ids
+routing_discoveries: verified accepted-evidence handoff-to-catalog mappings
 final_synthesis_evidence_id
 artifact_manifest_id, artifact_manifest_digest
 verifier_id
@@ -260,9 +263,11 @@ manifest entries, and trusted payloads. Reject missing, extra, malformed,
 truncated, semantically mismatched, stale, tampered, or self-asserted accepted
 IDs. The disjoint `resolved_handoff_ids` and `unresolved_handoff_ids` together
 equal the globally unique handoff IDs carried by accepted review evidence.
-Deterministic reconciliation resolves entries already selected, exactly reused,
-or explicitly excluded by the current routing ledger; any unresolved ID remains
-completion-blocking. Derive the user-facing findings,
+The proof's typed routing discoveries must equal the mappings reparsed from the
+accepted artifacts. Deterministic reconciliation derives resolved IDs only for
+catalog entries selected, exactly reused, or explicitly excluded by the current
+routing ledger; any unresolved or unverified ID remains completion-blocking.
+Derive the user-facing findings,
 validation ledger, five-row compatibility table, and repository-state report
 only from the accepted bundle.
 

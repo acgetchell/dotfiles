@@ -26,9 +26,11 @@ command, commands, working directories, environment, toolchain, features,
 platform, artifact policy, dependency policy, and elapsed bounds. Return
 `blocked` for an omission; never fall through to standalone discovery.
 
-Require the graph-owned effects, isolation, artifact-provenance, and snapshot
-policy. Capture relevant filesystem and Git state before and after; return both
-snapshots beside, not inside, the compact payload for compiler audit.
+Require the graph-owned effects, exact isolation root, artifact-provenance, and
+snapshot policy. Keep isolated working directories and outside-repository
+artifacts beneath that root. Capture relevant filesystem and Git state before
+and after; return both snapshots beside, not inside, the compact payload for
+compiler audit.
 
 Honor executor placement. A worker uses `fork_turns: "none"`; a coordinator
 fallback executes the same unit locally. Do not create another worker, split a

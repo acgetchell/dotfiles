@@ -404,7 +404,8 @@ for the same dispatch when needed. Isolated execution requires one fresh worker
 per unit. Read its complete `SKILL.md` and only
 `references/graph-dispatch.md`. The graph provides the planner-owned
 `ValidationUnit`; the validator must not select commands from prose or load a
-review skill.
+review skill. An isolated unit names one exact absolute isolation root; every
+outside-repository artifact and isolated working directory stays beneath it.
 
 Use this prompt shell:
 
