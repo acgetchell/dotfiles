@@ -105,12 +105,16 @@ assertion. Accept the result only when both envelope values equal those
 independently derived expectations exactly.
 
 The validation expectation also carries the exact dispatched validator skill
-path and typed approved artifacts `(path, kind, repository_status)`. Reparse the
-native Skill Loading, Reused Evidence, Artifacts, and Validation Ledger Export
-sections and reconcile them exactly with that expectation and envelope. An
-artifact must be an approved `ignored` or `outside-repository` path; a graph
-result's ledger consumer is exactly `review-graph`, and every ledger identity,
-digest, state, provenance, and handoff field must equal the accepted evidence.
+path and typed approved artifacts `(path, kind, repository_status,
+status_source, status_rule)`. Reparse the native Skill Loading, Reused Evidence,
+Artifacts, and Validation Ledger Export sections and reconcile them exactly
+with that expectation and envelope. An `ignored` artifact must cite a tracked
+repository `.gitignore` rule; repository-local and user-global excludes are not
+sufficient. An `outside-repository` artifact must be rooted in the dispatched
+isolated output directory. Persist before/after workspace snapshots and reject
+undeclared tracked or untracked outputs. A graph result's ledger consumer is
+exactly `review-graph`, and every ledger identity, digest, state, provenance,
+snapshot, and handoff field must equal the accepted evidence.
 
 Run `assess_validation_evidence` before importing the result into the graph.
 Only `passed` and exact `reused` evidence satisfy nonempty requirements.
@@ -192,7 +196,7 @@ accepted_review_evidence_ids
 required_validation_requirement_ids
 validation_requirement_evidence: requirement ID -> accepted validation evidence ID
 accepted_validation_evidence_ids
-stale_evidence_ids, unresolved_handoff_ids
+stale_evidence_ids, resolved_handoff_ids, unresolved_handoff_ids
 final_synthesis_evidence_id
 artifact_manifest_id, artifact_manifest_digest
 verifier_id
@@ -254,11 +258,11 @@ match its manifest entry; parses the native Markdown headings and canonical
 evidence block; and requires exact coverage between accepted evidence IDs,
 manifest entries, and trusted payloads. Reject missing, extra, malformed,
 truncated, semantically mismatched, stale, tampered, or self-asserted accepted
-IDs. The proof's `unresolved_handoff_ids` must equal the globally unique ordered
-concatenation of handoff IDs carried by all accepted review evidence. A
-nonempty tuple remains completion-blocking; close and reroute each handoff, then
-replace the affected accepted evidence with a newly verified result that
-carries no unresolved handoff before constructing the final proof. Derive the user-facing findings,
+IDs. The disjoint `resolved_handoff_ids` and `unresolved_handoff_ids` together
+equal the globally unique handoff IDs carried by accepted review evidence.
+Deterministic reconciliation resolves entries already selected, exactly reused,
+or explicitly excluded by the current routing ledger; any unresolved ID remains
+completion-blocking. Derive the user-facing findings,
 validation ledger, five-row compatibility table, and repository-state report
 only from the accepted bundle.
 

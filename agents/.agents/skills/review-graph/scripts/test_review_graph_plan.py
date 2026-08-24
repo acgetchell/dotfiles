@@ -3,6 +3,7 @@
 import hashlib
 import json
 import shutil
+import subprocess
 from dataclasses import asdict, replace
 from functools import cache
 from itertools import pairwise
@@ -48,6 +49,7 @@ from review_graph_plan import (
     _validation_native_result_blockers,
     _validation_plan_expected_body,
     _validation_requirements_expected_body,
+    _verified_artifact_status,
     assess_completion,
     assess_evidence_bundle,
     assess_migration_trials,
@@ -489,6 +491,8 @@ def _validation_result_payload(expectation: ValidationEvidenceExpectation, evide
                         f"  - Artifact digest: {artifact.artifact_digest or 'none'}",
                         f"  - Kind: {artifact.kind}",
                         f"  - Repository status: {artifact.repository_status}",
+                        f"  - Status source: {artifact.status_source}",
+                        f"  - Status rule: {artifact.status_rule or 'none'}",
                     )
                 )
                 for artifact in expectation.validation_unit.allowed_artifacts
@@ -1232,8 +1236,42 @@ def test_graph_document_preserves_optional_validation_artifact_identity() -> Non
             artifact_digest=artifact_digest,
             kind="log",
             repository_status="outside-repository",
+            status_source="isolated-output-directory",
         ),
     )
+
+
+def test_validation_artifact_status_requires_repository_owned_ignore_rule(tmp_path: Path) -> None:
+    source, rule = _verified_artifact_status("dist/review.whl", "ignored", REPOSITORY_ROOT)
+    assert source == "repository-rule"
+    assert rule is not None
+    assert rule.startswith(".gitignore:")
+    directory_source, directory_rule = _verified_artifact_status("dist", "ignored", REPOSITORY_ROOT)
+    assert directory_source == "repository-rule"
+    assert directory_rule is not None
+    assert directory_rule.startswith(".gitignore:")
+
+    with pytest.raises(ValueError, match="not ignored by repository policy"):
+        _verified_artifact_status("unexpected-review-output/review.whl", "ignored", REPOSITORY_ROOT)
+
+    git = shutil.which("git")
+    assert git is not None
+    subprocess.run([git, "init", str(tmp_path)], check=True, capture_output=True)  # noqa: S603 - resolved Git test fixture.
+    exclude = tmp_path / ".git" / "info" / "exclude"
+    exclude.write_text("private-output/\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="repository-local exclude"):
+        _verified_artifact_status("private-output/result.log", "ignored", tmp_path)
+
+    nested_ignore = tmp_path / "packages" / ".gitignore"
+    nested_ignore.parent.mkdir()
+    nested_ignore.write_text("generated/\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="untracked repository rule"):
+        _verified_artifact_status("packages/generated/result.log", "ignored", tmp_path)
+    subprocess.run([git, "-C", str(tmp_path), "add", "packages/.gitignore"], check=True, capture_output=True)  # noqa: S603
+    source, rule = _verified_artifact_status("packages/generated/result.log", "ignored", tmp_path)
+    assert source == "repository-rule"
+    assert rule is not None
+    assert rule.startswith("packages/.gitignore:")
 
 
 @pytest.mark.parametrize(
@@ -2768,7 +2806,11 @@ def test_validation_native_provenance_artifacts_and_ledger_are_dispatch_bound() 
     external_unit = replace(
         expectation.validation_unit,
         artifact_owner="external",
-        allowed_artifacts=(ValidationArtifact(path="/external/review-validator/command.log", kind="log", repository_status="outside-repository"),),
+        allowed_artifacts=(
+            ValidationArtifact(
+                path="/external/review-validator/command.log", kind="log", repository_status="outside-repository", status_source="isolated-output-directory"
+            ),
+        ),
     )
     external_expectation = validation_evidence_expectation(
         external_unit,
@@ -2806,6 +2848,7 @@ def test_validation_native_artifact_references_require_matching_content_identity
                 artifact_digest=artifact_digest,
                 kind="log",
                 repository_status="outside-repository",
+                status_source="isolated-output-directory",
             ),
         ),
     )
@@ -2987,7 +3030,15 @@ def test_validation_dispatch_digest_fixed_vectors() -> None:
         commands=("just check", "uv run pytest tests/test_é.py"),
         working_directories=("/repo", "/repo/subdir"),
         allowed_artifacts=(
-            ValidationArtifact(path="logs/é.txt", kind="log", repository_status="ignored", artifact_id="artifact://log", artifact_digest="sha256:" + "a" * 64),
+            ValidationArtifact(
+                path="logs/é.txt",
+                kind="log",
+                repository_status="ignored",
+                status_source="repository-rule",
+                artifact_id="artifact://log",
+                artifact_digest="sha256:" + "a" * 64,
+                status_rule=".gitignore:1:logs/",
+            ),
         ),
         artifact_owner="validator",
         environment="PYTHONUTF8=1",
@@ -2998,7 +3049,7 @@ def test_validation_dispatch_digest_fixed_vectors() -> None:
     )
 
     assert validation_command_identity_digest(unit) == "sha256:0a7cf4ab06b8269b3807b1d8727bd01a82aaf85d649be501f42745136843e93d"
-    assert validation_environment_digest(unit) == "sha256:b21bc5afe779633ac3609bc2bdca9df8f2e8c8296811867068636c6b280eb9cb"
+    assert validation_environment_digest(unit) == "sha256:bbbb51e39a60dc5731b9b7c8c9cb68ac92bdde7f4e167e10952b014fe38996ea"
 
 
 def test_isolated_validation_rejects_coordinator_evidence() -> None:
@@ -4030,7 +4081,7 @@ def test_evidence_bundle_requires_proof_to_preserve_accepted_independent_handoff
     )
 
     assert not omitted.feasible
-    assert "repository review proof unresolved handoffs do not equal accepted review evidence handoffs" in omitted.blockers
+    assert "repository review proof resolved and unresolved handoffs do not equal accepted review evidence handoffs" in omitted.blockers
     assert not preserved.feasible
     assert f"repository review proof has unresolved routing handoffs: {handoff_id}" in preserved.blockers
 

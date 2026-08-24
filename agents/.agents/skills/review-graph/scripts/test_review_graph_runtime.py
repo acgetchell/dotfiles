@@ -1,18 +1,33 @@
 """Tests for compact review-graph runtime compilation."""
 
 import json
+import shutil
+import subprocess
 from copy import deepcopy
 from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from review_graph_plan import GraphPlan, expand_compact_routing, load_routing_catalog, plan_from_document, validate_routing_ledger
+from capture_scope import _scope_data
+from review_graph_bootstrap import bootstrap_document
+from review_graph_plan import (
+    GraphPlan,
+    ValidationArtifact,
+    ValidationUnit,
+    expand_compact_routing,
+    load_routing_catalog,
+    plan_from_document,
+    validate_routing_ledger,
+)
 from review_graph_runtime import (
     JournalEventRequest,
+    _validation_workspace_audit,
+    advance_after_mutation,
     append_journal_event,
     build_routing_projection_document,
     build_synthesis_bundle,
+    compile_independent_review,
     compile_review,
     compile_validation,
     finalize_proof,
@@ -20,13 +35,16 @@ from review_graph_runtime import (
     materialize_dispatches,
     next_ready_nodes,
     read_execution_journal,
+    reconcile_handoffs,
 )
+from review_graph_schema import SchemaValidationError, require_schema
 
 SKILL_ROOT = Path(__file__).resolve().parents[2]
 ROUTING_CATALOG = Path(__file__).resolve().parents[1] / "references" / "routing-catalog.json"
 RUST_ERROR_SKILL = SKILL_ROOT / "rust-error-variants" / "SKILL.md"
 VALIDATOR_SKILL = SKILL_ROOT / "review-validator" / "SKILL.md"
 VALIDATOR_CONTRACT = SKILL_ROOT / "review-validator" / "references" / "graph-dispatch.md"
+SCHEMA_ROOT = Path(__file__).resolve().parents[1] / "references" / "schemas"
 STATE_FIXTURE = "agents/.agents/skills/review-graph/scripts/fixtures/state.rs"
 ORDINARY_PROMPT_WORD_BUDGET = 2400
 VALIDATOR_PROMPT_WORD_BUDGET = 850
@@ -118,6 +136,10 @@ FORBIDDEN_MAINTAINER_REFERENCES = frozenset(
         "runtime-contract.md",
     }
 )
+
+
+def _run_test_git(git: str, *arguments: str) -> None:
+    subprocess.run([git, *arguments], check=True, capture_output=True)  # noqa: S603 - resolved Git test fixture.
 
 
 def _word_count(paths: tuple[Path, ...]) -> int:
@@ -299,9 +321,205 @@ def test_compile_review_rejects_inherited_worker_context() -> None:
             {
                 "dispatch": dispatch,
                 "payload": {
+                    "changes": [],
+                    "command_policy_attested": True,
+                    "commands_executed": [],
                     "files_inspected": ["src/error.rs"],
                     "findings": [],
                     "handoffs": [],
+                    "limitations": [],
+                    "nearby_contract_owners": [],
+                    "status": "no-findings",
+                    "validation_requirements": [],
+                },
+            }
+        )
+
+
+def test_review_payload_schema_reports_all_field_diagnostics() -> None:
+    with pytest.raises(SchemaValidationError) as captured:
+        require_schema({"status": "unknown", "unexpected": True}, SCHEMA_ROOT / "review-payload-v1.schema.json")
+
+    diagnostics = cast("list[dict[str, Any]]", captured.value.as_dict()["diagnostics"])
+    paths = {item["path"] for item in diagnostics}
+    assert {"$.changes", "$.command_policy_attested", "$.commands_executed", "$.status", "$.unexpected"} <= paths
+    status = next(item for item in diagnostics if item["path"] == "$.status")
+    assert status["accepted_values"] == ["completed", "no-findings", "blocked"]
+
+
+@pytest.mark.parametrize(("attempt", "retry_allowed"), [(1, True), (2, False)])
+def test_compile_cli_allows_at_most_one_schema_retry(tmp_path: Path, capsys: pytest.CaptureFixture[str], attempt: int, retry_allowed: bool) -> None:
+    request = tmp_path / f"request-{attempt}.json"
+    request.write_text(json.dumps({"dispatch": {}, "handoff_attempt": attempt, "payload": {"status": "unknown", "unexpected": True}}), encoding="utf-8")
+
+    result = main(
+        [
+            "compile-review",
+            "--input",
+            str(request),
+            "--artifact",
+            str(tmp_path / f"artifact-{attempt}.md"),
+            "--metadata",
+            str(tmp_path / f"metadata-{attempt}.json"),
+        ]
+    )
+
+    diagnostic = json.loads(capsys.readouterr().err)
+    assert result == 2
+    assert diagnostic["handoff_attempt"] == attempt
+    assert diagnostic["maximum_handoff_attempts"] == 2
+    assert diagnostic["retry_allowed"] is retry_allowed
+    assert len(diagnostic["diagnostics"]) > 2
+
+
+def test_bootstrap_binds_capture_and_validation_fingerprints_without_field_renaming() -> None:
+    capture = {
+        "base_ref": None,
+        "branch": "main",
+        "capture_mode": "baseline",
+        "captured_path_line_bounds": {STATE_FIXTURE: 3},
+        "captured_scope_paths": [STATE_FIXTURE],
+        "captured_worktree_fingerprint": "captured-worktree",
+        "head": "head",
+        "merge_base": None,
+        "repository_root": str(SKILL_ROOT.parents[2]),
+        "repository_state_fingerprint": "captured-repository",
+        "requested_paths": [],
+        "scope_fingerprint": "captured-scope",
+        "status": [],
+        "untracked_paths": [],
+    }
+
+    document = bootstrap_document(capture, _sparse_plan_document())
+    require_schema(document, SCHEMA_ROOT / "planning-input-v1.schema.json")
+
+    validation = document["validation_requirements"][0]
+    assert validation["source_state"] == ["captured-scope", "captured-worktree", "captured-repository"]
+    assert validation["captured_paths"] == [STATE_FIXTURE]
+    assert document["captured_paths"] == [STATE_FIXTURE]
+
+
+def test_advance_after_mutation_emits_one_recaptured_repair_epoch(tmp_path: Path) -> None:
+    git = shutil.which("git")
+    assert git is not None
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _run_test_git(git, "init", str(repository))
+    _run_test_git(git, "-C", str(repository), "config", "user.email", "review@example.com")
+    _run_test_git(git, "-C", str(repository), "config", "user.name", "Review Test")
+    state_path = repository / "state.rs"
+    state_path.write_text("pub fn state() {}\n", encoding="utf-8")
+    _run_test_git(git, "-C", str(repository), "add", "state.rs")
+    _run_test_git(git, "-C", str(repository), "commit", "-m", "initial")
+    state_path.write_text("pub fn state() { assert!(true); }\n", encoding="utf-8")
+    new_capture = _scope_data(git, repository, "baseline", None, ())
+    template = _sparse_plan_document()
+    template["captured_paths"] = ["state.rs"]
+    template["routing_overrides"][0]["review_surface"] = ["state.rs"]
+
+    result = advance_after_mutation(
+        {
+            "artifact_store": str(tmp_path / "proof-store"),
+            "authorization_after": "review-and-fix",
+            "authorization_before": "review-only",
+            "changed_paths": ["state.rs"],
+            "new_capture": new_capture,
+            "plan": _json_plan(_sparse_plan()),
+            "planning_template": template,
+            "repair_epoch": 1,
+            "source_state": ["old-scope", "old-worktree", "old-repository"],
+            "state_verification_command": "capture_scope.py --mode baseline",
+        }
+    )
+
+    assert result["status"] == "advanced"
+    assert result["repair_epoch"]["recapture_count"] == 1
+    assert result["repair_epoch"]["fix_nodes"] == [{"mode": "fix", "node_id": "fix-epoch-001", "serialized": True}]
+    assert {item["state"] for item in result["invalidated_nodes"]} == {"awaiting-replan"}
+    assert result["newly_touched_paths"] == ["state.rs"]
+    assert result["dispatch_set"]["source_state"] == result["new_source_state"]
+    new_node_ids = {node["node_id"] for node in result["new_plan"]["actual_worker_nodes"]}
+    new_evidence_ids = {entry["dispatch"]["evidence_id"] for entry in result["dispatch_set"]["dispatches"]}
+    assert all(node_id.startswith("repair-epoch-001-") for node_id in new_node_ids)
+    assert set(result["stale_evidence_ids"]).isdisjoint(new_evidence_ids)
+
+
+def test_compile_review_enforces_validator_owned_command_policy() -> None:
+    dispatch = _dispatch()
+    dispatch["command_policy"] = {
+        "authorized_duplicate_commands": [],
+        "prohibited_commands": ["just check-fast"],
+        "validator_owned_commands": ["just check-fast"],
+    }
+    with pytest.raises(ValueError, match="owned by planned validators"):
+        compile_review(
+            {
+                "dispatch": dispatch,
+                "payload": {
+                    "command_policy_attested": True,
+                    "commands_executed": ["just check-fast"],
+                    "files_inspected": ["src/error.rs"],
+                    "findings": [],
+                    "handoffs": [],
+                    "limitations": [],
+                    "nearby_contract_owners": [],
+                    "status": "no-findings",
+                    "validation_requirements": [],
+                },
+            }
+        )
+
+
+def test_compile_review_records_explicitly_authorized_duplicate_validation() -> None:
+    dispatch = _dispatch()
+    dispatch["command_policy"] = {
+        "authorized_duplicate_commands": ["just check-fast"],
+        "prohibited_commands": [],
+        "validator_owned_commands": ["just check-fast"],
+    }
+    content, metadata = compile_review(
+        {
+            "dispatch": dispatch,
+            "payload": {
+                "changes": [],
+                "command_policy_attested": True,
+                "commands_executed": ["just check-fast"],
+                "files_inspected": ["src/error.rs"],
+                "findings": [],
+                "handoffs": [],
+                "limitations": [],
+                "nearby_contract_owners": [],
+                "status": "no-findings",
+                "validation_requirements": [],
+            },
+        }
+    )
+
+    assert content.startswith(b"# Review Node Result")
+    assert metadata["normalized_record"]["commands_executed"] == ["just check-fast"]
+
+
+def test_compile_review_rejects_non_catalog_handoff_identity() -> None:
+    dispatch = _dispatch()
+    dispatch["handoff_catalog_ids"] = ["rust.errors"]
+    with pytest.raises(ValueError, match="unknown handoff catalog IDs"):
+        compile_review(
+            {
+                "dispatch": dispatch,
+                "payload": {
+                    "changes": [],
+                    "command_policy_attested": True,
+                    "commands_executed": [],
+                    "files_inspected": ["src/error.rs"],
+                    "findings": [],
+                    "handoffs": [
+                        {
+                            "catalog_id": "rust-error-variants",
+                            "observed_trigger": "skill ID was supplied instead of a catalog ID",
+                            "reason": "exercise the catalog boundary",
+                            "scope": ["src/error.rs"],
+                        }
+                    ],
                     "limitations": [],
                     "nearby_contract_owners": [],
                     "status": "no-findings",
@@ -320,6 +538,9 @@ def test_runtime_cli_writes_verified_review_artifacts(tmp_path: Path) -> None:
             {
                 "dispatch": _dispatch(),
                 "payload": {
+                    "changes": [],
+                    "command_policy_attested": True,
+                    "commands_executed": [],
                     "files_inspected": ["src/error.rs"],
                     "findings": [],
                     "handoffs": [],
@@ -422,6 +643,55 @@ def test_compile_validation_builds_verified_artifact_from_execution_payload() ->
     assert content.startswith(b"# Validation Result\n")
     assert b"Canonical worker payload" in content
     assert metadata["evidence"]["status"] == "passed"
+
+
+def test_validation_workspace_audit_rejects_successful_run_with_unexpected_outputs() -> None:
+    unit = ValidationUnit(
+        node_id="validation-package",
+        requirement_ids=("python-package",),
+        source_state=("scope", "worktree", "repository"),
+        commands=("uv build",),
+        working_directories=(str(SKILL_ROOT.parents[2]),),
+        environment="locked",
+        toolchain="Python",
+        features=("wheel",),
+        platform="current",
+        artifact_owner="python-dist",
+        mutation_lock="isolated-output",
+        request="build package",
+        requested_scope="branch",
+        capture_command="capture_scope.py --mode branch",
+        captured_paths=("pyproject.toml",),
+        requirement_plans=(("python-package", "graph", "package changed", "isolated", "wheel built", "30s", None),),
+        dependency_policy="stop-on-failure",
+        meaningful_skips=(),
+        execution_strategy="sequential",
+        independence_basis="none",
+        planning_blocker=None,
+        allowed_artifacts=(
+            ValidationArtifact(path="dist", kind="build", repository_status="ignored", status_source="repository-rule", status_rule=".gitignore:dist/"),
+        ),
+        canonical_recipe="uv build",
+        evidence_ids=(),
+        required=True,
+        baseline=False,
+        expected_workspace_effects=("dist",),
+    )
+    digest = "sha256:" + "a" * 64
+    dispatch = {
+        "repository_root": str(SKILL_ROOT.parents[2]),
+        "workspace_after": [
+            {"digest": digest, "path": "dist/package.whl", "status": "ignored"},
+            {"digest": digest, "path": "src/generated.c", "status": "tracked"},
+        ],
+        "workspace_before": [],
+    }
+
+    with pytest.raises(ValueError, match="unexpected workspace paths"):
+        _validation_workspace_audit(dispatch, unit)
+
+    dispatch["workspace_after"] = [{"digest": digest, "path": "dist/package.whl", "status": "ignored"}]
+    assert _validation_workspace_audit(dispatch, unit)["changed_paths"] == ["dist/package.whl"]
 
 
 def test_sparse_routing_expands_to_exhaustive_catalog_records() -> None:
@@ -569,11 +839,27 @@ def test_dispatch_materialization_and_ready_nodes_are_plan_derived(tmp_path: Pat
     assert synthesis["predecessor_evidence_ids"] == expected_predecessors
     _assert_compact_dispatches(result["dispatches"])
     assert by_id[next(node.node_id for node in plan.actual_worker_nodes if node.mode == "validation")]["result_contract"] == "compact-validation"
+    assert {entry["compiler_operation"] for entry in result["dispatches"]} == {"compile-review", "compile-validation"}
+    assert {entry["journal_operation"] for entry in result["dispatches"]} == {"journal-append"}
+    audit_dispatch = next(entry["dispatch"] for entry in result["dispatches"] if entry["result_contract"] == "compact-review")
+    assert audit_dispatch["payload_schema"]["id"].endswith("review-payload-v1.schema.json")
+    assert "command_policy_attested" in audit_dispatch["payload_schema"]["required_fields"]
+    assert audit_dispatch["command_policy"]["validator_owned_commands"] == ["true"]
+    assert str(SKILL_ROOT.parents[2] / "AGENTS.md") in audit_dispatch["instruction_paths"]
+    assert all(entry["worker_prompt"] for entry in result["dispatches"])
 
-    lifecycle_document = {"plan": _json_plan(plan), "source_state": ["scope", "worktree", "repository"]}
+    lifecycle_document = {
+        "current_source_state": ["scope", "worktree", "repository"],
+        "plan": _json_plan(plan),
+        "source_state": ["scope", "worktree", "repository"],
+    }
     initial = next_ready_nodes(lifecycle_document, journal_events=(), dispatch_set=result)
     assert set(initial["ready_node_ids"]) == {node.node_id for node in plan.actual_worker_nodes if not node.predecessors}
     assert {entry["node_id"] for entry in initial["ready_dispatches"]} == set(initial["ready_node_ids"])
+    stale = dict(lifecycle_document)
+    stale["current_source_state"] = ["scope", "worktree", "changed-repository"]
+    with pytest.raises(ValueError, match="current recapture differs"):
+        next_ready_nodes(stale, journal_events=(), dispatch_set=result)
 
     journal = tmp_path / "execution.jsonl"
     started = initial["ready_node_ids"][0]
@@ -612,13 +898,288 @@ def test_independent_review_dispatch_excludes_coordinator_context(tmp_path: Path
     entry = next(item for item in result["dispatches"] if item["node_id"] == independent.node_id)
 
     assert entry["result_contract"] == "native-independent-review"
+    assert entry["compiler_operation"] == "compile-independent-review"
     assert entry["dispatch"]["planned_path_line_bounds"] == [[STATE_FIXTURE, 3]]
     _assert_compact_dispatches(result["dispatches"])
 
 
+def test_exact_overlap_leaves_share_only_trusted_read_only_observations(tmp_path: Path) -> None:
+    plan = _sparse_plan()
+    audit = next(node for node in plan.actual_worker_nodes if node.mode == "audit")
+    observer = replace(audit, node_id="audit-shared-observer", requirement_ids=("shared-observer",))
+    shared_plan = replace(plan, actual_worker_nodes=(*plan.actual_worker_nodes, observer), complete_node_count=plan.complete_node_count + 1)
+    result = materialize_dispatches(
+        {
+            "artifact_store": str(tmp_path),
+            "authorization": "review-only",
+            "plan": _json_plan(shared_plan),
+            "repository_root": str(SKILL_ROOT.parents[2]),
+            "source_state": ["scope", "worktree", "repository"],
+            "state_verification_command": "capture_scope.py --mode baseline",
+        }
+    )
+    by_id = {entry["node_id"]: entry["dispatch"] for entry in result["dispatches"]}
+    producer = by_id[audit.node_id]["shared_inspection_evidence"]
+    consumer = by_id[observer.node_id]["shared_inspection_evidence"]
+
+    assert producer == consumer
+    assert producer["observation_digest"].startswith("sha256:")
+    assert producer["observations"] == [
+        {
+            "byte_count": (SKILL_ROOT.parents[2] / STATE_FIXTURE).stat().st_size,
+            "content_digest": producer["observations"][0]["content_digest"],
+            "line_count": 3,
+            "path": STATE_FIXTURE,
+        }
+    ]
+    assert producer["observations"][0]["content_digest"].startswith("sha256:")
+
+
+def test_compile_independent_review_wraps_native_result_and_reloads_evidence(tmp_path: Path) -> None:
+    skill_path = SKILL_ROOT / "repository-independent-review" / "SKILL.md"
+    change_target = f"git diff -- {STATE_FIXTURE}"
+    dispatch = {
+        "adversarial_checks": ["fallback absence and failure", "platform seams", "parser suffixes and error branches", "unexpected exception types"],
+        "after_state": ["scope", "worktree", "repository"],
+        "artifact_id": "artifact://independent",
+        "authorization": "review-only",
+        "before_state": ["scope", "worktree", "repository"],
+        "change_target": change_target,
+        "evidence_id": "review:independent",
+        "execution_location": "worker",
+        "execution_profile": "grouped",
+        "fresh_context": True,
+        "handoff_catalog_ids": ["rust.invariants"],
+        "mode": "independent-review",
+        "node_id": "independent",
+        "planned_path_line_bounds": [[STATE_FIXTURE, 3]],
+        "planned_paths": [STATE_FIXTURE],
+        "reference_paths": [],
+        "requirement_ids": ["repo.independent"],
+        "selection_reason": "concrete change target",
+        "skill_id": "repository-independent-review",
+        "skill_path": str(skill_path),
+        "source_state": ["scope", "worktree", "repository"],
+        "worker_created": True,
+    }
+    checks = "\n".join(f"- Inspected: {check}" for check in dispatch["adversarial_checks"])
+    native = f"""# Repository Independent Review
+
+## Scope Inspected
+
+- Change target: {change_target}
+- Files: {STATE_FIXTURE}
+- Branches: captured change target
+- Boundary cases: dispatched adversarial checks
+- Tests: planned validator evidence
+
+## Findings
+
+No findings.
+
+## No-Finding Evidence
+
+{checks}
+
+## Routing Handoffs
+
+none
+
+## Fingerprint Proof
+
+- Expected:
+  - Scope fingerprint: scope
+  - Worktree fingerprint: worktree
+  - Repository state fingerprint: repository
+- Before:
+  - Scope fingerprint: scope
+  - Worktree fingerprint: worktree
+  - Repository state fingerprint: repository
+- After:
+  - Scope fingerprint: scope
+  - Worktree fingerprint: worktree
+  - Repository state fingerprint: repository
+
+## Git State
+
+- Source-controlled files changed: none
+- Git state mutated: no
+""".encode()
+
+    content, metadata = compile_independent_review({"dispatch": dispatch, "limitations": [], "status": "no-findings"}, native)
+    artifact_path = tmp_path / "independent.md"
+    metadata_path = tmp_path / "independent.json"
+    artifact_path.write_bytes(content)
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    bundle = build_synthesis_bundle(
+        {"source_state": ["scope", "worktree", "repository"], "sources": [{"artifact_path": str(artifact_path), "metadata_path": str(metadata_path)}]}
+    )
+
+    assert b"## Review Graph Envelope" in content
+    assert b"## Machine Evidence" in content
+    assert metadata["native_input_digest"].startswith("sha256:")
+    assert bundle["records"][0]["mode"] == "independent-review"
+
+
+def test_compact_branch_runs_from_bootstrap_through_journal_and_final_proof(tmp_path: Path) -> None:  # noqa: PLR0915
+    git = shutil.which("git")
+    assert git is not None
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _run_test_git(git, "init", str(repository))
+    _run_test_git(git, "-C", str(repository), "config", "user.email", "review@example.com")
+    _run_test_git(git, "-C", str(repository), "config", "user.name", "Review Test")
+    state_path = repository / "state.rs"
+    state_path.write_text("pub fn state() {}\n", encoding="utf-8")
+    _run_test_git(git, "-C", str(repository), "add", "state.rs")
+    _run_test_git(git, "-C", str(repository), "commit", "-m", "initial")
+    state_path.write_text("pub fn state() { assert!(true); }\n", encoding="utf-8")
+    _run_test_git(git, "-C", str(repository), "add", "state.rs")
+    _run_test_git(git, "-C", str(repository), "commit", "-m", "change state")
+    capture = _scope_data(git, repository, "branch", "HEAD~1", ())
+    template = _sparse_plan_document()
+    template.update({"change_target": "git diff HEAD~1...HEAD -- state.rs", "concrete_change_target": True, "scope_mode": "branch"})
+    template["captured_paths"] = ["state.rs"]
+    template["routing_overrides"][0]["review_surface"] = ["state.rs"]
+    validation_template = template["validation_requirements"][0]
+    validation_template["capture_command"] = "capture_scope.py --mode branch --base HEAD~1"
+    validation_template["captured_paths"] = ["state.rs"]
+    validation_template["working_directories"] = [str(repository)]
+    planning = bootstrap_document(capture, template)
+    plan = plan_from_document(planning, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)
+    source_state = cast(
+        "tuple[str, str, str]", (capture["scope_fingerprint"], capture["captured_worktree_fingerprint"], capture["repository_state_fingerprint"])
+    )
+    proof_store = tmp_path / "proof-store"
+    proof_store.mkdir()
+    dispatch_set = materialize_dispatches(
+        {
+            "artifact_store": str(proof_store),
+            "authorization": "review-only",
+            "plan": _json_plan(plan),
+            "repository_root": str(repository),
+            "source_state": list(source_state),
+            "state_verification_command": "capture_scope.py --mode branch --base HEAD~1",
+        }
+    )
+    sources_by_node: dict[str, dict[str, str]] = {}
+    for entry in dispatch_set["dispatches"]:
+        dispatch = deepcopy(entry["dispatch"])
+        dispatch.update({"after_state": list(source_state), "before_state": list(source_state)})
+        if entry["result_contract"] == "compact-validation":
+            unit = dispatch["validation_unit"]
+            payload = {
+                "artifacts": [],
+                "executions": [
+                    {
+                        "artifact_paths": [],
+                        "command": command,
+                        "elapsed": "0s",
+                        "evidence": "command exited successfully",
+                        "executor": dispatch["node_id"],
+                        "exit_code": 0,
+                        "result": "passed",
+                        "working_directory": working_directory,
+                    }
+                    for command, working_directory in zip(unit["commands"], unit["working_directories"], strict=True)
+                ],
+                "limitations": [],
+                "status": "passed",
+            }
+            require_schema(payload, SCHEMA_ROOT / "validation-payload-v1.schema.json")
+            content, metadata = compile_validation({"dispatch": dispatch, "payload": payload})
+            kind = "validation"
+        elif entry["result_contract"] == "native-independent-review":
+            checks = "\n".join(f"- Inspected: {check}" for check in dispatch["adversarial_checks"])
+            native = f"""# Repository Independent Review
+
+## Scope Inspected
+
+- Change target: {dispatch["change_target"]}
+- Files: state.rs
+- Branches: HEAD~1...HEAD
+- Boundary cases: changed state transition
+- Tests: baseline validation command
+
+## Findings
+
+No findings.
+
+## No-Finding Evidence
+
+{checks}
+
+## Routing Handoffs
+
+none
+
+## Fingerprint Proof
+
+- Expected:
+  - Scope fingerprint: {source_state[0]}
+  - Worktree fingerprint: {source_state[1]}
+  - Repository state fingerprint: {source_state[2]}
+- Before:
+  - Scope fingerprint: {source_state[0]}
+  - Worktree fingerprint: {source_state[1]}
+  - Repository state fingerprint: {source_state[2]}
+- After:
+  - Scope fingerprint: {source_state[0]}
+  - Worktree fingerprint: {source_state[1]}
+  - Repository state fingerprint: {source_state[2]}
+
+## Git State
+
+- Source-controlled files changed: none
+- Git state mutated: no
+""".encode()
+            content, metadata = compile_independent_review({"dispatch": dispatch, "limitations": [], "status": "no-findings"}, native)
+            kind = "review"
+        else:
+            payload = {
+                "changes": [],
+                "command_policy_attested": True,
+                "commands_executed": [],
+                "files_inspected": list(dispatch["owned_paths"]) or ["state.rs"],
+                "findings": [],
+                "handoffs": [],
+                "limitations": [],
+                "nearby_contract_owners": [],
+                "status": "no-findings",
+                "validation_requirements": [],
+            }
+            require_schema(payload, SCHEMA_ROOT / "review-payload-v1.schema.json")
+            content, metadata = compile_review({"dispatch": dispatch, "payload": payload})
+            kind = "review"
+        artifact_path = Path(entry["artifact_path"])
+        metadata_path = Path(entry["metadata_path"])
+        artifact_path.write_bytes(content)
+        metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+        sources_by_node[entry["node_id"]] = {"artifact_path": str(artifact_path), "kind": kind, "metadata_path": str(metadata_path)}
+
+    lifecycle = {"plan": _json_plan(plan), "source_state": list(source_state)}
+    journal = proof_store / "execution.jsonl"
+    for node in plan.actual_worker_nodes:
+        append_journal_event(journal, lifecycle, JournalEventRequest(node.node_id, "accepted", source=sources_by_node[node.node_id]))
+    events, _state, _head = read_execution_journal(journal, plan=plan, source_state=source_state)
+    ready = next_ready_nodes({**lifecycle, "current_source_state": list(source_state)}, journal_events=events, dispatch_set=dispatch_set)
+    sources = list(sources_by_node.values())
+    bundle = build_synthesis_bundle({"source_state": list(source_state), "sources": sources})
+    final = finalize_proof({**lifecycle, "current_source_state": list(source_state), "sources": sources})
+
+    assert any(record["mode"] == "independent-review" for record in bundle["records"])
+    assert ready["complete"] is True
+    assert final["repository_validation_status"] == "passed"
+    assert final["graph_proof_status"] == "complete"
+
+
 def test_journal_and_next_ready_cli_use_persisted_artifacts(tmp_path: Path) -> None:
     plan = _sparse_plan()
-    lifecycle_document = {"plan": _json_plan(plan), "source_state": ["scope", "worktree", "repository"]}
+    lifecycle_document = {
+        "current_source_state": ["scope", "worktree", "repository"],
+        "plan": _json_plan(plan),
+        "source_state": ["scope", "worktree", "repository"],
+    }
     dispatch_set = materialize_dispatches(
         {
             "artifact_store": str(tmp_path),
@@ -633,21 +1194,59 @@ def test_journal_and_next_ready_cli_use_persisted_artifacts(tmp_path: Path) -> N
     dispatch_path = tmp_path / "dispatches.json"
     journal_path = tmp_path / "execution.jsonl"
     ready_path = tmp_path / "ready.json"
+    capture_path = tmp_path / "capture.json"
     lifecycle_path.write_text(json.dumps(lifecycle_document), encoding="utf-8")
     dispatch_path.write_text(json.dumps(dispatch_set), encoding="utf-8")
+    capture_path.write_text(
+        json.dumps({"captured_worktree_fingerprint": "worktree", "repository_state_fingerprint": "repository", "scope_fingerprint": "scope"}), encoding="utf-8"
+    )
     started = next(node.node_id for node in plan.actual_worker_nodes if not node.predecessors)
 
     assert main(["journal-append", "--input", str(lifecycle_path), "--journal", str(journal_path), "--node-id", started, "--status", "in-flight"]) == 0
     assert (
-        main(["next-ready", "--input", str(lifecycle_path), "--journal", str(journal_path), "--dispatches", str(dispatch_path), "--output", str(ready_path)])
+        main(
+            [
+                "next-ready",
+                "--input",
+                str(lifecycle_path),
+                "--journal",
+                str(journal_path),
+                "--dispatches",
+                str(dispatch_path),
+                "--current-capture",
+                str(capture_path),
+                "--output",
+                str(ready_path),
+            ]
+        )
         == 0
     )
     ready = json.loads(ready_path.read_text(encoding="utf-8"))
     assert started not in ready["ready_node_ids"]
     assert ready["journal"]["event_count"] == 1
+    assert (
+        main(
+            [
+                "next-ready",
+                "--input",
+                str(lifecycle_path),
+                "--journal",
+                str(journal_path),
+                "--dispatches",
+                str(dispatch_path),
+                "--current-capture",
+                str(capture_path),
+                "--output-dir",
+                str(tmp_path),
+            ]
+        )
+        == 0
+    )
+    generated = json.loads((tmp_path / "next-ready.000001.json").read_text(encoding="utf-8"))
+    assert generated["output_generation"] == 1
 
 
-def _compile_materialized_evidence(tmp_path: Path) -> tuple[GraphPlan, list[dict[str, str]]]:
+def _compile_materialized_evidence(tmp_path: Path, *, resolved_handoff: bool = False) -> tuple[GraphPlan, list[dict[str, str]]]:
     plan = _sparse_plan()
     materialized = materialize_dispatches(
         {
@@ -686,10 +1285,24 @@ def _compile_materialized_evidence(tmp_path: Path) -> tuple[GraphPlan, list[dict
             content, metadata = compile_validation({"dispatch": dispatch, "payload": payload})
             kind = "validation"
         else:
+            handoffs = (
+                [
+                    {
+                        "catalog_id": "rust.invariants",
+                        "observed_trigger": "state transition ownership confirmed",
+                        "reason": "the current plan already selected the owning catalog entry",
+                        "scope": [STATE_FIXTURE],
+                    }
+                ]
+                if resolved_handoff and dispatch["mode"] == "audit"
+                else []
+            )
             payload = {
+                "command_policy_attested": True,
+                "commands_executed": [],
                 "files_inspected": [STATE_FIXTURE],
                 "findings": [],
-                "handoffs": [],
+                "handoffs": handoffs,
                 "limitations": [],
                 "nearby_contract_owners": [],
                 "status": "no-findings",
@@ -708,7 +1321,14 @@ def _compile_materialized_evidence(tmp_path: Path) -> tuple[GraphPlan, list[dict
 def test_artifact_derived_synthesis_and_final_proof_are_verified(tmp_path: Path) -> None:
     plan, sources = _compile_materialized_evidence(tmp_path)
     bundle = build_synthesis_bundle({"source_state": ["scope", "worktree", "repository"], "sources": sources})
-    final = finalize_proof({"plan": _json_plan(plan), "source_state": ["scope", "worktree", "repository"], "sources": sources})
+    final = finalize_proof(
+        {
+            "current_source_state": ["scope", "worktree", "repository"],
+            "plan": _json_plan(plan),
+            "source_state": ["scope", "worktree", "repository"],
+            "sources": sources,
+        }
+    )
 
     assert len(bundle["records"]) == plan.complete_node_count
     assert final["status"] == "complete"
@@ -722,10 +1342,44 @@ def test_artifact_derived_synthesis_and_final_proof_are_verified(tmp_path: Path)
     with pytest.raises(ValueError, match="normalized record does not match"):
         build_synthesis_bundle({"source_state": ["scope", "worktree", "repository"], "sources": sources})
 
+    with pytest.raises(ValueError, match="current recapture differs"):
+        finalize_proof(
+            {
+                "current_source_state": ["scope", "worktree", "changed-repository"],
+                "plan": _json_plan(plan),
+                "source_state": ["scope", "worktree", "repository"],
+                "sources": sources,
+            }
+        )
+
+
+def test_finalizer_reconciles_handoff_already_covered_by_current_plan(tmp_path: Path) -> None:
+    plan, sources = _compile_materialized_evidence(tmp_path, resolved_handoff=True)
+
+    reconciled = reconcile_handoffs({"plan": _json_plan(plan), "source_state": ["scope", "worktree", "repository"], "sources": sources})
+    final = finalize_proof(
+        {
+            "current_source_state": ["scope", "worktree", "repository"],
+            "plan": _json_plan(plan),
+            "source_state": ["scope", "worktree", "repository"],
+            "sources": sources,
+        }
+    )
+
+    assert reconciled["status"] == "resolved"
+    assert reconciled["new_routing_triggers"] == []
+    assert final["status"] == "complete"
+    assert final["proof"]["resolved_handoff_ids"]
+    assert final["proof"]["unresolved_handoff_ids"] == ()
+
 
 def test_append_only_journal_drives_scheduling_and_cascade_invalidation(tmp_path: Path) -> None:
     plan, sources = _compile_materialized_evidence(tmp_path)
-    lifecycle_document = {"plan": _json_plan(plan), "source_state": ["scope", "worktree", "repository"]}
+    lifecycle_document = {
+        "current_source_state": ["scope", "worktree", "repository"],
+        "plan": _json_plan(plan),
+        "source_state": ["scope", "worktree", "repository"],
+    }
     dispatch_set = materialize_dispatches(
         {
             "artifact_store": str(tmp_path),
@@ -804,6 +1458,33 @@ def test_journal_rejects_unverified_acceptance_and_out_of_order_nodes(tmp_path: 
     append_journal_event(journal, lifecycle_document, JournalEventRequest(root.node_id, "in-flight"))
     _events, state, _head = read_execution_journal(journal, plan=plan, source_state=("scope", "worktree", "repository"))
     assert state[root.node_id] == "in-flight"
+
+
+def test_awaiting_replan_is_terminal_for_stale_dispatch_set(tmp_path: Path) -> None:
+    plan, sources = _compile_materialized_evidence(tmp_path)
+    lifecycle = {"current_source_state": ["scope", "worktree", "repository"], "plan": _json_plan(plan), "source_state": ["scope", "worktree", "repository"]}
+    dispatch_set = materialize_dispatches(
+        {
+            "artifact_store": str(tmp_path),
+            "authorization": "review-only",
+            "plan": _json_plan(plan),
+            "repository_root": str(SKILL_ROOT.parents[2]),
+            "source_state": ["scope", "worktree", "repository"],
+            "state_verification_command": "capture_scope.py --mode baseline",
+        }
+    )
+    source_by_node = {json.loads(Path(source["metadata_path"]).read_text(encoding="utf-8"))["evidence"]["node_id"]: source for source in sources}
+    root = next(node for node in plan.actual_worker_nodes if not node.predecessors)
+    journal = tmp_path / "awaiting-replan.jsonl"
+    append_journal_event(journal, lifecycle, JournalEventRequest(root.node_id, "accepted", source=source_by_node[root.node_id]))
+    append_journal_event(journal, lifecycle, JournalEventRequest(root.node_id, "awaiting-replan", reason="repair epoch changed source state"))
+    events, _state, _head = read_execution_journal(journal, plan=plan, source_state=("scope", "worktree", "repository"))
+
+    ready = next_ready_nodes(lifecycle, journal_events=events, dispatch_set=dispatch_set)
+
+    assert root.node_id not in ready["ready_node_ids"]
+    assert root.node_id in ready["lifecycle"]["awaiting_replan_node_ids"]
+    assert any("fresh plan" in blocker for blocker in ready["blockers"])
 
 
 def test_ordinary_validator_and_all_surface_prompt_budgets() -> None:

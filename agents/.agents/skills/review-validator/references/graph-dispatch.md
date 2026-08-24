@@ -14,7 +14,8 @@ Require:
 - execution location and fresh-context identity
 - exact commands, corresponding working directories, environment, toolchain,
   features, platform, artifact owner, and mutation lock
-- approved artifact paths, kinds, and repository status
+- approved artifacts with status provenance; exact effects, isolation, and
+  snapshot policy
 - dependency policy and elapsed bounds
 
 Return `blocked` for any missing field. Do not fall through to standalone
@@ -22,7 +23,7 @@ discovery.
 
 ## Execution
 
-1. Verify source state before execution.
+1. Snapshot relevant filesystem/Git state; verify source state.
 2. Recheck that every dispatched command is non-mutating under repository-owned
    definitions or policy.
 3. Execute each command exactly once in order. Respect `stop-on-failure` or
@@ -30,8 +31,9 @@ discovery.
 4. Record command, working directory, executor, result, exit code, elapsed time,
    concise output evidence, and approved artifact paths.
 5. Compute approved artifact content digests.
-6. Verify source state after execution. Any source or Git-state change makes the
-   result `blocked`.
+6. Repeat both snapshot and state checks. Block unexpected tracked, untracked,
+   or ignored output and source/Git mutation. Return snapshots beside, not
+   inside, the payload.
 
 Do not review code, diagnose findings, edit, install substitute toolchains,
 change dependencies, re-plan, or create another worker.
@@ -60,7 +62,7 @@ Return one JSON object and no compatibility Markdown:
       "path": "/exact/path",
       "artifact_id": null,
       "artifact_digest": "sha256:<digest>",
-      "kind": "build | cache | coverage | log | other",
+      "kind": "build | cache | coverage | log | report | test-result | other",
       "repository_status": "ignored | outside-repository"
     }
   ],

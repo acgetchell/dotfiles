@@ -57,5 +57,8 @@ serialization; it never permits applicable coverage to disappear.
 
 Accepted review payloads report newly observed applicability with `catalog_id`,
 trigger evidence, reason, and exact paths. Add the corresponding sparse override
-and replan before dependent validation or synthesis. After fixes, rerun routing
-only for changed surfaces plus repository classification.
+only after `review_graph_runtime.py reconcile-handoffs` reports it in
+`new_routing_triggers`. Handoffs already selected, exactly reused, or explicitly
+excluded are resolved by the current plan. Replan genuine triggers before
+dependent validation or synthesis. After fixes, rerun routing only for changed
+surfaces plus repository classification.

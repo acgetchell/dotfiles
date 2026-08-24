@@ -25,6 +25,12 @@ closure, path validation, coalescing, epochs, acceptance, resume, and completion
 
 ## Routing Inputs
 
+`references/schemas/planning-input-v1.schema.json` is the versioned public
+input schema. Build it with `scripts/review_graph_bootstrap.py`, which merges the
+trusted `capture_scope.py` manifest, binds every validation requirement to the
+captured fingerprint triple, and returns aggregate JSON-path diagnostics before
+planning. Do not discover required capture fields by retrying planner failures.
+
 Load `routing-catalog.json` under one or more approved skill roots. Validate for
 every catalog entry:
 
@@ -212,6 +218,7 @@ environment and toolchain
 features/configuration and platform
 artifact owner
 mutation/locking compatibility
+expected workspace effects and isolation requirement
 ```
 
 Map every validation requirement to exactly one unit and accepted execution or
@@ -239,11 +246,12 @@ Before and after every dispatch, verify all three source fingerprints. After an
 accepted audit or independent result, validate every routing handoff. A handoff
 is closed only when its catalog decision becomes selected, exact-reused, or
 explicitly user-excluded. Replan the complete remaining graph and epochs before
-dependent synthesis. In a proof attempt, `unresolved_handoff_ids` must equal the
-globally unique ordered concatenation of handoff IDs in accepted review
-evidence; a nonempty tuple blocks completion. After rerouting closes those
-discoveries, regenerate the affected accepted evidence without unresolved
-handoffs before final proof.
+dependent synthesis. Reconcile each accepted handoff against the exact routing
+ledger: selected, exactly reused, and explicitly user-excluded catalog entries
+become `resolved_handoff_ids`; only genuinely new triggers remain in
+`unresolved_handoff_ids`. The two disjoint sets together equal the globally
+unique handoff IDs in accepted review evidence, and any unresolved ID blocks
+completion.
 
 After an authorized fix, persist the S0→S1 fix and revalidation reports,
 recapture S1 fingerprints, invalidate affected S0 reports, rerun repository and
@@ -252,6 +260,12 @@ Add newly applicable skills and rerun affected audit, validation, independent
 review, and synthesis. Record stale, transition, and replacement evidence in
 invalidation history rather than overwriting history or importing S0→S1 nodes
 into the S1 proof.
+
+Use `advance-after-mutation` for this transition. It records the serialized
+repair epoch, accepts exactly one new capture, routes newly touched paths, moves
+stale old-plan nodes to terminal `awaiting-replan`, and emits replacement
+identities with lineage. Old immutable dispatches cannot be scheduled from that
+state.
 
 Derive the final `repository-production-review` synthesis edges in the planner.
 It must depend on every selected non-repository synthesis node in addition to

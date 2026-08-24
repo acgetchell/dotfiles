@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import shutil
+import subprocess
 import sys
 import tomllib
 from collections.abc import Mapping
@@ -344,8 +345,10 @@ class ValidationArtifact:
     path: str
     kind: str
     repository_status: str
+    status_source: str
     artifact_id: str | None = None
     artifact_digest: str | None = None
+    status_rule: str | None = None
 
 
 @dataclass(frozen=True)
@@ -381,6 +384,8 @@ class ValidationRequirement:
     evidence_id: str | None = None
     required: bool = True
     baseline: bool = False
+    expected_workspace_effects: tuple[str, ...] = ()
+    requires_isolation: bool = False
 
 
 @dataclass(frozen=True)
@@ -414,6 +419,8 @@ class ValidationUnit:
     required: bool
     baseline: bool
     requirement_requests: tuple[tuple[str, str], ...] = ()
+    expected_workspace_effects: tuple[str, ...] = ()
+    requires_isolation: bool = False
 
 
 @dataclass(frozen=True)
@@ -642,6 +649,7 @@ class RepositoryReviewProof:
     artifact_manifest_id: str
     artifact_manifest_digest: str
     verifier_id: str
+    resolved_handoff_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1647,6 +1655,8 @@ def _validation_group_key(item: ValidationRequirement) -> tuple[object, ...]:
         item.independence_basis,
         item.planning_blocker,
         item.allowed_artifacts,
+        item.expected_workspace_effects,
+        item.requires_isolation,
     )
 
 
@@ -1692,8 +1702,9 @@ def coalesce_validation_requirements(requirements: Sequence[ValidationRequiremen
             or any(
                 not _nonempty_text(artifact.path)
                 or len(artifact.path) > MAX_NATIVE_IDENTIFIER_LENGTH
-                or artifact.kind not in {"build", "cache", "coverage", "log", "other"}
+                or artifact.kind not in {"build", "cache", "coverage", "log", "other", "report", "test-result"}
                 or artifact.repository_status not in {"ignored", "outside-repository"}
+                or artifact.status_source not in {"isolated-output-directory", "repository-rule"}
                 or (artifact.artifact_id is not None and (not _nonempty_text(artifact.artifact_id) or len(artifact.artifact_id) > MAX_NATIVE_IDENTIFIER_LENGTH))
                 or (artifact.artifact_digest is not None and _SHA256_DIGEST_RE.fullmatch(artifact.artifact_digest) is None)
                 for artifact in item.allowed_artifacts
@@ -1748,6 +1759,8 @@ def coalesce_validation_requirements(requirements: Sequence[ValidationRequiremen
             required=any(item.required or item.baseline for item in members),
             baseline=any(item.baseline for item in members),
             requirement_requests=tuple((item.requirement_id, item.request) for item in members),
+            expected_workspace_effects=first.expected_workspace_effects,
+            requires_isolation=first.requires_isolation,
         )
         units.append(unit)
         mappings.extend(ValidationEvidenceMapping(item.requirement_id, node_id, item.evidence_id) for item in members)
@@ -2709,7 +2722,9 @@ def _validation_reused_evidence_blockers(body: str, expectation: ValidationEvide
     return tuple(blockers)
 
 
-def _validation_artifact_blockers(body: str, expectation: ValidationEvidenceExpectation) -> tuple[tuple[ValidationArtifact, ...], tuple[str, ...]]:
+def _validation_artifact_blockers(  # noqa: C901
+    body: str, expectation: ValidationEvidenceExpectation
+) -> tuple[tuple[ValidationArtifact, ...], tuple[str, ...]]:
     expected = expectation.validation_unit.allowed_artifacts
     if not expected:
         blockers = () if body == "none" else ("native validation result claims artifacts absent from its dispatch",)
@@ -2721,7 +2736,7 @@ def _validation_artifact_blockers(body: str, expectation: ValidationEvidenceExpe
     reported: list[ValidationArtifact] = []
     for (path, record_body), approved in zip(records, expected, strict=False):
         fields, field_blockers = _native_record_fields(
-            record_body, section=f"Artifact {path}", labels=("Artifact ID", "Artifact digest", "Kind", "Repository status")
+            record_body, section=f"Artifact {path}", labels=("Artifact ID", "Artifact digest", "Kind", "Repository status", "Status source", "Status rule")
         )
         blockers.extend(field_blockers)
         artifact_id = fields.get("Artifact ID")
@@ -2734,6 +2749,8 @@ def _validation_artifact_blockers(body: str, expectation: ValidationEvidenceExpe
             blockers.append(f"native validation result artifact {path} has an invalid artifact ID")
         if fields.get("Kind") != approved.kind or fields.get("Repository status") != approved.repository_status:
             blockers.append(f"native validation result artifact {path} does not match its approved kind and repository status")
+        if fields.get("Status source") != approved.status_source or fields.get("Status rule") != (approved.status_rule or "none"):
+            blockers.append(f"native validation result artifact {path} does not match its verified repository-status provenance")
         if approved.artifact_id is not None and artifact_id != approved.artifact_id:
             blockers.append(f"native validation result artifact {path} does not match its approved artifact ID")
         if approved.artifact_digest is not None and artifact_digest != approved.artifact_digest:
@@ -2745,6 +2762,8 @@ def _validation_artifact_blockers(body: str, expectation: ValidationEvidenceExpe
                 repository_status=fields.get("Repository status", ""),
                 artifact_id=artifact_id,
                 artifact_digest=artifact_digest,
+                status_source=fields.get("Status source", ""),
+                status_rule=None if fields.get("Status rule") == "none" else fields.get("Status rule"),
             )
         )
     reported_ids = tuple(artifact.artifact_id for artifact in reported if artifact.artifact_id is not None)
@@ -3615,7 +3634,11 @@ def assess_repository_review_proof(  # noqa: C901
         if actual != expected:
             blockers.append(f"repository review proof {label} do not match the planner-derived expectation")
     blockers.extend(_identifier_tuple_blockers(proof.stale_evidence_ids, label="stale evidence IDs"))
+    blockers.extend(_identifier_tuple_blockers(proof.resolved_handoff_ids, label="resolved handoff IDs"))
     blockers.extend(_identifier_tuple_blockers(proof.unresolved_handoff_ids, label="unresolved handoff IDs"))
+    handoff_overlap = tuple(sorted(set(proof.resolved_handoff_ids) & set(proof.unresolved_handoff_ids)))
+    if handoff_overlap:
+        blockers.append("repository review proof handoffs cannot be both resolved and unresolved: " + ", ".join(handoff_overlap))
     blockers.extend(_planned_node_mapping_blockers(expectation, proof))
     reused_requirement_ids = {requirement_id for requirement_id, _ in expectation.exact_reused_review_evidence}
     proof_reuse_mapping = tuple(
@@ -3660,8 +3683,9 @@ def _review_bundle_blockers(  # noqa: C901, PLR0912
     )
     if _duplicate_values(accepted_handoff_ids):
         blockers.append("accepted review evidence handoff IDs must be globally unique")
-    if proof.unresolved_handoff_ids != accepted_handoff_ids:
-        blockers.append("repository review proof unresolved handoffs do not equal accepted review evidence handoffs")
+    accounted_handoff_ids = tuple(sorted((*proof.resolved_handoff_ids, *proof.unresolved_handoff_ids)))
+    if accounted_handoff_ids != tuple(sorted(accepted_handoff_ids)):
+        blockers.append("repository review proof resolved and unresolved handoffs do not equal accepted review evidence handoffs")
     extra_ids = sorted(set(by_id) - set(proof.accepted_review_evidence_ids))
     if extra_ids:
         blockers.append("review bundle contains evidence not accepted by the proof: " + ", ".join(extra_ids))
@@ -4698,7 +4722,74 @@ def _source_state_field(item: Mapping[str, Any]) -> tuple[str, str, str]:
     return scope, worktree, repository
 
 
-def _allowed_artifacts_field(item: Mapping[str, Any]) -> tuple[ValidationArtifact, ...]:
+def _verified_artifact_status(  # noqa: C901, PLR0912, PLR0915
+    path: str, repository_status: str, repository_root: Path | None
+) -> tuple[str, str | None]:
+    """Verify artifact isolation against repository-owned Git policy."""
+    if not path.strip() or "\n" in path:
+        msg = "allowed artifact path must be one non-empty line"
+        raise ValueError(msg)
+    candidate = Path(path)
+    if repository_status == "outside-repository":
+        if not candidate.is_absolute():
+            msg = f"outside-repository artifact path must be absolute: {path}"
+            raise ValueError(msg)
+        resolved = candidate.resolve(strict=False)
+        if repository_root is not None and resolved.is_relative_to(repository_root):
+            msg = f"artifact declared outside-repository is inside the captured repository: {path}"
+            raise ValueError(msg)
+        return "isolated-output-directory", None
+    if repository_status != "ignored":
+        msg = f"unsupported artifact repository_status {repository_status}"
+        raise ValueError(msg)
+    if repository_root is None:
+        msg = f"ignored artifact status requires a trusted repository_root: {path}"
+        raise ValueError(msg)
+    resolved = (candidate if candidate.is_absolute() else repository_root / candidate).resolve(strict=False)
+    if not resolved.is_relative_to(repository_root):
+        msg = f"ignored artifact path is outside the captured repository: {path}"
+        raise ValueError(msg)
+    relative = resolved.relative_to(repository_root).as_posix()
+    git = shutil.which("git")
+    if git is None:
+        msg = "artifact status verification requires Git"
+        raise ValueError(msg)
+    result: subprocess.CompletedProcess[str] | None = None
+    for probe in (relative, relative.rstrip("/") + "/.review-graph-generated-descendant"):
+        current = subprocess.run(  # noqa: S603 - resolved Git executable and fixed arguments only.
+            [git, "-C", str(repository_root), "check-ignore", "--no-index", "-v", "--", probe], capture_output=True, check=False, text=True, timeout=30
+        )
+        if current.returncode == 0 and current.stdout.strip():
+            result = current
+            break
+    if result is None:
+        msg = f"artifact declared ignored is not ignored by repository policy: {path}"
+        raise ValueError(msg)
+    provenance, separator, _reported_path = result.stdout.strip().partition("\t")
+    provenance_match = re.fullmatch(r"(.+):(\d+):(.*)", provenance)
+    if not separator or provenance_match is None or not provenance_match.group(3):
+        msg = f"could not parse Git ignore provenance for artifact: {path}"
+        raise ValueError(msg)
+    source = provenance_match.group(1)
+    source_path = (repository_root / source).resolve(strict=False) if not Path(source).is_absolute() else Path(source).resolve(strict=False)
+    repository_exclude = (repository_root / ".git" / "info" / "exclude").resolve(strict=False)
+    if source_path == repository_exclude:
+        msg = f"ignored artifact relies on repository-local exclude rather than a tracked rule: {path}"
+        raise ValueError(msg)
+    if not source_path.is_relative_to(repository_root) or source_path.name != ".gitignore":
+        msg = f"ignored artifact relies on a user-global exclude rather than a repository rule: {path}"
+        raise ValueError(msg)
+    source_relative = source_path.relative_to(repository_root).as_posix()
+    tracked = subprocess.run(  # noqa: S603 - resolved Git executable and fixed arguments only.
+        [git, "-C", str(repository_root), "ls-files", "--error-unmatch", "--", source_relative], capture_output=True, check=False, text=True, timeout=30
+    )
+    if tracked.returncode != 0:
+        msg = f"ignored artifact relies on an untracked repository rule: {path}"
+        raise ValueError(msg)
+    return "repository-rule", provenance
+
+
+def _allowed_artifacts_field(item: Mapping[str, Any], repository_root: Path | None) -> tuple[ValidationArtifact, ...]:
     value = item.get("allowed_artifacts", [])
     required_keys = {"kind", "path", "repository_status"}
     optional_keys = {"artifact_digest", "artifact_id"}
@@ -4718,7 +4809,18 @@ def _allowed_artifacts_field(item: Mapping[str, Any]) -> tuple[ValidationArtifac
         if (artifact_id is not None and not isinstance(artifact_id, str)) or (artifact_digest is not None and not isinstance(artifact_digest, str)):
             msg = "allowed_artifacts artifact_id and artifact_digest must be strings or null"
             raise ValueError(msg)
-        result.append(ValidationArtifact(path=path, kind=kind, repository_status=repository_status, artifact_id=artifact_id, artifact_digest=artifact_digest))
+        status_source, status_rule = _verified_artifact_status(path, repository_status, repository_root)
+        result.append(
+            ValidationArtifact(
+                path=path,
+                kind=kind,
+                repository_status=repository_status,
+                artifact_id=artifact_id,
+                artifact_digest=artifact_digest,
+                status_source=status_source,
+                status_rule=status_rule,
+            )
+        )
     return tuple(result)
 
 
@@ -5157,11 +5259,18 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0915
             execution_strategy=_bounded_text_field(item, "execution_strategy"),
             independence_basis=_bounded_text_field(item, "independence_basis"),
             planning_blocker=_optional_bounded_text_field(item, "planning_blocker"),
-            allowed_artifacts=_allowed_artifacts_field(item),
+            allowed_artifacts=_allowed_artifacts_field(item, repository_root),
             canonical_recipe=_optional_bounded_text_field(item, "canonical_recipe"),
             evidence_id=_optional_bounded_text_field(item, "evidence_id"),
             required=_boolean_field(item, "required", default=True, label=f"validation requirement {item.get('requirement_id', '<unknown>')} required"),
             baseline=_boolean_field(item, "baseline", default=False, label=f"validation requirement {item.get('requirement_id', '<unknown>')} baseline"),
+            expected_workspace_effects=_normalized_repository_paths(
+                _tuple_field(item, "expected_workspace_effects"),
+                label=f"validation requirement {item.get('requirement_id', '<unknown>')} expected_workspace_effects",
+            ),
+            requires_isolation=_boolean_field(
+                item, "requires_isolation", default=False, label=f"validation requirement {item.get('requirement_id', '<unknown>')} requires_isolation"
+            ),
         )
         for item in document.get("validation_requirements", [])
     )

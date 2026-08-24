@@ -29,6 +29,14 @@ Keep adaptive grouped execution as the default while it:
   lifecycle journal whose accepted events reference verified artifacts
 - keeps ordinary worker context within checked prompt budgets while retaining
   full provenance in the proof store
+- publishes versioned planning/review/validation schemas and aggregates boundary
+  diagnostics without coordinator field normalization
+- compiles every planned mode, including conclusion-blind independent review,
+  through an artifact-backed journal path
+- prevents validator-command duplication, verifies workspace effects, and
+  safely shares only read-only observations between semantic leaves
+- recaptures before readiness and finalization; mutation epochs end in a fresh
+  plan or terminal `awaiting-replan`, never stale redispatch
 
 An adaptive review is incomplete when an applicable requirement, required
 validator, or unresolved handoff is silently omitted. It is still useful when a
