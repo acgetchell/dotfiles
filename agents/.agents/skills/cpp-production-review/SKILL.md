@@ -24,6 +24,8 @@ skill after focused review groups.
 - In a `review-graph` synthesis node, remain read-only and evidence-only. Do not
   edit, run validators, route work, or create subagents. Return missing or stale
   validation as an exact blocker for the coordinator.
+- Consume the compiler-produced compact `SynthesisBundle`; do not request or
+  load complete predecessor artifacts.
 
 ### Standalone broad review
 

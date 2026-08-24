@@ -9,7 +9,15 @@ Audit documentation that teaches callers how to use a C++ API safely and correct
 
 ## Scope
 
-Use changed public or cross-module documentation by default. Include nearby declarations, implementations, examples, bindings, and generated-doc configuration only as needed to establish the contract. Use whole-repository mode only when explicitly requested.
+Review public or cross-module documentation in the supplied scope. Include
+nearby declarations, implementations, examples, bindings, and generated-doc
+configuration only as needed to establish the contract.
+
+When invoked directly without an exact parent scope, validation ledger, and
+result contract, read
+[`references/standalone-workflow.md`](references/standalone-workflow.md).
+Documentation, C++ orchestrator, and review-graph dispatches already own that
+information.
 
 Follow the repository's declared C++ standard and support matrix. When none is declared, treat C++23 as the working baseline and report the missing build contract; do not introduce C++26 documentation claims without an explicit repository decision.
 
@@ -92,19 +100,3 @@ Route example assertion and matrix quality to `cpp-test-quality`.
 Treat Doxygen, Sphinx/Breathe, or another configured generator as the renderer, not the source of truth. Check warnings, broken references, missing inputs, duplicate anchors, undocumented public members according to policy, stale navigation, and generated-file ownership.
 
 Do not hand-edit generated HTML, XML, tag files, or checked-in derived pages. Fix comments, configuration, templates, or source navigation and regenerate through the repository command.
-
-## Validation
-
-Prefer repository commands. Relevant focused evidence includes:
-
-- documentation generation with warnings treated according to policy
-- link and navigation checks
-- compilation and execution of canonical examples
-- minimal external consumers for include/import or feature claims
-- supported compiler variants when documentation describes portability-sensitive behavior
-
-Record unavailable generators, platforms, or compilers as limitations rather than implied passes.
-
-## Output
-
-Lead with misleading safety, lifetime, failure, concurrency, or portability contracts. Then report missing public coverage, discoverability and rendering failures, example problems, source-owner handoffs, validators run, and remaining evidence gaps.

@@ -9,7 +9,10 @@ Evaluate whether tests prove behavior and risk contracts rather than merely exec
 
 ## Scope And Boundaries
 
-Use changed-code mode by default and whole-repository mode only when requested.
+Review tests and fixtures in the supplied scope. When invoked directly without
+an exact parent scope, validation ledger, and result contract, read
+[`references/standalone-workflow.md`](references/standalone-workflow.md).
+Review-graph and Python-orchestrator dispatches already own that information.
 
 - Own pytest structure, fixtures, assertions, parametrization, properties, test determinism, regression evidence, and test-layer configuration here.
 - Let CLI, parsing, scientific, support, notebook, build, and production specialists define their domain contracts.
@@ -78,36 +81,3 @@ Let `python-build-portability` choose the meaningful matrix. Own whether the res
 Use uncovered lines as prompts, not goals. Prioritize public behavior, error paths, parsers, state transitions, file/process effects, configuration branches, and historical bugs. Skip or justify exclusion of unreachable defensive code, impractical platform fallbacks, debug-only paths, and boilerplate dispatch.
 
 Use `# pragma: no cover` or branch exclusions sparingly and with a reason. Route report-driven gap discovery to `codecov-test-gaps`.
-
-## Validation
-
-Maintain a validation ledger keyed by the relevant source and environment
-state, built artifact, Python version, platform, dependency/configuration set,
-instrumentation, and exact pytest or other test selection. Inspect repository
-recipes before execution, decide whether repository policy or the known scope
-requires an indivisible full gate, and reuse still-valid evidence.
-
-Choose the smallest single selection that proves the touched risk. Do not run
-a named pytest case and then its containing class, module, suite, and full CI as
-successive tiers. If a broader validator is independently required, choose it
-initially or run only the portion not already recorded as passing.
-
-If an indivisible policy-mandated gate is discovered only after overlapping
-tests have passed and it offers no reliable exclusion, report the validation
-and command-surface conflict and route it to `project-tooling-review`; do not
-silently replay the tests or count the duplicate execution as new evidence.
-
-Rerun a test only after relevant source, fixture, dependency, environment, or
-configuration changes invalidate its result, or when diagnosing
-nondeterminism. A different supported Python version, platform, optional
-dependency set, subprocess environment, async backend, or instrumentation mode
-is distinct evidence. Repeated Hypothesis, stochastic, concurrency, or
-benchmark samples are distinct only when repetition is part of the stated test
-design; record the seed or sample purpose.
-
-Report the non-overlapping ledger, seeds or generated counterexamples, skipped
-environments, justified reruns, and whether failures reproduce independently.
-
-## Output
-
-State PASS, NEEDS IMPROVEMENT, or FAIL. Order findings by behavioral risk. For each, identify the unproven contract, why existing evidence can pass incorrectly, and a concrete Given/When/Then scenario or property to add. Report validation and environment limitations.

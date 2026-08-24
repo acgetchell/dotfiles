@@ -22,7 +22,11 @@ Use uv as the build frontend while auditing the configured `[build-system]` back
 
 ## Scope
 
-Use changed-code mode by default. Inspect changed packaging, imports, configuration, native boundaries, and directly related tests. Use whole-repository mode only for an explicit baseline or release-readiness audit.
+Inspect packaging, imports, configuration, native boundaries, and directly
+related tests in the supplied scope. When invoked directly without an exact
+parent scope, validation ledger, and result contract, read
+[`references/standalone-workflow.md`](references/standalone-workflow.md).
+Review-graph and Python-orchestrator dispatches already own that information.
 
 Derive supported Python versions, operating systems, architectures, and dependency modes from `pyproject.toml`, documentation, workflows, and release policy. Do not invent support the project does not claim.
 
@@ -96,22 +100,3 @@ Check console/plugin entry points, public imports, optional-feature failures, me
 For native components, check wheel tags, ABI/runtime requirements, shared-library discovery, build isolation, representation boundaries, and explicit unsupported-platform failures. Route native algorithm correctness to the owning language specialist.
 
 Exercise only the configurations needed to distinguish the risk. Use uv's interpreter/environment selection rather than adding a second matrix runner, and record unavailable runtimes or platforms as evidence gaps.
-
-## Focused Validation
-
-Prefer repository recipes. Otherwise select from:
-
-- `uv lock --check`
-- `uv run --locked ruff check .`
-- `uv run --locked ruff format --check .`
-- `uv run --locked ty check`
-- `uv build`
-- artifact inspection followed by an isolated uv wheel install
-- external import, entry-point, extra, and package-resource smoke tests
-- a targeted supported-Python or platform configuration through uv
-
-Do not upgrade dependencies or rewrite the lockfile unless the user requested that change. Request approval when uv needs unavailable network access or cache writes outside the sandbox.
-
-## Output
-
-Lead with build or portability blockers. For each finding, identify the affected artifact/configuration, the declared contract, and the smallest correction. End with uv/Ruff/ty commands run, artifacts and configurations validated, external-consumer evidence, remaining matrix gaps, and tooling or test-quality handoffs.

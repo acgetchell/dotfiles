@@ -1,5 +1,9 @@
 # Complete Review Graph Planning
 
+This is a maintainer-facing planner specification. Ordinary review execution
+uses `runtime-contract.md` and the planner CLI; do not load this file unless
+changing planning behavior or diagnosing a rejected plan.
+
 Use this contract to build the complete evidence graph for every execution
 profile. Adaptive grouped execution may place a node in a worker or the
 coordinator; isolated execution additionally partitions fresh-worker epochs.
@@ -31,9 +35,12 @@ every catalog entry:
 - existing required static references
 - at least one semantic trigger
 
-Obtain one routing decision per entry owned by every consulted router. Reject
-missing, duplicated, unknown, or unconsulted entries. Require decisions to
-match the catalog router, rule, skill, and resolved path exactly.
+Accept sparse semantic `routing_overrides` from consulted routers. Expand them
+deterministically into one routing decision per owned catalog entry before
+closure validation. The planner derives router, rule, skill, resolved path,
+priority, requirement, and synthesis identity; sparse inputs containing those
+catalog-owned fields are rejected. After expansion, reject missing, duplicated,
+unknown, unconsulted, or mismatched entries exactly as before.
 
 Selected leaves require a concrete scope, evidence, reason, priority, owners,
 references, validators, and synthesis dependency. Convert every selected leaf
@@ -323,9 +330,10 @@ the explicitly narrowed request and must remain visible in limitations.
 
 ## Deterministic Dry Run
 
-Use a portable JSON input whose skill paths are `$SKILLS_ROOT/...` or exact
-absolute paths. Prefer exhaustive `consulted_routers` plus `routing_decisions`;
-legacy `review_requirements` are accepted only for isolated planner fixtures.
+Use a portable JSON input with `consulted_routers` plus sparse
+`routing_overrides`. The planner derives skill paths from the catalog and
+expands the exhaustive ledger. Full `routing_decisions` remain accepted for
+compatibility; legacy `review_requirements` are test-fixture-only.
 
 Use a repository-owned `just` recipe when one wraps this dry run. Otherwise,
 run the following from `agents/.agents/skills/review-graph`:

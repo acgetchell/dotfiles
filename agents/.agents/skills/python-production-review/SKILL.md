@@ -25,6 +25,8 @@ review evidence.
   edit, run validators, route work, load another review skill, or create
   subagents. Return missing or stale validation as an exact blocker for the
   coordinator.
+- Consume the compiler-produced compact `SynthesisBundle`; do not request or
+  load complete predecessor artifacts.
 
 ### Standalone Mode
 

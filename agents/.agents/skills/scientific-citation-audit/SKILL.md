@@ -30,19 +30,9 @@ Use this skill to verify that a scientific repository credits the right work and
 
 ## DOI Metadata Check
 
-Run the bundled checker when auditing Markdown references with DOI labels:
-
-```bash
-uv run <skill-directory>/scripts/validate_reference_dois.py REFERENCES.md
-```
-
-Resolve `<skill-directory>` from the loaded `SKILL.md`. When the active repository does not use `uv`, run the dependency-free script through its documented isolated Python environment rather than installing into a system interpreter.
-
-The script extracts DOI labels from Markdown, queries DOI content negotiation for CSL JSON metadata, and compares the resolved title against the surrounding bibliography entry. Use `--json` for machine-readable output.
-
-Network access is required. If the environment blocks network calls, request approval/escalation and explain that citation validation must query DOI/Crossref/publisher metadata.
-
-A passing network check is not enough. Manually inspect low-confidence matches, primary algorithm references, and every citation that supports a scientific or implementation claim.
+Read [`references/doi-validation.md`](references/doi-validation.md) only when
+auditing Markdown DOI labels or verifying DOI metadata. A live link alone is
+not evidence that the citation identifies the claimed work.
 
 ## Domain References
 
@@ -50,38 +40,10 @@ Read [`references/computational-geometry.md`](references/computational-geometry.
 
 ## Editing Guidance
 
-When fixing references:
+When citation fixes are explicitly authorized, read
+[`references/editing-workflow.md`](references/editing-workflow.md) before
+editing. Do not load it for review-only work.
 
-- Preserve the repository's existing reference format.
-- Prefer DOI links only after verifying DOI metadata matches the cited work.
-- Use angle links or percent-encoded URLs when DOI strings contain parentheses or other Markdown-sensitive characters.
-- Keep `REFERENCES.md` as the bibliography owner, but add local source/doc pointers near the algorithm that uses the citation.
-- Do not update generated changelogs by hand.
-
-## Output Format
-
-### Citation Surface Inspected
-
-- Files and active docs reviewed.
-
-### Mechanical Validation
-
-- DOI/link validation command and result.
-- Dead, malformed, or metadata-mismatched references.
-
-### Credit Alignment
-
-- Algorithm/data-structure claims with correct credit.
-- Missing, weak, or misplaced credit.
-
-### Changes Made
-
-- Files edited and why.
-
-### Validation
-
-- Documentation/config validator run, or reason it was not run.
-
-### Follow-ups
-
-- Optional literature additions, paper-reading tasks, or citation questions left for the maintainer.
+When invoked directly without an exact parent result contract, read
+[`references/standalone-report.md`](references/standalone-report.md).
+Review-graph and documentation-orchestrator dispatches already own reporting.

@@ -413,6 +413,7 @@ class ValidationUnit:
     evidence_ids: tuple[str, ...]
     required: bool
     baseline: bool
+    requirement_requests: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -478,6 +479,7 @@ class GraphPlan:
     captured_path_line_bounds: tuple[tuple[str, int], ...]
     routing_catalog_closed: bool
     consulted_routers: tuple[str, ...]
+    routing_decisions: tuple[RoutingDecision, ...]
     exact_reused_review_evidence: tuple[tuple[str, str], ...]
     reused_review_identities: tuple[ReusedReviewEvidencePlan, ...]
     user_excluded_catalog_ids: tuple[str, ...]
@@ -1362,6 +1364,192 @@ def classify_repository_paths(paths: Sequence[str], *, release_readiness: bool =
     return {surface: tuple(sorted(values)) for surface, values in signals.items() if values}
 
 
+_COMPACT_ROUTING_OVERRIDE_FIELDS = frozenset(
+    {
+        "applicability_evidence",
+        "catalog_id",
+        "disposition",
+        "evidence_id",
+        "instruction_paths",
+        "owners",
+        "reason",
+        "review_surface",
+        "static_references",
+        "validation_requirement_ids",
+    }
+)
+
+
+def expand_compact_routing(  # noqa: C901, PLR0912, PLR0913, PLR0915
+    catalog: Sequence[RoutingCatalogEntry],
+    *,
+    consulted_routers: Sequence[str],
+    captured_paths: Sequence[str],
+    overrides: Sequence[Mapping[str, Any]],
+    instruction_paths: Sequence[str] = (),
+    change_target: str | None = None,
+    release_readiness: bool = False,
+) -> tuple[RoutingDecision, ...]:
+    """Expand sparse semantic routing choices into the exhaustive trusted ledger.
+
+    Catalog-owned identity fields are always derived here. Reviewers only need to
+    return semantic exceptions: selected leaves, exclusions, blockers, or exact
+    evidence reuse. Unmentioned leaf candidates become explicit not-applicable
+    records, while repository classifier signals and required synthesis nodes are
+    selected deterministically.
+    """
+    consulted = tuple(dict.fromkeys(consulted_routers))
+    if REPOSITORY_ROUTER_ID not in consulted:
+        msg = f"compact routing must consult {REPOSITORY_ROUTER_ID}"
+        raise ValueError(msg)
+    normalized_paths = tuple(str(PurePosixPath(path)) for path in captured_paths)
+    signals = classify_repository_paths(normalized_paths, release_readiness=release_readiness)
+    override_ids = tuple(str(item.get("catalog_id", "")) for item in overrides)
+    _validate_unique_ids(override_ids, label="compact routing overrides")
+    catalog_by_id = {entry.catalog_id: entry for entry in catalog}
+    active_entries = tuple(entry for entry in catalog if entry.router_id in consulted)
+    active_ids = {entry.catalog_id for entry in active_entries}
+    unknown = sorted(set(override_ids) - active_ids)
+    if unknown:
+        msg = "compact routing overrides reference unconsulted or unknown catalog IDs: " + ", ".join(unknown)
+        raise ValueError(msg)
+    overrides_by_id: dict[str, Mapping[str, Any]] = {}
+    for item in overrides:
+        unexpected = sorted(set(item) - _COMPACT_ROUTING_OVERRIDE_FIELDS)
+        if unexpected:
+            msg = f"compact routing override {item.get('catalog_id', '<unknown>')} contains catalog-owned fields: {', '.join(unexpected)}"
+            raise ValueError(msg)
+        overrides_by_id[str(item["catalog_id"])] = item
+
+    signal_paths = {
+        surface: tuple(dict.fromkeys(value.split(":", 1)[0] for value in evidence if not value.startswith("<"))) for surface, evidence in signals.items()
+    }
+    decisions: list[RoutingDecision] = []
+    for entry in active_entries:
+        override = overrides_by_id.get(entry.catalog_id)
+        selected_by_classifier = entry.router_id == REPOSITORY_ROUTER_ID and entry.layer == "repository" and entry.surface in signals
+        selected_independent = entry.target_kind == "independent" and bool(change_target)
+        selected_synthesis = entry.target_kind == "synthesis"
+        default_selected = selected_by_classifier or selected_independent or selected_synthesis
+        disposition = str(override.get("disposition")) if override is not None else ("selected" if default_selected else "not-applicable")
+
+        if override is not None:
+            reason = str(override.get("reason", ""))
+            applicability_evidence = tuple(str(value) for value in override.get("applicability_evidence", ()))
+        elif selected_by_classifier:
+            reason = f"deterministic repository classifier selected the {entry.surface} surface"
+            applicability_evidence = signals[entry.surface]
+        elif selected_independent:
+            reason = "captured scope has a concrete change target requiring independent review"
+            applicability_evidence = (change_target or "concrete change target",)
+        elif selected_synthesis:
+            reason = f"{entry.router_id} synthesis is required for the consulted routing surface"
+            applicability_evidence = (f"consulted router: {entry.router_id}",)
+        else:
+            reason = f"no {entry.rule_id} trigger was selected for the captured scope"
+            applicability_evidence = (f"router {entry.router_id} considered {entry.catalog_id}",)
+
+        if not reason or not applicability_evidence:
+            msg = f"compact routing override {entry.catalog_id} requires reason and applicability evidence"
+            raise ValueError(msg)
+
+        default_surface: tuple[str, ...] = ()
+        if selected_by_classifier and entry.target_kind == "leaf":
+            default_surface = signal_paths.get(entry.surface, ())
+        elif selected_independent:
+            default_surface = normalized_paths
+        review_surface = tuple(str(value) for value in override.get("review_surface", default_surface)) if override is not None else default_surface
+        entry_instruction_paths = tuple(instruction_paths)
+        if override is not None and disposition in {"selected", "exact-evidence-reused"}:
+            entry_instruction_paths = tuple(str(value) for value in override.get("instruction_paths", instruction_paths))
+        extra_references = tuple(str(value) for value in override.get("static_references", ())) if override is not None else ()
+        static_references = tuple(dict.fromkeys((*entry.required_static_references, *extra_references)))
+        default_owner = "repository" if entry.target_kind == "independent" else entry.surface
+        owners = (default_owner,) if default_surface else ()
+        if override is not None:
+            owners = tuple(str(value) for value in override.get("owners", (default_owner,)))
+        validation_requirement_ids = tuple(str(value) for value in override.get("validation_requirement_ids", ())) if override is not None else ()
+        evidence_id = str(override["evidence_id"]) if override is not None and override.get("evidence_id") is not None else None
+        decisions.append(
+            RoutingDecision(
+                catalog_id=entry.catalog_id,
+                requirement_id=entry.catalog_id,
+                router_id=entry.router_id,
+                rule_id=entry.rule_id,
+                skill_id=entry.skill_id,
+                skill_path=entry.skill_path,
+                disposition=disposition,
+                reason=reason,
+                applicability_evidence=applicability_evidence,
+                review_surface=review_surface,
+                instruction_paths=entry_instruction_paths if disposition in {"selected", "exact-evidence-reused"} else (),
+                static_references=static_references if disposition in {"selected", "exact-evidence-reused"} else (),
+                validation_requirement_ids=validation_requirement_ids,
+                synthesis_dependency=entry.synthesis_dependency if disposition == "selected" else None,
+                priority=entry.default_priority,
+                owners=owners if disposition in {"selected", "exact-evidence-reused"} and entry.target_kind in {"leaf", "independent"} else (),
+                evidence_id=evidence_id,
+            )
+        )
+    absent_catalog_ids = sorted(set(override_ids) - set(catalog_by_id))
+    if absent_catalog_ids:  # Defensive when a caller supplies an unfiltered catalog implementation.
+        msg = "compact routing overrides reference missing catalog IDs: " + ", ".join(absent_catalog_ids)
+        raise ValueError(msg)
+    return tuple(decisions)
+
+
+def _catalog_path_matches(path: str, pattern: str) -> bool:
+    """Match catalog globs with Git-style `**/` zero-directory behavior."""
+    variants = {pattern}
+    pending = [pattern]
+    while pending:
+        candidate = pending.pop()
+        marker = candidate.find("**/")
+        if marker < 0:
+            continue
+        without_marker = candidate[:marker] + candidate[marker + 3 :]
+        if without_marker not in variants:
+            variants.add(without_marker)
+            pending.append(without_marker)
+    return any(fnmatch.fnmatch(path, candidate) for candidate in variants)
+
+
+def build_routing_projection(catalog: Sequence[RoutingCatalogEntry], *, consulted_routers: Sequence[str], captured_paths: Sequence[str]) -> dict[str, Any]:
+    """Project the complete consulted catalog into a compact semantic routing view."""
+    consulted = tuple(dict.fromkeys(consulted_routers))
+    if REPOSITORY_ROUTER_ID not in consulted:
+        msg = f"routing projection must consult {REPOSITORY_ROUTER_ID}"
+        raise ValueError(msg)
+    catalog_routers = {entry.router_id for entry in catalog}
+    unknown = tuple(sorted(set(consulted) - catalog_routers))
+    if unknown:
+        msg = "routing projection references unknown routers: " + ", ".join(unknown)
+        raise ValueError(msg)
+    normalized_paths = _normalized_repository_paths(captured_paths, label="routing projection captured_paths")
+    entries: list[dict[str, Any]] = []
+    for entry in catalog:
+        if entry.router_id not in consulted:
+            continue
+        matched_paths = tuple(path for path in normalized_paths if any(_catalog_path_matches(path, pattern) for pattern in entry.path_patterns))
+        entries.append(
+            {
+                "catalog_id": entry.catalog_id,
+                "matched_paths": list(matched_paths),
+                "semantic_triggers": list(entry.semantic_triggers),
+                "target_kind": entry.target_kind,
+            }
+        )
+    projection: dict[str, Any] = {
+        "captured_paths": list(normalized_paths),
+        "classifier_signals": {key: list(value) for key, value in classify_repository_paths(normalized_paths).items()},
+        "consulted_routers": list(consulted),
+        "entries": entries,
+        "schema_version": 1,
+    }
+    projection["projection_digest"] = _sha256_json(projection)
+    return projection
+
+
 def assess_repository_classifier_floor(
     catalog: Sequence[RoutingCatalogEntry], decisions: Sequence[RoutingDecision], signals: Mapping[str, Sequence[str]]
 ) -> Assessment:
@@ -1451,12 +1639,10 @@ def _validation_group_key(item: ValidationRequirement) -> tuple[object, ...]:
         item.platform,
         item.artifact_owner,
         item.mutation_lock,
-        item.request,
         item.requested_scope,
         item.capture_command,
         item.captured_paths,
         item.dependency_policy,
-        item.meaningful_skips,
         item.execution_strategy,
         item.independence_basis,
         item.planning_blocker,
@@ -1552,7 +1738,7 @@ def coalesce_validation_requirements(requirements: Sequence[ValidationRequiremen
                 for item in members
             ),
             dependency_policy=first.dependency_policy,
-            meaningful_skips=first.meaningful_skips,
+            meaningful_skips=tuple(sorted({skip for item in members for skip in item.meaningful_skips})),
             execution_strategy=first.execution_strategy,
             independence_basis=first.independence_basis,
             planning_blocker=first.planning_blocker,
@@ -1561,6 +1747,7 @@ def coalesce_validation_requirements(requirements: Sequence[ValidationRequiremen
             evidence_ids=tuple(sorted({item.evidence_id for item in members if item.evidence_id is not None})),
             required=any(item.required or item.baseline for item in members),
             baseline=any(item.baseline for item in members),
+            requirement_requests=tuple((item.requirement_id, item.request) for item in members),
         )
         units.append(unit)
         mappings.extend(ValidationEvidenceMapping(item.requirement_id, node_id, item.evidence_id) for item in members)
@@ -1735,7 +1922,7 @@ def _bind_reused_review_provenance(identity: ReusedReviewEvidencePlan) -> Reused
 def _validator_static_references(skill_path: str) -> tuple[str, ...]:
     """Return the required graph-dispatched validator contract paths."""
     skill_dir = Path(skill_path).parent
-    return (str(skill_dir / "references" / "result-contract.md"), str(skill_dir.parent / "review-graph" / "references" / "evidence-contract.md"))
+    return (str(skill_dir / "references" / "graph-dispatch.md"),)
 
 
 def _partition_execution_epochs(nodes: Sequence[WorkerNode], budget: WorkerBudget) -> tuple[ExecutionEpoch, ...]:
@@ -1769,6 +1956,7 @@ def plan_graph(  # noqa: C901, PLR0913, PLR0915
     validator_reference_digests: tuple[tuple[str, str], ...] = (),
     execution_profile: str = "grouped",
     captured_path_line_bounds: tuple[tuple[str, int], ...] = (),
+    routing_decisions: tuple[RoutingDecision, ...] = (),
 ) -> GraphPlan:
     """Build the complete required graph for one exact execution profile."""
     if not isinstance(execution_profile, str) or execution_profile not in {"grouped", "isolated", "isolated-only", "mixed"}:
@@ -1876,6 +2064,7 @@ def plan_graph(  # noqa: C901, PLR0913, PLR0915
         captured_path_line_bounds=captured_path_line_bounds,
         routing_catalog_closed=routing_assessment.catalog_closed if routing_assessment is not None else False,
         consulted_routers=routing_assessment.consulted_routers if routing_assessment is not None else (),
+        routing_decisions=routing_decisions,
         exact_reused_review_evidence=routing_assessment.exact_reused_review_evidence if routing_assessment is not None else (),
         reused_review_identities=routing_assessment.reused_review_identities if routing_assessment is not None else (),
         user_excluded_catalog_ids=routing_assessment.user_excluded_catalog_ids if routing_assessment is not None else (),
@@ -4756,6 +4945,47 @@ def _routing_discoveries_from_document(document: Mapping[str, Any]) -> tuple[Rou
     )
 
 
+def synthesis_nodes_from_routing(catalog: Sequence[RoutingCatalogEntry], decisions: Sequence[RoutingDecision]) -> tuple[WorkerNode, ...]:
+    """Derive selected synthesis nodes without caller-authored identity fields."""
+    entries = {entry.catalog_id: entry for entry in catalog}
+    nodes: list[WorkerNode] = []
+    for decision in decisions:
+        entry = entries.get(decision.catalog_id)
+        if entry is None or entry.target_kind != "synthesis" or decision.disposition != "selected":
+            continue
+        prefix = "repository" if decision.catalog_id.startswith("repo.") else decision.catalog_id.split(".", 1)[0]
+        nodes.append(
+            WorkerNode(
+                node_id=f"{prefix}-synthesis",
+                skill_id=entry.skill_id,
+                skill_path=entry.skill_path,
+                mode="synthesis",
+                priority="required-routing-synthesis",
+                required=True,
+                instruction_paths=decision.instruction_paths,
+                static_references=decision.static_references,
+            )
+        )
+    return tuple(nodes)
+
+
+def _compact_routing_overrides_from_document(
+    document: Mapping[str, Any], repository_root: Path | None, skill_roots: Sequence[Path]
+) -> tuple[Mapping[str, Any], ...]:
+    overrides: list[Mapping[str, Any]] = []
+    for raw in document.get("routing_overrides", []):
+        if not isinstance(raw, Mapping):
+            msg = "routing_overrides entries must be objects"
+            raise TypeError(msg)
+        item = dict(raw)
+        if "instruction_paths" in item:
+            item["instruction_paths"] = _resolved_instruction_tuple(item, "instruction_paths", repository_root, skill_roots)
+        if "static_references" in item:
+            item["static_references"] = _resolved_reference_tuple(item, "static_references", skill_roots)
+        overrides.append(item)
+    return tuple(overrides)
+
+
 def plan_from_document(  # noqa: C901, PLR0912, PLR0915
     document: Mapping[str, Any],
     *,
@@ -4770,7 +5000,11 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0915
         raise ValueError(msg)
     release_readiness = _boolean_field(document, "release_readiness", default=False)
     repository_root = _validated_repository_root(repository_root)
-    exhaustive_routing = document.get("routing_decisions") is not None
+    compact_routing = document.get("routing_overrides") is not None
+    if compact_routing and document.get("routing_decisions") is not None:
+        msg = "use routing_overrides or routing_decisions, not both"
+        raise ValueError(msg)
+    exhaustive_routing = document.get("routing_decisions") is not None or compact_routing
     change_target: str | None = None
     captured_paths = (
         _normalized_repository_paths(_tuple_field(document, "captured_paths"), label="captured_paths") if document.get("captured_paths") is not None else None
@@ -4781,20 +5015,11 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0915
     routing_decisions: tuple[RoutingDecision, ...] = ()
     if exhaustive_routing:
         routing_catalog = load_routing_catalog(catalog_path, skill_roots=skill_roots)
-        routing_decisions = _routing_decisions_from_document(document, repository_root, skill_roots)
-        if captured_paths is not None:
-            routing_decisions, routing_surface_blockers = _constrain_routing_surfaces(routing_catalog, routing_decisions, captured_paths=captured_paths)
-        else:
-            routing_surface_blockers = ()
         consulted_routers = _tuple_field(document, "consulted_routers")
-        routing_assessment = validate_routing_ledger(routing_catalog, routing_decisions, consulted_routers=consulted_routers)
-        routing_metadata_blockers: list[str] = list(routing_surface_blockers)
-        scope_mode = document.get("scope_mode")
-        if scope_mode not in {"branch", "staged-only", "changed-file-only", "baseline", "release-readiness"}:
-            routing_metadata_blockers.append("exhaustive routing requires a known scope_mode")
         concrete_change_target = document.get("concrete_change_target")
         if not isinstance(concrete_change_target, bool):
-            routing_metadata_blockers.append("exhaustive routing requires concrete_change_target=true or false")
+            msg = "exhaustive routing requires concrete_change_target=true or false"
+            raise ValueError(msg)
         raw_change_target = document.get("change_target")
         if concrete_change_target is True:
             if not isinstance(raw_change_target, str) or not raw_change_target.strip() or len(raw_change_target) > MAX_NATIVE_IDENTIFIER_LENGTH:
@@ -4804,6 +5029,31 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0915
         elif raw_change_target is not None:
             msg = "change_target is permitted only when concrete_change_target is true"
             raise ValueError(msg)
+        if compact_routing:
+            if captured_paths is None:
+                msg = "compact routing requires captured_paths"
+                raise ValueError(msg)
+            global_instruction_paths = _resolved_instruction_tuple(document, "instruction_paths", repository_root, skill_roots)
+            routing_decisions = expand_compact_routing(
+                routing_catalog,
+                consulted_routers=consulted_routers,
+                captured_paths=captured_paths,
+                overrides=_compact_routing_overrides_from_document(document, repository_root, skill_roots),
+                instruction_paths=global_instruction_paths,
+                change_target=change_target,
+                release_readiness=release_readiness,
+            )
+        else:
+            routing_decisions = _routing_decisions_from_document(document, repository_root, skill_roots)
+        if captured_paths is not None:
+            routing_decisions, routing_surface_blockers = _constrain_routing_surfaces(routing_catalog, routing_decisions, captured_paths=captured_paths)
+        else:
+            routing_surface_blockers = ()
+        routing_assessment = validate_routing_ledger(routing_catalog, routing_decisions, consulted_routers=consulted_routers)
+        routing_metadata_blockers: list[str] = list(routing_surface_blockers)
+        scope_mode = document.get("scope_mode")
+        if scope_mode not in {"branch", "staged-only", "changed-file-only", "baseline", "release-readiness"}:
+            routing_metadata_blockers.append("exhaustive routing requires a known scope_mode")
         independent_decision = next((item for item in routing_decisions if item.catalog_id == "repo.independent"), None)
         if independent_decision is not None and independent_decision.disposition in {"selected", "exact-evidence-reused"}:
             if captured_paths is None:
@@ -4915,21 +5165,25 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0915
         )
         for item in document.get("validation_requirements", [])
     )
-    synthesis_nodes = tuple(
-        WorkerNode(
-            node_id=str(item["node_id"]),
-            skill_id=str(item["skill_id"]),
-            skill_path=str(_resolve_checked_skill_path(str(item["skill_path"]), str(item["skill_id"]), skill_roots)),
-            mode="synthesis",
-            priority="required-routing-synthesis",
-            required=True,
-            requirement_ids=_tuple_field(item, "requirement_ids"),
-            coverage=_tuple_field(item, "coverage"),
-            predecessors=_tuple_field(item, "predecessors"),
-            instruction_paths=_resolved_instruction_tuple(item, "instruction_paths", repository_root, skill_roots),
-            static_references=_resolved_reference_tuple(item, "static_references", skill_roots),
+    synthesis_nodes = (
+        synthesis_nodes_from_routing(routing_catalog, routing_decisions)
+        if compact_routing and document.get("synthesis_nodes") is None
+        else tuple(
+            WorkerNode(
+                node_id=str(item["node_id"]),
+                skill_id=str(item["skill_id"]),
+                skill_path=str(_resolve_checked_skill_path(str(item["skill_path"]), str(item["skill_id"]), skill_roots)),
+                mode="synthesis",
+                priority="required-routing-synthesis",
+                required=True,
+                requirement_ids=_tuple_field(item, "requirement_ids"),
+                coverage=_tuple_field(item, "coverage"),
+                predecessors=_tuple_field(item, "predecessors"),
+                instruction_paths=_resolved_instruction_tuple(item, "instruction_paths", repository_root, skill_roots),
+                static_references=_resolved_reference_tuple(item, "static_references", skill_roots),
+            )
+            for item in document.get("synthesis_nodes", [])
         )
-        for item in document.get("synthesis_nodes", [])
     )
     if routing_decisions:
         catalog_by_id = {entry.catalog_id: entry for entry in routing_catalog}
@@ -4993,6 +5247,7 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0915
         ),
         validator_skill_path=str(_resolve_checked_skill_path("$SKILLS_ROOT/review-validator/SKILL.md", "review-validator", skill_roots)),
         captured_path_line_bounds=captured_path_line_bounds,
+        routing_decisions=routing_decisions,
     )
 
 

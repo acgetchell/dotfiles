@@ -90,7 +90,7 @@ RUST_FIXTURE_PATH = "agents/.agents/skills/review-graph/scripts/fixtures/state.r
 def _rust_fixture_capture_manifest() -> dict[str, object]:
     git = shutil.which("git")
     assert git is not None
-    return _scope_data(git, REPOSITORY_ROOT, "branch", None, (RUST_FIXTURE_PATH,))
+    return _scope_data(git, REPOSITORY_ROOT, "baseline", None, (RUST_FIXTURE_PATH,))
 
 
 def _native_markdown(heading: str, sections: tuple[str, ...], payload: dict[str, object], section_bodies: dict[str, str], *, preamble: str = "") -> bytes:
@@ -744,7 +744,7 @@ def _exhaustive_rust_document() -> dict[str, object]:
         "execution_profile": "isolated",
         "worker_budget": 5,
         "recovery_finalization_reserve": 1,
-        "scope_mode": "branch",
+        "scope_mode": "baseline",
         "concrete_change_target": True,
         "change_target": f"git diff origin/main...HEAD -- {RUST_FIXTURE_PATH}",
         "capture_mode": capture["capture_mode"],
@@ -772,8 +772,8 @@ def _exhaustive_rust_document() -> dict[str, object]:
                 "artifact_owner": "repository",
                 "mutation_lock": "read-only",
                 "request": "run the exact repository validation gate",
-                "requested_scope": "branch",
-                "capture_command": f"capture_scope.py --repo {REPOSITORY_ROOT} --mode branch --path {RUST_FIXTURE_PATH}",
+                "requested_scope": "baseline",
+                "capture_command": f"capture_scope.py --repo {REPOSITORY_ROOT} --mode baseline --path {RUST_FIXTURE_PATH}",
                 "captured_paths": [RUST_FIXTURE_PATH],
                 "authority": "graph dispatch",
                 "selection_reason": "baseline validation for the captured Rust fixture",
