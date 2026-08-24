@@ -244,7 +244,7 @@
         "elapsed_time_budget": {"type": "string"},
         "environment": {"type": "string"},
         "evidence_id": {"type": ["string", "null"]},
-        "execution_strategy": {"type": "string"},
+        "execution_strategy": {"enum": ["sequential", "parallel-independent"]},
         "expected_evidence": {"type": "string"},
         "expected_workspace_effects": {"$ref": "#/$defs/stringArray"},
         "features": {"$ref": "#/$defs/stringArray"},

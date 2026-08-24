@@ -194,3 +194,16 @@ def require_schema(value: object, schema_path: Path) -> None:
     diagnostics = schema_diagnostics(value, schema)
     if diagnostics:
         raise SchemaValidationError(str(schema.get("$id", schema_path)), diagnostics)
+
+
+def require_schema_definition(value: object, schema_path: Path, definition_name: str) -> None:
+    """Validate against one named definition in a published schema bundle."""
+    root = load_schema(schema_path)
+    definitions = root.get("$defs")
+    if not isinstance(definitions, dict) or not isinstance(definitions.get(definition_name), dict):
+        msg = f"schema definition does not exist: {schema_path}#/$defs/{definition_name}"
+        raise TypeError(msg)
+    schema = {"$defs": definitions, "$id": f"{root.get('$id', schema_path)}#/$defs/{definition_name}", "$ref": f"#/$defs/{definition_name}"}
+    diagnostics = schema_diagnostics(value, schema)
+    if diagnostics:
+        raise SchemaValidationError(str(schema["$id"]), diagnostics)

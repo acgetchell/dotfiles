@@ -27,10 +27,10 @@ platform, artifact policy, dependency policy, and elapsed bounds. Return
 `blocked` for an omission; never fall through to standalone discovery.
 
 Require the graph-owned effects, exact isolation root, artifact-provenance, and
-snapshot policy. Keep isolated working directories and outside-repository
-artifacts beneath that root. Capture relevant filesystem and Git state before
-and after; return both snapshots beside, not inside, the compact payload for
-compiler audit.
+runtime snapshot policy. Keep isolated working directories and
+outside-repository artifacts beneath that root. The coordinator captures
+filesystem and Git state through `snapshot-workspace` immediately before and
+after execution; do not author either snapshot or any digest.
 
 Honor executor placement. A worker uses `fork_turns: "none"`; a coordinator
 fallback executes the same unit locally. Do not create another worker, split a
@@ -42,8 +42,9 @@ Git-mutating. Execute each command once in its declared order, honoring the
 dependency policy. Record exact command, working directory, executor, result,
 exit code, elapsed time, concise output evidence, and approved artifact paths.
 
-Return only the compact payload. The graph owns evidence identities, command
-and environment digests, mappings, canonical artifact compilation, acceptance,
+Return only the compact payload. Omit artifact records, fingerprints,
+snapshots, and digests. The graph owns evidence identities, command and
+environment digests, mappings, canonical artifact compilation, acceptance,
 reuse, invalidation, and final reporting.
 
 ## Universal Boundaries

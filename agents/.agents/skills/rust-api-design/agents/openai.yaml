@@ -1,0 +1,6 @@
+interface:
+  display_name: "Rust API Design"
+  short_description: "Review cohesive, orthogonal Rust APIs"
+  default_prompt: >-
+    Use $rust-api-design to review this Rust public API for cohesive concept ownership,
+    orthogonal capabilities, canonical workflows, and compatible evolution.

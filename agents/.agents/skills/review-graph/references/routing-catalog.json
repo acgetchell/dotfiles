@@ -298,6 +298,20 @@
       "semantic_triggers": ["Manifest dependencies, features, workspace inheritance, edition/MSRV, lint tables, metadata, or publishing are material."]
     },
     {
+      "catalog_id": "rust.api-design",
+      "router_id": "rust-review-orchestrator",
+      "rule_id": "rust-public-api-design",
+      "layer": "surface",
+      "surface": "rust",
+      "skill_id": "rust-api-design",
+      "skill_path": "$SKILLS_ROOT/rust-api-design/SKILL.md",
+      "target_kind": "leaf",
+      "default_priority": "supporting-quality",
+      "synthesis_dependency": "rust-synthesis",
+      "path_patterns": ["src/**/*.rs", "Cargo.toml"],
+      "semantic_triggers": ["Public modules, types, traits, functions, constructors, adapters, wrappers, canonical workflows, cross-crate concept ownership, or compatibility are material."]
+    },
+    {
       "catalog_id": "rust.api-docs",
       "router_id": "rust-review-orchestrator",
       "rule_id": "rust-api-documentation",

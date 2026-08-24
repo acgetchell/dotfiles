@@ -710,10 +710,15 @@ class RepositoryReviewProofExpectation:
         if set(validation_units) != planned_validator_ids:
             msg = "repository review proof expectation validation nodes do not match exact coalesced units"
             raise ValueError(msg)
-        final_synthesis_nodes = tuple(node for node in self.plan.actual_worker_nodes if (node.node_id, node.skill_id, node.mode) == FINAL_SYNTHESIS_IDENTITY)
+        final_synthesis_nodes = tuple(
+            node
+            for node in self.plan.actual_worker_nodes
+            if node.skill_id == FINAL_SYNTHESIS_IDENTITY[1] and node.mode == FINAL_SYNTHESIS_IDENTITY[2] and node.node_id in self.plan.synthesis_nodes
+        )
         if len(final_synthesis_nodes) != 1:
             msg = "repository review proof expectation requires exactly one planner-derived repository synthesis node"
             raise ValueError(msg)
+        final_synthesis_identity = (final_synthesis_nodes[0].node_id, final_synthesis_nodes[0].skill_id, final_synthesis_nodes[0].mode)
         reused_mapping = self.plan.exact_reused_review_evidence
         reused_identities = self.plan.reused_review_identities
         if any(not _nonempty_text(requirement_id) or not _nonempty_text(evidence_id) for requirement_id, evidence_id in reused_mapping):
@@ -813,7 +818,7 @@ class RepositoryReviewProofExpectation:
                 for node in self.plan.actual_worker_nodes
             ),
         )
-        object.__setattr__(self, "final_synthesis_identity", FINAL_SYNTHESIS_IDENTITY)
+        object.__setattr__(self, "final_synthesis_identity", final_synthesis_identity)
 
 
 @dataclass(frozen=True)
@@ -2415,6 +2420,8 @@ def _native_fingerprint_proof_blockers(body: str, fingerprints: FingerprintEvide
 
 
 def _independent_finding_location_matches_dispatch(location: str, planned_paths: Sequence[str], planned_path_line_bounds: Sequence[tuple[str, int]]) -> bool:
+    if len(location) >= 2 and location.startswith("`") and location.endswith("`"):
+        location = location[1:-1]
     if len(location) > MAX_NATIVE_IDENTIFIER_LENGTH:
         return False
     line_bounds = dict(planned_path_line_bounds)
@@ -2478,7 +2485,7 @@ def _ordinary_finding_blockers(body: str, evidence: ReviewEvidence) -> tuple[str
 def _native_repository_path_list(value: str, *, label: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
     if value == "none":
         return (), ()
-    raw_paths = tuple(value.split(", "))
+    raw_paths = tuple(item[1:-1] if len(item) >= 2 and item.startswith("`") and item.endswith("`") else item for item in value.split(", "))
     try:
         paths = _normalized_repository_paths(raw_paths, label=label)
     except ValueError:
@@ -2624,15 +2631,22 @@ def _ordinary_review_native_blockers(  # noqa: C901, PLR0912
     return tuple(blockers)
 
 
-def _independent_review_native_blockers(  # noqa: C901, PLR0912
+def _independent_review_native_blockers(  # noqa: C901, PLR0912, PLR0915
     sections: Mapping[str, str], expectation: ReviewEvidenceExpectation, evidence: ReviewEvidence
 ) -> tuple[str, ...]:
     blockers: list[str] = []
     scope = sections["## Scope Inspected"]
-    blockers.extend(_native_nonempty_section_blockers(scope, section="Scope Inspected"))
     planned_paths = ", ".join(expectation.planned_paths)
+    blockers.extend(_native_nonempty_section_blockers(scope, section="Scope Inspected"))
     blockers.extend(_native_values_blockers(scope, section="Scope Inspected", label="Change target", expected=(expectation.change_target or "",)))
-    blockers.extend(_native_values_blockers(scope, section="Scope Inspected", label="Files", expected=(planned_paths,)))
+    file_values = _native_field_values(scope, "Files")
+    if len(file_values) != 1:
+        blockers.append("native result Scope Inspected requires exactly one Files value")
+    else:
+        inspected_paths, file_blockers = _native_repository_path_list(file_values[0], label="native result Scope Inspected Files")
+        blockers.extend(file_blockers)
+        if not file_blockers and inspected_paths != expectation.planned_paths:
+            blockers.append("native result Scope Inspected Files values do not match its evidence envelope")
     findings = sections["## Findings"]
     if evidence.status == "completed":
         blockers.extend(_independent_finding_blockers(findings, expectation, evidence))
