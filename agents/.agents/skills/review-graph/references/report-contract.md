@@ -66,6 +66,9 @@ that no files were changed.
 List each unique command or canonical recipe once with requirement IDs and
 result. Distinguish execution from exact reuse. Failed or blocked validation
 remains evidence, not an automatically promoted finding.
+Report `repository_validation_status` independently from
+`graph_proof_status`; a command failure and an orchestration-proof gap are
+different outcomes.
 
 ### Coverage And Limitations
 
@@ -73,6 +76,8 @@ Name selected skills, explicit exclusions, blocked or stale requirements,
 unresolved handoffs, untested configurations, and remaining risks. Omit routine
 `not-applicable` candidates; their exhaustive records remain in the proof
 store.
+For independent review, distinguish structurally accepted evidence from
+semantic agreement or recall, which requires separate adjudication.
 
 ### Proof And Repository State
 
@@ -101,7 +106,8 @@ persisted accepted bundle rather than regenerating it from memory.
 
 ## Reconciliation
 
-Before reporting `complete`, run `review_graph_runtime.py finalize-proof`. It
+Before reporting `complete`, run `review_graph_runtime.py finalize-proof` with
+the current capture. It
 derives and verifies these equalities from the plan and persisted artifacts:
 
 ```text
@@ -113,6 +119,6 @@ canonical findings = fixed + remaining + accepted-risk + blocked
 material changed files = union of compiled change records
 ```
 
-Also require closed routing, resolved handoffs, current post-fix capture,
+Also require closed routing, reconciled handoffs, current post-fix capture,
 accepted synthesis, a verified artifact manifest, and an accepted
 `RepositoryReviewProof`. Conversation output is never completion evidence.

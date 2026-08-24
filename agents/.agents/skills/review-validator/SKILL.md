@@ -26,6 +26,12 @@ command, commands, working directories, environment, toolchain, features,
 platform, artifact policy, dependency policy, and elapsed bounds. Return
 `blocked` for an omission; never fall through to standalone discovery.
 
+Require the graph-owned effects, exact isolation root, artifact-provenance, and
+snapshot policy. Keep isolated working directories and outside-repository
+artifacts beneath that root. Capture relevant filesystem and Git state before
+and after; return both snapshots beside, not inside, the compact payload for
+compiler audit.
+
 Honor executor placement. A worker uses `fork_turns: "none"`; a coordinator
 fallback executes the same unit locally. Do not create another worker, split a
 coalesced unit, re-plan, broaden commands, or inspect implementation semantics.
@@ -44,8 +50,8 @@ reuse, invalidation, and final reporting.
 
 - Do not load review skills, search for defects, assign severity, diagnose
   failed evidence, synthesize findings, recommend fixes, or edit source files.
-- Do not mutate Git state. Create only approved ignored or external build,
-  cache, coverage, or log artifacts and report them.
+- Create only approved ignored/external artifacts. Run source-mutating backends
+  only in the dispatched isolated tree; never mutate Git state.
 - Do not install substitute toolchains, alter dependencies, or change
   configuration to make a command pass.
 - Reuse evidence only when source, command, environment, configuration,

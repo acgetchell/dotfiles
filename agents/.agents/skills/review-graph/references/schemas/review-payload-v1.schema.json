@@ -1,0 +1,89 @@
+{
+  "$id": "https://openai.com/codex/review-graph/review-payload-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "changes": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "contract_preserved": {"type": "string"},
+          "files": {"items": {"type": "string"}, "type": "array"},
+          "finding_ids": {"items": {"type": "string"}, "type": "array"},
+          "what_changed": {"type": "string"},
+          "why": {"type": "string"}
+        },
+        "required": ["finding_ids", "files", "what_changed", "why", "contract_preserved"],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "command_policy_attested": {"const": true},
+    "commands_executed": {"items": {"type": "string"}, "type": "array"},
+    "files_inspected": {"items": {"type": "string"}, "type": "array"},
+    "findings": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {"type": "string"},
+          "location": {"type": "string"},
+          "remediation": {"type": "string"},
+          "severity": {"enum": ["P0", "P1", "P2", "P3"]},
+          "summary": {"type": "string"}
+        },
+        "required": ["severity", "location", "summary", "evidence", "remediation"],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "handoffs": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "catalog_id": {"type": "string"},
+          "observed_trigger": {"type": "string"},
+          "reason": {"type": "string"},
+          "scope": {"items": {"type": "string"}, "minItems": 1, "type": "array"}
+        },
+        "required": ["catalog_id", "observed_trigger", "reason", "scope"],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "limitations": {"items": {"type": "string"}, "type": "array"},
+    "nearby_contract_owners": {"items": {"type": "string"}, "type": "array"},
+    "status": {"enum": ["completed", "no-findings", "blocked"]},
+    "validation_requirements": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "commands": {"items": {"type": "string"}, "minItems": 1, "type": "array"},
+          "dependency_policy": {"enum": ["stop-on-failure", "continue-independent"]},
+          "environment": {"type": "string"},
+          "expected_evidence": {"type": "string"},
+          "owner": {"type": "string"},
+          "reason": {"type": "string"},
+          "requirement_id": {"type": "string"},
+          "working_directory": {"type": "string"}
+        },
+        "required": ["requirement_id", "owner", "reason", "commands", "working_directory", "environment", "expected_evidence", "dependency_policy"],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "status",
+    "files_inspected",
+    "nearby_contract_owners",
+    "findings",
+    "validation_requirements",
+    "handoffs",
+    "changes",
+    "limitations",
+    "commands_executed",
+    "command_policy_attested"
+  ],
+  "title": "Review Graph ReviewPayload v1",
+  "type": "object"
+}

@@ -404,7 +404,8 @@ for the same dispatch when needed. Isolated execution requires one fresh worker
 per unit. Read its complete `SKILL.md` and only
 `references/graph-dispatch.md`. The graph provides the planner-owned
 `ValidationUnit`; the validator must not select commands from prose or load a
-review skill.
+review skill. An isolated unit names one exact absolute isolation root; every
+outside-repository artifact and isolated working directory stays beneath it.
 
 Use this prompt shell:
 
@@ -461,11 +462,13 @@ State verification command: <exact non-mutating command>
 Applicable instruction files: <exact paths>
 
 Run the state-verification command before and after inspection. Follow
-the skill's native finding and assessment format so findings remain first.
-Then append the Review Graph Envelope below. Return no other graph commentary.
+the skill's native six-section finding and assessment format so findings remain
+first. Do not invent graph finding IDs, handoff IDs, the Review Graph Envelope,
+or Machine Evidence; `compile-independent-review` appends those deterministically.
+Return no other graph commentary.
 ```
 
-Require this envelope after the native independent-review result:
+The compiler appends this envelope after the native independent-review result:
 
 ```markdown
 ## Review Graph Envelope
@@ -509,6 +512,13 @@ Envelope target/path fields must equal that dispatch provenance exactly. This
 structural wrapper preserves the independent skill's native sections while
 making its persisted artifact deterministically verifiable.
 
+Invoke `compile-independent-review` with the trusted dispatch, native artifact,
+derived status, and limitations. It parses ordered native Finding and Catalog
+ID records, assigns graph IDs, verifies every dispatched adversarial check in
+No-Finding Evidence, and writes the wrapper and metadata sidecar. The worker's
+native digest remains compiler metadata; the worker never authors evidence
+identities.
+
 Derive `completed` when at least one native finding is present, `no-findings`
 only when the native result says `No findings.`, and `blocked` when the target or
 source identity could not be inspected. Require the result-header identities to
@@ -521,7 +531,10 @@ or that exact path alone for a repository-level finding, and the descriptive
 fields are concrete. A line or range endpoint must not exceed the
 planner-owned bound derived from the captured source identity; a deleted file
 uses its captured base-side bound, and a zero bound permits only the path-alone
-form. The Scope Inspected and envelope target/path values equal the
+form. A no-findings result names the exact files, branches and boundary cases,
+and tests inspected, and includes every materialized adversarial check relevant
+to the dispatched surfaces; a fixed denylist is not categorical coverage. The
+Scope Inspected and envelope target/path values equal the
 trusted dispatch, both Result dispositions are `matched`, every native routing
 handoff ID equals the typed evidence tuple, Limitations is exactly `none`, and
 no source or git-state mutation occurred. Accept `blocked` when it preserves

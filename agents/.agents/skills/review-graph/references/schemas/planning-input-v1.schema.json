@@ -1,0 +1,305 @@
+{
+  "$id": "https://openai.com/codex/review-graph/planning-input-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "additional_nodes": {
+      "items": {"$ref": "#/$defs/node"},
+      "type": "array"
+    },
+    "allow_legacy_fixture": {"type": "boolean"},
+    "authorization": {"enum": ["review-only", "review-and-fix"]},
+    "base_ref": {"type": ["string", "null"]},
+    "branch": {"type": ["string", "null"]},
+    "capture_mode": {"enum": ["branch", "staged", "worktree", "baseline"]},
+    "captured_path_line_bounds": {
+      "additionalProperties": {"minimum": 0, "type": "integer"},
+      "type": "object"
+    },
+    "captured_paths": {"$ref": "#/$defs/stringArray"},
+    "captured_scope_paths": {"$ref": "#/$defs/stringArray"},
+    "captured_worktree_fingerprint": {"type": "string"},
+    "change_target": {"type": "string"},
+    "concrete_change_target": {"type": "boolean"},
+    "consulted_routers": {"$ref": "#/$defs/stringArray"},
+    "execution_profile": {"enum": ["grouped", "isolated", "isolated-only", "mixed"]},
+    "head": {"type": "string"},
+    "instruction_paths": {"$ref": "#/$defs/stringArray"},
+    "merge_base": {"type": ["string", "null"]},
+    "recovery_finalization_reserve": {"minimum": 0, "type": "integer"},
+    "release_readiness": {"type": "boolean"},
+    "repository_root": {"type": "string"},
+    "repository_state_fingerprint": {"type": "string"},
+    "requested_paths": {"$ref": "#/$defs/stringArray"},
+    "review_requirements": {
+      "items": {"$ref": "#/$defs/reviewRequirement"},
+      "type": "array"
+    },
+    "routing_decisions": {
+      "items": {"$ref": "#/$defs/routingDecision"},
+      "type": "array"
+    },
+    "routing_discoveries": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "catalog_id": {"type": "string"},
+          "evidence": {"type": "string"},
+          "handoff_id": {"type": "string"},
+          "source_node_id": {"type": "string"}
+        },
+        "required": ["handoff_id", "source_node_id", "catalog_id", "evidence"],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "routing_overrides": {
+      "items": {"$ref": "#/$defs/routingOverride"},
+      "type": "array"
+    },
+    "scope_fingerprint": {"type": "string"},
+    "scope_mode": {"enum": ["branch", "staged-only", "changed-file-only", "baseline", "release-readiness"]},
+    "schema_version": {"const": 1, "type": "integer"},
+    "source_state": {"$ref": "#/$defs/sourceState"},
+    "status": {"$ref": "#/$defs/stringArray"},
+    "synthesis_nodes": {
+      "items": {"$ref": "#/$defs/node"},
+      "type": "array"
+    },
+    "untracked_paths": {"$ref": "#/$defs/stringArray"},
+    "validation_requirements": {
+      "items": {"$ref": "#/$defs/validationRequirement"},
+      "type": "array"
+    },
+    "worker_budget": {"minimum": 1, "type": "integer"}
+  },
+  "required": [
+    "authorization",
+    "capture_mode",
+    "captured_path_line_bounds",
+    "captured_paths",
+    "captured_worktree_fingerprint",
+    "concrete_change_target",
+    "consulted_routers",
+    "execution_profile",
+    "head",
+    "release_readiness",
+    "repository_root",
+    "repository_state_fingerprint",
+    "requested_paths",
+    "routing_overrides",
+    "schema_version",
+    "scope_fingerprint",
+    "scope_mode",
+    "validation_requirements"
+  ],
+  "title": "Review Graph Planning Input v1",
+  "type": "object",
+  "$defs": {
+    "artifact": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_digest": {"pattern": "^sha256:[0-9a-f]{64}$", "type": ["string", "null"]},
+        "artifact_id": {"type": ["string", "null"]},
+        "kind": {"enum": ["build", "cache", "coverage", "log", "report", "test-result", "other"]},
+        "path": {"type": "string"},
+        "repository_status": {"enum": ["ignored", "outside-repository"]}
+      },
+      "required": ["path", "kind", "repository_status"],
+      "type": "object"
+    },
+    "node": {
+      "additionalProperties": false,
+      "properties": {
+        "change_target": {"type": "string"},
+        "coverage": {"$ref": "#/$defs/stringArray"},
+        "instruction_paths": {"$ref": "#/$defs/stringArray"},
+        "mode": {"enum": ["audit", "independent-review", "validation", "synthesis", "fix", "revalidation"]},
+        "node_id": {"type": "string"},
+        "predecessors": {"$ref": "#/$defs/stringArray"},
+        "priority": {"enum": ["required-routing-synthesis", "correctness-invariants", "required-validation", "supporting-quality", "optional-hygiene"]},
+        "required": {"type": "boolean"},
+        "requirement_ids": {"$ref": "#/$defs/stringArray"},
+        "skill_id": {"type": "string"},
+        "skill_path": {"type": "string"},
+        "static_references": {"$ref": "#/$defs/stringArray"},
+        "synthesis_dependency": {"type": ["string", "null"]}
+      },
+      "required": ["node_id", "skill_id", "skill_path", "mode"],
+      "type": "object"
+    },
+    "routingOverride": {
+      "additionalProperties": false,
+      "properties": {
+        "applicability_evidence": {"$ref": "#/$defs/stringArray"},
+        "catalog_id": {"type": "string"},
+        "disposition": {"enum": ["selected", "not-applicable", "exact-evidence-reused", "user-excluded", "budget-deferred", "capability-blocked", "failed"]},
+        "evidence_id": {"type": "string"},
+        "instruction_paths": {"$ref": "#/$defs/stringArray"},
+        "owners": {"$ref": "#/$defs/stringArray"},
+        "reason": {"type": "string"},
+        "review_surface": {"$ref": "#/$defs/stringArray"},
+        "static_references": {"$ref": "#/$defs/stringArray"},
+        "validation_requirement_ids": {"$ref": "#/$defs/stringArray"}
+      },
+      "required": ["catalog_id", "disposition", "reason", "applicability_evidence", "review_surface", "owners"],
+      "type": "object"
+    },
+    "routingDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "applicability_evidence": {"$ref": "#/$defs/stringArray"},
+        "catalog_id": {"type": "string"},
+        "disposition": {"enum": ["selected", "not-applicable", "exact-evidence-reused", "user-excluded", "budget-deferred", "capability-blocked", "failed"]},
+        "evidence_id": {"type": ["string", "null"]},
+        "instruction_paths": {"$ref": "#/$defs/stringArray"},
+        "owners": {"$ref": "#/$defs/stringArray"},
+        "priority": {"enum": ["required-routing-synthesis", "correctness-invariants", "required-validation", "supporting-quality", "optional-hygiene", null]},
+        "reason": {"type": "string"},
+        "requirement_id": {"type": "string"},
+        "review_surface": {"$ref": "#/$defs/stringArray"},
+        "router_id": {"type": "string"},
+        "rule_id": {"type": "string"},
+        "skill_id": {"type": "string"},
+        "skill_path": {"type": "string"},
+        "static_references": {"$ref": "#/$defs/stringArray"},
+        "synthesis_dependency": {"type": ["string", "null"]},
+        "validation_requirement_ids": {"$ref": "#/$defs/stringArray"}
+      },
+      "required": [
+        "catalog_id",
+        "requirement_id",
+        "router_id",
+        "rule_id",
+        "skill_id",
+        "skill_path",
+        "disposition",
+        "reason",
+        "applicability_evidence",
+        "review_surface",
+        "instruction_paths",
+        "static_references",
+        "validation_requirement_ids",
+        "synthesis_dependency",
+        "priority",
+        "owners",
+        "evidence_id"
+      ],
+      "type": "object"
+    },
+    "reviewRequirement": {
+      "additionalProperties": false,
+      "properties": {
+        "instruction_paths": {"$ref": "#/$defs/stringArray"},
+        "owners": {"$ref": "#/$defs/stringArray"},
+        "priority": {"enum": ["required-routing-synthesis", "correctness-invariants", "required-validation", "supporting-quality", "optional-hygiene"]},
+        "reason": {"type": "string"},
+        "required": {"type": "boolean"},
+        "requirement_id": {"type": "string"},
+        "review_surface": {"$ref": "#/$defs/stringArray"},
+        "router_id": {"type": "string"},
+        "rule_id": {"type": "string"},
+        "skill_id": {"type": "string"},
+        "skill_path": {"type": "string"},
+        "static_references": {"$ref": "#/$defs/stringArray"},
+        "synthesis_dependency": {"type": ["string", "null"]},
+        "validation_requirement_ids": {"$ref": "#/$defs/stringArray"}
+      },
+      "required": [
+        "requirement_id",
+        "skill_id",
+        "skill_path",
+        "review_surface",
+        "reason",
+        "priority",
+        "synthesis_dependency",
+        "static_references",
+        "validation_requirement_ids",
+        "owners"
+      ],
+      "type": "object"
+    },
+    "sourceState": {
+      "items": {"minLength": 1, "type": "string"},
+      "maxItems": 3,
+      "minItems": 3,
+      "type": "array"
+    },
+    "stringArray": {
+      "items": {"minLength": 1, "type": "string"},
+      "type": "array"
+    },
+    "validationRequirement": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_artifacts": {"items": {"$ref": "#/$defs/artifact"}, "type": "array"},
+        "artifact_owner": {"type": "string"},
+        "authority": {"type": "string"},
+        "baseline": {"type": "boolean"},
+        "canonical_recipe": {"type": ["string", "null"]},
+        "capture_command": {"type": "string"},
+        "captured_paths": {"$ref": "#/$defs/stringArray"},
+        "commands": {"$ref": "#/$defs/stringArray"},
+        "dependency_policy": {"enum": ["stop-on-failure", "continue-independent"]},
+        "elapsed_time_budget": {"type": "string"},
+        "environment": {"type": "string"},
+        "evidence_id": {"type": ["string", "null"]},
+        "execution_strategy": {"type": "string"},
+        "expected_evidence": {"type": "string"},
+        "expected_workspace_effects": {"$ref": "#/$defs/stringArray"},
+        "features": {"$ref": "#/$defs/stringArray"},
+        "independence_basis": {"type": "string"},
+        "isolation_root": {"type": ["string", "null"]},
+        "meaningful_skips": {"$ref": "#/$defs/stringArray"},
+        "mutation_classification": {"type": "string"},
+        "mutation_lock": {"type": "string"},
+        "planning_blocker": {"type": ["string", "null"]},
+        "platform": {"type": "string"},
+        "request": {"type": "string"},
+        "requested_scope": {"type": "string"},
+        "requires_isolation": {"type": "boolean"},
+        "required": {"type": "boolean"},
+        "requirement_id": {"type": "string"},
+        "selection_reason": {"type": "string"},
+        "source_state": {"$ref": "#/$defs/sourceState"},
+        "toolchain": {"type": "string"},
+        "working_directories": {"$ref": "#/$defs/stringArray"}
+      },
+      "required": [
+        "requirement_id",
+        "source_state",
+        "commands",
+        "working_directories",
+        "environment",
+        "toolchain",
+        "features",
+        "platform",
+        "artifact_owner",
+        "mutation_lock",
+        "request",
+        "requested_scope",
+        "capture_command",
+        "captured_paths",
+        "authority",
+        "selection_reason",
+        "mutation_classification",
+        "expected_evidence",
+        "elapsed_time_budget",
+        "dependency_policy",
+        "meaningful_skips",
+        "execution_strategy",
+        "independence_basis",
+        "isolation_root",
+        "planning_blocker",
+        "allowed_artifacts",
+        "canonical_recipe",
+        "evidence_id",
+        "required",
+        "baseline",
+        "expected_workspace_effects",
+        "requires_isolation"
+      ],
+      "type": "object"
+    }
+  }
+}

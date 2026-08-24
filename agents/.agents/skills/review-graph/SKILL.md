@@ -36,6 +36,10 @@ uses the same compact payload contract and records `worker_created: false`.
   release, baseline, path, base, and exclusion requests.
 - Use `scripts/capture_scope.py` once before routing and after each authorized
   repair batch. Preserve scope, worktree, and repository-state fingerprints.
+- Normalize the capture and compact routing/validation template with
+  `scripts/review_graph_bootstrap.py`. It binds every validator to the captured
+  fingerprint triple and validates the versioned planning schema before graph
+  construction; do not transcribe capture fields into planner input.
 - Treat fixes as unauthorized unless explicitly requested. Never mutate Git
   state.
 - Persist compact worker payloads, compiled artifacts, routing input, graph
@@ -74,6 +78,12 @@ or machine-evidence JSON. Materialize exact dispatch bases from the accepted
 plan with `review_graph_runtime.py materialize-dispatches`; do not reconstruct
 planner-owned fields in prompts.
 
+The materialized command policy is authoritative. Review nodes attest to every
+command and do not execute validator-owned commands without an exact duplicate
+authorization; authorized results remain explicit reusable evidence.
+Exact-overlap leaves may reuse the materialized trusted read-only inspection
+record, but each leaf still produces its own judgment and payload.
+
 Run the state-verification command before and after execution. Then invoke
 `scripts/review_graph_runtime.py compile-review` with the trusted dispatch,
 observed states, and compact payload. Accept the node only when compilation and
@@ -82,6 +92,10 @@ the existing evidence verifier both succeed.
 Use `repository-independent-review` for a concrete change target. Keep it fresh
 and conclusion-blind. Its existing native result remains accepted evidence;
 do not send specialist findings or synthesis context to it.
+Compile its six native sections with `compile-independent-review`; the compiler
+assigns graph finding/handoff identities, appends the envelope and machine
+evidence, verifies adversarial-check coverage and line bounds, and emits the
+metadata sidecar used by the journal and finalizer.
 
 Fix nodes are serialized. Batch compatible fixes, recapture once per batch,
 invalidate affected evidence, reroute changed surfaces, and rerun only stale or
@@ -102,6 +116,9 @@ return a `ValidationPayload`. Compile it with
 `scripts/review_graph_runtime.py compile-validation`; accept it only when the
 native and envelope gates pass. Never replay an equivalent check for another
 owner. A failed validator is evidence for its owner, not a finding by itself.
+For units with declared artifacts or workspace effects, provide trusted before
+and after workspace snapshots. The compiler rejects unexpected outputs;
+source-adjacent build intermediates require an isolated working tree.
 
 ## Synthesize From A Compact Bundle
 
@@ -118,7 +135,12 @@ accepted content without repeating specialist inspection.
 ## Complete And Report
 
 Append verified lifecycle events with `journal-append`, then run `next-ready`
-to obtain only dependency-ready dispatches. Run `finalize-proof` after every
+with a current capture to obtain only dependency-ready dispatches. Prefer its
+runtime-managed `--output-dir` generations. Reconcile accepted handoffs before
+expansion; only genuinely new triggers reroute. After an authorized repair use
+`advance-after-mutation` to record the serialized repair epoch, recapture once,
+move stale nodes to `awaiting-replan`, and materialize the replacement graph.
+Run `finalize-proof` after every
 applicable review and validation requirement has accepted non-stale evidence.
 It derives the mappings, manifest, and `RepositoryReviewProof`; report complete
 only when its verifier returns `complete`.
