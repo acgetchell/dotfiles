@@ -32,11 +32,11 @@
     "repository_state_fingerprint": {"type": "string"},
     "requested_paths": {"$ref": "#/$defs/stringArray"},
     "review_requirements": {
-      "items": {"type": "object"},
+      "items": {"$ref": "#/$defs/reviewRequirement"},
       "type": "array"
     },
     "routing_decisions": {
-      "items": {"type": "object"},
+      "items": {"$ref": "#/$defs/routingDecision"},
       "type": "array"
     },
     "routing_discoveries": {
@@ -143,6 +143,80 @@
         "validation_requirement_ids": {"$ref": "#/$defs/stringArray"}
       },
       "required": ["catalog_id", "disposition", "reason", "applicability_evidence", "review_surface", "owners"],
+      "type": "object"
+    },
+    "routingDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "applicability_evidence": {"$ref": "#/$defs/stringArray"},
+        "catalog_id": {"type": "string"},
+        "disposition": {"enum": ["selected", "not-applicable", "exact-evidence-reused", "user-excluded", "budget-deferred", "capability-blocked", "failed"]},
+        "evidence_id": {"type": ["string", "null"]},
+        "instruction_paths": {"$ref": "#/$defs/stringArray"},
+        "owners": {"$ref": "#/$defs/stringArray"},
+        "priority": {"enum": ["required-routing-synthesis", "correctness-invariants", "required-validation", "supporting-quality", "optional-hygiene", null]},
+        "reason": {"type": "string"},
+        "requirement_id": {"type": "string"},
+        "review_surface": {"$ref": "#/$defs/stringArray"},
+        "router_id": {"type": "string"},
+        "rule_id": {"type": "string"},
+        "skill_id": {"type": "string"},
+        "skill_path": {"type": "string"},
+        "static_references": {"$ref": "#/$defs/stringArray"},
+        "synthesis_dependency": {"type": ["string", "null"]},
+        "validation_requirement_ids": {"$ref": "#/$defs/stringArray"}
+      },
+      "required": [
+        "catalog_id",
+        "requirement_id",
+        "router_id",
+        "rule_id",
+        "skill_id",
+        "skill_path",
+        "disposition",
+        "reason",
+        "applicability_evidence",
+        "review_surface",
+        "instruction_paths",
+        "static_references",
+        "validation_requirement_ids",
+        "synthesis_dependency",
+        "priority",
+        "owners",
+        "evidence_id"
+      ],
+      "type": "object"
+    },
+    "reviewRequirement": {
+      "additionalProperties": false,
+      "properties": {
+        "instruction_paths": {"$ref": "#/$defs/stringArray"},
+        "owners": {"$ref": "#/$defs/stringArray"},
+        "priority": {"enum": ["required-routing-synthesis", "correctness-invariants", "required-validation", "supporting-quality", "optional-hygiene"]},
+        "reason": {"type": "string"},
+        "required": {"type": "boolean"},
+        "requirement_id": {"type": "string"},
+        "review_surface": {"$ref": "#/$defs/stringArray"},
+        "router_id": {"type": "string"},
+        "rule_id": {"type": "string"},
+        "skill_id": {"type": "string"},
+        "skill_path": {"type": "string"},
+        "static_references": {"$ref": "#/$defs/stringArray"},
+        "synthesis_dependency": {"type": ["string", "null"]},
+        "validation_requirement_ids": {"$ref": "#/$defs/stringArray"}
+      },
+      "required": [
+        "requirement_id",
+        "skill_id",
+        "skill_path",
+        "review_surface",
+        "reason",
+        "priority",
+        "synthesis_dependency",
+        "static_references",
+        "validation_requirement_ids",
+        "owners"
+      ],
       "type": "object"
     },
     "sourceState": {

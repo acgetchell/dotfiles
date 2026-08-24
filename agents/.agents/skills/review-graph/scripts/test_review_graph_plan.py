@@ -1304,6 +1304,8 @@ def test_validation_artifact_status_requires_repository_owned_ignore_rule(tmp_pa
         _verified_artifact_status("/external/unapproved/command.log", "outside-repository", REPOSITORY_ROOT, "/external/review-validator")
     with pytest.raises(ValueError, match="requires a dispatched isolation root"):
         _verified_artifact_status("/external/review-validator/command.log", "outside-repository", REPOSITORY_ROOT)
+    with pytest.raises(ValueError, match="isolation root overlaps the captured repository"):
+        _verified_artifact_status("/external/review-validator/command.log", "outside-repository", REPOSITORY_ROOT, "/")
 
 
 @pytest.mark.parametrize(
@@ -1528,6 +1530,15 @@ def test_validation_isolation_root_partitions_coalescing_and_evidence_identity()
     assert len(units) == 2
     assert {unit.isolation_root for unit in units} == {"/external/validation-a", "/external/validation-b"}
     assert validation_environment_digest(units[0]) != validation_environment_digest(units[1])
+
+
+def test_isolated_validation_rejects_working_directory_outside_isolation_root() -> None:
+    requirement = replace(
+        _validation_requirement("V01"), isolation_root="/external/validation", requires_isolation=True, working_directories=("/external/unrelated",)
+    )
+
+    with pytest.raises(ValueError, match="working directories must be absolute and under its isolation root"):
+        coalesce_validation_requirements((requirement,))
 
 
 def _synthesis(node_id: str = "rust-synthesis") -> WorkerNode:

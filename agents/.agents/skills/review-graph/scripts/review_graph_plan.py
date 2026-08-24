@@ -1665,6 +1665,28 @@ def _validation_group_key(item: ValidationRequirement) -> tuple[object, ...]:
     )
 
 
+def _validate_validation_isolation(item: ValidationRequirement) -> None:
+    if item.requires_isolation and item.isolation_root is None:
+        msg = f"validation requirement {item.requirement_id} requires an isolation root"
+        raise ValueError(msg)
+    if item.isolation_root is not None and (not _nonempty_text(item.isolation_root) or not Path(item.isolation_root).is_absolute()):
+        msg = f"validation requirement {item.requirement_id} isolation root must be an absolute path"
+        raise ValueError(msg)
+    if not item.requires_isolation:
+        return
+    resolved_isolation_root = Path(item.isolation_root or "").resolve(strict=False)
+    invalid_working_directories = tuple(
+        directory
+        for directory in item.working_directories
+        if not Path(directory).is_absolute() or not Path(directory).resolve(strict=False).is_relative_to(resolved_isolation_root)
+    )
+    if invalid_working_directories:
+        msg = f"validation requirement {item.requirement_id} isolated working directories must be absolute and under its isolation root: " + ", ".join(
+            invalid_working_directories
+        )
+        raise ValueError(msg)
+
+
 def coalesce_validation_requirements(requirements: Sequence[ValidationRequirement]) -> tuple[tuple[ValidationUnit, ...], tuple[ValidationEvidenceMapping, ...]]:
     """Group exactly compatible validator needs and retain complete reuse maps."""
     _validate_unique_ids((item.requirement_id for item in requirements), label="validation requirement")
@@ -1699,12 +1721,7 @@ def coalesce_validation_requirements(requirements: Sequence[ValidationRequiremen
         if normalized_captured_paths != item.captured_paths:
             msg = f"validation requirement {item.requirement_id} captured_paths must be normalized"
             raise ValueError(msg)
-        if item.requires_isolation and item.isolation_root is None:
-            msg = f"validation requirement {item.requirement_id} requires an isolation root"
-            raise ValueError(msg)
-        if item.isolation_root is not None and (not _nonempty_text(item.isolation_root) or not Path(item.isolation_root).is_absolute()):
-            msg = f"validation requirement {item.requirement_id} isolation root must be an absolute path"
-            raise ValueError(msg)
+        _validate_validation_isolation(item)
         artifact_paths = tuple(artifact.path for artifact in item.allowed_artifacts)
         artifact_ids = tuple(artifact.artifact_id for artifact in item.allowed_artifacts if artifact.artifact_id is not None)
         if (
@@ -4824,8 +4841,11 @@ def _verified_artifact_status(  # noqa: C901, PLR0912, PLR0915
             msg = f"dispatched isolation root must be absolute: {isolation_root}"
             raise ValueError(msg)
         resolved_root = root.resolve(strict=False)
-        if repository_root is not None and resolved_root.is_relative_to(repository_root):
-            msg = f"dispatched isolation root is inside the captured repository: {isolation_root}"
+        resolved_repository_root = repository_root.resolve(strict=False) if repository_root is not None else None
+        if resolved_repository_root is not None and (
+            resolved_root.is_relative_to(resolved_repository_root) or resolved_repository_root.is_relative_to(resolved_root)
+        ):
+            msg = f"dispatched isolation root overlaps the captured repository: {isolation_root}"
             raise ValueError(msg)
         if not resolved.is_relative_to(resolved_root):
             msg = f"outside-repository artifact is not under the dispatched isolation root: {path}"

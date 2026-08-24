@@ -365,7 +365,7 @@ def test_planning_schema_rejects_boolean_schema_versions(value: bool) -> None:
     assert any(item["path"] == "$.schema_version" for item in diagnostics)
 
 
-@pytest.mark.parametrize("exit_code", ["signal", "1.0", "+ 1", ""])
+@pytest.mark.parametrize("exit_code", ["signal", "1.0", "+ 1", "+12", ""])
 def test_validation_payload_schema_rejects_nonnumeric_exit_code_strings(exit_code: str) -> None:
     payload = {
         "artifacts": [],
@@ -391,7 +391,7 @@ def test_validation_payload_schema_rejects_nonnumeric_exit_code_strings(exit_cod
     assert any(item["path"] == "$.executions[0].exit_code" and item["code"] == "pattern" for item in diagnostics)
 
 
-@pytest.mark.parametrize("exit_code", [-9, None, "-9", "+12", "0", "none"])
+@pytest.mark.parametrize("exit_code", [-9, None, "-9", "0", "none"])
 def test_validation_payload_schema_accepts_supported_exit_codes(exit_code: int | str | None) -> None:
     require_schema(
         {
@@ -412,6 +412,26 @@ def test_validation_payload_schema_accepts_supported_exit_codes(exit_code: int |
         },
         SCHEMA_ROOT / "validation-payload-v1.schema.json",
     )
+
+
+def test_planning_schema_reports_routing_decision_item_diagnostics() -> None:
+    with pytest.raises(SchemaValidationError) as captured:
+        require_schema({"routing_decisions": [{"catalog_id": "rust.errors", "unexpected": True}]}, SCHEMA_ROOT / "planning-input-v1.schema.json")
+
+    diagnostics = cast("list[dict[str, Any]]", captured.value.as_dict()["diagnostics"])
+    paths = {item["path"] for item in diagnostics}
+    assert "$.routing_decisions[0].router_id" in paths
+    assert "$.routing_decisions[0].unexpected" in paths
+
+
+def test_planning_schema_reports_review_requirement_item_diagnostics() -> None:
+    with pytest.raises(SchemaValidationError) as captured:
+        require_schema({"review_requirements": [{"requirement_id": "rust.errors", "unexpected": True}]}, SCHEMA_ROOT / "planning-input-v1.schema.json")
+
+    diagnostics = cast("list[dict[str, Any]]", captured.value.as_dict()["diagnostics"])
+    paths = {item["path"] for item in diagnostics}
+    assert "$.review_requirements[0].skill_id" in paths
+    assert "$.review_requirements[0].unexpected" in paths
 
 
 @pytest.mark.parametrize(("attempt", "retry_allowed"), [(1, True), (2, False)])
@@ -780,6 +800,65 @@ def test_validation_workspace_audit_rejects_successful_run_with_unexpected_outpu
 
     dispatch["workspace_after"] = [{"digest": digest, "path": "dist/package.whl", "status": "ignored"}]
     assert _validation_workspace_audit(dispatch, unit)["changed_paths"] == ["dist/package.whl"]
+
+
+def test_isolated_validation_workspace_audit_binds_artifacts_and_changes_to_root(tmp_path: Path) -> None:
+    repository_root = tmp_path / "repository"
+    isolation_root = tmp_path / "isolation"
+    unrelated_root = tmp_path / "unrelated"
+    artifact_root = isolation_root / "artifacts"
+    digest = "sha256:" + "a" * 64
+    unit = ValidationUnit(
+        node_id="validation-isolated",
+        requirement_ids=("isolated",),
+        source_state=("scope", "worktree", "repository"),
+        commands=("build",),
+        working_directories=(str(isolation_root / "work"),),
+        environment="locked",
+        toolchain="Python",
+        features=(),
+        platform="current",
+        artifact_owner="isolated",
+        mutation_lock="isolated-output",
+        request="build outside the repository",
+        requested_scope="branch",
+        capture_command="capture_scope.py --mode branch",
+        captured_paths=("pyproject.toml",),
+        requirement_plans=(("isolated", "graph", "package changed", "isolated", "artifact built", "30s", None),),
+        dependency_policy="stop-on-failure",
+        meaningful_skips=(),
+        execution_strategy="sequential",
+        independence_basis="none",
+        planning_blocker=None,
+        allowed_artifacts=(
+            ValidationArtifact(path=str(artifact_root), kind="build", repository_status="outside-repository", status_source="isolated-output-directory"),
+        ),
+        canonical_recipe="build",
+        evidence_ids=(),
+        required=True,
+        baseline=False,
+        requires_isolation=True,
+        isolation_root=str(isolation_root),
+    )
+    artifact_path = artifact_root / "package.whl"
+    dispatch = {
+        "repository_root": str(repository_root),
+        "workspace_after": [{"digest": digest, "path": str(artifact_path), "status": "outside-repository"}],
+        "workspace_before": [],
+    }
+
+    assert _validation_workspace_audit(dispatch, unit)["changed_paths"] == [str(artifact_path)]
+
+    unrelated_artifact = replace(unit.allowed_artifacts[0], path=str(unrelated_root / "artifacts"))
+    with pytest.raises(ValueError, match="artifacts must be under the dispatched isolation root"):
+        _validation_workspace_audit({**dispatch, "workspace_after": []}, replace(unit, allowed_artifacts=(unrelated_artifact,)))
+
+    unrelated_path = unrelated_root / "package.whl"
+    with pytest.raises(ValueError, match="changed workspace paths must be under the dispatched isolation root"):
+        _validation_workspace_audit(
+            {**dispatch, "workspace_after": [{"digest": digest, "path": str(unrelated_path), "status": "outside-repository"}]},
+            replace(unit, allowed_artifacts=(), expected_workspace_effects=(str(unrelated_path),)),
+        )
 
 
 def test_sparse_routing_expands_to_exhaustive_catalog_records() -> None:

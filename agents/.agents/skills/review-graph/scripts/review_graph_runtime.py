@@ -1443,6 +1443,34 @@ def _path_allowed(path: str, allowed: tuple[str, ...]) -> bool:
     return any(path == candidate or path.startswith(candidate.rstrip("/") + "/") for candidate in allowed)
 
 
+def _validate_isolated_workspace_paths(dispatch: dict[str, Any], unit: ValidationUnit, changed: tuple[str, ...]) -> None:
+    repository_root = Path(_required_text(dispatch, "repository_root")).resolve()
+    inside = tuple(directory for directory in unit.working_directories if Path(directory).resolve(strict=False).is_relative_to(repository_root))
+    if inside:
+        msg = "source-mutating validation requires working directories outside the captured repository: " + ", ".join(inside)
+        raise ValueError(msg)
+    isolation_root = Path(unit.isolation_root or "").resolve(strict=False)
+    if isolation_root.is_relative_to(repository_root) or repository_root.is_relative_to(isolation_root):
+        msg = f"isolated validation root overlaps the captured repository: {isolation_root}"
+        raise ValueError(msg)
+    outside_root = tuple(directory for directory in unit.working_directories if not Path(directory).resolve(strict=False).is_relative_to(isolation_root))
+    if outside_root:
+        msg = "isolated validation working directories must be under the dispatched isolation root: " + ", ".join(outside_root)
+        raise ValueError(msg)
+    outside_artifacts = tuple(
+        artifact.path
+        for artifact in unit.allowed_artifacts
+        if artifact.repository_status == "outside-repository" and not Path(artifact.path).resolve(strict=False).is_relative_to(isolation_root)
+    )
+    if outside_artifacts:
+        msg = "isolated validation artifacts must be under the dispatched isolation root: " + ", ".join(outside_artifacts)
+        raise ValueError(msg)
+    outside_changes = tuple(path for path in changed if not Path(path).resolve(strict=False).is_relative_to(isolation_root))
+    if outside_changes:
+        msg = "isolated validation changed workspace paths must be under the dispatched isolation root: " + ", ".join(outside_changes)
+        raise ValueError(msg)
+
+
 def _validation_workspace_audit(dispatch: dict[str, Any], unit: ValidationUnit) -> dict[str, object]:
     required = bool(unit.allowed_artifacts or unit.expected_workspace_effects or unit.requires_isolation or unit.isolation_root)
     if not required and "workspace_before" not in dispatch and "workspace_after" not in dispatch:
@@ -1463,16 +1491,7 @@ def _validation_workspace_audit(dispatch: dict[str, Any], unit: ValidationUnit) 
         msg = "validation changed tracked or nonignored repository paths: " + ", ".join(unsafe)
         raise ValueError(msg)
     if unit.requires_isolation:
-        repository_root = Path(_required_text(dispatch, "repository_root")).resolve()
-        inside = tuple(directory for directory in unit.working_directories if Path(directory).resolve(strict=False).is_relative_to(repository_root))
-        if inside:
-            msg = "source-mutating validation requires working directories outside the captured repository: " + ", ".join(inside)
-            raise ValueError(msg)
-        isolation_root = Path(unit.isolation_root or "").resolve(strict=False)
-        outside_root = tuple(directory for directory in unit.working_directories if not Path(directory).resolve(strict=False).is_relative_to(isolation_root))
-        if outside_root:
-            msg = "isolated validation working directories must be under the dispatched isolation root: " + ", ".join(outside_root)
-            raise ValueError(msg)
+        _validate_isolated_workspace_paths(dispatch, unit, changed)
     return {"changed_paths": list(changed), "observed": True, "unexpected_paths": []}
 
 

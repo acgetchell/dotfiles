@@ -27,7 +27,7 @@
           "elapsed": {"type": ["string", "number", "null"]},
           "evidence": {"type": "string"},
           "executor": {"type": "string"},
-          "exit_code": {"pattern": "^(?:[+-]?[0-9]+|none)$", "type": ["integer", "string", "null"]},
+          "exit_code": {"pattern": "^(?:-?[0-9]+|none)$", "type": ["integer", "string", "null"]},
           "result": {"enum": ["passed", "failed", "blocked", "not-run"]},
           "working_directory": {"type": "string"}
         },
