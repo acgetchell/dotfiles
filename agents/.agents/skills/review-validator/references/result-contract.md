@@ -1,6 +1,8 @@
 # Review Validator Result Contract
 
-Use this contract for every standalone or graph-dispatched validation unit.
+This is the standalone user-facing and compiled-artifact specification. A live
+graph-dispatched worker reads `graph-dispatch.md` and returns a compact payload;
+the graph runtime compiler renders the compatible artifact described here.
 
 ## Contents
 

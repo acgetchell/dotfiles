@@ -1,5 +1,10 @@
 # Review Graph Node Contract
 
+This documents the compiled native compatibility artifact and legacy direct
+node format. New runtime workers return the compact `ReviewPayload` from
+`runtime-contract.md`; `review_graph_runtime.py` renders and verifies the native
+artifact below. Workers do not read this file.
+
 Use this contract for every `review-graph` node. Adaptive grouped execution may
 run a node in a subagent or the coordinator; isolated execution requires a
 fresh worker. Both locations return the same native result and evidence
@@ -53,8 +58,8 @@ state_verification_command: exact read-only command that recomputes all three fi
 change_target: exact diff, commit, or custom target for independent review, or none
 validation_requirements: exact requirement IDs and commands, or none
 validation_ledger: exact reusable evidence, including verified standalone candidates, or empty
-supplied_validation_results: complete user-supplied standalone Validation Results or empty
-predecessor_reports: complete reports for synthesis, fix, or revalidation; otherwise empty
+supplied_validation_results: accepted artifact identities and normalized validation evidence or empty
+synthesis_bundle: canonical normalized predecessor view and digest for synthesis; otherwise empty
 artifact_store: persistent session-owned or external result location
 ```
 
@@ -64,7 +69,7 @@ synthesis, fix, revalidation, and validation prompts receive only the fields
 their contracts name. `repository-independent-review` receives only the identity,
 change-target, instruction, and state-verification fields in the Independent
 Review Worker Contract. Never send it `validation_ledger`,
-`supplied_validation_results`, `predecessor_reports`, prior findings, or
+`supplied_validation_results`, `synthesis_bundle`, prior findings, or
 coordinator conclusions.
 
 ## Coordinator-Only Lifecycle Gate
@@ -86,11 +91,11 @@ worker created but unable to load its skill is
 adding the worker attempt to `Skills Run`. Adaptive coordinator fallback may
 later produce a separate accepted execution record for the same node.
 
-In isolated execution, create a fresh no-inherited-turn worker for every node
-and never dispatch a later node through a follow-up to a completed worker. In
-adaptive execution, use independent workers when possible; if creation fails
-before accepted evidence, record the attempt and execute that same node in the
-coordinator. Isolated-only instead stops and emits the resume manifest from
+Create every worker in every profile with `fork_turns: "none"` and never dispatch
+a later node through a follow-up to a completed worker. In adaptive execution,
+use fresh independent workers when possible; if creation fails before accepted
+evidence, record the attempt and execute that same node in the coordinator.
+Isolated-only instead stops and emits the resume manifest from
 `planning-contract.md`.
 
 ## Focused Review Execution Prompt
@@ -134,8 +139,8 @@ Skill and reference digests:
 Prior validation evidence:
 <exact-ledger-entries-or-none>
 
-Predecessor reports:
-<complete-reports-or-none>
+Synthesis bundle:
+<canonical-normalized-bundle-and-digest-or-none>
 
 State verification command:
 <exact-command-from-scope-manifest>
@@ -353,8 +358,10 @@ evidence ID unchanged; the reused record is the only permitted accepted review
 evidence without a planned executable node.
 
 For final repository synthesis, dispatch `repository-production-review` in
-`synthesis` mode with complete accepted predecessor reports, exhaustive routing
-ledgers, validation mappings, exact reuse, and explicit user exclusions. It may
+`synthesis` mode with the canonical hashed `SynthesisBundle`, accepted
+predecessor IDs, routing exceptions, validation mappings, exact reuse, and
+explicit user exclusions. Raw predecessor artifacts remain in the proof store
+and are verified independently; do not inject them into synthesis context. It may
 not capture, route, create workers, validate, fix, or perform new specialist
 analysis. Require every predecessor under `Predecessor Coverage` and apply all
 normal skill-loading, static-reference, structure, and fingerprint gates.
@@ -394,10 +401,10 @@ review owner before it can become a finding.
 Use one `review-validator` execution for each independent validation unit. In
 adaptive execution, prefer an independent worker and use coordinator fallback
 for the same dispatch when needed. Isolated execution requires one fresh worker
-per unit. Read its complete `SKILL.md` and
-`references/result-contract.md`, then fill that skill's Validation Dispatch
-verbatim. The graph must provide exact commands; the validator must not select
-them from prose or load a review skill.
+per unit. Read its complete `SKILL.md` and only
+`references/graph-dispatch.md`. The graph provides the planner-owned
+`ValidationUnit`; the validator must not select commands from prose or load a
+review skill.
 
 Use this prompt shell:
 
@@ -406,24 +413,23 @@ Use $review-validator at <absolute-review-validator-skill-path> to execute this
 validation node.
 
 Read every applicable repository instruction file, then read the complete skill
-and its result-contract reference. Apply exactly that one skill. Do not review
+and its graph-dispatch reference. Apply exactly that one skill. Do not review
 or fix code, assign findings, load another skill, broaden the commands, mutate
 git state, or spawn another worker.
 
 Validation Dispatch:
-<complete-dispatch-from-review-validator-result-contract>
+<exact planner-owned validation unit and trusted execution identity>
 
-Return exactly the Validation Result format required by that skill, with no
-prose before it.
+Return only the compact ValidationPayload required by that skill.
 ```
 
-Accept the native Validation Result only when it satisfies every acceptance rule
-in `review-validator/references/result-contract.md`. Treat `passed`, `failed`,
-`reused`, and `not-applicable` as accepted evidence states and `blocked` as an
-accepted blocked node state. A failed validation is not automatically a finding;
-route its raw evidence to the owning reviewer or synthesis node for diagnosis.
-Persist the result, create `ValidationEvidence`, and run
-`assess_validation_evidence` before satisfying any mapped requirement.
+Persist the payload and compile it with `review_graph_runtime.py
+compile-validation`. The compiler renders the native compatibility artifact,
+creates `ValidationEvidence`, and runs the existing native and envelope gates.
+Treat `passed`, `failed`, `reused`, and `not-applicable` as accepted evidence
+states and `blocked` as an accepted blocked node state. A failed validation is
+not automatically a finding; route its accepted evidence to the owning reviewer
+or synthesis node for diagnosis.
 
 ## Independent Review Worker Contract
 

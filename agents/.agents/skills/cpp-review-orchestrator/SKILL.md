@@ -27,15 +27,12 @@ The intent is to replace a maintainer manually invoking several C++ reviews. Do 
 When `review-graph` requests a declarative handoff, read
 [`review-graph/references/routing-handoff.md`](../review-graph/references/routing-handoff.md)
 and return its records instead of running this skill's standalone grouped pass
-loop. Use every `cpp-review-orchestrator` entry in
-[`routing-catalog.json`](../review-graph/references/routing-catalog.json) and
-return exactly one disposition per candidate, including the mandatory
-`cpp-production-review` synthesis entry. Select only groups justified by the
-supplied C++ surface, cite the catalog rule and inspected trigger evidence,
-expand exact skill paths, attach applicable CDT++ references, and declare exact
-validation requirements, priorities, owners, and synthesis dependencies. Do
-not load specialist bodies, validate, synthesize, edit, create subagents, or
-recursively invoke an orchestrator in graph-routing mode.
+loop. Return sparse semantic overrides only for selected, reused, excluded, or
+blocked candidates. The planner derives catalog identity, expands omitted
+candidates to `not-applicable`, and selects mandatory synthesis. Attach
+applicable CDT++ references and exact validation requirements only to selected
+records. Do not load specialist bodies, validate, synthesize, edit, create
+subagents, or recursively invoke an orchestrator in graph-routing mode.
 
 Otherwise keep the standalone behavior below.
 

@@ -16,6 +16,12 @@ Review Rust tests as executable evidence for behavior, invariants, compatibility
 - Do not add a property, fuzz, compile-fail, Miri, Loom, or sanitizer framework merely for ceremony; use established tooling or add it only when the uncovered risk justifies the maintenance cost.
 - Do not mutate git state without explicit authorization.
 
+When invoked directly without a parent validation ledger and result contract,
+read
+[`references/standalone-validation.md`](references/standalone-validation.md).
+Graph and Rust-orchestrator dispatches follow the supplied validation ownership
+and compact result contract without loading that reference.
+
 ## Workflow
 
 ### 1. Identify the failure the test must detect
@@ -102,38 +108,6 @@ Verify:
 - benchmark setup and correctness checks remain outside measured closures
 - nonzero exits and diagnostic reports propagate through repository commands
 
-## Validation
-
-Maintain a validation ledger keyed by the relevant source state, built artifact,
-toolchain, target, feature set, profile, instrumentation, and exact test
-selection. Before executing a repository recipe or Cargo command, inspect what
-it selects, decide whether repository policy or the known scope requires an
-indivisible full gate, and reuse still-valid evidence already in the ledger.
-
-Choose the smallest single test selection that proves the touched risk: a named
-test, doctest, property replay, fuzz regression, compile-fail target, model
-check, affected package, or feature tier. Do not run a named test and then its
-containing target, package, workspace, and full CI as successive tiers. If a
-broader gate is independently required, choose it initially or run only the
-portion not already recorded as passing.
-
-If an indivisible policy-mandated gate is discovered only after overlapping
-tests have passed and it offers no reliable exclusion, report the validation
-and command-surface conflict and route it to `project-tooling-review`; do not
-silently replay the tests or count the duplicate execution as new evidence.
-
-Rerun a test only after relevant source, fixture, build, or configuration
-changes invalidate its result, or when diagnosing nondeterminism. A different
-toolchain, target, feature set, Miri/sanitizer mode, or other material runtime
-configuration is distinct evidence rather than a duplicate. Repeated
-property, fuzz, concurrency, or benchmark samples are also distinct when the
-repetition is itself part of the stated test design; record the seed, schedule,
-or sample purpose.
-
 ## Finding Standard
 
 For each finding, state what wrong implementation could still pass, the missing input/oracle/assertion/configuration, the smallest stronger test, and the command that demonstrates it.
-
-## Handoff
-
-Summarize risks and tests inspected, evidence strengthened, independent oracles, seeds/counterexamples, compile/configuration contracts, the non-overlapping validation ledger, remaining gaps, files changed, and confirmation that no git state mutation occurred when true.

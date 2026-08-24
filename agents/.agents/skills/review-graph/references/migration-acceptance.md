@@ -18,6 +18,17 @@ Keep adaptive grouped execution as the default while it:
 - records blockers without discarding completed surface evidence
 - applies and revalidates fixes only when authorized
 - verifies `RepositoryReviewProof` and derives the five-row compatibility table
+- dispatches every worker with no inherited turns and compiles compact review
+  and validation payloads through the trusted runtime
+- gives synthesis only the canonical hashed `SynthesisBundle`, while preserving
+  complete predecessor artifacts in the proof store
+- derives dispatches, synthesis records, requirement mappings, manifests, and
+  the final proof from accepted planner/compiler artifacts rather than model
+  transcription
+- derives ready dispatches from a plan-bound, source-bound, digest-chained
+  lifecycle journal whose accepted events reference verified artifacts
+- keeps ordinary worker context within checked prompt budgets while retaining
+  full provenance in the proof store
 
 An adaptive review is incomplete when an applicable requirement, required
 validator, or unresolved handoff is silently omitted. It is still useful when a
@@ -39,7 +50,15 @@ Require on every isolated-planner change:
 - fingerprints, node lifecycle equalities, and final report equalities reconcile
 
 Run routing, planner, completion, failure/resume, and scope-capture tests in CI.
-These deterministic tests prove the model, not runtime operability.
+Also test artifact tampering; separate ordinary, validator, and complete
+all-surface prompt budgets; and recursive exclusion of coordinator ledgers,
+reports, proofs, and maintainer specifications from worker dispatches. These
+deterministic tests prove the model, not runtime operability.
+
+For leaf progressive-disclosure audits, rank candidates from actual selection
+traces combined with loaded words. Keep domain reasoning in the entrypoint;
+move only conditionally relevant standalone, fix, release, validation, or
+reporting procedures, and add entrypoint budgets for the optimized leaves.
 
 ## Isolated Forward Gate
 

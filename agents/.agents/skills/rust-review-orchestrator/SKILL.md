@@ -28,16 +28,13 @@ Do not treat selecting a group as permission to load every skill listed in it. L
 When `review-graph` requests a declarative handoff, read
 [`review-graph/references/routing-handoff.md`](../review-graph/references/routing-handoff.md)
 and return its records instead of running this skill's standalone pass loop.
-Use every `rust-review-orchestrator` entry in
-[`routing-catalog.json`](../review-graph/references/routing-catalog.json) and
-return exactly one disposition per candidate, including the mandatory
-`rust-production-review` synthesis entry. Select Rust specialists from the
-supplied surface, cite the catalog rule and inspected trigger evidence, expand
-exact skill paths, attach applicable static guidance such as
-`references/la-stack.md`, and declare exact validators, priorities, owners, and
-synthesis dependencies. Do not load specialist bodies, validate, synthesize,
-edit, create subagents, or recursively invoke an orchestrator in graph-routing
-mode.
+Return sparse semantic overrides only for selected, reused, excluded, or
+blocked candidates. The planner derives catalog identity, expands omitted
+candidates to `not-applicable`, and selects mandatory synthesis. Attach
+applicable static guidance such as `references/la-stack.md` and exact validation
+requirements only to selected records. Do not load specialist bodies, validate,
+synthesize, edit, create subagents, or recursively invoke an orchestrator in
+graph-routing mode.
 
 Otherwise keep the standalone behavior below.
 

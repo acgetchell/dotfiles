@@ -14,9 +14,11 @@ running validators, editing files, or repeating specialist analysis.
 Require:
 
 - captured scope, worktree, and repository-state fingerprints
-- exhaustive repository and surface routing ledgers
-- every accepted leaf, independent-review, validation, and language-synthesis
-  report with stable IDs
+- one compiler-produced `SynthesisBundle` and its verified digest
+- routing exceptions and blockers; the exhaustive ledger remains in the proof
+  store
+- normalized accepted leaf, independent-review, validation, and
+  language-synthesis records with stable evidence and artifact IDs
 - requirement-to-node and validation-reuse mappings
 - explicit user exclusions, exact evidence reuse, and remaining blockers
 
@@ -25,8 +27,8 @@ an unresolved applicability handoff. Never infer that omitted work passed.
 
 ## Reconciliation
 
-1. Map every selected requirement to one accepted report or exact verified
-   reuse record.
+1. Map every selected requirement to one accepted normalized record or exact
+   verified reuse record.
 2. Verify that every consulted routing catalog is exhaustive and no
    completion-blocking disposition remains.
 3. Preserve raw disagreements. Deduplicate only findings with the same cause,
@@ -53,3 +55,5 @@ Return:
 - `Repository Verdict`: `ready`, `not-ready`, or `blocked`, with exact reasons
 
 Do not create subagents or recursively invoke `review-graph`.
+Do not request or load complete predecessor artifacts; the proof verifier owns
+their independent validation.

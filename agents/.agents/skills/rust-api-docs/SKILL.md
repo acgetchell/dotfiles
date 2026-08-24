@@ -25,19 +25,10 @@ constrain, or explain public API behavior, especially when they encode error
 classification, panic/rollback invariants, proposal semantics, serialization
 compatibility, or other behavior callers observe indirectly.
 
-### Scope Modes
-
-Default mode:
-
-- Audit newly added or modified public APIs.
-- Ignore unrelated unchanged APIs unless they clarify the changed contract.
-
-Whole-repo baseline mode:
-
-- Use when the user explicitly says "whole repo", "entire repo", "baseline audit", or similar.
-- Audit the full public documentation surface: crate docs, module docs, public items, examples, rustdoc lint configuration, and docs.rs metadata.
-- Prioritize findings by published API risk, broken or missing required sections, misleading contracts, and examples users are likely to copy.
-- Do not require fixing every historical documentation gap in one pass; group lower-risk gaps as follow-ups.
+When invoked directly without an exact parent scope and result contract, read
+[`references/standalone-workflow.md`](references/standalone-workflow.md).
+Graph and Rust-orchestrator dispatches use their supplied scope and compact
+result contract without loading that reference.
 
 ## Review goals
 
@@ -147,31 +138,3 @@ Check:
 - examples cover at least one realistic use, not just a trivial constructor
 
 If doctest *test quality* is the primary concern, defer to `rust-test-quality`. This skill cares whether the example exists, demonstrates the API contract, and uses the right import surface.
-
-## Output Format
-
-### Summary
-
-- PASS
-- NEEDS IMPROVEMENT
-- FAIL
-
-### Findings
-
-- Items missing required sections
-- Items with weak descriptions or broken links
-- API-supporting private helpers missing intent/behavior docs
-- Crate-level or module-level documentation gaps
-
-### Required Fixes
-
-- Sections to add (`# Errors`, `# Panics`, `# Safety`, `# Examples`)
-- Intra-doc links to add or repair
-- Description rewrites
-- Private helper `///` comments to add for changed API-supporting code
-- Lint or `[package.metadata.docs.rs]` configuration changes
-
-### Optional Improvements
-
-- Examples to strengthen
-- Cross-links between related items

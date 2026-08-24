@@ -4,6 +4,10 @@ Use this contract only when the user explicitly requests isolated execution.
 Ordinary `review-graph` and `repo-review` requests use adaptive grouped
 execution and do not inspect worker capacity before routing.
 
+All workers, including adaptive workers, use fresh no-inherited-turn context.
+Isolation differs by fallback and lifecycle guarantees, not by permitting
+adaptive workers to inherit the coordinator conversation.
+
 ## Contents
 
 - [Profile Selection](#profile-selection)

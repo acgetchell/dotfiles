@@ -34,7 +34,7 @@ coalesced validators, exact evidence reuse, and coordinator fallback may change
 execution order or location, but never coverage, findings, validation
 attribution, or completion status.
 
-Require the final `RepositoryReviewProof` defined by
-[`review-graph` evidence contract](../review-graph/references/evidence-contract.md).
-Do not claim completion from an orchestrator table, routing ledger, worker plan,
-or conversation summary alone.
+Require the final `RepositoryReviewProof` produced and verified by the
+`review-graph` runtime. Do not load its maintainer-facing evidence specification
+unless diagnosing a verifier rejection. Do not claim completion from an
+orchestrator table, routing ledger, worker plan, or conversation summary alone.

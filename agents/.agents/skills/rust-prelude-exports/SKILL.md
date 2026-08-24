@@ -25,19 +25,9 @@ Focus on newly added or modified Rust public APIs that affect:
 
 Ignore private implementation imports unless they reveal a missing or confused public export.
 
-### Scope Modes
-
-Default mode:
-
-- Audit newly added or modified public APIs, preludes, `pub use` exports, and downstream-style imports.
-- Ignore unrelated unchanged exports unless they define the boundary the changed API should follow.
-
-Whole-repo baseline mode:
-
-- Use when the user explicitly says "whole repo", "entire repo", "baseline audit", or similar.
-- Audit the complete public export surface, all prelude modules, doctest imports, integration tests, examples, and benchmark imports.
-- Prioritize findings by accidental API stabilization, bloated or overlapping preludes, missing ergonomic exports for common workflows, and examples that require internal paths.
-- Do not require fixing every historical export nit in one pass; separate breaking cleanup from additive ergonomic fixes.
+When invoked directly without an exact parent scope and result contract, read
+[`references/standalone-workflow.md`](references/standalone-workflow.md).
+Review-graph and Rust-orchestrator dispatches already own that information.
 
 ## Review goals
 
@@ -151,29 +141,3 @@ Prefer:
 - documentation comments explaining what each scoped prelude is for
 
 Avoid tests that only compile because they live inside the same module as the implementation.
-
-## Output Format
-
-### Summary
-
-- PASS
-- NEEDS IMPROVEMENT
-- FAIL
-
-### Findings
-
-- Concrete issues with file/module references
-- For each issue, state whether the problem is missing export, excessive export, overlap, unclear scope, or downstream usability
-
-### Required Fixes
-
-- Exports to add
-- Exports to remove or move to a scoped prelude
-- Visibility tightenings (`pub` → `pub(crate)` or `pub(super)`) for items that should not be public
-- Scoped preludes to create or rename
-- Doctests, integration tests, examples, or benchmarks to update
-- Documentation to add for prelude usage
-
-### Optional Improvements
-
-- Non-blocking organization, naming, or docs refinements

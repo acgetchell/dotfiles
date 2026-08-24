@@ -35,19 +35,10 @@ Focus on newly added or modified Rust code that:
 
 Ignore unrelated unchanged code unless needed to understand existing error conventions.
 
-### Scope Modes
-
-Default mode:
-
-- Audit newly added or modified error types, fallible paths, and error conversions.
-- Ignore unrelated unchanged errors unless they define the convention the changed code should follow.
-
-Whole-repo baseline mode:
-
-- Use when the user explicitly says "whole repo", "entire repo", "baseline audit", or similar.
-- Audit public error types, fallible public APIs, validation paths, backend/library error mappings, and common internal error conversion boundaries.
-- Prioritize findings by caller-visible ambiguity, lost typed context, misleading variants, missing `#[non_exhaustive]`, and tests that cannot assert structured errors.
-- Do not require fixing every historical error-design issue in one pass; separate API-breaking fixes from internal cleanup.
+When invoked directly without an exact parent scope and result contract, read
+[`references/standalone-workflow.md`](references/standalone-workflow.md).
+Graph and Rust-orchestrator dispatches use their supplied scope and compact
+result contract without loading that reference.
 
 ## Review goals
 
@@ -221,28 +212,3 @@ Prefer tests that:
 - cover each new distinct failure path
 
 Avoid tests that only check `is_err()` for logic that depends on variant correctness.
-
-## Output Format
-
-### Summary
-
-- PASS
-- NEEDS IMPROVEMENT
-- FAIL
-
-### Findings
-
-- Concrete issues with file/function references
-- For each issue, state the current error path and the better variant/path
-
-### Required Fixes
-
-- New variants to add, if any
-- Existing variants to use instead
-- Conversion or `map_err` changes needed
-- Display/debug message improvements
-- Tests to add or update
-
-### Optional Improvements
-
-- Non-blocking naming, field, or message refinements

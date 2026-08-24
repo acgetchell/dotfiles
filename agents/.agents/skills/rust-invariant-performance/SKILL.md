@@ -56,26 +56,11 @@ user asks for a cross-crate comparison:
 
 ## Scope
 
-Default changed-code mode:
-
-- Review newly added or modified Rust code and nearby hot-path context.
-- Ignore unrelated unchanged code unless it defines the invariant, benchmark, or
-  performance contract the change relies on.
-
-Pull-request mode:
-
-- Use when the user says "PR", "this branch", "diff against main", or similar.
-- Review changed hot paths first, then adjacent invariant boundaries and
-  benchmarks needed to evaluate the change.
-
-Whole-repo baseline mode:
-
-- Use when the user explicitly says "whole repo", "entire repo", "baseline
-  audit", or similar.
-- Audit public hot paths, core algorithms, allocation-heavy loops, validation
-  layers, construction/sampling/repair paths, and benchmarks.
-- Produce a prioritized performance plan; do not require every historical issue
-  to be fixed in one patch.
+Review performance-sensitive Rust paths in the supplied scope together with
+nearby invariant and benchmark owners. When invoked directly without an exact
+parent scope and result contract, read
+[`references/standalone-workflow.md`](references/standalone-workflow.md).
+Review-graph and Rust-orchestrator dispatches already own that information.
 
 ## Review Posture
 
@@ -240,55 +225,3 @@ Use these when they fit the codebase:
 - add typed budgets to retry, repair, or rejection-sampling loops
 - make cache invalidation explicit before adding caches
 - add or update benchmarks before claiming a win
-
-## Output Format
-
-### Scope
-
-- State changed-code, pull-request, or whole-repo baseline mode.
-- Name the likely hot paths reviewed.
-
-### Summary
-
-- PASS
-- NEEDS IMPROVEMENT
-- FAIL
-
-### Correctness-Preserving Wins
-
-- Concrete improvements that reduce cost while strengthening or preserving
-  invariants.
-
-### Hot-Path Allocation Issues
-
-- Avoidable allocation, cloning, formatting, boxing, or data movement.
-
-### Complexity / Algorithmic Issues
-
-- Accidental complexity, repeated work, missing budgets, stale-cache risks, or
-  opportunities for better algorithmic structure.
-
-### Invariant and API Risks
-
-- Any performance suggestion or implementation detail that weakens
-  parse-don't-validate, typed errors, public semantics, or safety.
-
-### Benchmark Gaps
-
-- Benchmarks to run or add, and what each should measure.
-
-### Benchmark Evidence
-
-- For performance implementations or claims, list the representative command,
-  before result, after result, and whether the same proxy improved, held steady,
-  or regressed.
-- If no representative benchmark or smoke test exists, say so explicitly and
-  recommend adding one before claiming a performance win.
-
-### Not Worth Optimizing
-
-- Cold paths or cosmetic changes that should not distract from real hot paths.
-
-### Do Not Change For Performance
-
-- Explicit invariants, APIs, diagnostics, or semantics that must stay intact.

@@ -1,5 +1,9 @@
 # Repository Review Evidence Contract
 
+This is a maintainer-facing verifier specification. Runtime review agents use
+`runtime-contract.md`; the compiler and planner enforce this schema without
+requiring workers to read or reproduce it.
+
 Use this contract for every `review-graph` profile. Execution location may
 change, but coverage, result identity, acceptance, and final reconciliation may
 not. The stable schema version is `1`; `scripts/review_graph_plan.py` is the

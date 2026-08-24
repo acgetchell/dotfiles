@@ -154,9 +154,6 @@ shared contract locally and in the repository that owns each change.
   support-package behavior, or other Python-owned surfaces; require an accepted
   `python-production-review` synthesis pass before finalizing those release-ready
   decisions.
-- Use `praxis-research` only when the release decision affects the planned
-  scientific experiment; do not make independent maintenance appear
-  scientifically mandatory.
 
 ## Report The Train
 

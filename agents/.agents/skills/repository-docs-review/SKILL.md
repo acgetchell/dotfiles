@@ -45,10 +45,11 @@ archives unless the user explicitly requests archive maintenance.
 
 Read [`references/latex-validation.md`](references/latex-validation.md) only when LaTeX, TeX tooling, publication builds, PDF generation, `chktex`, or TeX-produced documentation is in scope.
 
-Default to the parent task's branch or changed-file scope. For an explicit whole-repo
-baseline or documentation release-readiness review, inspect every tracked active
-document, including unchanged files. A diff supplies context; it does not limit a
-full-suite review.
+When invoked directly without an exact parent scope, validation ledger, and
+result contract, read
+[`references/standalone-workflow.md`](references/standalone-workflow.md).
+Review-graph and documentation-orchestrator dispatches already own that
+information.
 
 ## Workflow
 
@@ -89,20 +90,6 @@ Check each applicable document for:
 Distinguish intentional historical examples, versioned migration notes, and archive
 content from stale current guidance. Do not perform blind version or name replacement.
 
-### 4. Fix and Validate
-
-Make focused edits that preserve the repository's tone and structure. Prefer extending
-the owning page over creating a competing page. Add new navigation entries whenever the
-repository requires them.
-
-Run the narrowest authoritative checks first, followed by the repository-mandated docs
-or CI command. Typical checks include a docs/site build, generated-output drift check,
-Markdown lint, link validation, spelling, and configuration parsing. Do not invent a
-validator when the repository already defines one.
-
-If a check needs unavailable network access or installation, run the strongest local
-substitute and report the remaining gap.
-
 ## Specialist Handoffs
 
 Keep ownership explicit and select only specialists required by the files and claims:
@@ -120,15 +107,3 @@ Keep ownership explicit and select only specialists required by the files and cl
 
 The presence of Markdown, an academic-sounding repository name, or ordinary source
 links does not by itself justify the scientific or academic specialists.
-
-## Output
-
-Report:
-
-- scope mode and the active/generated/archive classification
-- documents inspected and the authority used for important claims
-- findings or explicit no-finding results, with file-level evidence
-- edits made and any discrepancy deliberately left for follow-up
-- specialist handoffs selected or skipped and why
-- validators run and their results
-- remaining validation gaps or deferred work

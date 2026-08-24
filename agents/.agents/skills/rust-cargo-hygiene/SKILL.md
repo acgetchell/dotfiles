@@ -21,19 +21,15 @@ Focus on newly added or modified files such as:
 - crate-root attributes (`#![deny(...)]`, `#![warn(...)]`, `#![forbid(...)]`)
 - `rust-toolchain.toml`
 
-### Scope Modes
+When invoked directly without an exact parent scope and result contract, read
+[`references/standalone-workflow.md`](references/standalone-workflow.md).
+Graph and Rust-orchestrator dispatches use their supplied scope and compact
+result contract without loading that reference.
 
-Default mode:
-
-- Audit newly added or modified manifests, toolchain files, lint configuration, and crate-root attributes.
-- Ignore unrelated unchanged configuration unless it affects the changed manifest surface.
-
-Whole-repo baseline mode:
-
-- Use when the user explicitly says "whole repo", "entire repo", "baseline audit", or similar.
-- Audit all workspace manifests, committed lockfile policy, toolchain files, Cargo config, lint configuration, docs.rs metadata, and crate-root lint attributes.
-- Prioritize findings by release risk, semver impact, MSRV drift, feature breakage, unsafe/lint policy enforcement, and dependency correctness.
-- Do not require fixing every historical hygiene issue in one pass; separate release blockers from cleanup follow-ups.
+Read
+[`references/release-readiness.md`](references/release-readiness.md) only for
+explicit release preparation, version-bump, or publish-readiness work. Never
+change package or lockfile versions without that authorization.
 
 ## Review goals
 
@@ -46,12 +42,6 @@ Check:
 - `edition` is set explicitly and matches the rest of the workspace
 - `rust-version` is present for any published crate that wants a meaningful MSRV
 - `license` field agrees with `LICENSE`/`LICENSE-*` files in the repository
-
-Version-change policy:
-
-- Do not automatically bump `Cargo.toml` package versions, lockfile package versions, README dependency snippets, or related version references during ordinary cargo-hygiene, feature, fix, or review work.
-- Treat version bumps as maintainer-driven release work. Only recommend or perform them when the user explicitly asks for release/version-bump work or is following the repository's release procedure.
-- If changed code appears semver-sensitive, report the semver implication as a finding or release note. Leave the actual version update to the maintainer unless explicitly instructed otherwise.
 
 Flag:
 
@@ -134,38 +124,3 @@ Check:
 - `exclude`/`include` are set when the published tarball needs trimming
 - `[package.metadata.docs.rs]` is configured when feature flags affect docs.rs builds
 - workspace members that should not be published explicitly opt out
-
-### 7. Release readiness
-
-Before a release, also check:
-
-- `CHANGELOG.md` has an entry that matches the manifest version
-- documentation has been updated to match the new version before publishing; crates.io does not allow republishing documentation without a version bump
-- version references are consistent only within an explicit release workflow; do not introduce the version bump yourself unless the user requested that release step
-- `cargo publish --dry-run` would succeed with the current manifest
-- yanked or deprecated dependencies are not present
-- declared MSRV and supported feature/target compilation or cross-compilation evidence is available from `rust-build-portability`; `project-tooling-review` owns only the commands, workflows, and runners that produce it
-
-## Output Format
-
-### Summary
-
-- PASS
-- NEEDS IMPROVEMENT
-- FAIL
-
-### Findings
-
-- Manifest, feature, MSRV, lint, or workspace issues with locations
-
-### Required Fixes
-
-- Metadata corrections
-- Dependency reorganization or feature changes
-- MSRV/toolchain alignment
-- Lint configuration changes (including `forbid(unsafe_code)` when policy requires it)
-- Workspace or publish setting changes
-
-### Optional Improvements
-
-- Future-friendly metadata, doc, or feature suggestions
