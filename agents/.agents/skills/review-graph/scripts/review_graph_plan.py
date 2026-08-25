@@ -4,6 +4,7 @@ import argparse
 import fnmatch
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -4883,7 +4884,11 @@ def _verified_artifact_status(  # noqa: C901, PLR0912, PLR0915
     result: subprocess.CompletedProcess[str] | None = None
     for probe in (relative, relative.rstrip("/") + "/.review-graph-generated-descendant"):
         current = subprocess.run(  # noqa: S603 - resolved Git executable and fixed arguments only.
-            [git, "-C", str(repository_root), "check-ignore", "--no-index", "-v", "--", probe], capture_output=True, check=False, text=True, timeout=30
+            [git, "-c", f"core.excludesFile={os.devnull}", "-C", str(repository_root), "check-ignore", "--no-index", "-v", "--", probe],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=30,
         )
         if current.returncode == 0 and current.stdout.strip():
             result = current

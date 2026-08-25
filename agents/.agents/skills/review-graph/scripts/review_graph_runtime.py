@@ -50,6 +50,7 @@ from review_graph_plan import (
     _validation_native_result_blockers,
     _validation_plan_expected_body,
     _validation_requirements_expected_body,
+    _verified_artifact_status,
     assess_evidence_bundle,
     assess_review_evidence,
     assess_validation_evidence,
@@ -1496,10 +1497,11 @@ def _git_path_status(repository_root: Path, path: Path) -> str:
     )
     if tracked.returncode == 0:
         return "tracked"
-    ignored = subprocess.run(  # noqa: S603 - fixed executable and argument array; no shell interpretation
-        [git, "-C", str(repository_root), "check-ignore", "--no-index", "--quiet", "--", relative], check=False, capture_output=True, text=True, timeout=10
-    )
-    return "ignored" if ignored.returncode == 0 else "untracked"
+    try:
+        status_source, status_rule = _verified_artifact_status(relative, "ignored", repository_root)
+    except ValueError:
+        return "untracked"
+    return "ignored" if status_source == "repository-rule" and status_rule is not None else "untracked"
 
 
 def capture_workspace_snapshot(dispatch: dict[str, Any]) -> dict[str, Any]:

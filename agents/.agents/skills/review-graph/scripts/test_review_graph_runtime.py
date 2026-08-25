@@ -24,6 +24,7 @@ from review_graph_plan import (
 from review_graph_runtime import (
     JournalEventRequest,
     _argument_parser,
+    _git_path_status,
     _graph_plan,
     _validation_workspace_audit,
     advance_after_mutation,
@@ -835,6 +836,25 @@ def test_validation_workspace_audit_rejects_successful_run_with_unexpected_outpu
 
     dispatch["workspace_after"] = [{"digest": digest, "path": "dist/package.whl", "status": "ignored"}]
     assert _validation_workspace_audit(dispatch, unit)["changed_paths"] == ["dist/package.whl"]
+
+
+def test_git_path_status_accepts_only_tracked_gitignore_rules(tmp_path: Path) -> None:
+    git = shutil.which("git")
+    assert git is not None
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _run_test_git(git, "init", str(repository))
+    (repository / ".gitignore").write_text("generated/\n", encoding="utf-8")
+    _run_test_git(git, "-C", str(repository), "add", ".gitignore")
+    (repository / ".git" / "info" / "exclude").write_text("local-output/\n", encoding="utf-8")
+    global_excludes = tmp_path / "global-excludes"
+    global_excludes.write_text("global-output/\n", encoding="utf-8")
+    _run_test_git(git, "-C", str(repository), "config", "core.excludesFile", str(global_excludes))
+
+    assert _git_path_status(repository, repository / "generated" / "result.json") == "ignored"
+    assert _git_path_status(repository, repository / "local-output" / "result.json") == "untracked"
+    assert _git_path_status(repository, repository / "global-output" / "result.json") == "untracked"
+    assert _git_path_status(repository, repository / "ordinary-output" / "result.json") == "untracked"
 
 
 def test_runtime_snapshots_own_validation_artifact_digest(tmp_path: Path) -> None:
