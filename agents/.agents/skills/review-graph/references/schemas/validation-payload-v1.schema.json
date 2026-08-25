@@ -39,7 +39,7 @@
     "limitations": {"items": {"type": "string"}, "type": "array"},
     "status": {"enum": ["passed", "failed", "blocked", "reused", "not-applicable"]}
   },
-  "required": ["status", "executions", "artifacts", "limitations"],
+  "required": ["status", "executions", "limitations"],
   "title": "Review Graph ValidationPayload v1",
   "type": "object"
 }

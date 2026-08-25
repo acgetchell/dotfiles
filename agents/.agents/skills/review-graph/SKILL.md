@@ -84,15 +84,16 @@ authorization; authorized results remain explicit reusable evidence.
 Exact-overlap leaves may reuse the materialized trusted read-only inspection
 record, but each leaf still produces its own judgment and payload.
 
-Run the state-verification command before and after execution. Then invoke
-`scripts/review_graph_runtime.py compile-review` with the trusted dispatch,
-observed states, and compact payload. Accept the node only when compilation and
-the existing evidence verifier both succeed.
+Run the capture command before and after execution. Then invoke
+`scripts/review_graph_runtime.py compile-node` with the node ID, materialized
+dispatch set, captures, exact payload bytes, and journal. Do not splice a
+dispatch or author compiler identities. Accept the node only when compilation
+and the existing evidence verifier both succeed.
 
 Use `repository-independent-review` for a concrete change target. Keep it fresh
 and conclusion-blind. Its existing native result remains accepted evidence;
 do not send specialist findings or synthesis context to it.
-Compile its six native sections with `compile-independent-review`; the compiler
+Compile its six native sections through `compile-node`; the compiler
 assigns graph finding/handoff identities, appends the envelope and machine
 evidence, verifies adversarial-check coverage and line bounds, and emits the
 metadata sidecar used by the journal and finalizer.
@@ -112,12 +113,12 @@ retains their per-requirement provenance.
 
 Run each coalesced unit once through `review-validator`. Validator workers also
 use `fork_turns: "none"`, read only its compact graph-dispatch reference, and
-return a `ValidationPayload`. Compile it with
-`scripts/review_graph_runtime.py compile-validation`; accept it only when the
-native and envelope gates pass. Never replay an equivalent check for another
+return a `ValidationPayload` without artifact records or digests. Invoke
+`snapshot-workspace` immediately before and after execution, then compile the
+node with both runtime-owned snapshots. Accept it only when the native and
+envelope gates pass. Never replay an equivalent check for another
 owner. A failed validator is evidence for its owner, not a finding by itself.
-For units with declared artifacts or workspace effects, provide trusted before
-and after workspace snapshots. The compiler rejects unexpected outputs;
+The compiler rejects unexpected outputs;
 source-adjacent build intermediates require an isolated working tree.
 
 ## Synthesize From A Compact Bundle
@@ -140,7 +141,7 @@ runtime-managed `--output-dir` generations. Reconcile accepted handoffs before
 expansion; only genuinely new triggers reroute. After an authorized repair use
 `advance-after-mutation` to record the serialized repair epoch, recapture once,
 move stale nodes to `awaiting-replan`, and materialize the replacement graph.
-Run `finalize-proof` after every
+Run `finalize-proof` with the signed dispatch set and journal after every
 applicable review and validation requirement has accepted non-stale evidence.
 It derives the mappings, manifest, and `RepositoryReviewProof`; report complete
 only when its verifier returns `complete`.

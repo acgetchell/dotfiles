@@ -18,15 +18,20 @@ from review_graph_plan import (
     expand_compact_routing,
     load_routing_catalog,
     plan_from_document,
+    repository_review_proof_expectation,
     validate_routing_ledger,
 )
 from review_graph_runtime import (
     JournalEventRequest,
+    _argument_parser,
+    _git_path_status,
+    _graph_plan,
     _validation_workspace_audit,
     advance_after_mutation,
     append_journal_event,
     build_routing_projection_document,
     build_synthesis_bundle,
+    capture_workspace_snapshot,
     compile_independent_review,
     compile_review,
     compile_validation,
@@ -37,19 +42,21 @@ from review_graph_runtime import (
     read_execution_journal,
     reconcile_handoffs,
 )
-from review_graph_schema import SchemaValidationError, require_schema
+from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
 
 SKILL_ROOT = Path(__file__).resolve().parents[2]
 ROUTING_CATALOG = Path(__file__).resolve().parents[1] / "references" / "routing-catalog.json"
 RUST_ERROR_SKILL = SKILL_ROOT / "rust-error-variants" / "SKILL.md"
 VALIDATOR_SKILL = SKILL_ROOT / "review-validator" / "SKILL.md"
 VALIDATOR_CONTRACT = SKILL_ROOT / "review-validator" / "references" / "graph-dispatch.md"
+INDEPENDENT_NATIVE_EXAMPLE = SKILL_ROOT / "repository-independent-review" / "references" / "native-example.md"
 SCHEMA_ROOT = Path(__file__).resolve().parents[1] / "references" / "schemas"
 STATE_FIXTURE = "agents/.agents/skills/review-graph/scripts/fixtures/state.rs"
 ORDINARY_PROMPT_WORD_BUDGET = 2400
 VALIDATOR_PROMPT_WORD_BUDGET = 850
 ALL_SURFACE_PROMPT_WORD_BUDGET = 4200
 TRACE_PRIORITIZED_RUST_LEAF_BUDGETS = {
+    "rust-api-design": 1400,
     "rust-api-docs": 950,
     "rust-cargo-hygiene": 900,
     "rust-error-variants": 1400,
@@ -347,6 +354,33 @@ def test_review_payload_schema_reports_all_field_diagnostics() -> None:
     assert status["accepted_values"] == ["completed", "no-findings", "blocked"]
 
 
+def test_planning_schema_aggregates_enum_and_required_field_diagnostics() -> None:
+    with pytest.raises(SchemaValidationError) as captured:
+        require_schema({"validation_requirements": [{"execution_strategy": "distributed"}]}, SCHEMA_ROOT / "planning-input-v1.schema.json")
+
+    diagnostics = cast("list[dict[str, Any]]", captured.value.as_dict()["diagnostics"])
+    paths = {item["path"] for item in diagnostics}
+    strategy_path = "$.validation_requirements[0].execution_strategy"
+    assert {"$.captured_paths", "$.scope_fingerprint", strategy_path} <= paths
+    strategy = next(item for item in diagnostics if item["path"] == strategy_path)
+    assert strategy["accepted_values"] == ["sequential", "parallel-independent"]
+
+
+def test_runtime_operations_publish_schema_valid_examples_and_help_links(capsys: pytest.CaptureFixture[str]) -> None:
+    examples_path = SCHEMA_ROOT.parent / "runtime-operation-examples-v1.json"
+    schema_path = SCHEMA_ROOT / "runtime-operation-inputs-v1.schema.json"
+    examples = json.loads(examples_path.read_text(encoding="utf-8"))
+
+    for operation, example in examples.items():
+        require_schema_definition(example, schema_path, operation)
+        with pytest.raises(SystemExit) as exit_status:
+            _argument_parser().parse_args([operation, "--help"])
+        assert exit_status.value.code == 0
+        help_text = capsys.readouterr().out
+        assert f"#/$defs/{operation}" in help_text
+        assert f"runtime-operation-examples-v1.json#/{operation}" in help_text
+
+
 @pytest.mark.parametrize("value", [1, 1.0])
 def test_review_payload_schema_rejects_numeric_true_constants(value: float) -> None:
     with pytest.raises(SchemaValidationError) as captured:
@@ -529,6 +563,8 @@ def test_advance_after_mutation_emits_one_recaptured_repair_epoch(tmp_path: Path
     new_evidence_ids = {entry["dispatch"]["evidence_id"] for entry in result["dispatch_set"]["dispatches"]}
     assert all(node_id.startswith("repair-epoch-001-") for node_id in new_node_ids)
     assert set(result["stale_evidence_ids"]).isdisjoint(new_evidence_ids)
+    expectation = repository_review_proof_expectation(_graph_plan(json.loads(json.dumps(result["new_plan"]))), source_state=tuple(result["new_source_state"]))
+    assert expectation.final_synthesis_identity == ("repair-epoch-001-repository-synthesis", "repository-production-review", "synthesis")
 
 
 def test_compile_review_enforces_validator_owned_command_policy() -> None:
@@ -802,6 +838,108 @@ def test_validation_workspace_audit_rejects_successful_run_with_unexpected_outpu
     assert _validation_workspace_audit(dispatch, unit)["changed_paths"] == ["dist/package.whl"]
 
 
+def test_git_path_status_accepts_only_tracked_gitignore_rules(tmp_path: Path) -> None:
+    git = shutil.which("git")
+    assert git is not None
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _run_test_git(git, "init", str(repository))
+    (repository / ".gitignore").write_text("generated/\n", encoding="utf-8")
+    _run_test_git(git, "-C", str(repository), "add", ".gitignore")
+    (repository / ".git" / "info" / "exclude").write_text("local-output/\n", encoding="utf-8")
+    global_excludes = tmp_path / "global-excludes"
+    global_excludes.write_text("global-output/\n", encoding="utf-8")
+    _run_test_git(git, "-C", str(repository), "config", "core.excludesFile", str(global_excludes))
+
+    assert _git_path_status(repository, repository / "generated" / "result.json") == "ignored"
+    assert _git_path_status(repository, repository / "local-output" / "result.json") == "untracked"
+    assert _git_path_status(repository, repository / "global-output" / "result.json") == "untracked"
+    assert _git_path_status(repository, repository / "ordinary-output" / "result.json") == "untracked"
+
+
+def test_runtime_snapshots_own_validation_artifact_digest(tmp_path: Path) -> None:
+    repository_root = tmp_path / "repository"
+    isolation_root = tmp_path / "isolation"
+    artifact_path = isolation_root / "artifacts" / "result.json"
+    repository_root.mkdir()
+    unit = ValidationUnit(
+        node_id="validation-runtime-artifact",
+        requirement_ids=("runtime-artifact",),
+        source_state=("scope", "worktree", "repository"),
+        commands=("build",),
+        working_directories=(str(isolation_root / "work"),),
+        environment="locked",
+        toolchain="test",
+        features=(),
+        platform="current",
+        artifact_owner="validator",
+        mutation_lock="isolated-output",
+        request="produce one result",
+        requested_scope="branch",
+        capture_command="capture_scope.py --mode branch",
+        captured_paths=("src/lib.rs",),
+        requirement_plans=(("runtime-artifact", "graph", "build changed", "isolated", "result exists", "30s", None),),
+        dependency_policy="stop-on-failure",
+        meaningful_skips=(),
+        execution_strategy="sequential",
+        independence_basis="none",
+        planning_blocker=None,
+        allowed_artifacts=(
+            ValidationArtifact(path=str(artifact_path), kind="report", repository_status="outside-repository", status_source="isolated-output-directory"),
+        ),
+        canonical_recipe="build",
+        evidence_ids=(),
+        required=True,
+        baseline=False,
+        expected_workspace_effects=(str(artifact_path),),
+        requires_isolation=True,
+        isolation_root=str(isolation_root),
+    )
+    dispatch = {
+        "after_state": ["scope", "worktree", "repository"],
+        "artifact_id": "artifact://validation-runtime-artifact",
+        "before_state": ["scope", "worktree", "repository"],
+        "evidence_id": "validation:runtime-artifact",
+        "execution_location": "worker",
+        "execution_profile": "grouped",
+        "fresh_context": True,
+        "reference_paths": [str(VALIDATOR_CONTRACT)],
+        "repository_root": str(repository_root),
+        "skill_path": str(VALIDATOR_SKILL),
+        "state_verification_command": "capture_scope.py --mode branch",
+        "validation_unit": json.loads(json.dumps(asdict(unit))),
+        "worker_created": True,
+    }
+    before = capture_workspace_snapshot(dispatch)
+    artifact_path.parent.mkdir(parents=True)
+    artifact_path.write_text('{"passed":true}\n', encoding="utf-8")
+    after = capture_workspace_snapshot(dispatch)
+    dispatch["workspace_before"] = before["records"]
+    dispatch["workspace_after"] = after["records"]
+    payload = {
+        "executions": [
+            {
+                "artifact_paths": [str(artifact_path)],
+                "command": "build",
+                "elapsed": "1s",
+                "evidence": "result created",
+                "executor": "worker validation-runtime-artifact",
+                "exit_code": 0,
+                "result": "passed",
+                "working_directory": str(isolation_root / "work"),
+            }
+        ],
+        "limitations": [],
+        "status": "passed",
+    }
+
+    _content, metadata = compile_validation({"dispatch": dispatch, "payload": payload})
+
+    assert before["records"][0]["exists"] is False
+    assert after["records"][0]["exists"] is True
+    assert metadata["normalized_record"]["artifacts"][0]["artifact_digest"] == after["records"][0]["digest"]
+
+
 def test_isolated_validation_workspace_audit_binds_artifacts_and_changes_to_root(tmp_path: Path) -> None:
     repository_root = tmp_path / "repository"
     isolation_root = tmp_path / "isolation"
@@ -1037,6 +1175,48 @@ def test_dispatch_materialization_and_ready_nodes_are_plan_derived(tmp_path: Pat
     assert after_start["lifecycle"]["in_flight_node_ids"] == [started]
 
 
+def test_next_ready_creates_runtime_managed_output_directory(tmp_path: Path) -> None:
+    plan = _sparse_plan()
+    lifecycle = {"plan": _json_plan(plan), "source_state": ["scope", "worktree", "repository"]}
+    dispatch_set = materialize_dispatches(
+        {
+            "artifact_store": str(tmp_path / "artifacts"),
+            "authorization": "review-only",
+            "plan": lifecycle["plan"],
+            "repository_root": str(SKILL_ROOT.parents[2]),
+            "source_state": lifecycle["source_state"],
+            "state_verification_command": "capture_scope.py --mode baseline",
+        }
+    )
+    capture = {"captured_worktree_fingerprint": "worktree", "repository_state_fingerprint": "repository", "scope_fingerprint": "scope"}
+    input_path = tmp_path / "lifecycle.json"
+    dispatch_path = tmp_path / "dispatches.json"
+    capture_path = tmp_path / "capture.json"
+    input_path.write_text(json.dumps(lifecycle), encoding="utf-8")
+    dispatch_path.write_text(json.dumps(dispatch_set), encoding="utf-8")
+    capture_path.write_text(json.dumps(capture), encoding="utf-8")
+    output_directory = tmp_path / "missing" / "ready"
+
+    result = main(
+        [
+            "next-ready",
+            "--input",
+            str(input_path),
+            "--journal",
+            str(tmp_path / "execution.jsonl"),
+            "--dispatches",
+            str(dispatch_path),
+            "--current-capture",
+            str(capture_path),
+            "--output-dir",
+            str(output_directory),
+        ]
+    )
+
+    assert result == 0
+    assert (output_directory / "next-ready.000000.json").is_file()
+
+
 def test_dispatch_materialization_reports_validation_node_without_unit(tmp_path: Path) -> None:
     plan = _sparse_plan()
     malformed = replace(plan, coalesced_validation_units=())
@@ -1117,6 +1297,20 @@ def test_exact_overlap_leaves_share_only_trusted_read_only_observations(tmp_path
         }
     ]
     assert producer["observations"][0]["content_digest"].startswith("sha256:")
+    assert Path(producer["artifact_path"]).is_file()
+
+    independent = materialize_dispatches(
+        {
+            "artifact_store": str(tmp_path / "independent"),
+            "authorization": "review-only",
+            "inspection_profile": "independent-source",
+            "plan": _json_plan(shared_plan),
+            "repository_root": str(SKILL_ROOT.parents[2]),
+            "source_state": ["scope", "worktree", "repository"],
+            "state_verification_command": "capture_scope.py --mode baseline",
+        }
+    )
+    assert all("shared_inspection_evidence" not in entry["dispatch"] for entry in independent["dispatches"])
 
 
 def test_compile_independent_review_wraps_native_result_and_reloads_evidence(tmp_path: Path) -> None:
@@ -1229,6 +1423,135 @@ none
     )
     assert blocked_metadata["normalized_record"]["limitations"] == ["target; unavailable; retry exhausted"]
     assert blocked_bundle["records"][0]["limitations"] == ["target; unavailable; retry exhausted"]
+
+
+def test_independent_native_example_compiles_verbatim_and_aggregates_contract_errors() -> None:
+    dispatch = {
+        "adversarial_checks": ["fallback absence and failure", "platform seams", "parser suffixes and error branches", "unexpected exception types"],
+        "after_state": ["scope", "worktree", "repository"],
+        "artifact_id": "artifact://independent-example",
+        "authorization": "review-only",
+        "before_state": ["scope", "worktree", "repository"],
+        "change_target": f"git diff -- {STATE_FIXTURE}",
+        "evidence_id": "review:independent-example",
+        "execution_location": "worker",
+        "execution_profile": "grouped",
+        "fresh_context": True,
+        "handoff_catalog_ids": ["rust.invariants"],
+        "mode": "independent-review",
+        "node_id": "independent-example",
+        "planned_path_line_bounds": [[STATE_FIXTURE, 3]],
+        "planned_paths": [STATE_FIXTURE],
+        "reference_paths": [],
+        "requirement_ids": ["repo.independent"],
+        "selection_reason": "concrete change target",
+        "skill_id": "repository-independent-review",
+        "skill_path": str(SKILL_ROOT / "repository-independent-review" / "SKILL.md"),
+        "source_state": ["scope", "worktree", "repository"],
+        "worker_created": True,
+    }
+    native = INDEPENDENT_NATIVE_EXAMPLE.read_bytes()
+
+    content, metadata = compile_independent_review({"dispatch": dispatch, "limitations": [], "status": "no-findings"}, native)
+
+    assert metadata["native_input_digest"].startswith("sha256:")
+    assert content.startswith(native.rstrip() + b"\n\n")
+
+    malformed = (
+        native.replace(f"`{STATE_FIXTURE}`".encode(), b"`wrong.rs`")
+        .replace(b"- Inspected: platform seams\n", b"")
+        .replace(b"## Routing Handoffs\n\nnone", b"## Routing Handoffs\n\nmalformed")
+        .replace(b"- Git state mutated: no", b"- Git state mutated: yes")
+    )
+    with pytest.raises(ValueError, match="contract validation") as raised:
+        compile_independent_review({"dispatch": dispatch, "limitations": [], "status": "no-findings"}, malformed)
+    diagnostic = str(raised.value)
+    assert "files do not equal" in diagnostic
+    assert "platform seams" in diagnostic
+    assert "must contain Catalog ID records" in diagnostic
+    assert "native state proof failed validation" in diagnostic
+
+
+def test_compile_node_preserves_worker_payload_bytes_and_journals(tmp_path: Path) -> None:
+    plan = _sparse_plan()
+    source_state = ["scope", "worktree", "repository"]
+    artifact_store = tmp_path / "nested" / "artifacts"
+    dispatch_set = materialize_dispatches(
+        {
+            "artifact_store": str(artifact_store),
+            "authorization": "review-only",
+            "plan": _json_plan(plan),
+            "repository_root": str(SKILL_ROOT.parents[2]),
+            "source_state": source_state,
+            "state_verification_command": "capture_scope.py --mode baseline",
+        }
+    )
+    entry = next(
+        candidate
+        for candidate in dispatch_set["dispatches"]
+        if candidate["result_contract"] == "compact-review" and not candidate["dispatch"]["predecessor_evidence_ids"]
+    )
+    payload = {
+        "changes": [],
+        "command_policy_attested": True,
+        "commands_executed": [],
+        "files_inspected": entry["dispatch"]["owned_paths"],
+        "findings": [],
+        "handoffs": [],
+        "limitations": [],
+        "nearby_contract_owners": [],
+        "status": "no-findings",
+        "validation_requirements": [],
+    }
+    payload_bytes = (json.dumps(payload, indent=2) + "\n").encode()
+    lifecycle = {"plan": _json_plan(plan), "source_state": source_state}
+    capture = {"captured_worktree_fingerprint": source_state[1], "repository_state_fingerprint": source_state[2], "scope_fingerprint": source_state[0]}
+    lifecycle_path = tmp_path / "lifecycle.json"
+    dispatch_path = tmp_path / "dispatches.json"
+    capture_path = tmp_path / "capture.json"
+    payload_path = tmp_path / "payload.json"
+    output_path = tmp_path / "compile.json"
+    journal_path = tmp_path / "journal" / "execution.jsonl"
+    lifecycle_path.write_text(json.dumps(lifecycle), encoding="utf-8")
+    dispatch_path.write_text(json.dumps(dispatch_set), encoding="utf-8")
+    capture_path.write_text(json.dumps(capture), encoding="utf-8")
+    payload_path.write_bytes(payload_bytes)
+
+    result = main(
+        [
+            "compile-node",
+            "--input",
+            str(lifecycle_path),
+            "--dispatches",
+            str(dispatch_path),
+            "--node-id",
+            entry["node_id"],
+            "--payload",
+            str(payload_path),
+            "--before-capture",
+            str(capture_path),
+            "--after-capture",
+            str(capture_path),
+            "--journal",
+            str(journal_path),
+            "--output",
+            str(output_path),
+        ]
+    )
+
+    assert result == 0
+    output = json.loads(output_path.read_text(encoding="utf-8"))
+    assert Path(output["worker_payload_path"]).read_bytes() == payload_bytes
+    metadata = json.loads(Path(output["metadata_path"]).read_text(encoding="utf-8"))
+    assert metadata["worker_payload_byte_count"] == len(payload_bytes)
+    events, lifecycle_state, _head = read_execution_journal(journal_path, plan=plan, source_state=cast("tuple[str, str, str]", tuple(source_state)))
+    assert len(events) == 1
+    assert lifecycle_state[entry["node_id"]] == "accepted"
+    source = {"artifact_path": output["artifact_path"], "metadata_path": output["metadata_path"]}
+    build_synthesis_bundle({"source_state": source_state, "sources": [source]})
+    Path(output["worker_payload_path"]).write_bytes(b"{}\n")
+    with pytest.raises(ValueError, match="worker payload bytes do not match"):
+        build_synthesis_bundle({"source_state": source_state, "sources": [source]})
 
 
 def test_compact_branch_runs_from_bootstrap_through_journal_and_final_proof(tmp_path: Path) -> None:  # noqa: PLR0915
@@ -1376,11 +1699,35 @@ none
     sources = list(sources_by_node.values())
     bundle = build_synthesis_bundle({"source_state": list(source_state), "sources": sources})
     final = finalize_proof({**lifecycle, "current_source_state": list(source_state), "sources": sources})
+    lifecycle_path = proof_store / "lifecycle.json"
+    dispatch_path = proof_store / "dispatches.json"
+    capture_path = proof_store / "capture.json"
+    final_path = proof_store / "final-from-journal.json"
+    lifecycle_path.write_text(json.dumps(lifecycle), encoding="utf-8")
+    dispatch_path.write_text(json.dumps(dispatch_set), encoding="utf-8")
+    capture_path.write_text(json.dumps(capture), encoding="utf-8")
+    finalize_result = main(
+        [
+            "finalize-proof",
+            "--input",
+            str(lifecycle_path),
+            "--dispatches",
+            str(dispatch_path),
+            "--journal",
+            str(journal),
+            "--current-capture",
+            str(capture_path),
+            "--output",
+            str(final_path),
+        ]
+    )
 
     assert any(record["mode"] == "independent-review" for record in bundle["records"])
     assert ready["complete"] is True
     assert final["repository_validation_status"] == "passed"
     assert final["graph_proof_status"] == "complete"
+    assert finalize_result == 0
+    assert json.loads(final_path.read_text(encoding="utf-8"))["graph_proof_status"] == "complete"
 
 
 def test_journal_and_next_ready_cli_use_persisted_artifacts(tmp_path: Path) -> None:
