@@ -58,12 +58,12 @@ IDs, skill paths, priorities, and synthesis dependencies.
    ordinary routing context. Inspect a surface `references/check-routing.md`
    only when shared ownership or ambiguity is not resolved by the projection.
    Do not load the surface orchestrator body merely to produce routing records.
-3. Return sparse `routing_overrides` only for selected leaves, semantic
-   additions, exact reuse, user exclusions, or blockers. Do not repeat
+3. Return sparse `routing_overrides` only for semantic additions, exact reuse,
+   exclusions, blockers, or corrections to projection matches. Do not repeat
    catalog-owned identity fields.
-4. Let `plan_from_document` expand omissions into explicit `not-applicable`
-   records, select classifier-signaled repository surfaces and required
-   syntheses, validate closure, and derive synthesis nodes.
+4. Let `plan_from_document` select projection matches, classifier-signaled
+   repository surfaces, and required syntheses; it expands other omissions to
+   `not-applicable`, validates closure, and derives synthesis nodes.
 
 Every applicable leaf remains required. The compact representation changes
 serialization, not coverage. Resolve late handoffs before dependent validation
@@ -81,8 +81,8 @@ planner-owned fields in prompts.
 The materialized command policy is authoritative. Review nodes attest to every
 command and do not execute validator-owned commands without an exact duplicate
 authorization; authorized results remain explicit reusable evidence.
-Exact-overlap leaves may reuse the materialized trusted read-only inspection
-record, but each leaf still produces its own judgment and payload.
+Identical skill/source/scope leaves execute once; each catalog requirement
+retains ownership of the coalesced judgment and evidence.
 
 Run the capture command before and after execution. Then invoke
 `scripts/review_graph_runtime.py compile-node` with the node ID, materialized

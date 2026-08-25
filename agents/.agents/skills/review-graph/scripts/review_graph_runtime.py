@@ -1,6 +1,7 @@
 """Materialize, compile, schedule, and verify deterministic review-graph artifacts."""
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -45,6 +46,7 @@ from review_graph_plan import (
     _native_repository_path_list,
     _native_section_bodies,
     _review_native_result_blockers,
+    _synthesis_reused_evidence_ids,
     _validation_environment_identity,
     _validation_ledger_expected_fields,
     _validation_native_result_blockers,
@@ -2367,7 +2369,10 @@ def materialize_dispatches(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
             common.update(
                 {
                     "mode": node.mode,
-                    "predecessor_evidence_ids": [evidence_ids[predecessor] for predecessor in node.predecessors],
+                    "predecessor_evidence_ids": [
+                        *(evidence_ids[predecessor] for predecessor in node.predecessors),
+                        *_synthesis_reused_evidence_ids(plan, node.node_id),
+                    ],
                     "selection_reason": "; ".join(node.selection_reasons) or f"planner selected {node.skill_id}",
                 }
             )
@@ -2432,6 +2437,7 @@ def _epoch_scoped_plan(plan: GraphPlan, epoch: int) -> GraphPlan:
         validation_evidence_mapping=tuple(
             replace(mapping, validation_unit_id=node_ids[mapping.validation_unit_id]) for mapping in plan.validation_evidence_mapping
         ),
+        routing_decisions=tuple(replace(decision, synthesis_dependency=mapped(decision.synthesis_dependency)) for decision in plan.routing_decisions),
     )
 
 
@@ -2599,7 +2605,10 @@ def _verified_journal_evidence(
         raise ValueError(msg)
     if isinstance(evidence, ReviewEvidence):
         by_id = {candidate.node_id: candidate for candidate in plan.actual_worker_nodes}
-        expected_predecessors = tuple(_expected_evidence_id(by_id[predecessor_id]) for predecessor_id in node.predecessors)
+        expected_predecessors = (
+            *(_expected_evidence_id(by_id[predecessor_id]) for predecessor_id in node.predecessors),
+            *_synthesis_reused_evidence_ids(plan, node.node_id),
+        )
         if (
             not isinstance(expectation, ReviewEvidenceExpectation)
             or evidence.skill_id != node.skill_id
@@ -2735,6 +2744,13 @@ def read_execution_journal(path: Path, *, plan: GraphPlan, source_state: tuple[s
         content = path.read_bytes()
     except FileNotFoundError:
         content = b""
+    return _read_execution_journal_content(content, path=path, plan=plan, source_state=source_state)
+
+
+def _read_execution_journal_content(
+    content: bytes, *, path: Path, plan: GraphPlan, source_state: tuple[str, str, str]
+) -> tuple[tuple[dict[str, Any], ...], dict[str, str], str | None]:
+    """Validate journal bytes already protected by the caller's file lock."""
     if content and not content.endswith(b"\n"):
         msg = f"execution journal ends with a partial record: {path}"
         raise ValueError(msg)
@@ -2788,18 +2804,15 @@ def _new_journal_reason(request: JournalEventRequest, limitations: tuple[str, ..
     return reason
 
 
-def _persist_journal_event(path: Path, event: dict[str, Any], *, existing_size: int) -> None:
-    if not path.parent.is_dir():
-        msg = f"execution journal parent directory does not exist: {path.parent}"
-        raise ValueError(msg)
+def _persist_journal_event(stream: Any, path: Path, event: dict[str, Any], *, existing_size: int) -> None:
     encoded = (_canonical_json(event) + "\n").encode()
-    with path.open("ab") as stream:
-        if stream.tell() != existing_size:
-            msg = f"execution journal changed during append: {path}"
-            raise ValueError(msg)
-        stream.write(encoded)
-        stream.flush()
-        os.fsync(stream.fileno())
+    stream.seek(0, os.SEEK_END)
+    if stream.tell() != existing_size:
+        msg = f"execution journal changed during append: {path}"
+        raise ValueError(msg)
+    stream.write(encoded)
+    stream.flush()
+    os.fsync(stream.fileno())
 
 
 def append_journal_event(path: Path, document: dict[str, Any], request: JournalEventRequest) -> dict[str, Any]:
@@ -2810,32 +2823,46 @@ def append_journal_event(path: Path, document: dict[str, Any], request: JournalE
         raise TypeError(msg)
     plan = _graph_plan(raw_plan)
     source_state = _state(document, "source_state")
-    existing_size = path.stat().st_size if path.exists() else 0
-    events, state, head_digest = read_execution_journal(path, plan=plan, source_state=source_state)
-    node = next((candidate for candidate in plan.actual_worker_nodes if candidate.node_id == request.node_id), None)
-    if node is None:
-        msg = f"journal event references unknown node: {request.node_id}"
+    if not path.parent.is_dir():
+        msg = f"execution journal parent directory does not exist: {path.parent}"
         raise ValueError(msg)
-    if request.status not in _JOURNAL_STATUSES:
-        msg = f"invalid journal status {request.status}"
-        raise ValueError(msg)
-    evidence, limitations = _new_journal_evidence(request, plan=plan, node=node, source_state=source_state)
-    affected = _apply_journal_transition(plan, state, node_id=request.node_id, status=request.status)
-    event: dict[str, Any] = {
-        "affected_node_ids": list(affected),
-        "evidence": evidence,
-        "node_id": request.node_id,
-        "plan_digest": _plan_digest(plan),
-        "previous_event_digest": head_digest,
-        "reason": _new_journal_reason(request, limitations),
-        "schema_version": 1,
-        "sequence": len(events) + 1,
-        "source_state": list(source_state),
-        "status": request.status,
-    }
-    event["event_digest"] = _sha256_bytes(_canonical_json(event).encode())
-    _persist_journal_event(path, event, existing_size=existing_size)
-    return event
+    lock_path = path.with_name(path.name + ".lock")
+    with lock_path.open("a+b") as lock_stream:
+        fcntl.flock(lock_stream.fileno(), fcntl.LOCK_EX)
+        try:
+            try:
+                content = path.read_bytes()
+            except FileNotFoundError:
+                content = b""
+            existing_size = len(content)
+            events, state, head_digest = _read_execution_journal_content(content, path=path, plan=plan, source_state=source_state)
+            node = next((candidate for candidate in plan.actual_worker_nodes if candidate.node_id == request.node_id), None)
+            if node is None:
+                msg = f"journal event references unknown node: {request.node_id}"
+                raise ValueError(msg)
+            if request.status not in _JOURNAL_STATUSES:
+                msg = f"invalid journal status {request.status}"
+                raise ValueError(msg)
+            evidence, limitations = _new_journal_evidence(request, plan=plan, node=node, source_state=source_state)
+            affected = _apply_journal_transition(plan, state, node_id=request.node_id, status=request.status)
+            event: dict[str, Any] = {
+                "affected_node_ids": list(affected),
+                "evidence": evidence,
+                "node_id": request.node_id,
+                "plan_digest": _plan_digest(plan),
+                "previous_event_digest": head_digest,
+                "reason": _new_journal_reason(request, limitations),
+                "schema_version": 1,
+                "sequence": len(events) + 1,
+                "source_state": list(source_state),
+                "status": request.status,
+            }
+            event["event_digest"] = _sha256_bytes(_canonical_json(event).encode())
+            with path.open("ab") as journal_stream:
+                _persist_journal_event(journal_stream, path, event, existing_size=existing_size)
+            return event
+        finally:
+            fcntl.flock(lock_stream.fileno(), fcntl.LOCK_UN)
 
 
 def _dispatches_by_node(dispatch_set: dict[str, Any], *, plan: GraphPlan, source_state: tuple[str, str, str]) -> dict[str, dict[str, Any]]:

@@ -1,0 +1,67 @@
+{
+  "captured_paths": [
+    "Cargo.lock",
+    "README.md",
+    "uv.lock"
+  ],
+  "concrete_change_target": false,
+  "consulted_routers": [
+    "review-graph",
+    "rust-review-orchestrator",
+    "python-review-orchestrator",
+    "docs-review-orchestrator"
+  ],
+  "execution_profile": "grouped",
+  "release_readiness": false,
+  "routing_overrides": [],
+  "schema_version": 1,
+  "scope_mode": "baseline",
+  "validation_requirements": [
+    {
+      "allowed_artifacts": [],
+      "artifact_owner": "repository",
+      "authority": "repository baseline",
+      "baseline": true,
+      "canonical_recipe": "just ci",
+      "capture_command": "capture_scope.py --mode baseline",
+      "captured_paths": [
+        "Cargo.lock",
+        "README.md",
+        "uv.lock"
+      ],
+      "commands": [
+        "just ci"
+      ],
+      "dependency_policy": "stop-on-failure",
+      "elapsed_time_budget": "900s",
+      "environment": "current host with locked dependencies",
+      "evidence_id": null,
+      "execution_strategy": "sequential",
+      "expected_evidence": "the repository validation gate exits successfully",
+      "expected_workspace_effects": [],
+      "features": [],
+      "independence_basis": "none",
+      "isolation_root": null,
+      "meaningful_skips": [],
+      "mutation_classification": "non-mutating under validation-only",
+      "mutation_lock": "repository read-only",
+      "planning_blocker": null,
+      "platform": "current host",
+      "request": "validate the mixed lockfile and documentation scope",
+      "requested_scope": "baseline",
+      "required": true,
+      "requirement_id": "baseline-validation",
+      "requires_isolation": false,
+      "selection_reason": "bounded graphs require baseline validation",
+      "source_state": [
+        "scope",
+        "worktree",
+        "repository"
+      ],
+      "toolchain": "locked Rust and Python",
+      "working_directories": [
+        "/repo"
+      ]
+    }
+  ]
+}

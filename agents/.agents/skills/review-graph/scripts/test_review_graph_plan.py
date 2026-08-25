@@ -43,6 +43,7 @@ from review_graph_plan import (
     WorkerBudget,
     WorkerNode,
     _review_native_result_blockers,
+    _synthesis_reused_evidence_ids,
     _validation_coalescing_identity,
     _validation_environment_identity,
     _validation_ledger_expected_fields,
@@ -1745,18 +1746,42 @@ def test_repeated_validation_requirements_coalesce_and_reuse_mapping_is_complete
     assert {item.evidence_id for item in mappings} == {"ledger-current-host"}
 
 
-def test_review_coalescing_preserves_reasons_and_does_not_merge_distinct_owners() -> None:
+def test_review_coalescing_preserves_reasons_and_aggregates_distinct_catalog_owners() -> None:
     first = _review_requirement(1)
     second = replace(first, requirement_id="R02", reason="second routing reason")
-    distinct_owner = replace(first, requirement_id="R03", owners=("documentation",))
+    distinct_owner = replace(first, requirement_id="R03", owners=("documentation",), synthesis_dependency="repository-synthesis")
 
     nodes, mappings = coalesce_review_requirements((first, second, distinct_owner))
 
-    assert len(nodes) == 2
-    merged = next(node for node in nodes if set(node.requirement_ids) == {"R01", "R02"})
+    assert len(nodes) == 1
+    merged = nodes[0]
+    assert set(merged.requirement_ids) == {"R01", "R02", "R03"}
     assert merged.selection_reasons == ("fixture surface owns this contract", "second routing reason")
-    assert merged.owners == ()
+    assert merged.owners == ("documentation",)
+    assert merged.synthesis_dependency is None
     assert dict(mappings).keys() == {"R01", "R02", "R03"}
+
+
+def test_replan_allocates_new_audit_identity_after_all_exact_reuse_ids() -> None:
+    reused = tuple((f"reused-{ordinal:03d}", f"review:audit-{ordinal:03d}") for ordinal in range(1, 24))
+    routing = RoutingLedgerAssessment(
+        feasible=True,
+        blockers=(),
+        selected_requirement_ids=("R01",),
+        exact_reused_review_evidence=reused,
+        reused_review_identities=(),
+        user_excluded_catalog_ids=(),
+        completion_blocking_catalog_ids=(),
+        consulted_routers=("review-graph", "rust-review-orchestrator"),
+        catalog_closed=True,
+    )
+
+    plan = plan_graph((_review_requirement(1),), (_validation_requirement("V-baseline", baseline=True),), (_synthesis(),), routing_assessment=routing)
+
+    audit = next(node for node in plan.actual_worker_nodes if node.mode == "audit")
+    assert audit.node_id == "audit-024"
+    assert f"review:{audit.node_id}" not in {evidence_id for _requirement_id, evidence_id in reused}
+    assert f"artifact://{audit.node_id}" not in {evidence_id.replace("review:", "artifact://") for _requirement_id, evidence_id in reused}
 
 
 def test_budget_never_reclassifies_applicable_specialists_as_skips() -> None:
@@ -3271,12 +3296,7 @@ def _predecessor_evidence_ids(expectation: RepositoryReviewProofExpectation, pro
     evidence_by_node = dict(proof.planned_node_evidence)
     node = next(item for item in expectation.planned_evidence_nodes if item.node_id == node_id)
     return tuple(
-        dict.fromkeys(
-            (
-                *(evidence_by_node[predecessor] for predecessor in node.predecessors),
-                *((evidence_id for _, evidence_id in expectation.exact_reused_review_evidence) if node_id == expectation.final_synthesis_identity[0] else ()),
-            )
-        )
+        dict.fromkeys((*(evidence_by_node[predecessor] for predecessor in node.predecessors), *_synthesis_reused_evidence_ids(expectation.plan, node_id)))
     )
 
 
