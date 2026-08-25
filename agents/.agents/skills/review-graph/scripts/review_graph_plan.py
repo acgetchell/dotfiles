@@ -1154,7 +1154,7 @@ def _decision_matches_entry(decision: RoutingDecision, entry: RoutingCatalogEntr
     if decision.disposition in {"selected", "exact-evidence-reused"} and missing_references:
         blockers.append(f"{decision.catalog_id} omitted required static references: {', '.join(missing_references)}")
     expected_synthesis = entry.synthesis_dependency
-    if decision.disposition == "selected" and expected_synthesis is not None and decision.synthesis_dependency != expected_synthesis:
+    if decision.disposition in {"selected", "exact-evidence-reused"} and expected_synthesis is not None and decision.synthesis_dependency != expected_synthesis:
         blockers.append(f"{decision.catalog_id} must depend on synthesis {expected_synthesis}")
     if decision.priority is not None:
         _priority_rank(decision.priority)
@@ -1290,7 +1290,7 @@ def review_requirements_from_routing(catalog: Sequence[RoutingCatalogEntry], dec
 
 
 def independent_nodes_from_routing(
-    catalog: Sequence[RoutingCatalogEntry], decisions: Sequence[RoutingDecision], *, change_target: str
+    catalog: Sequence[RoutingCatalogEntry], decisions: Sequence[RoutingDecision], *, change_target: str, reserved_node_ids: Sequence[str] = ()
 ) -> tuple[WorkerNode, ...]:
     """Create executable selected independent-review nodes without treating them as audits."""
     entries = {entry.catalog_id: entry for entry in catalog}
@@ -1305,27 +1305,32 @@ def independent_nodes_from_routing(
     if selected and (not _nonempty_text(change_target) or len(change_target) > MAX_NATIVE_IDENTIFIER_LENGTH):
         msg = "selected independent review requires one bounded non-empty change target"
         raise ValueError(msg)
-    return tuple(
-        WorkerNode(
-            node_id=f"independent-{ordinal:03d}",
-            skill_id=decision.skill_id,
-            skill_path=decision.skill_path,
-            mode="independent-review",
-            priority=decision.priority or entries[decision.catalog_id].default_priority,
-            required=True,
-            requirement_ids=(decision.requirement_id,),
-            coverage=decision.review_surface,
-            synthesis_dependency=decision.synthesis_dependency,
-            router_ids=(decision.router_id,),
-            rule_ids=(decision.rule_id,),
-            selection_reasons=(decision.reason,),
-            owners=decision.owners,
-            instruction_paths=decision.instruction_paths,
-            static_references=decision.static_references,
-            change_target=change_target,
+    nodes: list[WorkerNode] = []
+    allocated = set(reserved_node_ids)
+    for ordinal, decision in enumerate(selected, start=1):
+        node_id = _allocate_node_id("independent", ordinal, allocated)
+        allocated.add(node_id)
+        nodes.append(
+            WorkerNode(
+                node_id=node_id,
+                skill_id=decision.skill_id,
+                skill_path=decision.skill_path,
+                mode="independent-review",
+                priority=decision.priority or entries[decision.catalog_id].default_priority,
+                required=True,
+                requirement_ids=(decision.requirement_id,),
+                coverage=decision.review_surface,
+                synthesis_dependency=decision.synthesis_dependency,
+                router_ids=(decision.router_id,),
+                rule_ids=(decision.rule_id,),
+                selection_reasons=(decision.reason,),
+                owners=decision.owners,
+                instruction_paths=decision.instruction_paths,
+                static_references=decision.static_references,
+                change_target=change_target,
+            )
         )
-        for ordinal, decision in enumerate(selected, start=1)
-    )
+    return tuple(nodes)
 
 
 def assess_routing_discoveries(decisions: Sequence[RoutingDecision], discoveries: Sequence[RoutingDiscovery]) -> Assessment:
@@ -1445,10 +1450,12 @@ def expand_compact_routing(  # noqa: C901, PLR0912, PLR0913, PLR0915
     decisions: list[RoutingDecision] = []
     for entry in active_entries:
         override = overrides_by_id.get(entry.catalog_id)
+        matched_paths = tuple(path for path in normalized_paths if any(_catalog_path_matches(path, pattern) for pattern in entry.path_patterns))
         selected_by_classifier = entry.router_id == REPOSITORY_ROUTER_ID and entry.layer == "repository" and entry.surface in signals
+        selected_by_projection = entry.target_kind == "leaf" and bool(matched_paths)
         selected_independent = entry.target_kind == "independent" and bool(change_target)
         selected_synthesis = entry.target_kind == "synthesis"
-        default_selected = selected_by_classifier or selected_independent or selected_synthesis
+        default_selected = selected_by_classifier or selected_by_projection or selected_independent or selected_synthesis
         disposition = str(override.get("disposition")) if override is not None else ("selected" if default_selected else "not-applicable")
 
         if override is not None:
@@ -1457,6 +1464,9 @@ def expand_compact_routing(  # noqa: C901, PLR0912, PLR0913, PLR0915
         elif selected_by_classifier:
             reason = f"deterministic repository classifier selected the {entry.surface} surface"
             applicability_evidence = signals[entry.surface]
+        elif selected_by_projection:
+            reason = f"routing projection matched the {entry.catalog_id} review surface"
+            applicability_evidence = tuple(f"matched path: {path}" for path in matched_paths)
         elif selected_independent:
             reason = "captured scope has a concrete change target requiring independent review"
             applicability_evidence = (change_target or "concrete change target",)
@@ -1472,7 +1482,9 @@ def expand_compact_routing(  # noqa: C901, PLR0912, PLR0913, PLR0915
             raise ValueError(msg)
 
         default_surface: tuple[str, ...] = ()
-        if selected_by_classifier and entry.target_kind == "leaf":
+        if selected_by_projection:
+            default_surface = matched_paths
+        elif selected_by_classifier and entry.target_kind == "leaf":
             default_surface = signal_paths.get(entry.surface, ())
         elif selected_independent:
             default_surface = normalized_paths
@@ -1503,7 +1515,7 @@ def expand_compact_routing(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 instruction_paths=entry_instruction_paths if disposition in {"selected", "exact-evidence-reused"} else (),
                 static_references=static_references if disposition in {"selected", "exact-evidence-reused"} else (),
                 validation_requirement_ids=validation_requirement_ids,
-                synthesis_dependency=entry.synthesis_dependency if disposition == "selected" else None,
+                synthesis_dependency=entry.synthesis_dependency if disposition in {"selected", "exact-evidence-reused"} else None,
                 priority=entry.default_priority,
                 owners=owners if disposition in {"selected", "exact-evidence-reused"} and entry.target_kind in {"leaf", "independent"} else (),
                 evidence_id=evidence_id,
@@ -1589,8 +1601,46 @@ def assess_repository_classifier_floor(
     return Assessment(not blockers, tuple(blockers))
 
 
-def coalesce_review_requirements(requirements: Sequence[ReviewRequirement]) -> tuple[tuple[WorkerNode, ...], tuple[tuple[str, str], ...]]:
-    """Coalesce identical leaf dispatches without merging distinct scopes."""
+def _reserved_node_ids(evidence_ids: Iterable[str]) -> frozenset[str]:
+    reserved: set[str] = set()
+    for evidence_id in evidence_ids:
+        for prefix in ("review:", "validation:", "artifact://"):
+            if evidence_id.startswith(prefix) and evidence_id != prefix:
+                reserved.add(evidence_id.removeprefix(prefix))
+    return frozenset(reserved)
+
+
+def _allocate_node_id(prefix: str, ordinal: int, reserved: set[str] | frozenset[str]) -> str:
+    candidate = max(1, ordinal)
+    while f"{prefix}-{candidate:03d}" in reserved:
+        candidate += 1
+    return f"{prefix}-{candidate:03d}"
+
+
+def _expected_planned_evidence_id(node: WorkerNode) -> str:
+    return f"{'validation' if node.mode == 'validation' else 'review'}:{node.node_id}"
+
+
+def _synthesis_reused_evidence_ids(plan: GraphPlan, node_id: str) -> tuple[str, ...]:
+    """Return planner-routed exact reuse required by one synthesis node."""
+    node = next((candidate for candidate in plan.actual_worker_nodes if candidate.node_id == node_id), None)
+    if node is None or node.mode != "synthesis":
+        return ()
+    mapping = dict(plan.exact_reused_review_evidence)
+    if (node.skill_id, node.mode) == FINAL_SYNTHESIS_IDENTITY[1:]:
+        return tuple(evidence_id for _requirement_id, evidence_id in plan.exact_reused_review_evidence)
+    routed_requirement_ids = {
+        decision.requirement_id
+        for decision in plan.routing_decisions
+        if decision.disposition == "exact-evidence-reused" and decision.synthesis_dependency == node.node_id
+    }
+    return tuple(mapping[requirement_id] for requirement_id in mapping if requirement_id in routed_requirement_ids)
+
+
+def coalesce_review_requirements(
+    requirements: Sequence[ReviewRequirement], *, reserved_node_ids: Sequence[str] = ()
+) -> tuple[tuple[WorkerNode, ...], tuple[tuple[str, str], ...]]:
+    """Coalesce identical semantic work while retaining every catalog owner."""
     _validate_unique_ids((item.requirement_id for item in requirements), label="review requirement")
     groups: dict[tuple[object, ...], list[ReviewRequirement]] = {}
     for item in requirements:
@@ -1606,19 +1656,20 @@ def coalesce_review_requirements(requirements: Sequence[ReviewRequirement]) -> t
             tuple(sorted(item.review_surface)),
             tuple(sorted(item.instruction_paths)),
             tuple(sorted(item.static_references)),
-            item.synthesis_dependency,
-            tuple(sorted(item.owners)),
         )
         groups.setdefault(key, []).append(item)
 
     nodes: list[WorkerNode] = []
     mappings: list[tuple[str, str]] = []
+    allocated = set(reserved_node_ids)
     for ordinal, key in enumerate(sorted(groups, key=repr), start=1):
         members = sorted(groups[key], key=lambda item: item.requirement_id)
-        node_id = f"audit-{ordinal:03d}"
+        node_id = _allocate_node_id("audit", ordinal, allocated)
+        allocated.add(node_id)
         priority = min((item.priority for item in members), key=_priority_rank)
         requirement_ids = tuple(item.requirement_id for item in members)
         coverage = tuple(sorted({path for item in members for path in item.review_surface}))
+        synthesis_dependencies = {item.synthesis_dependency for item in members}
         nodes.append(
             WorkerNode(
                 node_id=node_id,
@@ -1629,7 +1680,7 @@ def coalesce_review_requirements(requirements: Sequence[ReviewRequirement]) -> t
                 required=True,
                 requirement_ids=requirement_ids,
                 coverage=coverage,
-                synthesis_dependency=members[0].synthesis_dependency,
+                synthesis_dependency=members[0].synthesis_dependency if len(synthesis_dependencies) == 1 else None,
                 router_ids=tuple(sorted({item.router_id for item in members})),
                 rule_ids=tuple(sorted({item.rule_id for item in members})),
                 selection_reasons=tuple(sorted({item.reason for item in members})),
@@ -1693,7 +1744,9 @@ def _validate_validation_isolation(item: ValidationRequirement) -> None:
         raise ValueError(msg)
 
 
-def coalesce_validation_requirements(requirements: Sequence[ValidationRequirement]) -> tuple[tuple[ValidationUnit, ...], tuple[ValidationEvidenceMapping, ...]]:
+def coalesce_validation_requirements(
+    requirements: Sequence[ValidationRequirement], *, reserved_node_ids: Sequence[str] = ()
+) -> tuple[tuple[ValidationUnit, ...], tuple[ValidationEvidenceMapping, ...]]:
     """Group exactly compatible validator needs and retain complete reuse maps."""
     _validate_unique_ids((item.requirement_id for item in requirements), label="validation requirement")
     groups: dict[tuple[object, ...], list[ValidationRequirement]] = {}
@@ -1750,10 +1803,12 @@ def coalesce_validation_requirements(requirements: Sequence[ValidationRequiremen
 
     units: list[ValidationUnit] = []
     mappings: list[ValidationEvidenceMapping] = []
+    allocated = set(reserved_node_ids)
     for ordinal, key in enumerate(sorted(groups, key=repr), start=1):
         members = sorted(groups[key], key=lambda item: item.requirement_id)
         first = members[0]
-        node_id = f"validation-{ordinal:03d}"
+        node_id = _allocate_node_id("validation", ordinal, allocated)
+        allocated.add(node_id)
         unit = ValidationUnit(
             node_id=node_id,
             requirement_ids=tuple(item.requirement_id for item in members),
@@ -1860,12 +1915,16 @@ def _synthesis_nodes(
         if node.mode != "synthesis":
             msg = f"declared synthesis node {node.node_id} has mode {node.mode}"
             raise ValueError(msg)
-        routed_audits = tuple(audit.node_id for audit in audit_nodes if audit.synthesis_dependency == node.node_id)
+        routed_audits = tuple(
+            audit.node_id
+            for audit in audit_nodes
+            if any(review_by_id[requirement_id].synthesis_dependency == node.node_id for requirement_id in audit.requirement_ids)
+        )
         routed_validators = tuple(
             dict.fromkeys(
                 validation_node_by_requirement[validation_requirement_id]
                 for audit in audit_nodes
-                if audit.synthesis_dependency == node.node_id
+                if any(review_by_id[requirement_id].synthesis_dependency == node.node_id for requirement_id in audit.requirement_ids)
                 for review_requirement_id in audit.requirement_ids
                 for validation_requirement_id in review_by_id[review_requirement_id].validation_requirement_ids
             )
@@ -1876,11 +1935,7 @@ def _synthesis_nodes(
             if (node.node_id, node.skill_id, node.mode) == FINAL_SYNTHESIS_IDENTITY
             else ()
         )
-        required_validators = (
-            tuple(unit.node_id for unit in validation_units if unit.required or unit.baseline)
-            if (node.node_id, node.skill_id, node.mode) == FINAL_SYNTHESIS_IDENTITY
-            else ()
-        )
+        required_validators = tuple(unit.node_id for unit in validation_units if unit.required or unit.baseline)
         result.append(
             replace(
                 node,
@@ -2029,8 +2084,10 @@ def plan_graph(  # noqa: C901, PLR0913, PLR0915
         normalized_line_bounds[normalized_path] = bound
     captured_path_line_bounds = tuple(sorted(normalized_line_bounds.items()))
 
-    audit_nodes, requirement_to_node = coalesce_review_requirements(review_requirements)
-    validation_units, evidence_mapping = coalesce_validation_requirements(validation_requirements)
+    reused_evidence_ids = tuple(evidence_id for _requirement_id, evidence_id in (routing_assessment.exact_reused_review_evidence if routing_assessment else ()))
+    reserved_node_ids = _reserved_node_ids(reused_evidence_ids)
+    audit_nodes, requirement_to_node = coalesce_review_requirements(review_requirements, reserved_node_ids=tuple(reserved_node_ids))
+    validation_units, evidence_mapping = coalesce_validation_requirements(validation_requirements, reserved_node_ids=tuple(reserved_node_ids))
     if not any(unit.baseline for unit in validation_units):
         msg = "bounded review graphs require at least one baseline validation unit"
         raise ValueError(msg)
@@ -2081,6 +2138,11 @@ def plan_graph(  # noqa: C901, PLR0913, PLR0915
             *_synthesis_nodes(synthesis_nodes, audit_nodes, review_requirements, validation_units, normalized_additional_nodes),
         )
     )
+    executable_evidence_ids = {_expected_planned_evidence_id(node) for node in all_nodes}
+    evidence_overlap = tuple(sorted(executable_evidence_ids & set(reused_evidence_ids)))
+    if evidence_overlap:
+        msg = "exactly reused evidence identities overlap executable nodes: " + ", ".join(evidence_overlap)
+        raise ValueError(msg)
     _validate_plan_edges(all_nodes)
     scheduled = _schedule_nodes(all_nodes)
     epochs = _partition_execution_epochs(scheduled, budget) if execution_profile in {"isolated", "isolated-only", "mixed"} else ()
@@ -3978,11 +4040,7 @@ def _planned_node_bundle_blockers(  # noqa: C901, PLR0912, PLR0915
             dict.fromkeys(
                 (
                     *(evidence_by_node[predecessor] for predecessor in node.predecessors if predecessor in evidence_by_node),
-                    *(
-                        (evidence_id for _, evidence_id in expectation.exact_reused_review_evidence)
-                        if node.node_id == expectation.final_synthesis_identity[0]
-                        else ()
-                    ),
+                    *_synthesis_reused_evidence_ids(expectation.plan, node.node_id),
                 )
             )
         )
@@ -5335,7 +5393,12 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0915
         if not discovery_assessment.feasible:
             routing_assessment = replace(routing_assessment, feasible=False, blockers=(*routing_assessment.blockers, *discovery_assessment.blockers))
         review_requirements = review_requirements_from_routing(routing_catalog, routing_decisions)
-        routed_additional_nodes = independent_nodes_from_routing(routing_catalog, routing_decisions, change_target=change_target or "")
+        routed_additional_nodes = independent_nodes_from_routing(
+            routing_catalog,
+            routing_decisions,
+            change_target=change_target or "",
+            reserved_node_ids=tuple(_reserved_node_ids(evidence_id for _requirement_id, evidence_id in routing_assessment.exact_reused_review_evidence)),
+        )
     else:
         allow_legacy_fixture = document.get("allow_legacy_fixture", False)
         if not isinstance(allow_legacy_fixture, bool):
@@ -5493,7 +5556,7 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0915
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run one deterministic, read-only fixture-based planning dry run."""
+    """Run one deterministic planning dry run or inspect a terminal bootstrap bundle."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, required=True, help="JSON graph-planning fixture")
     parser.add_argument("--catalog", type=Path, default=DEFAULT_ROUTING_CATALOG, help="machine-readable routing catalog")
@@ -5505,6 +5568,29 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not isinstance(document, Mapping):
             msg = "input root must be a JSON object"
             raise TypeError(msg)
+        bundle_fields = {"lifecycle_input", "materialization_input", "plan", "planning_input", "schema_version"}
+        if bundle_fields <= set(document):
+            plan_document = document.get("plan")
+            planning_input = document.get("planning_input")
+            materialization_input = document.get("materialization_input")
+            lifecycle_input = document.get("lifecycle_input")
+            if (
+                document.get("schema_version") != 1
+                or not isinstance(plan_document, Mapping)
+                or not isinstance(planning_input, Mapping)
+                or not isinstance(materialization_input, Mapping)
+                or not isinstance(lifecycle_input, Mapping)
+                or materialization_input.get("plan") != plan_document
+                or lifecycle_input.get("plan") != plan_document
+            ):
+                msg = "bootstrap bundle plan and stage inputs must contain one identical terminal plan"
+                raise ValueError(msg)
+            dispatch_allowed = plan_document.get("dispatch_allowed")
+            if not isinstance(dispatch_allowed, bool):
+                msg = "bootstrap bundle terminal plan requires dispatch_allowed=true or false"
+                raise ValueError(msg)
+            print(json.dumps(plan_document, indent=2, sort_keys=True))
+            return 0 if dispatch_allowed else 2
         plan = plan_from_document(
             document, catalog_path=args.catalog, skill_roots=tuple(args.skill_root or (DEFAULT_SKILL_ROOT,)), repository_root=args.repository_root
         )

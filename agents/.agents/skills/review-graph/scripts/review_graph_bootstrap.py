@@ -22,7 +22,8 @@ def _source_state(capture: dict[str, Any]) -> list[object]:
 
 
 def _capture_command(capture: dict[str, Any]) -> str:
-    command = ["capture_scope.py", "--mode", str(capture.get("capture_mode", "<missing>"))]
+    capture_script = Path(__file__).resolve().with_name("capture_scope.py")
+    command = [str(Path(sys.executable).resolve()), str(capture_script), "--mode", str(capture.get("capture_mode", "<missing>"))]
     repository_root = capture.get("repository_root")
     if isinstance(repository_root, str) and repository_root:
         command.extend(("--repo", repository_root))

@@ -28,9 +28,9 @@ uv run --locked python scripts/review_graph_bootstrap.py \
 Bootstrap binds each validator to the captured scope, worktree, and repository
 fingerprints, capture command, and paths. Schema failures aggregate missing,
 unknown, and malformed fields with JSON paths, accepted shapes, and enums.
-Its output bundle contains schema-valid `planning_input`,
-`materialization_input`, and `lifecycle_input` documents. Runtime commands that
-own those stages accept the bundle directly.
+The bundle contains stage inputs and the terminal `plan`. Runtime
+commands accept it directly; `review_graph_plan.py --input` prints the embedded
+plan without replanning.
 
 Supply `consulted_routers`, validation requirements, and sparse
 `routing_overrides`. Each override contains `catalog_id`, `disposition`,

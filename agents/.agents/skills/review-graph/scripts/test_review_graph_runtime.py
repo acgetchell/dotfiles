@@ -1,22 +1,26 @@
 """Tests for compact review-graph runtime compilation."""
 
 import json
+import shlex
 import shutil
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import asdict, replace
 from pathlib import Path
+from threading import Barrier
 from typing import Any, cast
 
 import pytest
 from capture_scope import _scope_data
-from review_graph_bootstrap import bootstrap_document
+from review_graph_bootstrap import bootstrap_document, main as bootstrap_main
 from review_graph_plan import (
     GraphPlan,
     ValidationArtifact,
     ValidationUnit,
     expand_compact_routing,
     load_routing_catalog,
+    main as plan_main,
     plan_from_document,
     repository_review_proof_expectation,
     validate_routing_ledger,
@@ -218,6 +222,46 @@ def _sparse_plan_document() -> dict[str, Any]:
 
 def _sparse_plan() -> GraphPlan:
     return plan_from_document(_sparse_plan_document(), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
+
+
+def _late_handoff_replan() -> GraphPlan:
+    document = _sparse_plan_document()
+    document["consulted_routers"] = ["review-graph", "rust-review-orchestrator", "python-review-orchestrator"]
+    document["routing_overrides"] = [
+        {
+            "applicability_evidence": ["accepted build audit from the unchanged source state"],
+            "catalog_id": "rust.build",
+            "disposition": "exact-evidence-reused",
+            "evidence_id": "review:audit-001",
+            "owners": ["rust"],
+            "reason": "the prior Rust build audit is exact for this source state",
+            "review_surface": [STATE_FIXTURE],
+        },
+        {
+            "applicability_evidence": ["accepted audit from the unchanged source state"],
+            "catalog_id": "rust.invariants",
+            "disposition": "exact-evidence-reused",
+            "evidence_id": "review:audit-002",
+            "owners": ["rust"],
+            "reason": "the prior Rust invariant audit is exact for this source state",
+            "review_surface": [STATE_FIXTURE],
+        },
+        {
+            "applicability_evidence": ["accepted handoff identified notebook ownership"],
+            "catalog_id": "repo.python",
+            "disposition": "selected",
+            "reason": "late handoff requires the Python surface router",
+        },
+        {
+            "applicability_evidence": ["accepted handoff identified notebook semantics"],
+            "catalog_id": "python.notebook",
+            "disposition": "selected",
+            "owners": ["python"],
+            "reason": "late handoff requires a notebook audit",
+            "review_surface": [STATE_FIXTURE],
+        },
+    ]
+    return plan_from_document(document, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
 
 
 def _json_plan(plan: GraphPlan) -> dict[str, object]:
@@ -493,7 +537,7 @@ def test_compile_cli_allows_at_most_one_schema_retry(tmp_path: Path, capsys: pyt
     assert len(diagnostic["diagnostics"]) > 2
 
 
-def test_bootstrap_binds_capture_and_validation_fingerprints_without_field_renaming() -> None:
+def test_bootstrap_binds_capture_and_validation_fingerprints_without_field_renaming(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     capture = {
         "base_ref": None,
         "branch": "main",
@@ -518,6 +562,23 @@ def test_bootstrap_binds_capture_and_validation_fingerprints_without_field_renam
     assert validation["source_state"] == ["captured-scope", "captured-worktree", "captured-repository"]
     assert validation["captured_paths"] == [STATE_FIXTURE]
     assert document["captured_paths"] == [STATE_FIXTURE]
+
+    capture_path = tmp_path / "capture.json"
+    template_path = tmp_path / "template.json"
+    bundle_path = tmp_path / "bootstrap.json"
+    capture_path.write_text(json.dumps(capture), encoding="utf-8")
+    template_path.write_text(json.dumps(_sparse_plan_document()), encoding="utf-8")
+    assert bootstrap_main(["--capture", str(capture_path), "--input", str(template_path), "--output", str(bundle_path)]) == 0
+
+    bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+    command = shlex.split(bundle["materialization_input"]["state_verification_command"])
+    assert Path(command[0]).is_absolute()
+    assert Path(command[1]).is_absolute()
+    assert Path(command[1]).stat().st_mode & 0o111
+    assert subprocess.run(command, check=False, capture_output=True).returncode == 0  # noqa: S603 - bootstrap-owned absolute command.
+
+    assert plan_main(["--input", str(bundle_path)]) == 0
+    assert json.loads(capsys.readouterr().out) == bundle["plan"]
 
 
 def test_advance_after_mutation_emits_one_recaptured_repair_epoch(tmp_path: Path) -> None:
@@ -1025,7 +1086,8 @@ def test_sparse_routing_expands_to_exhaustive_catalog_records() -> None:
     assert by_id["repo.rust"].disposition == "selected"
     assert by_id["rust.errors"].skill_id == "rust-error-variants"
     assert by_id["rust.errors"].disposition == "selected"
-    assert by_id["rust.concurrency"].disposition == "not-applicable"
+    assert by_id["rust.concurrency"].disposition == "selected"
+    assert by_id["rust.concurrency"].review_surface == ("src/lib.rs",)
     assert by_id["rust.synthesis"].disposition == "selected"
 
 
@@ -1093,6 +1155,23 @@ def test_routing_projection_is_complete_compact_and_hashed() -> None:
     assert projected["rust.errors"]["matched_paths"] == [captured_path]
     assert projected["rust.concurrency"]["matched_paths"] == [captured_path]
     assert projection["projection_digest"].startswith("sha256:")
+
+
+def test_sparse_mixed_lockfile_fixture_selects_every_projection_match_and_coalesces_aliases() -> None:
+    fixture = Path(__file__).with_name("fixtures") / "sparse_mixed_lockfiles.json"
+    document = json.loads(fixture.read_text(encoding="utf-8"))
+    plan = plan_from_document(document, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
+    projection = build_routing_projection_document(document, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
+
+    matched_leaf_ids = {entry["catalog_id"] for entry in projection["entries"] if entry["target_kind"] == "leaf" and entry["matched_paths"]}
+    selected_ids = {decision.catalog_id for decision in plan.routing_decisions if decision.disposition == "selected"}
+    assert matched_leaf_ids <= selected_ids
+    assert {"rust.cargo", "python.build", "docs.repository", "docs.rust-api", "rust.api-docs"} <= selected_ids
+    requirement_nodes = dict(plan.requirement_to_node)
+    assert requirement_nodes["rust.api-docs"] == requirement_nodes["docs.rust-api"]
+    alias_node = requirement_nodes["rust.api-docs"]
+    assert alias_node in next(node for node in plan.actual_worker_nodes if node.node_id == "rust-synthesis").predecessors
+    assert alias_node in next(node for node in plan.actual_worker_nodes if node.node_id == "repository-synthesis").predecessors
 
 
 def test_validation_coalescing_ignores_narrative_differences_without_losing_provenance() -> None:
@@ -1173,6 +1252,36 @@ def test_dispatch_materialization_and_ready_nodes_are_plan_derived(tmp_path: Pat
     after_start = next_ready_nodes(lifecycle_document, journal_events=events, dispatch_set=result)
     assert started not in after_start["ready_node_ids"]
     assert after_start["lifecycle"]["in_flight_node_ids"] == [started]
+
+
+def test_late_handoff_replan_reserves_reused_ids_and_binds_surface_readiness(tmp_path: Path) -> None:
+    plan = _late_handoff_replan()
+    audit = next(node for node in plan.actual_worker_nodes if node.mode == "audit")
+    validation = next(node for node in plan.actual_worker_nodes if node.mode == "validation")
+    rust_synthesis = next(node for node in plan.actual_worker_nodes if node.node_id == "rust-synthesis")
+    python_synthesis = next(node for node in plan.actual_worker_nodes if node.node_id == "python-synthesis")
+    repository_synthesis = next(node for node in plan.actual_worker_nodes if node.node_id == "repository-synthesis")
+
+    assert audit.node_id == "audit-003"
+    assert validation.node_id in rust_synthesis.predecessors
+    assert {audit.node_id, validation.node_id} <= set(python_synthesis.predecessors)
+    assert {rust_synthesis.node_id, python_synthesis.node_id, validation.node_id} <= set(repository_synthesis.predecessors)
+
+    materialized = materialize_dispatches(
+        {
+            "artifact_store": str(tmp_path),
+            "authorization": "review-only",
+            "plan": _json_plan(plan),
+            "repository_root": str(SKILL_ROOT.parents[2]),
+            "source_state": ["scope", "worktree", "repository"],
+            "state_verification_command": "capture_scope.py --mode baseline",
+        }
+    )
+    dispatches = {entry["node_id"]: entry["dispatch"] for entry in materialized["dispatches"]}
+    assert {"review:audit-001", "review:audit-002"} <= set(dispatches["rust-synthesis"]["predecessor_evidence_ids"])
+    assert {"review:audit-001", "review:audit-002"} <= set(dispatches["repository-synthesis"]["predecessor_evidence_ids"])
+    assert f"review:{audit.node_id}" in dispatches["python-synthesis"]["predecessor_evidence_ids"]
+    assert f"validation:{validation.node_id}" in dispatches["python-synthesis"]["predecessor_evidence_ids"]
 
 
 def test_next_ready_creates_runtime_managed_output_directory(tmp_path: Path) -> None:
@@ -1803,8 +1912,10 @@ def test_journal_and_next_ready_cli_use_persisted_artifacts(tmp_path: Path) -> N
     assert generated["output_generation"] == 1
 
 
-def _compile_materialized_evidence(tmp_path: Path, *, resolved_handoff: bool = False) -> tuple[GraphPlan, list[dict[str, str]]]:
-    plan = _sparse_plan()
+def _compile_materialized_evidence(
+    tmp_path: Path, *, handoff_catalog_id: str | None = None, resolved_handoff: bool = False, plan: GraphPlan | None = None, skip_node_ids: tuple[str, ...] = ()
+) -> tuple[GraphPlan, list[dict[str, str]]]:
+    plan = plan or _sparse_plan()
     materialized = materialize_dispatches(
         {
             "artifact_store": str(tmp_path),
@@ -1817,6 +1928,8 @@ def _compile_materialized_evidence(tmp_path: Path, *, resolved_handoff: bool = F
     )
     sources: list[dict[str, str]] = []
     for entry in materialized["dispatches"]:
+        if entry["node_id"] in skip_node_ids:
+            continue
         dispatch = entry["dispatch"]
         dispatch.update({"after_state": ["scope", "worktree", "repository"], "before_state": ["scope", "worktree", "repository"]})
         if entry["result_contract"] == "compact-validation":
@@ -1842,8 +1955,17 @@ def _compile_materialized_evidence(tmp_path: Path, *, resolved_handoff: bool = F
             content, metadata = compile_validation({"dispatch": dispatch, "payload": payload})
             kind = "validation"
         else:
-            handoffs = (
-                [
+            if handoff_catalog_id is not None and dispatch["skill_id"] == "rust-invariant-state-transitions":
+                handoffs = [
+                    {
+                        "catalog_id": handoff_catalog_id,
+                        "observed_trigger": "the accepted audit discovered a newly applicable review surface",
+                        "reason": "late routing must add the catalog owner before synthesis",
+                        "scope": [STATE_FIXTURE],
+                    }
+                ]
+            elif resolved_handoff and dispatch["mode"] == "audit":
+                handoffs = [
                     {
                         "catalog_id": "rust.invariants",
                         "observed_trigger": "state transition ownership confirmed",
@@ -1851,9 +1973,8 @@ def _compile_materialized_evidence(tmp_path: Path, *, resolved_handoff: bool = F
                         "scope": [STATE_FIXTURE],
                     }
                 ]
-                if resolved_handoff and dispatch["mode"] == "audit"
-                else []
-            )
+            else:
+                handoffs = []
             payload = {
                 "command_policy_attested": True,
                 "commands_executed": [],
@@ -1873,6 +1994,36 @@ def _compile_materialized_evidence(tmp_path: Path, *, resolved_handoff: bool = F
         metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
         sources.append({"artifact_path": str(artifact_path), "kind": kind, "metadata_path": str(metadata_path)})
     return plan, sources
+
+
+def _source_by_node(sources: list[dict[str, str]]) -> dict[str, dict[str, str]]:
+    return {json.loads(Path(source["metadata_path"]).read_text(encoding="utf-8"))["evidence"]["node_id"]: source for source in sources}
+
+
+def test_late_handoff_exact_reuse_replan_finalizes_complete_proof(tmp_path: Path) -> None:
+    initial_plan, initial_sources = _compile_materialized_evidence(tmp_path / "initial", handoff_catalog_id="python.notebook")
+    initial_by_node = _source_by_node(initial_sources)
+    reconciled = reconcile_handoffs({"plan": _json_plan(initial_plan), "source_state": ["scope", "worktree", "repository"], "sources": initial_sources})
+    assert reconciled["status"] == "requires-expansion"
+    assert {trigger["catalog_id"] for trigger in reconciled["new_routing_triggers"]} == {"python.notebook"}
+
+    replanned = _late_handoff_replan()
+    validation_node_id = next(node.node_id for node in replanned.actual_worker_nodes if node.mode == "validation")
+    _replanned, fresh_sources = _compile_materialized_evidence(tmp_path / "replan", plan=replanned, skip_node_ids=(validation_node_id,))
+    reused_sources = [initial_by_node["audit-001"], initial_by_node["audit-002"], initial_by_node["validation-001"]]
+    final = finalize_proof(
+        {
+            "current_source_state": ["scope", "worktree", "repository"],
+            "plan": _json_plan(replanned),
+            "source_state": ["scope", "worktree", "repository"],
+            "sources": [*reused_sources, *fresh_sources],
+        }
+    )
+
+    assert final["status"] == "complete", final["blockers"]
+    assert final["proof"]["exact_reused_review_evidence"] == (("rust.build", "review:audit-001"), ("rust.invariants", "review:audit-002"))
+    assert final["proof"]["validation_requirement_evidence"] == (("baseline-validation", "validation:validation-001"),)
+    assert final["proof"]["resolved_handoff_ids"]
 
 
 def test_artifact_derived_synthesis_and_final_proof_are_verified(tmp_path: Path) -> None:
@@ -1991,6 +2142,29 @@ def test_append_only_journal_drives_scheduling_and_cascade_invalidation(tmp_path
     tampered.write_text("".join(json.dumps(record) + "\n" for record in records), encoding="utf-8")
     with pytest.raises(ValueError, match="digest"):
         read_execution_journal(tampered, plan=plan, source_state=("scope", "worktree", "repository"))
+
+
+def test_concurrent_journal_appends_serialize_sequence_and_hash_chain(tmp_path: Path) -> None:
+    plan = _sparse_plan()
+    lifecycle_document = {"plan": _json_plan(plan), "source_state": ["scope", "worktree", "repository"]}
+    ready_nodes = [node.node_id for node in plan.actual_worker_nodes if not node.predecessors][:2]
+    assert len(ready_nodes) == 2
+    barrier = Barrier(len(ready_nodes))
+    journal = tmp_path / "execution.jsonl"
+
+    def append(node_id: str) -> dict[str, Any]:
+        barrier.wait()
+        return append_journal_event(journal, lifecycle_document, JournalEventRequest(node_id, "in-flight"))
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        events = list(executor.map(append, ready_nodes))
+
+    persisted, state, head = read_execution_journal(journal, plan=plan, source_state=("scope", "worktree", "repository"))
+    assert sorted(event["sequence"] for event in events) == [1, 2]
+    assert [event["sequence"] for event in persisted] == [1, 2]
+    assert persisted[1]["previous_event_digest"] == persisted[0]["event_digest"]
+    assert head == persisted[1]["event_digest"]
+    assert state == dict.fromkeys(ready_nodes, "in-flight")
 
 
 def test_journal_rejects_unverified_acceptance_and_out_of_order_nodes(tmp_path: Path) -> None:

@@ -43,9 +43,10 @@ rejected.
 The planner:
 
 - applies the conservative repository classifier
+- selects every projection-matched leaf unless explicitly overridden
 - selects required repository and consulted-surface syntheses
 - selects independent review for a concrete change target
-- expands every omitted candidate to `not-applicable`
+- expands unmatched, untriggered omissions to `not-applicable`
 - resolves exact skill paths under approved roots
 - attaches catalog priority and synthesis identity
 - rejects unknown, duplicated, out-of-scope, or contradictory overrides
