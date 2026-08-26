@@ -1,12 +1,14 @@
 """Tests for compact review-graph runtime compilation."""
 
 import json
+import os
 import shlex
 import shutil
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import asdict, replace
+from functools import partial
 from pathlib import Path
 from threading import Barrier
 from typing import Any, cast
@@ -30,7 +32,10 @@ from review_graph_runtime import (
     _argument_parser,
     _git_path_status,
     _graph_plan,
+    _schema_reference,
     _validation_workspace_audit,
+    _write_bytes_atomically_once,
+    _write_bytes_once,
     advance_after_mutation,
     append_journal_event,
     build_routing_projection_document,
@@ -451,6 +456,7 @@ def test_validation_payload_schema_rejects_nonnumeric_exit_code_strings(exit_cod
             {
                 "artifact_paths": [],
                 "command": "true",
+                "elapsed": "0s",
                 "evidence": "command completed",
                 "executor": "validation-001",
                 "exit_code": exit_code,
@@ -463,7 +469,7 @@ def test_validation_payload_schema_rejects_nonnumeric_exit_code_strings(exit_cod
     }
 
     with pytest.raises(SchemaValidationError) as captured:
-        require_schema(payload, SCHEMA_ROOT / "validation-payload-v1.schema.json")
+        require_schema(payload, SCHEMA_ROOT / "validation-payload-v2.schema.json")
 
     diagnostics = cast("list[dict[str, Any]]", captured.value.as_dict()["diagnostics"])
     assert any(item["path"] == "$.executions[0].exit_code" and item["code"] == "pattern" for item in diagnostics)
@@ -478,6 +484,7 @@ def test_validation_payload_schema_accepts_supported_exit_codes(exit_code: int |
                 {
                     "artifact_paths": [],
                     "command": "true",
+                    "elapsed": "0s",
                     "evidence": "command completed",
                     "executor": "validation-001",
                     "exit_code": exit_code,
@@ -488,8 +495,60 @@ def test_validation_payload_schema_accepts_supported_exit_codes(exit_code: int |
             "limitations": [],
             "status": "passed",
         },
-        SCHEMA_ROOT / "validation-payload-v1.schema.json",
+        SCHEMA_ROOT / "validation-payload-v2.schema.json",
     )
+
+
+def test_validation_payload_v1_remains_legacy_compatible_while_v2_requires_stronger_fields() -> None:
+    legacy_artifact_payload = {
+        "artifacts": [
+            {"artifact_digest": "sha256:" + "a" * 64, "artifact_id": None, "kind": "log", "path": "legacy.log", "repository_status": "outside-repository"}
+        ],
+        "executions": [],
+        "limitations": [],
+        "status": "not-applicable",
+    }
+    legacy_execution_payload = {
+        "artifacts": [],
+        "executions": [
+            {
+                "artifact_paths": [],
+                "command": "true",
+                "evidence": "legacy execution",
+                "executor": "validation-legacy",
+                "result": "passed",
+                "working_directory": "/repo",
+            }
+        ],
+        "limitations": [],
+        "status": "passed",
+    }
+
+    require_schema(legacy_artifact_payload, SCHEMA_ROOT / "validation-payload-v1.schema.json")
+    require_schema(legacy_execution_payload, SCHEMA_ROOT / "validation-payload-v1.schema.json")
+    with pytest.raises(SchemaValidationError) as artifact_error:
+        require_schema(legacy_artifact_payload, SCHEMA_ROOT / "validation-payload-v2.schema.json")
+    with pytest.raises(SchemaValidationError) as execution_error:
+        require_schema(legacy_execution_payload, SCHEMA_ROOT / "validation-payload-v2.schema.json")
+
+    artifact_diagnostics = cast("list[dict[str, Any]]", artifact_error.value.as_dict()["diagnostics"])
+    execution_diagnostics = cast("list[dict[str, Any]]", execution_error.value.as_dict()["diagnostics"])
+    assert any(item["path"] == "$.artifacts[0].artifact_digest_mode" and item["code"] == "required" for item in artifact_diagnostics)
+    assert {item["path"] for item in execution_diagnostics if item["code"] == "required"} >= {"$.executions[0].elapsed", "$.executions[0].exit_code"}
+
+
+def test_schema_reference_reports_canonical_version_and_rejects_filename_mismatch(tmp_path: Path) -> None:
+    review = _schema_reference(SCHEMA_ROOT / "review-payload-v1.schema.json")
+    validation = _schema_reference(SCHEMA_ROOT / "validation-payload-v2.schema.json")
+    mismatched = tmp_path / "validation-payload-v1.schema.json"
+    mismatched.write_text(
+        json.dumps({"$id": "https://openai.com/codex/review-graph/validation-payload-v2.schema.json", "required": [], "type": "object"}), encoding="utf-8"
+    )
+
+    assert review["version"] == 1
+    assert validation["version"] == 2
+    with pytest.raises(ValueError, match="filename does not match"):
+        _schema_reference(mismatched)
 
 
 def test_planning_schema_reports_routing_decision_item_diagnostics() -> None:
@@ -886,8 +945,8 @@ def test_validation_workspace_audit_rejects_successful_run_with_unexpected_outpu
     dispatch = {
         "repository_root": str(SKILL_ROOT.parents[2]),
         "workspace_after": [
-            {"digest": digest, "path": "dist/package.whl", "status": "ignored"},
-            {"digest": digest, "path": "src/generated.c", "status": "tracked"},
+            {"digest": digest, "path": "dist/package.whl", "snapshot_mode": "content-sha256-v1", "status": "ignored"},
+            {"digest": digest, "path": "src/generated.c", "snapshot_mode": "content-sha256-v1", "status": "tracked"},
         ],
         "workspace_before": [],
     }
@@ -895,8 +954,12 @@ def test_validation_workspace_audit_rejects_successful_run_with_unexpected_outpu
     with pytest.raises(ValueError, match="unexpected workspace paths"):
         _validation_workspace_audit(dispatch, unit)
 
-    dispatch["workspace_after"] = [{"digest": digest, "path": "dist/package.whl", "status": "ignored"}]
+    dispatch["workspace_after"] = [{"digest": digest, "path": "dist/package.whl", "snapshot_mode": "content-sha256-v1", "status": "ignored"}]
     assert _validation_workspace_audit(dispatch, unit)["changed_paths"] == ["dist/package.whl"]
+
+    dispatch["workspace_after"] = [{"digest": digest, "exists": False, "path": "dist/package.whl", "snapshot_mode": "content-sha256-v1", "status": "ignored"}]
+    with pytest.raises(ValueError, match="inconsistent existence and snapshot identity"):
+        _validation_workspace_audit(dispatch, unit)
 
 
 def test_git_path_status_accepts_only_tracked_gitignore_rules(tmp_path: Path) -> None:
@@ -918,10 +981,11 @@ def test_git_path_status_accepts_only_tracked_gitignore_rules(tmp_path: Path) ->
     assert _git_path_status(repository, repository / "ordinary-output" / "result.json") == "untracked"
 
 
-def test_runtime_snapshots_own_validation_artifact_digest(tmp_path: Path) -> None:
+def test_runtime_snapshots_preserve_validation_artifact_digest_mode(tmp_path: Path) -> None:
     repository_root = tmp_path / "repository"
     isolation_root = tmp_path / "isolation"
-    artifact_path = isolation_root / "artifacts" / "result.json"
+    artifact_path = isolation_root / "target"
+    nested_artifact_path = artifact_path / "debug" / "deps" / "result.json"
     repository_root.mkdir()
     unit = ValidationUnit(
         node_id="validation-runtime-artifact",
@@ -972,8 +1036,8 @@ def test_runtime_snapshots_own_validation_artifact_digest(tmp_path: Path) -> Non
         "worker_created": True,
     }
     before = capture_workspace_snapshot(dispatch)
-    artifact_path.parent.mkdir(parents=True)
-    artifact_path.write_text('{"passed":true}\n', encoding="utf-8")
+    nested_artifact_path.parent.mkdir(parents=True)
+    nested_artifact_path.write_text('{"passed":true}\n', encoding="utf-8")
     after = capture_workspace_snapshot(dispatch)
     dispatch["workspace_before"] = before["records"]
     dispatch["workspace_after"] = after["records"]
@@ -999,6 +1063,113 @@ def test_runtime_snapshots_own_validation_artifact_digest(tmp_path: Path) -> Non
     assert before["records"][0]["exists"] is False
     assert after["records"][0]["exists"] is True
     assert metadata["normalized_record"]["artifacts"][0]["artifact_digest"] == after["records"][0]["digest"]
+    assert metadata["normalized_record"]["artifacts"][0]["artifact_digest_mode"] == "bounded-directory-metadata-v3"
+    assert metadata["workspace_audit"]["snapshot_modes"] == {str(artifact_path): "bounded-directory-metadata-v3"}
+
+
+def test_runtime_snapshot_bounds_known_build_trees_without_reading_file_contents(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repository_root = tmp_path / "repository"
+    build_root = tmp_path / "isolated" / "target"
+    payload_path = build_root / "debug" / "deps" / "large-artifact"
+    repository_root.mkdir()
+    payload_path.parent.mkdir(parents=True)
+    payload_path.write_bytes(b"artifact bytes must not be read")
+    plan = _sparse_plan()
+    unit = replace(plan.coalesced_validation_units[0], allowed_artifacts=(), expected_workspace_effects=(str(build_root),))
+    original_read_bytes = Path.read_bytes
+
+    def guarded_read_bytes(path: Path) -> bytes:
+        if path == payload_path:
+            msg = "bounded workspace snapshots must not hash cache/build file contents"
+            raise AssertionError(msg)
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", guarded_read_bytes)
+    snapshot = capture_workspace_snapshot({"repository_root": str(repository_root), "validation_unit": json.loads(json.dumps(asdict(unit)))})
+
+    assert snapshot["records"] == [
+        {
+            "digest": snapshot["records"][0]["digest"],
+            "exists": True,
+            "path": str(build_root),
+            "snapshot_mode": "bounded-directory-metadata-v3",
+            "status": "outside-repository",
+        }
+    ]
+
+
+def test_bounded_workspace_snapshot_selects_entries_deterministically_before_truncation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repository_root = tmp_path / "repository"
+    build_root = tmp_path / "target"
+    repository_root.mkdir()
+    build_root.mkdir()
+    for ordinal in range(300):
+        (build_root / f"artifact-{ordinal:03d}").write_text(str(ordinal), encoding="utf-8")
+    plan = _sparse_plan()
+    unit = replace(plan.coalesced_validation_units[0], allowed_artifacts=(), expected_workspace_effects=(str(build_root),))
+    dispatch = {"repository_root": str(repository_root), "validation_unit": json.loads(json.dumps(asdict(unit)))}
+    real_scandir = os.scandir
+    with real_scandir(build_root) as stream:
+        entries = list(stream)
+
+    class OrderedScandir:
+        def __init__(self, ordered_entries: list[os.DirEntry[str]]) -> None:
+            self.ordered_entries = ordered_entries
+
+        def __enter__(self) -> object:
+            return iter(self.ordered_entries)
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    monkeypatch.setattr(os, "scandir", lambda _path: OrderedScandir(entries))
+    forward = capture_workspace_snapshot(dispatch)
+    monkeypatch.setattr(os, "scandir", lambda _path: OrderedScandir(list(reversed(entries))))
+    reverse = capture_workspace_snapshot(dispatch)
+
+    assert forward["records"][0]["digest"] == reverse["records"][0]["digest"]
+
+
+def test_bounded_workspace_snapshot_hashes_names_outside_metadata_sample(tmp_path: Path) -> None:
+    repository_root = tmp_path / "repository"
+    build_root = tmp_path / "target"
+    repository_root.mkdir()
+    build_root.mkdir()
+    for ordinal in range(300):
+        (build_root / f"artifact-{ordinal:03d}").write_text(str(ordinal), encoding="utf-8")
+    fixed_timestamp_ns = 1_700_000_000_000_000_000
+    os.utime(build_root, ns=(fixed_timestamp_ns, fixed_timestamp_ns))
+    plan = _sparse_plan()
+    unit = replace(plan.coalesced_validation_units[0], allowed_artifacts=(), expected_workspace_effects=(str(build_root),))
+    dispatch = {"repository_root": str(repository_root), "validation_unit": json.loads(json.dumps(asdict(unit)))}
+    before = capture_workspace_snapshot(dispatch)
+
+    (build_root / "artifact-299").rename(build_root / "artifact-399")
+    os.utime(build_root, ns=(fixed_timestamp_ns, fixed_timestamp_ns))
+    after = capture_workspace_snapshot(dispatch)
+
+    assert before["records"][0]["digest"] != after["records"][0]["digest"]
+
+
+def test_bounded_workspace_snapshot_hashes_metadata_outside_diagnostic_sample(tmp_path: Path) -> None:
+    repository_root = tmp_path / "repository"
+    build_root = tmp_path / "target"
+    repository_root.mkdir()
+    build_root.mkdir()
+    for ordinal in range(300):
+        (build_root / f"artifact-{ordinal:03d}").write_text(str(ordinal), encoding="utf-8")
+    fixed_timestamp_ns = 1_700_000_000_000_000_000
+    os.utime(build_root, ns=(fixed_timestamp_ns, fixed_timestamp_ns))
+    plan = _sparse_plan()
+    unit = replace(plan.coalesced_validation_units[0], allowed_artifacts=(), expected_workspace_effects=(str(build_root),))
+    dispatch = {"repository_root": str(repository_root), "validation_unit": json.loads(json.dumps(asdict(unit)))}
+    before = capture_workspace_snapshot(dispatch)
+
+    (build_root / "artifact-299").write_text("changed outside the diagnostic sample", encoding="utf-8")
+    os.utime(build_root, ns=(fixed_timestamp_ns, fixed_timestamp_ns))
+    after = capture_workspace_snapshot(dispatch)
+
+    assert before["records"][0]["digest"] != after["records"][0]["digest"]
 
 
 def test_isolated_validation_workspace_audit_binds_artifacts_and_changes_to_root(tmp_path: Path) -> None:
@@ -1042,7 +1213,7 @@ def test_isolated_validation_workspace_audit_binds_artifacts_and_changes_to_root
     artifact_path = artifact_root / "package.whl"
     dispatch = {
         "repository_root": str(repository_root),
-        "workspace_after": [{"digest": digest, "path": str(artifact_path), "status": "outside-repository"}],
+        "workspace_after": [{"digest": digest, "path": str(artifact_path), "snapshot_mode": "content-sha256-v1", "status": "outside-repository"}],
         "workspace_before": [],
     }
 
@@ -1055,7 +1226,10 @@ def test_isolated_validation_workspace_audit_binds_artifacts_and_changes_to_root
     unrelated_path = unrelated_root / "package.whl"
     with pytest.raises(ValueError, match="changed workspace paths must be under the dispatched isolation root"):
         _validation_workspace_audit(
-            {**dispatch, "workspace_after": [{"digest": digest, "path": str(unrelated_path), "status": "outside-repository"}]},
+            {
+                **dispatch,
+                "workspace_after": [{"digest": digest, "path": str(unrelated_path), "snapshot_mode": "content-sha256-v1", "status": "outside-repository"}],
+            },
             replace(unit, allowed_artifacts=(), expected_workspace_effects=(str(unrelated_path),)),
         )
 
@@ -1157,6 +1331,19 @@ def test_routing_projection_is_complete_compact_and_hashed() -> None:
     assert projection["projection_digest"].startswith("sha256:")
 
 
+def test_routing_regression_fixtures_enforce_guarded_docs_and_scripts_test_paths() -> None:
+    fixture = Path(__file__).with_name("fixtures") / "routing_regressions.json"
+    cases = json.loads(fixture.read_text(encoding="utf-8"))["cases"]
+
+    for case in cases:
+        projection = build_routing_projection_document(
+            {"captured_paths": case["paths"], "consulted_routers": case["consulted_routers"]}, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,)
+        )
+        projected = {entry["catalog_id"]: entry for entry in projection["entries"]}
+        for catalog_id, expected_matches in case["expected_matches"].items():
+            assert projected[catalog_id]["matched_paths"] == expected_matches, case["id"]
+
+
 def test_sparse_mixed_lockfile_fixture_selects_every_projection_match_and_coalesces_aliases() -> None:
     fixture = Path(__file__).with_name("fixtures") / "sparse_mixed_lockfiles.json"
     document = json.loads(fixture.read_text(encoding="utf-8"))
@@ -1226,11 +1413,17 @@ def test_dispatch_materialization_and_ready_nodes_are_plan_derived(tmp_path: Pat
     assert {entry["compiler_operation"] for entry in result["dispatches"]} == {"compile-review", "compile-validation"}
     assert {entry["journal_operation"] for entry in result["dispatches"]} == {"journal-append"}
     audit_dispatch = next(entry["dispatch"] for entry in result["dispatches"] if entry["result_contract"] == "compact-review")
+    validation_dispatch = next(entry["dispatch"] for entry in result["dispatches"] if entry["result_contract"] == "compact-validation")
     assert audit_dispatch["payload_schema"]["id"].endswith("review-payload-v1.schema.json")
+    assert validation_dispatch["payload_schema"]["id"].endswith("validation-payload-v2.schema.json")
+    assert audit_dispatch["payload_schema"]["version"] == 1
+    assert validation_dispatch["payload_schema"]["version"] == 2
     assert "command_policy_attested" in audit_dispatch["payload_schema"]["required_fields"]
     assert audit_dispatch["command_policy"]["validator_owned_commands"] == ["true"]
     assert str(SKILL_ROOT.parents[2] / "AGENTS.md") in audit_dispatch["instruction_paths"]
     assert all(entry["worker_prompt"] for entry in result["dispatches"])
+    assert all("persist-worker-payload" in entry["worker_prompt"] for entry in result["dispatches"])
+    assert all(Path(entry["worker_payload_contract_path"]).is_file() for entry in result["dispatches"])
 
     lifecycle_document = {
         "current_source_state": ["scope", "worktree", "repository"],
@@ -1252,6 +1445,49 @@ def test_dispatch_materialization_and_ready_nodes_are_plan_derived(tmp_path: Pat
     after_start = next_ready_nodes(lifecycle_document, journal_events=events, dispatch_set=result)
     assert started not in after_start["ready_node_ids"]
     assert after_start["lifecycle"]["in_flight_node_ids"] == [started]
+
+
+def test_validator_prompt_exposes_nested_required_shape_and_minimal_response_compiles(tmp_path: Path) -> None:
+    plan = _sparse_plan()
+    materialized = materialize_dispatches(
+        {
+            "artifact_store": str(tmp_path),
+            "authorization": "review-only",
+            "plan": _json_plan(plan),
+            "repository_root": str(SKILL_ROOT.parents[2]),
+            "source_state": ["scope", "worktree", "repository"],
+            "state_verification_command": "capture_scope.py --mode baseline",
+        }
+    )
+    entry = next(item for item in materialized["dispatches"] if item["result_contract"] == "compact-validation")
+    dispatch = deepcopy(entry["dispatch"])
+    execution_shape = dispatch["payload_schema"]["required_shape"]["executions"][0]
+    unit = dispatch["validation_unit"]
+    payload = {
+        "executions": [
+            {
+                "artifact_paths": [],
+                "command": command,
+                "elapsed": "0s",
+                "evidence": "command completed",
+                "executor": f"worker {dispatch['node_id']}",
+                "exit_code": 0,
+                "result": "passed",
+                "working_directory": working_directory,
+            }
+            for command, working_directory in zip(unit["commands"], unit["working_directories"], strict=True)
+        ],
+        "limitations": [],
+        "status": "passed",
+    }
+    dispatch.update({"after_state": ["scope", "worktree", "repository"], "before_state": ["scope", "worktree", "repository"]})
+
+    assert set(execution_shape) == {"artifact_paths", "command", "elapsed", "evidence", "executor", "exit_code", "result", "working_directory"}
+    assert '"artifact_paths":["string"]' in entry["worker_prompt"]
+    require_schema(payload, SCHEMA_ROOT / "validation-payload-v2.schema.json")
+    content, metadata = compile_validation({"dispatch": dispatch, "payload": payload})
+    assert content.startswith(b"# Validation Result\n")
+    assert metadata["evidence"]["status"] == "passed"
 
 
 def test_late_handoff_replan_reserves_reused_ids_and_binds_surface_readiness(tmp_path: Path) -> None:
@@ -1581,7 +1817,39 @@ def test_independent_native_example_compiles_verbatim_and_aggregates_contract_er
     assert "native state proof failed validation" in diagnostic
 
 
-def test_compile_node_preserves_worker_payload_bytes_and_journals(tmp_path: Path) -> None:
+@pytest.mark.parametrize("writer", ["direct", "atomic"])
+def test_create_once_writers_reject_preexisting_symlinks_without_touching_target(tmp_path: Path, writer: str) -> None:
+    content = b"accepted payload"
+    target = tmp_path / "target"
+    target.write_bytes(content)
+    target.chmod(0o600)
+    destination = tmp_path / f"{writer}.artifact"
+    destination.symlink_to(target)
+    write = partial(_write_bytes_atomically_once, mode=0o444) if writer == "atomic" else _write_bytes_once
+
+    with pytest.raises(ValueError, match="regular non-symlink file"):
+        write(destination, content)
+
+    assert destination.is_symlink()
+    assert target.read_bytes() == content
+    assert target.stat().st_mode & 0o777 == 0o600
+    assert not tuple(tmp_path.glob(f".{destination.name}.*.tmp"))
+
+
+@pytest.mark.parametrize("writer", ["direct", "atomic"])
+def test_create_once_writers_reject_nonregular_targets(tmp_path: Path, writer: str) -> None:
+    destination = tmp_path / f"{writer}.artifact"
+    destination.mkdir()
+    write = partial(_write_bytes_atomically_once, mode=0o444) if writer == "atomic" else _write_bytes_once
+
+    with pytest.raises(ValueError, match="regular non-symlink file"):
+        write(destination, b"accepted payload")
+
+    assert destination.is_dir()
+    assert not tuple(tmp_path.glob(f".{destination.name}.*.tmp"))
+
+
+def test_compile_node_survives_context_compaction_by_reading_bound_worker_payload(tmp_path: Path) -> None:
     plan = _sparse_plan()
     source_state = ["scope", "worktree", "repository"]
     artifact_store = tmp_path / "nested" / "artifacts"
@@ -1618,13 +1886,15 @@ def test_compile_node_preserves_worker_payload_bytes_and_journals(tmp_path: Path
     lifecycle_path = tmp_path / "lifecycle.json"
     dispatch_path = tmp_path / "dispatches.json"
     capture_path = tmp_path / "capture.json"
-    payload_path = tmp_path / "payload.json"
+    payload_path = Path(entry["worker_payload_path"])
+    payload_candidate_path = Path(entry["worker_payload_candidate_path"])
     output_path = tmp_path / "compile.json"
     journal_path = tmp_path / "journal" / "execution.jsonl"
     lifecycle_path.write_text(json.dumps(lifecycle), encoding="utf-8")
     dispatch_path.write_text(json.dumps(dispatch_set), encoding="utf-8")
     capture_path.write_text(json.dumps(capture), encoding="utf-8")
-    payload_path.write_bytes(payload_bytes)
+    payload_candidate_path.write_bytes(payload_bytes)
+    assert main(["persist-worker-payload", "--input", entry["worker_payload_contract_path"], "--payload", str(payload_candidate_path)]) == 0
 
     result = main(
         [
@@ -1635,8 +1905,6 @@ def test_compile_node_preserves_worker_payload_bytes_and_journals(tmp_path: Path
             str(dispatch_path),
             "--node-id",
             entry["node_id"],
-            "--payload",
-            str(payload_path),
             "--before-capture",
             str(capture_path),
             "--after-capture",
@@ -1650,17 +1918,80 @@ def test_compile_node_preserves_worker_payload_bytes_and_journals(tmp_path: Path
 
     assert result == 0
     output = json.loads(output_path.read_text(encoding="utf-8"))
-    assert Path(output["worker_payload_path"]).read_bytes() == payload_bytes
+    sealed_payload_path = Path(output["worker_payload_path"])
+    assert sealed_payload_path != payload_path
+    assert sealed_payload_path.read_bytes() == payload_bytes
+    assert sealed_payload_path.stat().st_mode & 0o222 == 0
     metadata = json.loads(Path(output["metadata_path"]).read_text(encoding="utf-8"))
     assert metadata["worker_payload_byte_count"] == len(payload_bytes)
+    assert metadata["worker_payload_path"] == str(sealed_payload_path)
+    assert metadata["worker_payload_staging_path"] == str(payload_path)
     events, lifecycle_state, _head = read_execution_journal(journal_path, plan=plan, source_state=cast("tuple[str, str, str]", tuple(source_state)))
     assert len(events) == 1
     assert lifecycle_state[entry["node_id"]] == "accepted"
     source = {"artifact_path": output["artifact_path"], "metadata_path": output["metadata_path"]}
     build_synthesis_bundle({"source_state": source_state, "sources": [source]})
-    Path(output["worker_payload_path"]).write_bytes(b"{}\n")
-    with pytest.raises(ValueError, match="worker payload bytes do not match"):
-        build_synthesis_bundle({"source_state": source_state, "sources": [source]})
+
+    replacement_bytes = (json.dumps({**payload, "limitations": ["late replacement"]}, indent=2) + "\n").encode()
+    payload_candidate_path.write_bytes(replacement_bytes)
+    assert main(["persist-worker-payload", "--input", entry["worker_payload_contract_path"], "--payload", str(payload_candidate_path)]) == 0
+    assert payload_path.read_bytes() == replacement_bytes
+    assert sealed_payload_path.read_bytes() == payload_bytes
+    build_synthesis_bundle({"source_state": source_state, "sources": [source]})
+
+
+def test_persist_worker_payload_preserves_valid_target_when_validation_or_publication_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan = _sparse_plan()
+    dispatch_set = materialize_dispatches(
+        {
+            "artifact_store": str(tmp_path / "artifacts"),
+            "authorization": "review-only",
+            "plan": _json_plan(plan),
+            "repository_root": str(SKILL_ROOT.parents[2]),
+            "source_state": ["scope", "worktree", "repository"],
+            "state_verification_command": "capture_scope.py --mode baseline",
+        }
+    )
+    entry = next(candidate for candidate in dispatch_set["dispatches"] if candidate["result_contract"] == "compact-review")
+    target = Path(entry["worker_payload_path"])
+    candidate = Path(entry["worker_payload_candidate_path"])
+    valid_payload = {
+        "changes": [],
+        "command_policy_attested": True,
+        "commands_executed": [],
+        "files_inspected": entry["dispatch"]["owned_paths"],
+        "findings": [],
+        "handoffs": [],
+        "limitations": [],
+        "nearby_contract_owners": [],
+        "status": "no-findings",
+        "validation_requirements": [],
+    }
+    valid_bytes = (json.dumps(valid_payload, indent=2) + "\n").encode()
+    candidate.write_bytes(valid_bytes)
+    command = ["persist-worker-payload", "--input", entry["worker_payload_contract_path"], "--payload", str(candidate)]
+    assert main(command) == 0
+    capsys.readouterr()
+
+    candidate.write_bytes(b"{}\n")
+    assert main(command) == 2
+    assert target.read_bytes() == valid_bytes
+    assert candidate.read_bytes() == b"{}\n"
+    capsys.readouterr()
+
+    replacement = {**valid_payload, "limitations": ["replacement"]}
+    candidate.write_bytes((json.dumps(replacement, indent=2) + "\n").encode())
+
+    def fail_replace(_source: Path, _target: Path) -> Path:
+        msg = "simulated publication failure"
+        raise OSError(msg)
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    assert main(command) == 2
+    assert target.read_bytes() == valid_bytes
+    assert candidate.is_file()
 
 
 def test_compact_branch_runs_from_bootstrap_through_journal_and_final_proof(tmp_path: Path) -> None:  # noqa: PLR0915
@@ -1728,7 +2059,7 @@ def test_compact_branch_runs_from_bootstrap_through_journal_and_final_proof(tmp_
                 "limitations": [],
                 "status": "passed",
             }
-            require_schema(payload, SCHEMA_ROOT / "validation-payload-v1.schema.json")
+            require_schema(payload, SCHEMA_ROOT / "validation-payload-v2.schema.json")
             content, metadata = compile_validation({"dispatch": dispatch, "payload": payload})
             kind = "validation"
         elif entry["result_contract"] == "native-independent-review":

@@ -1,0 +1,56 @@
+{
+  "$id": "https://openai.com/codex/review-graph/validation-payload-v2.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "artifacts": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_digest": {"pattern": "^sha256:[0-9a-f]{64}$", "type": "string"},
+          "artifact_digest_mode": {
+            "enum": [
+              "bounded-directory-metadata-v1",
+              "bounded-directory-metadata-v2",
+              "bounded-directory-metadata-v3",
+              "content-sha256-v1",
+              "recursive-content-sha256-v1",
+              "special-metadata-v1",
+              "symlink-target-v1"
+            ]
+          },
+          "artifact_id": {"type": ["string", "null"]},
+          "kind": {"enum": ["build", "cache", "coverage", "log", "report", "test-result", "other"]},
+          "path": {"type": "string"},
+          "repository_status": {"enum": ["ignored", "outside-repository"]}
+        },
+        "required": ["path", "kind", "repository_status", "artifact_digest", "artifact_digest_mode"],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "executions": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_paths": {"items": {"type": "string"}, "type": "array"},
+          "command": {"type": "string"},
+          "elapsed": {"type": ["string", "number", "null"]},
+          "evidence": {"type": "string"},
+          "executor": {"type": "string"},
+          "exit_code": {"pattern": "^(?:-?[0-9]+|none)$", "type": ["integer", "string", "null"]},
+          "result": {"enum": ["passed", "failed", "blocked", "not-run"]},
+          "working_directory": {"type": "string"}
+        },
+        "required": ["executor", "command", "working_directory", "result", "exit_code", "elapsed", "evidence", "artifact_paths"],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "limitations": {"items": {"type": "string"}, "type": "array"},
+    "status": {"enum": ["passed", "failed", "blocked", "reused", "not-applicable"]}
+  },
+  "required": ["status", "executions", "limitations"],
+  "title": "Review Graph ValidationPayload v2",
+  "type": "object"
+}

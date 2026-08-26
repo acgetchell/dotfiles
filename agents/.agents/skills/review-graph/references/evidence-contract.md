@@ -6,7 +6,7 @@ requiring workers to read or reproduce it.
 
 Use this contract for every `review-graph` profile. Execution location may
 change, but coverage, result identity, acceptance, and final reconciliation may
-not. The stable schema version is `1`; `scripts/review_graph_plan.py` is the
+not. The stable schema version is `2`; `scripts/review_graph_plan.py` is the
 deterministic verifier.
 
 ## Evidence Invariants
@@ -39,7 +39,7 @@ Create one `ReviewEvidence` envelope for each selected leaf, independent review,
 fix, revalidation, or synthesis result:
 
 ```text
-schema_version: 1
+schema_version: 2
 evidence_id: stable unique ID
 node_id: exact graph node
 requirement_ids: every requirement coalesced into this node
@@ -83,7 +83,7 @@ Every validation requirement maps to exactly one coalesced
 create one `ValidationEvidence` envelope:
 
 ```text
-schema_version: 1
+schema_version: 2
 evidence_id, node_id, requirement_ids
 skill_digest, reference_digests
 fingerprints: expected, observed before, observed after
@@ -131,8 +131,8 @@ one canonical block. The opening marker, one-line JSON object, and closing
 marker are exact; do not use YAML or frontmatter:
 
 ```text
-<!-- review-graph-evidence-v1
-{"after_repository_state_fingerprint":"<digest>","after_scope_fingerprint":"<digest>","after_worktree_fingerprint":"<digest>","artifact_id":"<artifact-id>","before_repository_state_fingerprint":"<digest>","before_scope_fingerprint":"<digest>","before_worktree_fingerprint":"<digest>","evidence_id":"<evidence-id>","finding_ids":[],"git_mutated":false,"mode":"<audit|independent-review|synthesis|fix|revalidation>","node_id":"<node-id>","predecessor_evidence_ids":[],"repository_state_fingerprint":"<digest>","requirement_ids":[],"result_type":"<review-node-result|independent-review-result>","schema_version":1,"scope_fingerprint":"<digest>","skill_id":"<skill-id>","source_mutated":false,"status":"<completed|no-findings|blocked>","validation_requirement_ids":[],"worktree_fingerprint":"<digest>"}
+<!-- review-graph-evidence-v2
+{"after_repository_state_fingerprint":"<digest>","after_scope_fingerprint":"<digest>","after_worktree_fingerprint":"<digest>","artifact_id":"<artifact-id>","before_repository_state_fingerprint":"<digest>","before_scope_fingerprint":"<digest>","before_worktree_fingerprint":"<digest>","evidence_id":"<evidence-id>","finding_ids":[],"git_mutated":false,"mode":"<audit|independent-review|synthesis|fix|revalidation>","node_id":"<node-id>","predecessor_evidence_ids":[],"repository_state_fingerprint":"<digest>","requirement_ids":[],"result_type":"<review-node-result|independent-review-result>","schema_version":2,"scope_fingerprint":"<digest>","skill_id":"<skill-id>","source_mutated":false,"status":"<completed|no-findings|blocked>","validation_requirement_ids":[],"worktree_fingerprint":"<digest>"}
 -->
 ```
 
@@ -140,8 +140,8 @@ Validation results use the same markers and common identity fields, replacing
 the review-only arrays with the exact validation dispatch identities:
 
 ```text
-<!-- review-graph-evidence-v1
-{"after_repository_state_fingerprint":"<digest>","after_scope_fingerprint":"<digest>","after_worktree_fingerprint":"<digest>","artifact_id":"<artifact-id>","before_repository_state_fingerprint":"<digest>","before_scope_fingerprint":"<digest>","before_worktree_fingerprint":"<digest>","command_identity_digest":"<digest>","environment_digest":"<digest>","evidence_id":"<evidence-id>","git_mutated":false,"mode":"validation","node_id":"<node-id>","repository_state_fingerprint":"<digest>","requirement_ids":[],"result_type":"validation-result","schema_version":1,"scope_fingerprint":"<digest>","skill_id":"review-validator","source_mutated":false,"status":"<passed|failed|blocked|reused|not-applicable>","validation_status":"<same-status>","worktree_fingerprint":"<digest>"}
+<!-- review-graph-evidence-v2
+{"after_repository_state_fingerprint":"<digest>","after_scope_fingerprint":"<digest>","after_worktree_fingerprint":"<digest>","artifact_id":"<artifact-id>","before_repository_state_fingerprint":"<digest>","before_scope_fingerprint":"<digest>","before_worktree_fingerprint":"<digest>","command_identity_digest":"<digest>","environment_digest":"<digest>","evidence_id":"<evidence-id>","git_mutated":false,"mode":"validation","node_id":"<node-id>","repository_state_fingerprint":"<digest>","requirement_ids":[],"result_type":"validation-result","schema_version":2,"scope_fingerprint":"<digest>","skill_id":"review-validator","source_mutated":false,"status":"<passed|failed|blocked|reused|not-applicable>","validation_status":"<same-status>","worktree_fingerprint":"<digest>"}
 -->
 ```
 
@@ -188,7 +188,7 @@ After all routing handoffs close and final synthesis returns accepted review
 evidence, construct one `RepositoryReviewProof`:
 
 ```text
-schema_version: 1
+schema_version: 2
 proof_id, plan_digest, source_state
 planned_node_evidence: planned executable node ID -> accepted evidence ID
 required_review_requirement_ids

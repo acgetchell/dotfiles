@@ -16,6 +16,7 @@ Require:
   features, platform, artifact owner, and mutation lock
 - approved artifacts with status provenance; exact effects, absolute isolation
   root, and runtime snapshot policy
+- recursive required payload shape and the exact worker payload path
 - dependency policy and elapsed bounds
 
 Return `blocked` for any missing field. Do not fall through to standalone
@@ -32,7 +33,12 @@ discovery.
    must remain beneath the dispatched isolation root.
 4. Record command, working directory, executor, result, exit code, elapsed time,
    concise output evidence, and approved artifact paths.
-5. Repeat the source-state check. The coordinator invokes the runtime-owned
+5. Repeat the source-state check. Complete the payload, including `exit_code`,
+   `elapsed`, and `artifact_paths` for every execution. Write its exact bytes to
+   the dispatched candidate path, invoke the runtime-owned
+   `persist-worker-payload` operation, and return those same bytes only after it
+   succeeds.
+6. The coordinator invokes the runtime-owned
    post-execution snapshot immediately afterward.
 
 Do not report artifact digests, snapshots, fingerprints, or compiler identities.
@@ -68,8 +74,8 @@ payload requires a concrete limitation. `reused` and `not-applicable` contain
 no execution records. Each execution may reference only dispatched artifact
 paths; the runtime resolves those paths to compiler-owned artifact records.
 
-The coordinator preserves this payload verbatim and invokes `compile-node` for
-the validation node, supplying the runtime-owned before and after snapshots.
+The coordinator invokes `compile-node` for the validation node, which reads the
+dispatch-bound persisted payload and the runtime-owned before and after snapshots.
 For low-level compiler diagnosis only, it may invoke:
 
 ```sh

@@ -66,6 +66,13 @@
     "plan": {},
     "source_state": ["scope", "worktree", "repository"]
   },
+  "persist-worker-payload": {
+    "candidate_path": "/tmp/review-proof/audit.worker-payload.candidate.json",
+    "node_id": "audit",
+    "result_contract": "compact-review",
+    "schema_version": 1,
+    "worker_payload_path": "/tmp/review-proof/audit.worker-payload.json"
+  },
   "reconcile-handoffs": {
     "plan": {},
     "source_state": ["scope", "worktree", "repository"],

@@ -125,6 +125,18 @@
       "required": ["plan", "source_state"],
       "type": "object"
     },
+    "persist-worker-payload": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_path": {"minLength": 1, "type": "string"},
+        "node_id": {"minLength": 1, "type": "string"},
+        "result_contract": {"enum": ["compact-review", "compact-validation", "native-independent-review"]},
+        "schema_version": {"const": 1},
+        "worker_payload_path": {"minLength": 1, "type": "string"}
+      },
+      "required": ["candidate_path", "node_id", "result_contract", "schema_version", "worker_payload_path"],
+      "type": "object"
+    },
     "reconcile-handoffs": {
       "additionalProperties": false,
       "properties": {

@@ -48,7 +48,7 @@ execution:
 ```text
 node_id: stable graph identifier or standalone-validation-<scope-digest-prefix>
 invocation: graph-dispatched | standalone
-evidence_schema_version: 1
+evidence_schema_version: 2
 execution_profile: standalone | grouped | isolated | isolated-only | mixed
 execution_location: worker | coordinator | none
   (graph-dispatched only uses worker or coordinator; standalone must be none and
@@ -104,7 +104,8 @@ fields serialize in this order: `canonical_recipe`, `commands`, and
 serialize in this order: `allowed_artifacts`, `artifact_owner`, `environment`,
 `features`, `mutation_lock`, `platform`, and `toolchain`. Each element of
 `allowed_artifacts` is one object whose fields serialize in this order:
-`artifact_digest`, `artifact_id`, `kind`, `path`, and `repository_status`.
+`artifact_digest`, `artifact_digest_mode`, `artifact_id`, `kind`, `path`, and
+`repository_status`, `status_rule`, and `status_source`.
 
 Sort object keys lexicographically at every level; preserve array element
 order; serialize tuples as JSON arrays and absent optional values as JSON
@@ -127,7 +128,7 @@ Return every heading, using `none` when a section has no entries.
 - Node ID: <node-id>
 - Skill: review-validator
 - Invocation: <graph-dispatched|standalone>
-- Evidence schema version: 1
+- Evidence schema version: 2
 - Execution profile: <standalone|grouped|isolated|isolated-only|mixed>
 - Execution location: <worker|coordinator|none>
   - graph-dispatched results: worker or coordinator
@@ -228,6 +229,7 @@ Write `none` when no command executed.
 - Path: <exact path>
   - Artifact ID: <opaque ID|none>
   - Artifact digest: <sha256: followed by exactly 64 lowercase hexadecimal characters>
+  - Artifact digest mode: <content-sha256-v1|recursive-content-sha256-v1|bounded-directory-metadata-v3|symlink-target-v1|special-metadata-v1>
   - Kind: <build|cache|coverage|log|other>
   - Repository status: <ignored|outside-repository>
 
@@ -255,7 +257,10 @@ uses this canonical `directory-artifact-v1` format:
 Digest generation and evidence acceptance must both use this exact format and
 must compare the regenerated digest before accepting the artifact. An artifact
 ID remains a separate locator and is never part of, or a substitute for, the
-content digest.
+content digest. Bounded cache and build-tree manifests are explicitly labeled
+`bounded-directory-metadata-v3`. Version 3 hashes name, kind, mode, timestamp,
+and size metadata for every immediate entry while retaining a bounded detailed
+sample; it must never be interpreted as a content digest.
 
 ## Source And Git State
 
