@@ -63,6 +63,7 @@ VALIDATION_ARTIFACT_DIGEST_MODES = frozenset(
         "bounded-directory-metadata-v3",
         "content-sha256-v1",
         "recursive-content-sha256-v1",
+        "recursive-content-sha256-v2",
         "special-metadata-v1",
         "symlink-target-v1",
     }
@@ -136,6 +137,7 @@ ROUTING_DISPOSITIONS = frozenset({"selected", "not-applicable", "exact-evidence-
 COMPLETION_BLOCKING_DISPOSITIONS = frozenset({"budget-deferred", "capability-blocked", "failed"})
 ROUTING_TARGET_KINDS = frozenset({"router", "leaf", "synthesis", "independent"})
 ROUTING_LAYERS = frozenset({"repository", "surface", "finalization"})
+_CLASSIFIER_SURFACES = ("tooling", "cpp", "rust", "python", "documentation")
 DEFAULT_SKILL_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ROUTING_CATALOG = Path(__file__).resolve().parents[1] / "references" / "routing-catalog.json"
 _FRONTMATTER_NAME = re.compile(r"^name:\s*[\"']?([^\"'\s]+)[\"']?\s*$")
@@ -1119,7 +1121,7 @@ def load_routing_catalog(path: Path, *, skill_roots: Sequence[Path] = (DEFAULT_S
             path_patterns = item.get("path_patterns")
             if (
                 not isinstance(classifier_surface, str)
-                or classifier_surface not in {"tooling", "cpp", "rust", "python", "documentation"}
+                or classifier_surface not in _CLASSIFIER_SURFACES
                 or not isinstance(path_patterns, list)
                 or not path_patterns
                 or any(not isinstance(pattern, str) or not pattern for pattern in path_patterns)
@@ -1382,7 +1384,7 @@ def assess_routing_discoveries(decisions: Sequence[RoutingDecision], discoveries
 def classify_repository_paths(paths: Sequence[str], *, release_readiness: bool = False) -> dict[str, tuple[str, ...]]:  # noqa: C901
     """Return conservative repository-surface signals, including shared owners."""
     normalized = tuple(str(PurePosixPath(path)) for path in paths)
-    signals: dict[str, set[str]] = {surface: set() for surface in ("tooling", "cpp", "rust", "python", "documentation")}
+    signals: dict[str, set[str]] = {surface: set() for surface in _CLASSIFIER_SURFACES}
 
     def add(surface: str, path: str, reason: str) -> None:
         signals[surface].add(f"{path}: {reason}")

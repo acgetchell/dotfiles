@@ -34,6 +34,7 @@ from review_graph_runtime import (
     _graph_plan,
     _schema_reference,
     _validation_workspace_audit,
+    _workspace_content_digest,
     _write_bytes_atomically_once,
     _write_bytes_once,
     advance_after_mutation,
@@ -1170,6 +1171,67 @@ def test_bounded_workspace_snapshot_hashes_metadata_outside_diagnostic_sample(tm
     after = capture_workspace_snapshot(dispatch)
 
     assert before["records"][0]["digest"] != after["records"][0]["digest"]
+
+
+def test_recursive_workspace_snapshot_bounds_nested_build_trees_without_reading_contents(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repository_root = tmp_path / "repository"
+    workspace_root = tmp_path / "artifacts"
+    bounded_root = workspace_root / "target"
+    bounded_payload = bounded_root / "large-artifact"
+    ordinary_payload = workspace_root / "ordinary.txt"
+    repository_root.mkdir()
+    bounded_root.mkdir(parents=True)
+    bounded_payload.write_bytes(b"bounded bytes must not be read")
+    ordinary_payload.write_bytes(b"ordinary bytes remain content hashed")
+    plan = _sparse_plan()
+    unit = replace(plan.coalesced_validation_units[0], allowed_artifacts=(), expected_workspace_effects=(str(workspace_root),))
+    dispatch = {"repository_root": str(repository_root), "validation_unit": json.loads(json.dumps(asdict(unit)))}
+    original_read_bytes = Path.read_bytes
+    read_paths: list[Path] = []
+
+    def guarded_read_bytes(path: Path) -> bytes:
+        read_paths.append(path)
+        if path.is_relative_to(bounded_root):
+            msg = "recursive workspace snapshots must not hash nested cache/build file contents"
+            raise AssertionError(msg)
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", guarded_read_bytes)
+    before = capture_workspace_snapshot(dispatch)
+    bounded_payload.write_bytes(b"changed bounded metadata")
+    after_bounded_change = capture_workspace_snapshot(dispatch)
+    ordinary_payload.write_bytes(b"changed ordinary content")
+    after_ordinary_change = capture_workspace_snapshot(dispatch)
+
+    assert before["records"][0]["snapshot_mode"] == "recursive-content-sha256-v2"
+    assert ordinary_payload in read_paths
+    assert bounded_payload not in read_paths
+    assert before["records"][0]["digest"] != after_bounded_change["records"][0]["digest"]
+    assert after_bounded_change["records"][0]["digest"] != after_ordinary_change["records"][0]["digest"]
+
+
+@pytest.mark.parametrize(("entry_kind", "content_change_detected"), [("file", True), ("directory-symlink", False)])
+def test_recursive_workspace_digest_preserves_non_directory_bounded_names(tmp_path: Path, entry_kind: str, content_change_detected: bool) -> None:
+    workspace_root = tmp_path / "artifacts"
+    workspace_root.mkdir()
+    entry = workspace_root / "target"
+    if entry_kind == "file":
+        entry.write_bytes(b"initial")
+        changed_path = entry
+    else:
+        external_root = tmp_path / "external"
+        external_root.mkdir()
+        changed_path = external_root / "payload"
+        changed_path.write_bytes(b"initial")
+        entry.symlink_to(external_root, target_is_directory=True)
+    exists, before, before_mode = _workspace_content_digest(workspace_root)
+
+    changed_path.write_bytes(b"changed")
+    _exists, after, after_mode = _workspace_content_digest(workspace_root)
+
+    assert exists
+    assert before_mode == after_mode == "recursive-content-sha256-v2"
+    assert (before != after) is content_change_detected
 
 
 def test_isolated_validation_workspace_audit_binds_artifacts_and_changes_to_root(tmp_path: Path) -> None:

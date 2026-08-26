@@ -104,7 +104,7 @@ fields serialize in this order: `canonical_recipe`, `commands`, and
 serialize in this order: `allowed_artifacts`, `artifact_owner`, `environment`,
 `features`, `mutation_lock`, `platform`, and `toolchain`. Each element of
 `allowed_artifacts` is one object whose fields serialize in this order:
-`artifact_digest`, `artifact_digest_mode`, `artifact_id`, `kind`, `path`, and
+`artifact_digest`, `artifact_digest_mode`, `artifact_id`, `kind`, `path`,
 `repository_status`, `status_rule`, and `status_source`.
 
 Sort object keys lexicographically at every level; preserve array element
@@ -229,7 +229,7 @@ Write `none` when no command executed.
 - Path: <exact path>
   - Artifact ID: <opaque ID|none>
   - Artifact digest: <sha256: followed by exactly 64 lowercase hexadecimal characters>
-  - Artifact digest mode: <content-sha256-v1|recursive-content-sha256-v1|bounded-directory-metadata-v3|symlink-target-v1|special-metadata-v1>
+  - Artifact digest mode: <content-sha256-v1|recursive-content-sha256-v2|bounded-directory-metadata-v3|symlink-target-v1|special-metadata-v1>
   - Kind: <build|cache|coverage|log|other>
   - Repository status: <ignored|outside-repository>
 

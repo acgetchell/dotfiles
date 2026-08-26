@@ -175,8 +175,9 @@ that can create source-adjacent intermediates run under the exact dispatched
 isolation root; outside-repository artifacts must resolve beneath that root.
 Known cache/build directory roots such as `target/` use
 `bounded-directory-metadata-v3`: existence and metadata for every immediate
-entry, plus a bounded detailed sample. Ordinary files and other directories
-retain content hashing.
+entry, plus a bounded detailed sample. Recursive directory hashing uses
+`recursive-content-sha256-v2`, replacing any nested known cache/build root with
+its bounded manifest while retaining content hashing elsewhere.
 
 Use `synthesis-bundle` to verify accepted artifacts and derive the compact,
 hashed findings, mappings, validation, handoff, limitation, and artifact view.

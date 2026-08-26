@@ -107,6 +107,7 @@
             "bounded-directory-metadata-v3",
             "content-sha256-v1",
             "recursive-content-sha256-v1",
+            "recursive-content-sha256-v2",
             "special-metadata-v1",
             "symlink-target-v1",
             null

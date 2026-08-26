@@ -110,6 +110,7 @@ _BOUNDED_WORKSPACE_DIRECTORY_NAMES = frozenset(
 )
 _BOUNDED_WORKSPACE_ENTRY_LIMIT = 256
 _BOUNDED_WORKSPACE_POLICY = "bounded-directory-metadata-v3"
+_RECURSIVE_WORKSPACE_POLICY = "recursive-content-sha256-v2"
 _SCHEMA_ID_VERSION_RE = re.compile(r"(?P<name>[^/]+)-v(?P<version>[1-9][0-9]*)\.schema\.json\Z")
 
 
@@ -1570,6 +1571,35 @@ def _bounded_workspace_directory_digest(path: Path) -> str:
     return _sha256_bytes(_canonical_json(manifest).encode())
 
 
+def _recursive_workspace_directory_digest(path: Path) -> str:
+    """Hash recursive contents while pruning known cache and build subtrees."""
+    records: list[dict[str, object]] = []
+    for directory, directory_names, file_names in path.walk(top_down=True, follow_symlinks=False):
+        retained_directories: list[str] = []
+        for name in sorted(directory_names):
+            child = directory / name
+            relative = child.relative_to(path).as_posix()
+            if name in _BOUNDED_WORKSPACE_DIRECTORY_NAMES:
+                records.append(
+                    {"digest": _bounded_workspace_directory_digest(child), "digest_mode": _BOUNDED_WORKSPACE_POLICY, "kind": "directory", "path": relative}
+                )
+            else:
+                records.append({"kind": "directory", "path": relative})
+                retained_directories.append(name)
+        directory_names[:] = retained_directories
+        for name in sorted(file_names):
+            child = directory / name
+            relative = child.relative_to(path).as_posix()
+            if child.is_symlink():
+                records.append({"kind": "symlink", "path": relative, "target": str(child.readlink())})
+            elif child.is_file():
+                records.append({"digest": _sha256_bytes(child.read_bytes()), "kind": "file", "path": relative})
+            else:
+                records.append({"kind": "special", "mode": child.stat().st_mode, "path": relative})
+    records.sort(key=lambda item: str(item["path"]))
+    return _sha256_bytes(_canonical_json(records).encode())
+
+
 def _workspace_content_digest(path: Path) -> tuple[bool, str, str]:
     if not path.exists() and not path.is_symlink():
         return False, _sha256_bytes(b"absent"), "absent-v1"
@@ -1581,18 +1611,7 @@ def _workspace_content_digest(path: Path) -> tuple[bool, str, str]:
         return True, _sha256_bytes(f"special:{path.stat().st_mode}".encode()), "special-metadata-v1"
     if path.name in _BOUNDED_WORKSPACE_DIRECTORY_NAMES:
         return True, _bounded_workspace_directory_digest(path), _BOUNDED_WORKSPACE_POLICY
-    records: list[dict[str, object]] = []
-    for child in sorted(path.rglob("*"), key=lambda item: item.relative_to(path).as_posix()):
-        relative = child.relative_to(path).as_posix()
-        if child.is_symlink():
-            records.append({"kind": "symlink", "path": relative, "target": str(child.readlink())})
-        elif child.is_file():
-            records.append({"digest": _sha256_bytes(child.read_bytes()), "kind": "file", "path": relative})
-        elif child.is_dir():
-            records.append({"kind": "directory", "path": relative})
-        else:
-            records.append({"kind": "special", "mode": child.stat().st_mode, "path": relative})
-    return True, _sha256_bytes(_canonical_json(records).encode()), "recursive-content-sha256-v1"
+    return True, _recursive_workspace_directory_digest(path), _RECURSIVE_WORKSPACE_POLICY
 
 
 def _git_path_status(repository_root: Path, path: Path) -> str:
