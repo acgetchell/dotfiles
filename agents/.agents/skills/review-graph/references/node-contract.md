@@ -35,7 +35,7 @@ every node:
 repository_root: absolute path
 request: exact user request relevant to this node
 authorization: review-only | review-and-fix
-evidence_schema_version: 1
+evidence_schema_version: 2
 execution_profile: grouped | isolated | isolated-only | mixed
 execution_location: worker | coordinator
 graph_mode: branch | staged | worktree | pull-request | release | baseline
@@ -115,7 +115,7 @@ another reviewer. Record a possible cross-skill concern only as a handoff.
 
 Node ID: <node-id>
 Node mode: <audit|synthesis|fix|revalidation>
-Evidence schema version: 1
+Evidence schema version: 2
 Execution profile: <grouped|isolated|isolated-only|mixed>
 Execution location: <worker|coordinator>
 Selection reason: <why-this-skill-owns-this-node>
@@ -172,7 +172,7 @@ Require every heading, using `none` when a section has no entries.
 - Node ID: <node-id>
 - Skill: <skill-id>
 - Mode: <audit|synthesis|fix|revalidation>
-- Evidence schema version: 1
+- Evidence schema version: 2
 - Execution profile: <grouped|isolated|isolated-only|mixed>
 - Execution location: <worker|coordinator>
 - Status: <completed|no-findings|blocked>

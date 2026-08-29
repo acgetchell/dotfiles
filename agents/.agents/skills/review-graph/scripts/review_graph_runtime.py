@@ -5,9 +5,12 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import shutil
+import stat
 import subprocess
 import sys
+import tempfile
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, cast
@@ -19,6 +22,7 @@ from review_graph_plan import (
     EVIDENCE_SCHEMA_VERSION,
     NATIVE_EVIDENCE_BLOCK_CLOSE,
     NATIVE_EVIDENCE_BLOCK_OPEN,
+    VALIDATION_ARTIFACT_DIGEST_MODES,
     ArtifactPayload,
     ExecutionEpoch,
     FingerprintEvidence,
@@ -73,7 +77,7 @@ _JOURNAL_STATUSES = frozenset({"accepted", "awaiting-replan", "blocked", "in-fli
 _SCHEMA_ROOT = Path(__file__).resolve().parents[1] / "references" / "schemas"
 _PLANNING_INPUT_SCHEMA = _SCHEMA_ROOT / "planning-input-v1.schema.json"
 _REVIEW_PAYLOAD_SCHEMA = _SCHEMA_ROOT / "review-payload-v1.schema.json"
-_VALIDATION_PAYLOAD_SCHEMA = _SCHEMA_ROOT / "validation-payload-v1.schema.json"
+_VALIDATION_PAYLOAD_SCHEMA = _SCHEMA_ROOT / "validation-payload-v2.schema.json"
 _RUNTIME_OPERATION_INPUT_SCHEMA = _SCHEMA_ROOT / "runtime-operation-inputs-v1.schema.json"
 _RUNTIME_OPERATION_EXAMPLES = Path(__file__).resolve().parents[1] / "references" / "runtime-operation-examples-v1.json"
 _COMPILER_BY_MODE = {
@@ -101,6 +105,13 @@ _JOURNAL_EVENT_KEYS = frozenset(
     }
 )
 _JOURNAL_EVIDENCE_KEYS = frozenset({"artifact_digest", "artifact_id", "evidence_id", "evidence_status", "normalized_record_digest"})
+_BOUNDED_WORKSPACE_DIRECTORY_NAMES = frozenset(
+    {".cache", ".gradle", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox", ".venv", "build", "node_modules", "target"}
+)
+_BOUNDED_WORKSPACE_ENTRY_LIMIT = 256
+_BOUNDED_WORKSPACE_POLICY = "bounded-directory-metadata-v3"
+_RECURSIVE_WORKSPACE_POLICY = "recursive-content-sha256-v2"
+_SCHEMA_ID_VERSION_RE = re.compile(r"(?P<name>[^/]+)-v(?P<version>[1-9][0-9]*)\.schema\.json\Z")
 
 
 @dataclass(frozen=True)
@@ -121,19 +132,72 @@ def _sha256_bytes(value: bytes) -> str:
     return "sha256:" + hashlib.sha256(value).hexdigest()
 
 
+def _read_regular_file_no_follow(path: Path) -> bytes:
+    """Read an existing regular file without following a replaceable symlink."""
+    flags = os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        msg = f"immutable artifact target must be a regular non-symlink file: {path}"
+        raise ValueError(msg) from error
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            msg = f"immutable artifact target must be a regular non-symlink file: {path}"
+            raise ValueError(msg)
+        stream = os.fdopen(descriptor, "rb")
+        descriptor = -1
+        with stream:
+            return stream.read()
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def _write_bytes_once(path: Path, content: bytes) -> None:
     """Create an immutable artifact, permitting only an identical replay."""
     try:
         with path.open("xb") as stream:
             stream.write(content)
     except FileExistsError:
-        if path.read_bytes() != content:
+        if _read_regular_file_no_follow(path) != content:
             msg = f"refusing to overwrite non-identical artifact: {path}"
             raise ValueError(msg) from None
 
 
 def _write_text_once(path: Path, content: str) -> None:
     _write_bytes_once(path, content.encode("utf-8"))
+
+
+def _write_bytes_atomically_once(path: Path, content: bytes, *, mode: int) -> None:
+    """Atomically create immutable content, permitting only an identical replay."""
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temporary_path = Path(temporary_name)
+    created = False
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fchmod(stream.fileno(), mode)
+            os.fsync(stream.fileno())
+        try:
+            path.hardlink_to(temporary_path)
+            created = True
+        except FileExistsError:
+            if _read_regular_file_no_follow(path) != content:
+                msg = f"refusing to overwrite non-identical immutable artifact: {path}"
+                raise ValueError(msg) from None
+        if created:
+            _fsync_directory(path.parent)
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def _required_text(item: dict[str, Any], name: str) -> str:
@@ -1066,6 +1130,7 @@ def _validation_unit(raw: dict[str, Any]) -> ValidationUnit:
             status_source=_required_text(item, "status_source"),
             artifact_id=item.get("artifact_id"),
             artifact_digest=item.get("artifact_digest"),
+            artifact_digest_mode=item.get("artifact_digest_mode"),
             status_rule=item.get("status_rule"),
         )
         for item in _records(raw, "allowed_artifacts")
@@ -1287,7 +1352,7 @@ def _validation_state_verification(dispatch: dict[str, Any], evidence: Validatio
 
 
 def _validation_artifacts_body(  # noqa: C901
-    payload: dict[str, Any], unit: ValidationUnit, workspace_after: dict[str, tuple[str, str, bool]]
+    payload: dict[str, Any], unit: ValidationUnit, workspace_after: dict[str, tuple[str, str, bool, str]]
 ) -> tuple[str, tuple[ValidationArtifact, ...]]:
     raw_artifacts = _records(payload, "artifacts") if "artifacts" in payload else ()
     raw_by_path = {_required_text(raw, "path"): raw for raw in raw_artifacts}
@@ -1307,7 +1372,7 @@ def _validation_artifacts_body(  # noqa: C901
         if observed is None:
             msg = f"trusted workspace_after snapshot lacks validation artifact {approved.path}"
             raise ValueError(msg)
-        observed_status, observed_digest, exists = observed
+        observed_status, observed_digest, exists, observed_digest_mode = observed
         if not exists:
             if raw is not None:
                 msg = f"validation payload claims an artifact absent from the trusted snapshot: {approved.path}"
@@ -1326,11 +1391,15 @@ def _validation_artifacts_body(  # noqa: C901
             if worker_identity != (path, kind, repository_status):
                 msg = f"validation artifact {path} does not match its dispatch"
                 raise ValueError(msg)
-            if raw.get("artifact_id") != artifact_id or _required_text(raw, "artifact_digest") != artifact_digest:
+            if (
+                raw.get("artifact_id") != artifact_id
+                or _required_text(raw, "artifact_digest") != artifact_digest
+                or _required_text(raw, "artifact_digest_mode") != observed_digest_mode
+            ):
                 msg = f"validation artifact {path} identity differs from the trusted workspace snapshot"
                 raise ValueError(msg)
-        if approved.artifact_digest is not None and artifact_digest != approved.artifact_digest:
-            msg = f"validation artifact {path} changed its approved digest"
+        if approved.artifact_digest is not None and (artifact_digest, observed_digest_mode) != (approved.artifact_digest, approved.artifact_digest_mode):
+            msg = f"validation artifact {path} changed its approved digest or digest mode"
             raise ValueError(msg)
         artifact = ValidationArtifact(
             path=path,
@@ -1338,6 +1407,7 @@ def _validation_artifacts_body(  # noqa: C901
             repository_status=repository_status,
             artifact_id=artifact_id,
             artifact_digest=artifact_digest,
+            artifact_digest_mode=observed_digest_mode,
             status_source=approved.status_source,
             status_rule=approved.status_rule,
         )
@@ -1348,6 +1418,7 @@ def _validation_artifacts_body(  # noqa: C901
                     f"- Path: {path}",
                     f"  - Artifact ID: {artifact_id or 'none'}",
                     f"  - Artifact digest: {artifact_digest}",
+                    f"  - Artifact digest mode: {observed_digest_mode}",
                     f"  - Kind: {kind}",
                     f"  - Repository status: {repository_status}",
                     f"  - Status source: {approved.status_source}",
@@ -1378,7 +1449,12 @@ def _validation_executions_body(
         artifact_references = (
             json.dumps(
                 [
-                    {"artifact_digest": artifact_by_path[path].artifact_digest, "artifact_id": artifact_by_path[path].artifact_id, "path": path}
+                    {
+                        "artifact_digest": artifact_by_path[path].artifact_digest,
+                        "artifact_digest_mode": artifact_by_path[path].artifact_digest_mode,
+                        "artifact_id": artifact_by_path[path].artifact_id,
+                        "path": path,
+                    }
                     for path in result_artifacts
                 ],
                 sort_keys=True,
@@ -1463,27 +1539,79 @@ def _workspace_path(path: str, repository_root: Path) -> Path:
     return candidate.resolve(strict=False) if candidate.is_absolute() else (repository_root / candidate).resolve(strict=False)
 
 
-def _workspace_content_digest(path: Path) -> tuple[bool, str]:
-    if not path.exists() and not path.is_symlink():
-        return False, _sha256_bytes(b"absent")
-    if path.is_symlink():
-        return True, _sha256_bytes(f"symlink:{path.readlink()}".encode())
-    if path.is_file():
-        return True, _sha256_bytes(path.read_bytes())
-    if not path.is_dir():
-        return True, _sha256_bytes(f"special:{path.stat().st_mode}".encode())
+def _bounded_workspace_directory_digest(path: Path) -> str:
+    """Hash bounded root metadata for cache/build trees without reading contents."""
+    root_stat = path.stat()
+    all_entry_metadata: list[dict[str, object]] = []
+    truncated = False
+    with os.scandir(path) as stream:
+        ordered_entries = sorted(stream, key=lambda item: item.name)
+        truncated = len(ordered_entries) > _BOUNDED_WORKSPACE_ENTRY_LIMIT
+        for entry in ordered_entries:
+            stat = entry.stat(follow_symlinks=False)
+            if entry.is_symlink():
+                kind = "symlink"
+            elif entry.is_file(follow_symlinks=False):
+                kind = "file"
+            elif entry.is_dir(follow_symlinks=False):
+                kind = "directory"
+            else:
+                kind = "special"
+            all_entry_metadata.append({"kind": kind, "mode": stat.st_mode, "mtime_ns": stat.st_mtime_ns, "name": entry.name, "size": stat.st_size})
+    manifest = {
+        "entry_limit": _BOUNDED_WORKSPACE_ENTRY_LIMIT,
+        "entry_count": len(all_entry_metadata),
+        "entry_metadata_digest": _sha256_bytes(_canonical_json(all_entry_metadata).encode()),
+        "entry_name_digest": _sha256_bytes(_canonical_json([entry["name"] for entry in all_entry_metadata]).encode()),
+        "policy": _BOUNDED_WORKSPACE_POLICY,
+        "root": {"mode": root_stat.st_mode, "mtime_ns": root_stat.st_mtime_ns, "size": root_stat.st_size},
+        "sampled_entries": all_entry_metadata[:_BOUNDED_WORKSPACE_ENTRY_LIMIT],
+        "truncated": truncated,
+    }
+    return _sha256_bytes(_canonical_json(manifest).encode())
+
+
+def _recursive_workspace_directory_digest(path: Path) -> str:
+    """Hash recursive contents while pruning known cache and build subtrees."""
     records: list[dict[str, object]] = []
-    for child in sorted(path.rglob("*"), key=lambda item: item.relative_to(path).as_posix()):
-        relative = child.relative_to(path).as_posix()
-        if child.is_symlink():
-            records.append({"kind": "symlink", "path": relative, "target": str(child.readlink())})
-        elif child.is_file():
-            records.append({"digest": _sha256_bytes(child.read_bytes()), "kind": "file", "path": relative})
-        elif child.is_dir():
-            records.append({"kind": "directory", "path": relative})
-        else:
-            records.append({"kind": "special", "mode": child.stat().st_mode, "path": relative})
-    return True, _sha256_bytes(_canonical_json(records).encode())
+    for directory, directory_names, file_names in path.walk(top_down=True, follow_symlinks=False):
+        retained_directories: list[str] = []
+        for name in sorted(directory_names):
+            child = directory / name
+            relative = child.relative_to(path).as_posix()
+            if name in _BOUNDED_WORKSPACE_DIRECTORY_NAMES:
+                records.append(
+                    {"digest": _bounded_workspace_directory_digest(child), "digest_mode": _BOUNDED_WORKSPACE_POLICY, "kind": "directory", "path": relative}
+                )
+            else:
+                records.append({"kind": "directory", "path": relative})
+                retained_directories.append(name)
+        directory_names[:] = retained_directories
+        for name in sorted(file_names):
+            child = directory / name
+            relative = child.relative_to(path).as_posix()
+            if child.is_symlink():
+                records.append({"kind": "symlink", "path": relative, "target": str(child.readlink())})
+            elif child.is_file():
+                records.append({"digest": _sha256_bytes(child.read_bytes()), "kind": "file", "path": relative})
+            else:
+                records.append({"kind": "special", "mode": child.stat().st_mode, "path": relative})
+    records.sort(key=lambda item: str(item["path"]))
+    return _sha256_bytes(_canonical_json(records).encode())
+
+
+def _workspace_content_digest(path: Path) -> tuple[bool, str, str]:
+    if not path.exists() and not path.is_symlink():
+        return False, _sha256_bytes(b"absent"), "absent-v1"
+    if path.is_symlink():
+        return True, _sha256_bytes(f"symlink:{path.readlink()}".encode()), "symlink-target-v1"
+    if path.is_file():
+        return True, _sha256_bytes(path.read_bytes()), "content-sha256-v1"
+    if not path.is_dir():
+        return True, _sha256_bytes(f"special:{path.stat().st_mode}".encode()), "special-metadata-v1"
+    if path.name in _BOUNDED_WORKSPACE_DIRECTORY_NAMES:
+        return True, _bounded_workspace_directory_digest(path), _BOUNDED_WORKSPACE_POLICY
+    return True, _recursive_workspace_directory_digest(path), _RECURSIVE_WORKSPACE_POLICY
 
 
 def _git_path_status(repository_root: Path, path: Path) -> str:
@@ -1519,19 +1647,20 @@ def capture_workspace_snapshot(dispatch: dict[str, Any]) -> dict[str, Any]:
     records: list[dict[str, object]] = []
     for raw_path in paths:
         resolved = _workspace_path(raw_path, repository_root)
-        exists, digest = _workspace_content_digest(resolved)
+        exists, digest, snapshot_mode = _workspace_content_digest(resolved)
         status = _git_path_status(repository_root, resolved)
-        records.append({"digest": digest, "exists": exists, "path": raw_path, "status": status})
+        records.append({"digest": digest, "exists": exists, "path": raw_path, "snapshot_mode": snapshot_mode, "status": status})
     return {"node_id": unit.node_id, "records": records, "schema_version": 1, "source_state": list(unit.source_state)}
 
 
-def _workspace_snapshot(dispatch: dict[str, Any], name: str) -> dict[str, tuple[str, str, bool]]:
+def _workspace_snapshot(dispatch: dict[str, Any], name: str) -> dict[str, tuple[str, str, bool, str]]:
     records = _records(dispatch, name)
-    snapshot: dict[str, tuple[str, str, bool]] = {}
+    snapshot: dict[str, tuple[str, str, bool, str]] = {}
     for ordinal, raw in enumerate(records, start=1):
         path = _required_text(raw, "path")
         digest = _required_text(raw, "digest")
         status = _required_text(raw, "status")
+        snapshot_mode = _required_text(raw, "snapshot_mode")
         exists = raw.get("exists", True)
         if not isinstance(exists, bool):
             msg = f"{name} record {ordinal} exists must be a boolean"
@@ -1543,7 +1672,13 @@ def _workspace_snapshot(dispatch: dict[str, Any], name: str) -> dict[str, tuple[
             msg = f"{name} record {ordinal} has invalid status {status}"
             raise ValueError(msg)
         _sha256_digest(digest, f"{name} digest")
-        snapshot[path] = (status, digest, exists)
+        if snapshot_mode not in VALIDATION_ARTIFACT_DIGEST_MODES | {"absent-v1"}:
+            msg = f"{name} record {ordinal} has invalid snapshot mode {snapshot_mode}"
+            raise ValueError(msg)
+        if exists == (snapshot_mode == "absent-v1") or (not exists and digest != _sha256_bytes(b"absent")):
+            msg = f"{name} record {ordinal} has inconsistent existence and snapshot identity"
+            raise ValueError(msg)
+        snapshot[path] = (status, digest, exists, snapshot_mode)
     return snapshot
 
 
@@ -1591,7 +1726,7 @@ def _validation_workspace_audit(dispatch: dict[str, Any], unit: ValidationUnit) 
     changed = tuple(sorted(path for path in set(before) | set(after) if before.get(path) != after.get(path)))
     allowed = (*unit.expected_workspace_effects, *(artifact.path for artifact in unit.allowed_artifacts))
     unexpected = tuple(path for path in changed if not _path_allowed(path, allowed))
-    unsafe = tuple(path for path in changed if after.get(path, before.get(path, ("", "", False)))[0] not in {"ignored", "outside-repository"})
+    unsafe = tuple(path for path in changed if after.get(path, before.get(path, ("", "", False, "absent-v1")))[0] not in {"ignored", "outside-repository"})
     if unexpected:
         msg = "validation produced unexpected workspace paths: " + ", ".join(unexpected)
         raise ValueError(msg)
@@ -1600,7 +1735,12 @@ def _validation_workspace_audit(dispatch: dict[str, Any], unit: ValidationUnit) 
         raise ValueError(msg)
     if unit.requires_isolation:
         _validate_isolated_workspace_paths(dispatch, unit, changed)
-    return {"changed_paths": list(changed), "observed": True, "unexpected_paths": []}
+    return {
+        "changed_paths": list(changed),
+        "observed": True,
+        "snapshot_modes": {path: (after[path] if path in after else before[path])[3] for path in sorted(set(before) | set(after))},
+        "unexpected_paths": [],
+    }
 
 
 def compile_validation(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  # noqa: PLR0915
@@ -1673,6 +1813,7 @@ def compile_validation(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]
         "artifacts": [
             {
                 "artifact_digest": artifact.artifact_digest,
+                "artifact_digest_mode": artifact.artifact_digest_mode,
                 "artifact_id": artifact.artifact_id,
                 "kind": artifact.kind,
                 "path": artifact.path,
@@ -2086,13 +2227,51 @@ def build_routing_projection_document(
     )
 
 
+def _required_schema_shape(node: dict[str, Any]) -> object:
+    """Return a compact recursive description of every schema-required field."""
+    if isinstance(node.get("enum"), list):
+        shape: object = " | ".join(str(value) for value in node["enum"])
+    elif "const" in node:
+        shape = node["const"]
+    elif node.get("type") == "object":
+        properties = node.get("properties", {})
+        required = node.get("required", [])
+        if not isinstance(properties, dict) or not isinstance(required, list):
+            shape = "object"
+        else:
+            shape = {name: _required_schema_shape(properties[name]) for name in required if name in properties}
+    elif node.get("type") == "array":
+        items = node.get("items")
+        shape = [_required_schema_shape(items)] if isinstance(items, dict) else []
+    elif isinstance(node.get("type"), list):
+        shape = " | ".join(str(value) for value in node["type"])
+    else:
+        shape = str(node.get("type") or "value")
+    return shape
+
+
 def _schema_reference(path: Path) -> dict[str, object]:
     raw = _read_json_object(path)
     required = raw.get("required")
     if not isinstance(required, list) or any(not isinstance(name, str) for name in required):
         msg = f"payload schema has no canonical required field list: {path}"
         raise ValueError(msg)
-    return {"digest": _file_identity_digest(str(path)), "id": _required_text(raw, "$id"), "path": str(path), "required_fields": required, "version": 1}
+    schema_id = _required_text(raw, "$id")
+    match = _SCHEMA_ID_VERSION_RE.search(schema_id)
+    if match is None:
+        msg = f"payload schema $id has no canonical version suffix: {schema_id}"
+        raise ValueError(msg)
+    if path.name != match.group(0):
+        msg = f"payload schema filename does not match its canonical $id: {path.name} != {match.group(0)}"
+        raise ValueError(msg)
+    return {
+        "digest": _file_identity_digest(str(path)),
+        "id": schema_id,
+        "path": str(path),
+        "required_fields": required,
+        "required_shape": _required_schema_shape(raw),
+        "version": int(match.group("version")),
+    }
 
 
 def _applicable_instruction_paths(repository_root: Path, owned_paths: tuple[str, ...], declared: tuple[str, ...]) -> tuple[str, ...]:
@@ -2215,21 +2394,90 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
         if isinstance(shared, dict)
         else ""
     )
+    worker_payload_path = _required_text(dispatch, "worker_payload_path")
+    persistence = dispatch.get("worker_payload_persistence")
+    if not isinstance(persistence, dict) or persistence.get("operation") != "persist-worker-payload":
+        msg = "worker dispatch lacks its runtime-owned payload persistence contract"
+        raise ValueError(msg)
+    persistence_input = _required_text(persistence, "input_path")
+    persistence_candidate = _required_text(persistence, "candidate_path")
+    persistence_text = (
+        f" Before returning, write the exact result bytes to temporary sibling {persistence_candidate}, then invoke the runtime-owned "
+        f"persist-worker-payload operation with --input {persistence_input} and --payload {persistence_candidate}. "
+        f"Only after it atomically publishes {worker_payload_path} may you return those same bytes."
+    )
     if contract == "native-independent-review":
         return (
             "Perform only the dispatched repository-independent-review in fresh context. Return the six canonical native sections "
             "Scope Inspected, Findings, No-Finding Evidence, Routing Handoffs, Fingerprint Proof, and Git State; do not append graph IDs, "
             "an envelope, or Machine Evidence because compile-independent-review owns those identities. "
-            f"Command policy: {command_policy}{shared_text}"
+            f"Command policy: {command_policy}{persistence_text}{shared_text}"
         )
     validation_text = (
         " Omit artifacts: the runtime captures workspace status and artifact digests before and after execution." if contract == "compact-validation" else ""
     )
     return (
         f"Return only the canonical {contract} payload using field names from {schema_text}. "
+        "Every field shown in payload_schema.required_shape is required whenever its parent object is present. "
         "Do not author fingerprints, evidence IDs, artifact IDs, or digests. "
-        f"Command policy: {command_policy}{validation_text}{shared_text}"
+        f"Command policy: {command_policy}{validation_text}{persistence_text}{shared_text}"
     )
+
+
+def _validate_worker_payload_bytes(contract: str, payload_bytes: bytes) -> None:
+    """Reject incomplete worker output before it can replace a persisted payload."""
+    if contract in {"compact-review", "compact-validation"}:
+        payload = json.loads(payload_bytes)
+        if not isinstance(payload, dict):
+            msg = "compact worker payload root must be an object"
+            raise TypeError(msg)
+        schema = _REVIEW_PAYLOAD_SCHEMA if contract == "compact-review" else _VALIDATION_PAYLOAD_SCHEMA
+        require_schema(payload, schema)
+        return
+    if contract == "native-independent-review":
+        _independent_input_sections(payload_bytes)
+        return
+    msg = f"unsupported worker payload result contract: {contract}"
+    raise ValueError(msg)
+
+
+def persist_worker_payload(contract_document: dict[str, Any], candidate_path: Path) -> dict[str, Any]:
+    """Validate and atomically publish one dispatch-bound worker payload."""
+    node_id = _required_text(contract_document, "node_id")
+    result_contract = _required_text(contract_document, "result_contract")
+    target_path = Path(_required_text(contract_document, "worker_payload_path")).resolve()
+    expected_candidate = Path(_required_text(contract_document, "candidate_path")).resolve()
+    candidate = candidate_path.resolve()
+    if candidate != expected_candidate:
+        msg = f"worker payload candidate differs from its materialized contract: {candidate}"
+        raise ValueError(msg)
+    if candidate == target_path or candidate.parent != target_path.parent:
+        msg = "worker payload candidate must be a distinct sibling of the materialized target"
+        raise ValueError(msg)
+    if candidate_path.is_symlink() or not candidate.is_file():
+        msg = f"worker payload candidate must be a regular non-symlink file: {candidate}"
+        raise ValueError(msg)
+    if not target_path.parent.is_dir():
+        msg = f"worker payload target directory does not exist: {target_path.parent}"
+        raise ValueError(msg)
+
+    with candidate.open("rb+") as stream:
+        payload_bytes = stream.read()
+        _validate_worker_payload_bytes(result_contract, payload_bytes)
+        stream.flush()
+        os.fsync(stream.fileno())
+    candidate.replace(target_path)
+    if target_path.read_bytes() != payload_bytes:
+        msg = f"atomically published worker payload bytes differ from the validated candidate: {target_path}"
+        raise ValueError(msg)
+    return {
+        "node_id": node_id,
+        "result_contract": result_contract,
+        "schema_version": 1,
+        "worker_payload_byte_count": len(payload_bytes),
+        "worker_payload_digest": _sha256_bytes(payload_bytes),
+        "worker_payload_path": str(target_path),
+    }
 
 
 def materialize_dispatches(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, PLR0912, PLR0915
@@ -2313,6 +2561,10 @@ def materialize_dispatches(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
         artifact_suffix = "validation.md" if node.mode == "validation" else "review.md"
         artifact_path = artifact_store / f"{node.node_id}.{artifact_suffix}"
         metadata_path = artifact_store / f"{node.node_id}.evidence.json"
+        worker_payload_suffix = "md" if node.mode == "independent-review" else "json"
+        worker_payload_path = artifact_store / f"{node.node_id}.worker-payload.{worker_payload_suffix}"
+        worker_payload_candidate_path = artifact_store / f"{node.node_id}.worker-payload.candidate.{worker_payload_suffix}"
+        worker_payload_contract_path = artifact_store / f"{node.node_id}.worker-payload-contract.json"
         instruction_paths = _applicable_instruction_paths(repository_root_path.resolve(), node.coverage, node.instruction_paths)
         authorized_duplicates = tuple(sorted(set(raw_duplicate_authorizations.get(node.node_id, ()))))
         if node.mode == "validation" and authorized_duplicates:
@@ -2343,6 +2595,12 @@ def materialize_dispatches(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
             "skill_path": node.skill_path,
             "source_state": list(source_state),
             "state_verification_command": state_command,
+            "worker_payload_path": str(worker_payload_path),
+            "worker_payload_persistence": {
+                "candidate_path": str(worker_payload_candidate_path),
+                "input_path": str(worker_payload_contract_path),
+                "operation": "persist-worker-payload",
+            },
             "worker_created": location == "worker",
         }
         if node.node_id in inspection_groups:
@@ -2390,6 +2648,14 @@ def materialize_dispatches(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
             else:
                 common["payload_schema"] = review_schema
                 contract = "compact-review"
+        persistence_contract = {
+            "candidate_path": str(worker_payload_candidate_path),
+            "node_id": node.node_id,
+            "result_contract": contract,
+            "schema_version": 1,
+            "worker_payload_path": str(worker_payload_path),
+        }
+        _write_text_once(worker_payload_contract_path, json.dumps(persistence_contract, indent=2, sort_keys=True) + "\n")
         dispatches.append(
             {
                 "artifact_path": str(artifact_path),
@@ -2399,6 +2665,9 @@ def materialize_dispatches(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
                 "metadata_path": str(metadata_path),
                 "node_id": node.node_id,
                 "result_contract": contract,
+                "worker_payload_candidate_path": str(worker_payload_candidate_path),
+                "worker_payload_contract_path": str(worker_payload_contract_path),
+                "worker_payload_path": str(worker_payload_path),
                 "worker_prompt": _worker_prompt(contract, common),
             }
         )
@@ -3275,7 +3544,7 @@ def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     node_parser.add_argument("--input", type=Path, required=True)
     node_parser.add_argument("--dispatches", type=Path, required=True)
     node_parser.add_argument("--node-id", required=True)
-    node_parser.add_argument("--payload", type=Path, required=True)
+    node_parser.add_argument("--payload", type=Path, help="deprecated; when supplied, must equal the materialized worker payload path")
     node_parser.add_argument("--before-capture", type=Path, required=True)
     node_parser.add_argument("--after-capture", type=Path, required=True)
     node_parser.add_argument("--workspace-before", type=Path)
@@ -3284,6 +3553,9 @@ def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     node_parser.add_argument("--status", choices=sorted(_REVIEW_STATUSES))
     node_parser.add_argument("--limitation", action="append")
     node_parser.add_argument("--output", type=Path, required=True)
+    persist_parser = _runtime_subparser(subparsers, "persist-worker-payload", "validate and atomically publish one materialized worker payload")
+    persist_parser.add_argument("--input", type=Path, required=True)
+    persist_parser.add_argument("--payload", type=Path, required=True)
     synthesis_parser = _runtime_subparser(subparsers, "synthesis-bundle", "build a compact synthesis bundle")
     synthesis_parser.add_argument("--input", type=Path, required=True)
     synthesis_parser.add_argument("--output", type=Path, required=True)
@@ -3452,7 +3724,7 @@ def _workspace_records(path: Path, *, node_id: str, source_state: tuple[str, str
     return list(_records(snapshot, "records"))
 
 
-def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:  # noqa: C901, PLR0915
+def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:  # noqa: C901, PLR0912, PLR0915
     _plan, entry = _lifecycle_dispatch(document, args.dispatches, args.node_id)
     source_state = _state(document, "source_state")
     before_state = _capture_source_state(args.before_capture)
@@ -3466,7 +3738,17 @@ def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace)
         raise TypeError(msg)
     dispatch = {**raw_dispatch, "after_state": list(after_state), "before_state": list(before_state)}
     contract = _required_text(entry, "result_contract")
-    payload_bytes = args.payload.read_bytes()
+    payload_path = Path(_required_text(entry, "worker_payload_path")).resolve()
+    if _required_text(raw_dispatch, "worker_payload_path") != str(payload_path):
+        msg = f"materialized worker payload path differs between entry and dispatch: {args.node_id}"
+        raise ValueError(msg)
+    if args.payload is not None and args.payload.resolve() != payload_path:
+        msg = "compile-node accepts only the materialized worker payload path"
+        raise ValueError(msg)
+    if not payload_path.is_file():
+        msg = f"worker result was not persisted before compilation: {payload_path}"
+        raise ValueError(msg)
+    payload_bytes = payload_path.read_bytes()
     if contract == "compact-validation":
         if args.workspace_before is None or args.workspace_after is None:
             msg = "validation compile-node requires --workspace-before and --workspace-after"
@@ -3495,15 +3777,17 @@ def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace)
 
     artifact_path = Path(_required_text(entry, "artifact_path")).resolve()
     metadata_path = Path(_required_text(entry, "metadata_path")).resolve()
-    payload_path = metadata_path.with_suffix(".worker-payload")
     for parent in {artifact_path.parent, metadata_path.parent, payload_path.parent, args.journal.parent.resolve()}:
         parent.mkdir(parents=True, exist_ok=True)
-    _write_bytes_once(payload_path, payload_bytes)
+    worker_payload_digest = _sha256_bytes(payload_bytes)
+    sealed_payload_path = payload_path.with_name(f"{payload_path.stem}.{worker_payload_digest.removeprefix('sha256:')}.sealed{payload_path.suffix}")
+    _write_bytes_atomically_once(sealed_payload_path, payload_bytes, mode=0o444)
     metadata = {
         **metadata,
         "worker_payload_byte_count": len(payload_bytes),
-        "worker_payload_digest": _sha256_bytes(payload_bytes),
-        "worker_payload_path": str(payload_path),
+        "worker_payload_digest": worker_payload_digest,
+        "worker_payload_path": str(sealed_payload_path),
+        "worker_payload_staging_path": str(payload_path),
     }
     _write_bytes_once(artifact_path, content)
     _write_text_once(metadata_path, json.dumps(metadata, indent=2, sort_keys=True) + "\n")
@@ -3523,7 +3807,7 @@ def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace)
         "metadata_path": str(metadata_path),
         "node_id": args.node_id,
         "schema_version": 1,
-        "worker_payload_path": str(payload_path),
+        "worker_payload_path": str(sealed_payload_path),
     }
 
 
@@ -3548,6 +3832,9 @@ def _json_operation_output(document: dict[str, Any], args: argparse.Namespace) -
 
 
 def _run_operation(document: dict[str, Any], args: argparse.Namespace) -> int:
+    if args.operation == "persist-worker-payload":
+        print(_canonical_json(persist_worker_payload(document, args.payload)))
+        return 0
     if args.operation in {"compile-independent-review", "compile-review", "compile-validation"}:
         if args.operation in {"compile-review", "compile-validation"}:
             payload = document.get("payload")

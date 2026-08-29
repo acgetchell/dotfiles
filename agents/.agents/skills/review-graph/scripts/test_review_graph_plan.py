@@ -512,6 +512,7 @@ def _validation_result_payload(expectation: ValidationEvidenceExpectation, evide
                         f"- Path: {artifact.path}",
                         f"  - Artifact ID: {artifact.artifact_id or 'none'}",
                         f"  - Artifact digest: {artifact.artifact_digest or 'none'}",
+                        f"  - Artifact digest mode: {artifact.artifact_digest_mode or 'none'}",
                         f"  - Kind: {artifact.kind}",
                         f"  - Repository status: {artifact.repository_status}",
                         f"  - Status source: {artifact.status_source}",
@@ -1259,6 +1260,7 @@ def test_graph_document_preserves_optional_validation_artifact_identity() -> Non
             path="/external/review-validator/command.log",
             artifact_id="artifact://command-log",
             artifact_digest=artifact_digest,
+            artifact_digest_mode="content-sha256-v1",
             kind="log",
             repository_status="outside-repository",
             status_source="isolated-output-directory",
@@ -2333,6 +2335,16 @@ def test_adaptive_review_accepts_the_same_proof_from_coordinator_or_worker() -> 
     assert worker.satisfies_requirements
 
 
+def test_review_evidence_v2_rejects_legacy_v1_envelopes() -> None:
+    expectation, evidence = _review_evidence()
+
+    result = assess_review_evidence(expectation, replace(evidence, schema_version=1))
+
+    assert EVIDENCE_SCHEMA_VERSION == 2
+    assert not result.feasible
+    assert "review evidence schema must be exactly 2" in result.blockers
+
+
 def test_isolated_review_rejects_coordinator_evidence() -> None:
     expectation, evidence = _review_evidence(profile="isolated")
 
@@ -2908,7 +2920,7 @@ def test_validation_native_provenance_artifacts_and_ledger_are_dispatch_bound() 
     external_content = _validation_result_payload(external_expectation, external_evidence)
     assert b"  - Artifact digest: none" in external_content
     assert any(
-        "requires a lowercase SHA-256 content digest" in blocker
+        "requires a lowercase SHA-256 digest" in blocker
         for blocker in _validation_native_result_blockers(external_content, external_expectation, external_evidence)
     )
 
@@ -2930,6 +2942,7 @@ def test_validation_native_artifact_references_require_matching_content_identity
                 path="/external/review-validator/command.log",
                 artifact_id="artifact://command-log",
                 artifact_digest=artifact_digest,
+                artifact_digest_mode="content-sha256-v1",
                 kind="log",
                 repository_status="outside-repository",
                 status_source="isolated-output-directory",
@@ -2946,7 +2959,14 @@ def test_validation_native_artifact_references_require_matching_content_identity
     )
     evidence = replace(evidence, environment_digest=expectation.environment_digest)
     reference = json.dumps(
-        [{"path": "/external/review-validator/command.log", "artifact_id": "artifact://command-log", "artifact_digest": artifact_digest}],
+        [
+            {
+                "path": "/external/review-validator/command.log",
+                "artifact_id": "artifact://command-log",
+                "artifact_digest": artifact_digest,
+                "artifact_digest_mode": "content-sha256-v1",
+            }
+        ],
         sort_keys=True,
         separators=(",", ":"),
     )
@@ -2971,7 +2991,7 @@ def test_validation_native_artifact_references_require_matching_content_identity
     )
 
     assert any("artifact reference does not match" in blocker for blocker in _validation_native_result_blockers(mismatched_reference, expectation, evidence))
-    assert any("approved content digest" in blocker for blocker in _validation_native_result_blockers(mismatched_artifact, expectation, evidence))
+    assert any("approved digest and mode" in blocker for blocker in _validation_native_result_blockers(mismatched_artifact, expectation, evidence))
     assert any("approved artifact ID" in blocker for blocker in _validation_native_result_blockers(mismatched_artifact_id, expectation, evidence))
     assert any("requires a lowercase SHA-256" in blocker for blocker in _validation_native_result_blockers(missing_artifact_digest, expectation, evidence))
     assert any(
@@ -3121,6 +3141,7 @@ def test_validation_dispatch_digest_fixed_vectors() -> None:
                 status_source="repository-rule",
                 artifact_id="artifact://log",
                 artifact_digest="sha256:" + "a" * 64,
+                artifact_digest_mode="content-sha256-v1",
                 status_rule=".gitignore:1:logs/",
             ),
         ),
@@ -3133,7 +3154,7 @@ def test_validation_dispatch_digest_fixed_vectors() -> None:
     )
 
     assert validation_command_identity_digest(unit) == "sha256:0a7cf4ab06b8269b3807b1d8727bd01a82aaf85d649be501f42745136843e93d"
-    assert validation_environment_digest(unit) == "sha256:e143568fb0d1707c14dbc1fbe3530fc53be445f9f802b120cfda35d5cce412e7"
+    assert validation_environment_digest(unit) == "sha256:4dfc441ae6c5f504018125c5cfb886fdb6b546ea35e7012b67af74e6f22c36a7"
 
 
 def test_isolated_validation_rejects_coordinator_evidence() -> None:

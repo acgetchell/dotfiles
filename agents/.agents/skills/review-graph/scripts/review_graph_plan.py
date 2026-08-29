@@ -45,10 +45,10 @@ _CONTEXT_KEYS = frozenset(
 
 DEFAULT_TOTAL_FRESH_WORKER_BUDGET = 24
 DEFAULT_RECOVERY_FINALIZATION_RESERVE = 1
-EVIDENCE_SCHEMA_VERSION = 1
+EVIDENCE_SCHEMA_VERSION = 2
 REPOSITORY_ROUTER_ID = "review-graph"
 FINAL_SYNTHESIS_IDENTITY = ("repository-synthesis", "repository-production-review", "synthesis")
-NATIVE_EVIDENCE_BLOCK_OPEN = "<!-- review-graph-evidence-v1\n"
+NATIVE_EVIDENCE_BLOCK_OPEN = "<!-- review-graph-evidence-v2\n"
 NATIVE_EVIDENCE_BLOCK_CLOSE = "\n-->"
 MAX_NATIVE_RESULT_BYTES = 1_048_576
 MAX_NATIVE_EVIDENCE_BLOCK_BYTES = 65_536
@@ -56,6 +56,18 @@ MAX_NATIVE_SECTION_BYTES = 65_536
 MAX_NATIVE_IDENTIFIER_LENGTH = 4_096
 MAX_NATIVE_IDENTIFIER_COUNT = 1_024
 _SHA256_DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}")
+VALIDATION_ARTIFACT_DIGEST_MODES = frozenset(
+    {
+        "bounded-directory-metadata-v1",
+        "bounded-directory-metadata-v2",
+        "bounded-directory-metadata-v3",
+        "content-sha256-v1",
+        "recursive-content-sha256-v1",
+        "recursive-content-sha256-v2",
+        "special-metadata-v1",
+        "symlink-target-v1",
+    }
+)
 _REVIEW_RESULT_SECTIONS = (
     "## Skill Loading",
     "## State Verification",
@@ -125,6 +137,7 @@ ROUTING_DISPOSITIONS = frozenset({"selected", "not-applicable", "exact-evidence-
 COMPLETION_BLOCKING_DISPOSITIONS = frozenset({"budget-deferred", "capability-blocked", "failed"})
 ROUTING_TARGET_KINDS = frozenset({"router", "leaf", "synthesis", "independent"})
 ROUTING_LAYERS = frozenset({"repository", "surface", "finalization"})
+_CLASSIFIER_SURFACES = ("tooling", "cpp", "rust", "python", "documentation")
 DEFAULT_SKILL_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ROUTING_CATALOG = Path(__file__).resolve().parents[1] / "references" / "routing-catalog.json"
 _FRONTMATTER_NAME = re.compile(r"^name:\s*[\"']?([^\"'\s]+)[\"']?\s*$")
@@ -221,6 +234,7 @@ class RoutingCatalogEntry:
     synthesis_dependency: str | None
     required_static_references: tuple[str, ...] = ()
     path_patterns: tuple[str, ...] = ()
+    classifier_guarded_path_patterns: tuple[tuple[str, tuple[str, ...]], ...] = ()
     semantic_triggers: tuple[str, ...] = ()
 
 
@@ -349,6 +363,7 @@ class ValidationArtifact:
     status_source: str
     artifact_id: str | None = None
     artifact_digest: str | None = None
+    artifact_digest_mode: str | None = None
     status_rule: str | None = None
 
 
@@ -1096,6 +1111,24 @@ def load_routing_catalog(path: Path, *, skill_roots: Sequence[Path] = (DEFAULT_S
             raise TypeError(msg)
         skill_id = str(raw["skill_id"])
         skill_path = _resolve_checked_skill_path(str(raw["skill_path"]), skill_id, skill_roots)
+        raw_guarded_patterns = raw.get("classifier_guarded_path_patterns", [])
+        if not isinstance(raw_guarded_patterns, list) or any(not isinstance(item, Mapping) for item in raw_guarded_patterns):
+            msg = "classifier_guarded_path_patterns must be an array of classifier-surface/path-pattern objects"
+            raise TypeError(msg)
+        guarded_patterns: list[tuple[str, tuple[str, ...]]] = []
+        for item in raw_guarded_patterns:
+            classifier_surface = item.get("classifier_surface")
+            path_patterns = item.get("path_patterns")
+            if (
+                not isinstance(classifier_surface, str)
+                or classifier_surface not in _CLASSIFIER_SURFACES
+                or not isinstance(path_patterns, list)
+                or not path_patterns
+                or any(not isinstance(pattern, str) or not pattern for pattern in path_patterns)
+            ):
+                msg = "classifier-guarded catalog patterns require a known classifier_surface and non-empty path_patterns"
+                raise ValueError(msg)
+            guarded_patterns.append((classifier_surface, tuple(path_patterns)))
         entry = RoutingCatalogEntry(
             catalog_id=str(raw["catalog_id"]),
             router_id=str(raw["router_id"]),
@@ -1109,6 +1142,7 @@ def load_routing_catalog(path: Path, *, skill_roots: Sequence[Path] = (DEFAULT_S
             synthesis_dependency=(str(raw["synthesis_dependency"]) if raw.get("synthesis_dependency") is not None else None),
             required_static_references=tuple(str(_resolve_skill_root_path(str(item), skill_roots)) for item in raw.get("required_static_references", [])),
             path_patterns=tuple(str(item) for item in raw.get("path_patterns", [])),
+            classifier_guarded_path_patterns=tuple(guarded_patterns),
             semantic_triggers=tuple(str(item) for item in raw.get("semantic_triggers", [])),
         )
         if entry.layer not in ROUTING_LAYERS:
@@ -1350,7 +1384,7 @@ def assess_routing_discoveries(decisions: Sequence[RoutingDecision], discoveries
 def classify_repository_paths(paths: Sequence[str], *, release_readiness: bool = False) -> dict[str, tuple[str, ...]]:  # noqa: C901
     """Return conservative repository-surface signals, including shared owners."""
     normalized = tuple(str(PurePosixPath(path)) for path in paths)
-    signals: dict[str, set[str]] = {surface: set() for surface in ("tooling", "cpp", "rust", "python", "documentation")}
+    signals: dict[str, set[str]] = {surface: set() for surface in _CLASSIFIER_SURFACES}
 
     def add(surface: str, path: str, reason: str) -> None:
         signals[surface].add(f"{path}: {reason}")
@@ -1450,7 +1484,7 @@ def expand_compact_routing(  # noqa: C901, PLR0912, PLR0913, PLR0915
     decisions: list[RoutingDecision] = []
     for entry in active_entries:
         override = overrides_by_id.get(entry.catalog_id)
-        matched_paths = tuple(path for path in normalized_paths if any(_catalog_path_matches(path, pattern) for pattern in entry.path_patterns))
+        matched_paths = _catalog_matched_paths(entry, normalized_paths, signals)
         selected_by_classifier = entry.router_id == REPOSITORY_ROUTER_ID and entry.layer == "repository" and entry.surface in signals
         selected_by_projection = entry.target_kind == "leaf" and bool(matched_paths)
         selected_independent = entry.target_kind == "independent" and bool(change_target)
@@ -1544,6 +1578,15 @@ def _catalog_path_matches(path: str, pattern: str) -> bool:
     return any(fnmatch.fnmatch(path, candidate) for candidate in variants)
 
 
+def _catalog_matched_paths(entry: RoutingCatalogEntry, normalized_paths: Sequence[str], classifier_signals: Mapping[str, Sequence[str]]) -> tuple[str, ...]:
+    """Match unconditional paths plus paths guarded by a repository-surface signal."""
+    active_patterns = [*entry.path_patterns]
+    for classifier_surface, patterns in entry.classifier_guarded_path_patterns:
+        if classifier_surface in classifier_signals:
+            active_patterns.extend(patterns)
+    return tuple(path for path in normalized_paths if any(_catalog_path_matches(path, pattern) for pattern in active_patterns))
+
+
 def build_routing_projection(catalog: Sequence[RoutingCatalogEntry], *, consulted_routers: Sequence[str], captured_paths: Sequence[str]) -> dict[str, Any]:
     """Project the complete consulted catalog into a compact semantic routing view."""
     consulted = tuple(dict.fromkeys(consulted_routers))
@@ -1556,11 +1599,12 @@ def build_routing_projection(catalog: Sequence[RoutingCatalogEntry], *, consulte
         msg = "routing projection references unknown routers: " + ", ".join(unknown)
         raise ValueError(msg)
     normalized_paths = _normalized_repository_paths(captured_paths, label="routing projection captured_paths")
+    classifier_signals = classify_repository_paths(normalized_paths)
     entries: list[dict[str, Any]] = []
     for entry in catalog:
         if entry.router_id not in consulted:
             continue
-        matched_paths = tuple(path for path in normalized_paths if any(_catalog_path_matches(path, pattern) for pattern in entry.path_patterns))
+        matched_paths = _catalog_matched_paths(entry, normalized_paths, classifier_signals)
         entries.append(
             {
                 "catalog_id": entry.catalog_id,
@@ -1571,7 +1615,7 @@ def build_routing_projection(catalog: Sequence[RoutingCatalogEntry], *, consulte
         )
     projection: dict[str, Any] = {
         "captured_paths": list(normalized_paths),
-        "classifier_signals": {key: list(value) for key, value in classify_repository_paths(normalized_paths).items()},
+        "classifier_signals": {key: list(value) for key, value in classifier_signals.items()},
         "consulted_routers": list(consulted),
         "entries": entries,
         "schema_version": 1,
@@ -1794,6 +1838,8 @@ def coalesce_validation_requirements(
                 or artifact.status_source not in {"isolated-output-directory", "repository-rule"}
                 or (artifact.artifact_id is not None and (not _nonempty_text(artifact.artifact_id) or len(artifact.artifact_id) > MAX_NATIVE_IDENTIFIER_LENGTH))
                 or (artifact.artifact_digest is not None and _SHA256_DIGEST_RE.fullmatch(artifact.artifact_digest) is None)
+                or (artifact.artifact_digest_mode is not None and artifact.artifact_digest_mode not in VALIDATION_ARTIFACT_DIGEST_MODES)
+                or ((artifact.artifact_digest is None) != (artifact.artifact_digest_mode is None))
                 for artifact in item.allowed_artifacts
             )
         ):
@@ -2856,15 +2902,21 @@ def _validation_artifact_blockers(  # noqa: C901
     reported: list[ValidationArtifact] = []
     for (path, record_body), approved in zip(records, expected, strict=False):
         fields, field_blockers = _native_record_fields(
-            record_body, section=f"Artifact {path}", labels=("Artifact ID", "Artifact digest", "Kind", "Repository status", "Status source", "Status rule")
+            record_body,
+            section=f"Artifact {path}",
+            labels=("Artifact ID", "Artifact digest", "Artifact digest mode", "Kind", "Repository status", "Status source", "Status rule"),
         )
         blockers.extend(field_blockers)
         artifact_id = fields.get("Artifact ID")
         artifact_id = None if artifact_id == "none" else artifact_id
         artifact_digest = fields.get("Artifact digest")
         artifact_digest = None if artifact_digest == "none" else artifact_digest
+        artifact_digest_mode = fields.get("Artifact digest mode")
+        artifact_digest_mode = None if artifact_digest_mode == "none" else artifact_digest_mode
         if artifact_digest is None or _SHA256_DIGEST_RE.fullmatch(artifact_digest) is None:
-            blockers.append(f"native validation result artifact {path} requires a lowercase SHA-256 content digest")
+            blockers.append(f"native validation result artifact {path} requires a lowercase SHA-256 digest")
+        if artifact_digest_mode not in VALIDATION_ARTIFACT_DIGEST_MODES:
+            blockers.append(f"native validation result artifact {path} requires a recognized digest mode")
         if artifact_id is not None and (not _nonempty_text(artifact_id) or len(artifact_id) > MAX_NATIVE_IDENTIFIER_LENGTH):
             blockers.append(f"native validation result artifact {path} has an invalid artifact ID")
         if fields.get("Kind") != approved.kind or fields.get("Repository status") != approved.repository_status:
@@ -2873,8 +2925,8 @@ def _validation_artifact_blockers(  # noqa: C901
             blockers.append(f"native validation result artifact {path} does not match its verified repository-status provenance")
         if approved.artifact_id is not None and artifact_id != approved.artifact_id:
             blockers.append(f"native validation result artifact {path} does not match its approved artifact ID")
-        if approved.artifact_digest is not None and artifact_digest != approved.artifact_digest:
-            blockers.append(f"native validation result artifact {path} does not match its approved content digest")
+        if approved.artifact_digest is not None and (artifact_digest, artifact_digest_mode) != (approved.artifact_digest, approved.artifact_digest_mode):
+            blockers.append(f"native validation result artifact {path} does not match its approved digest and mode")
         reported.append(
             ValidationArtifact(
                 path=path,
@@ -2882,6 +2934,7 @@ def _validation_artifact_blockers(  # noqa: C901
                 repository_status=fields.get("Repository status", ""),
                 artifact_id=artifact_id,
                 artifact_digest=artifact_digest,
+                artifact_digest_mode=artifact_digest_mode,
                 status_source=fields.get("Status source", ""),
                 status_rule=None if fields.get("Status rule") == "none" else fields.get("Status rule"),
             )
@@ -2901,7 +2954,7 @@ def _validation_execution_artifact_reference_blockers(value: str | None, artifac
         raw_references = json.loads(value)
     except json.JSONDecodeError:
         return (f"native validation result Execution {execution_id} artifact references are not valid JSON",)
-    expected_keys = {"artifact_digest", "artifact_id", "path"}
+    expected_keys = {"artifact_digest", "artifact_digest_mode", "artifact_id", "path"}
     if (
         not isinstance(raw_references, list)
         or not raw_references
@@ -2915,18 +2968,24 @@ def _validation_execution_artifact_reference_blockers(value: str | None, artifac
         path = reference["path"]
         artifact_id = reference["artifact_id"]
         artifact_digest = reference["artifact_digest"]
+        artifact_digest_mode = reference["artifact_digest_mode"]
         if (
             not isinstance(path, str)
             or not _nonempty_text(path)
             or (artifact_id is not None and not isinstance(artifact_id, str))
             or not isinstance(artifact_digest, str)
             or _SHA256_DIGEST_RE.fullmatch(artifact_digest) is None
+            or artifact_digest_mode not in VALIDATION_ARTIFACT_DIGEST_MODES
         ):
             blockers.append(f"native validation result Execution {execution_id} has a malformed artifact reference")
             continue
         paths.append(path)
         approved = approved_by_path.get(path)
-        if approved is None or (artifact_id, artifact_digest) != (approved.artifact_id, approved.artifact_digest):
+        if approved is None or (artifact_id, artifact_digest, artifact_digest_mode) != (
+            approved.artifact_id,
+            approved.artifact_digest,
+            approved.artifact_digest_mode,
+        ):
             blockers.append(f"native validation result Execution {execution_id} artifact reference does not match a reported artifact identity")
     if _duplicate_values(paths):
         blockers.append(f"native validation result Execution {execution_id} artifact references must be unique")
@@ -4981,7 +5040,7 @@ def _verified_artifact_status(  # noqa: C901, PLR0912, PLR0915
 def _allowed_artifacts_field(item: Mapping[str, Any], repository_root: Path | None, isolation_root: str | None) -> tuple[ValidationArtifact, ...]:
     value = item.get("allowed_artifacts", [])
     required_keys = {"kind", "path", "repository_status"}
-    optional_keys = {"artifact_digest", "artifact_id"}
+    optional_keys = {"artifact_digest", "artifact_digest_mode", "artifact_id"}
     if not isinstance(value, list) or any(
         not isinstance(entry, Mapping) or not required_keys.issubset(entry) or not set(entry).issubset(required_keys | optional_keys) for entry in value
     ):
@@ -4995,8 +5054,14 @@ def _allowed_artifacts_field(item: Mapping[str, Any], repository_root: Path | No
             raise ValueError(msg)
         artifact_id = entry.get("artifact_id")
         artifact_digest = entry.get("artifact_digest")
-        if (artifact_id is not None and not isinstance(artifact_id, str)) or (artifact_digest is not None and not isinstance(artifact_digest, str)):
-            msg = "allowed_artifacts artifact_id and artifact_digest must be strings or null"
+        artifact_digest_mode = entry.get("artifact_digest_mode", "content-sha256-v1" if artifact_digest is not None else None)
+        if (
+            (artifact_id is not None and not isinstance(artifact_id, str))
+            or (artifact_digest is not None and not isinstance(artifact_digest, str))
+            or (artifact_digest_mode is not None and not isinstance(artifact_digest_mode, str))
+            or ((artifact_digest is None) != (artifact_digest_mode is None))
+        ):
+            msg = "allowed_artifacts artifact identity requires paired string digest and digest mode values"
             raise ValueError(msg)
         status_source, status_rule = _verified_artifact_status(path, repository_status, repository_root, isolation_root)
         result.append(
@@ -5006,6 +5071,7 @@ def _allowed_artifacts_field(item: Mapping[str, Any], repository_root: Path | No
                 repository_status=repository_status,
                 artifact_id=artifact_id,
                 artifact_digest=artifact_digest,
+                artifact_digest_mode=artifact_digest_mode,
                 status_source=status_source,
                 status_rule=status_rule,
             )

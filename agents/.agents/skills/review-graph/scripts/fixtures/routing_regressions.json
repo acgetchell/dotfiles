@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "documentation-only-does-not-activate-cpp-api-docs",
+      "consulted_routers": ["review-graph", "docs-review-orchestrator"],
+      "paths": ["docs/architecture.md"],
+      "expected_matches": {
+        "docs.cpp-api": []
+      }
+    },
+    {
+      "id": "cpp-signal-allows-generic-documentation",
+      "consulted_routers": ["review-graph", "docs-review-orchestrator"],
+      "paths": ["src/model.cpp", "docs/architecture.md"],
+      "expected_matches": {
+        "docs.cpp-api": ["docs/architecture.md"]
+      }
+    },
+    {
+      "id": "doxygen-is-an-unconditional-cpp-api-doc-signal",
+      "consulted_routers": ["review-graph", "docs-review-orchestrator"],
+      "paths": ["Doxyfile.in"],
+      "expected_matches": {
+        "docs.cpp-api": ["Doxyfile.in"]
+      }
+    },
+    {
+      "id": "scripts-pytest-suite-routes-to-test-quality",
+      "consulted_routers": ["review-graph", "python-review-orchestrator"],
+      "paths": ["scripts/tests/test_release.py", "scripts/tests/integration/conftest.py"],
+      "expected_matches": {
+        "python.tests": ["scripts/tests/test_release.py", "scripts/tests/integration/conftest.py"]
+      }
+    }
+  ]
+}

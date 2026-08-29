@@ -16,35 +16,25 @@ task changes them.
 
 ## Profiles
 
-- **Adaptive grouped** is the default. Run dependency-independent read-only
-  nodes concurrently when useful and use coordinator fallback for a failed
-  worker attempt.
-- **Isolated** is an explicit preference. Require a fresh worker for every node
-  and permit declared adaptive fallback.
-- **Isolated-only** is an explicit hard requirement. Emit a resume manifest
-  rather than falling back.
+- **Adaptive grouped** (default): run independent read-only nodes concurrently;
+  permit coordinator fallback after a worker failure.
+- **Isolated**: use a fresh worker per node with declared adaptive fallback.
+- **Isolated-only**: use fresh workers without fallback; emit a resume manifest
+  when blocked.
 
-Every worker in every profile uses `fork_turns: "none"`. Give it only the exact
-dispatch, repository instructions, skill path, relevant static references, and
-compact result schema. Record `fresh_context: true`. A coordinator execution
-uses the same compact payload contract and records `worker_created: false`.
+Workers use `fork_turns: "none"` and receive only their dispatch, applicable
+instructions/references, and result schema. Coordinator fallback uses the same
+contract with `worker_created: false`.
 
 ## Capture And Authorization
 
-- Read repository instructions before review or edits.
-- Capture branch scope by default; honor explicit staged, worktree, pull-request,
-  release, baseline, path, base, and exclusion requests.
-- Use `scripts/capture_scope.py` once before routing and after each authorized
-  repair batch. Preserve scope, worktree, and repository-state fingerprints.
-- Normalize the capture and compact routing/validation template with
-  `scripts/review_graph_bootstrap.py`. It binds every validator to the captured
-  fingerprint triple and validates the versioned planning schema before graph
-  construction; do not transcribe capture fields into planner input.
-- Treat fixes as unauthorized unless explicitly requested. Never mutate Git
-  state.
-- Persist compact worker payloads, compiled artifacts, routing input, graph
-  plans, validation records, invalidation history, and the final manifest
-  outside the reviewed repository.
+- Honor repository instructions and explicit scope/base/exclusions; otherwise
+  capture branch scope.
+- Run `capture_scope.py` before routing and after each authorized repair batch.
+- Bootstrap the capture and compact template with
+  `review_graph_bootstrap.py`; do not transcribe fingerprint fields.
+- Fix only when authorized and never mutate Git state.
+- Keep all proof artifacts outside the reviewed repository.
 
 ## Route Compactly And Exhaustively
 
@@ -65,14 +55,15 @@ IDs, skill paths, priorities, and synthesis dependencies.
    repository surfaces, and required syntheses; it expands other omissions to
    `not-applicable`, validates closure, and derives synthesis nodes.
 
-Every applicable leaf remains required. The compact representation changes
-serialization, not coverage. Resolve late handoffs before dependent validation
-or synthesis.
+Every applicable leaf remains required. Resolve late handoffs before dependent
+validation or synthesis.
 
 ## Execute Review Nodes
 
 Dispatch each selected leaf with its exact skill and owned paths. The worker
-returns only the `ReviewPayload` from the runtime contract. It does not author
+writes only the `ReviewPayload` to the dispatch-bound candidate path, invokes
+the runtime-owned `persist-worker-payload` operation to validate and atomically
+publish it, and returns those same bytes. It does not author
 fingerprints, digests, evidence IDs, execution metadata, canonical Markdown,
 or machine-evidence JSON. Materialize exact dispatch bases from the accepted
 plan with `review_graph_runtime.py materialize-dispatches`; do not reconstruct
@@ -86,17 +77,14 @@ retains ownership of the coalesced judgment and evidence.
 
 Run the capture command before and after execution. Then invoke
 `scripts/review_graph_runtime.py compile-node` with the node ID, materialized
-dispatch set, captures, exact payload bytes, and journal. Do not splice a
-dispatch or author compiler identities. Accept the node only when compilation
-and the existing evidence verifier both succeed.
+dispatch set, captures, and journal. It reads the bound payload, seals accepted
+bytes at a read-only content-addressed path, and records that copy in evidence.
+Do not splice a dispatch or author compiler identities. Accept only when the
+compiler and evidence verifier succeed.
 
-Use `repository-independent-review` for a concrete change target. Keep it fresh
-and conclusion-blind. Its existing native result remains accepted evidence;
-do not send specialist findings or synthesis context to it.
-Compile its six native sections through `compile-node`; the compiler
-assigns graph finding/handoff identities, appends the envelope and machine
-evidence, verifies adversarial-check coverage and line bounds, and emits the
-metadata sidecar used by the journal and finalizer.
+For a concrete change target, run `repository-independent-review` fresh and
+conclusion-blind. Compile its six native sections through `compile-node`; never
+send it specialist findings or synthesis context.
 
 Fix nodes are serialized. Batch compatible fixes, recapture once per batch,
 invalidate affected evidence, reroute changed surfaces, and rerun only stale or
@@ -113,25 +101,20 @@ retains their per-requirement provenance.
 
 Run each coalesced unit once through `review-validator`. Validator workers also
 use `fork_turns: "none"`, read only its compact graph-dispatch reference, and
-return a `ValidationPayload` without artifact records or digests. Invoke
+publish a schema-valid `ValidationPayload` without artifact records or digests
+through `persist-worker-payload` before returning it. Invoke
 `snapshot-workspace` immediately before and after execution, then compile the
-node with both runtime-owned snapshots. Accept it only when the native and
-envelope gates pass. Never replay an equivalent check for another
-owner. A failed validator is evidence for its owner, not a finding by itself.
-The compiler rejects unexpected outputs;
+node from its bound payload path with both runtime-owned snapshots. Cache/build
+manifests bind metadata for every immediate entry. Accept only when both gates pass.
+Never replay equivalent checks. A validator failure is owner evidence, not
+itself a finding. The compiler rejects unexpected outputs;
 source-adjacent build intermediates require an isolated working tree.
 
 ## Synthesize From A Compact Bundle
 
-Do not pass complete predecessor reports to a synthesis worker. Use
-`scripts/review_graph_runtime.py synthesis-bundle` to create a canonical hashed
-view containing only normalized findings, requirement mappings, validation
-status, handoffs, limitations, and raw-artifact identities. Raw predecessor
-artifacts remain in the proof store and are independently verified.
-
-Give synthesis workers the bundle, its digest, accepted predecessor evidence
-IDs, and explicit exclusions. Surface and repository synthesis reconcile this
-accepted content without repeating specialist inspection.
+Use `synthesis-bundle` rather than complete predecessor reports. Give synthesis
+workers its canonical hashed view, digest, accepted predecessor IDs, and
+exclusions. Keep raw artifacts in the proof store.
 
 ## Complete And Report
 

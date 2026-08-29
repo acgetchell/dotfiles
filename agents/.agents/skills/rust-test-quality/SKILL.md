@@ -1,6 +1,6 @@
 ---
 name: rust-test-quality
-description: "Review Rust unit, integration, doctest, property, fuzz, compile-fail, Miri, sanitizer, concurrency-model, benchmark-fixture, and example tests for meaningful risk coverage, precise assertions, deterministic reproduction, and reliable failure diagnostics. Use when tests change or production behavior needs durable regression evidence."
+description: "Review Rust unit, integration, doctest, property, fuzz, compile-fail, Miri, sanitizer, concurrency-model, benchmark-fixture, and example tests for meaningful risk coverage, fail-closed production errors, precise assertions, deterministic reproduction, and reliable failure diagnostics. Use when tests change or production behavior needs durable regression evidence."
 ---
 
 # Rust Test Quality
@@ -74,6 +74,14 @@ Avoid matching complete error prose, debug formatting, nondeterministic iteratio
 ### 5. Keep generated and stochastic evidence reproducible
 
 Record failing seeds and minimize counterexamples. Keep generators within the intended domain unless testing rejection. Preserve discovered failures as deterministic regressions.
+
+Property tests fail closed: reject only from raw facts independent of
+production. After admission, unexpected `Err` fails with replay context—never
+`prop_assume!`, `if let Ok`, or a successful
+early return. Require deterministic success or enforced acceptance counts; test
+unsupported domains as typed rejections. For fallible production calls, read
+[`references/fail-closed-property-testing-fixture.md`](references/fail-closed-property-testing-fixture.md)
+for the required finding and repair.
 
 For scientific or numerical behavior, cover supported dimensions/features and adversarial regimes with an oracle independent of the production path. Defer mathematical validity to `rust-scientific-correctness` while ensuring the test harness preserves its evidence.
 
