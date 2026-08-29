@@ -235,8 +235,50 @@ Write `none` when no command executed.
 
 Compute each digest from the completed artifact before returning the result. A
 regular file uses `sha256:` followed immediately by exactly 64 lowercase
-hexadecimal characters containing the SHA-256 of its raw bytes. A directory
-uses this canonical `directory-artifact-v1` format:
+hexadecimal characters containing the SHA-256 of its raw bytes.
+
+For `recursive-content-sha256-v2`, hash a directory root that is not itself a
+bounded cache/build root as follows. Canonical JSON sorts object keys
+lexicographically, preserves array order, escapes non-ASCII characters, uses
+`,` and `:` separators without added whitespace or a trailing newline, and is
+encoded as UTF-8. Every digest below is `sha256:` followed by the lowercase
+hexadecimal SHA-256 of the specified bytes.
+
+1. Walk the root top-down without following symbolic links. Express each child
+   path relative to the root with `/` separators and do not include a record
+   for the root itself. For each non-symbolic-link directory, append
+   `{"kind":"directory","path":<relative-path>}` and descend into it,
+   except when its basename is `.cache`, `.gradle`, `.mypy_cache`,
+   `.pytest_cache`, `.ruff_cache`, `.tox`, `.venv`, `build`, `node_modules`, or
+   `target`.
+2. For each excepted directory, do not descend. Instead, append a bounded
+   nested-directory record with `digest` set to its
+   `bounded-directory-metadata-v3` digest, `digest_mode` set to
+   `bounded-directory-metadata-v3`, `kind` set to `directory`, and `path` set
+   to the relative path. The bounded record remains in the recursive record
+   array; pruning only replaces traversal of its descendants.
+3. For each symbolic link, append its relative `path`, `kind` set to
+   `symlink`, and `target` set to the exact textual link target without
+   following it. For each regular file, append its relative `path`, `kind` set
+   to `file`, and `digest` set to the SHA-256 of its raw bytes. For every other
+   entry, append its relative `path`, `kind` set to `special`, and `mode` set to
+   the integer `st_mode` value.
+4. Compute a bounded directory digest from its immediate entries sorted
+   lexicographically by name. Represent every entry with `kind`, integer
+   `mode`, integer `mtime_ns`, `name`, and integer `size`; determine `kind`
+   without following symbolic links. Canonically hash the complete entry array
+   for `entry_metadata_digest` and its ordered name array for
+   `entry_name_digest`. Canonically hash this manifest for the bounded digest:
+   `entry_limit` set to `256`; `entry_count` set to the complete entry count;
+   those two digests; `policy` set to `bounded-directory-metadata-v3`; `root`
+   containing the directory's integer `mode`, `mtime_ns`, and `size`;
+   `sampled_entries` containing the first 256 complete entry records; and
+   `truncated` set to whether the complete count exceeds 256.
+5. Sort the complete recursive record array lexicographically by its `path`
+   string, canonically encode the array, and hash those bytes. The resulting
+   digest is the `recursive-content-sha256-v2` digest.
+
+A directory uses this canonical `directory-artifact-v1` format:
 
 1. Recursively enumerate regular files without following symbolic links. Empty
    directories contribute no records; reject symbolic links and other special
