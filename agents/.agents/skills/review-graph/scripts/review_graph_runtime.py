@@ -1,10 +1,16 @@
 """Materialize, compile, schedule, and verify deterministic review-graph artifacts."""
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
+import re
+import shutil
+import stat
+import subprocess
 import sys
+import tempfile
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, cast
@@ -16,6 +22,7 @@ from review_graph_plan import (
     EVIDENCE_SCHEMA_VERSION,
     NATIVE_EVIDENCE_BLOCK_CLOSE,
     NATIVE_EVIDENCE_BLOCK_OPEN,
+    VALIDATION_ARTIFACT_DIGEST_MODES,
     ArtifactPayload,
     ExecutionEpoch,
     FingerprintEvidence,
@@ -43,11 +50,13 @@ from review_graph_plan import (
     _native_repository_path_list,
     _native_section_bodies,
     _review_native_result_blockers,
+    _synthesis_reused_evidence_ids,
     _validation_environment_identity,
     _validation_ledger_expected_fields,
     _validation_native_result_blockers,
     _validation_plan_expected_body,
     _validation_requirements_expected_body,
+    _verified_artifact_status,
     assess_evidence_bundle,
     assess_review_evidence,
     assess_validation_evidence,
@@ -58,7 +67,7 @@ from review_graph_plan import (
     repository_review_proof_expectation,
     validation_evidence_expectation,
 )
-from review_graph_schema import SchemaValidationError, require_schema
+from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
 
 _READ_ONLY_MODES = frozenset({"audit", "revalidation", "synthesis"})
 _REVIEW_MODES = _READ_ONLY_MODES | {"fix"}
@@ -68,7 +77,9 @@ _JOURNAL_STATUSES = frozenset({"accepted", "awaiting-replan", "blocked", "in-fli
 _SCHEMA_ROOT = Path(__file__).resolve().parents[1] / "references" / "schemas"
 _PLANNING_INPUT_SCHEMA = _SCHEMA_ROOT / "planning-input-v1.schema.json"
 _REVIEW_PAYLOAD_SCHEMA = _SCHEMA_ROOT / "review-payload-v1.schema.json"
-_VALIDATION_PAYLOAD_SCHEMA = _SCHEMA_ROOT / "validation-payload-v1.schema.json"
+_VALIDATION_PAYLOAD_SCHEMA = _SCHEMA_ROOT / "validation-payload-v2.schema.json"
+_RUNTIME_OPERATION_INPUT_SCHEMA = _SCHEMA_ROOT / "runtime-operation-inputs-v1.schema.json"
+_RUNTIME_OPERATION_EXAMPLES = Path(__file__).resolve().parents[1] / "references" / "runtime-operation-examples-v1.json"
 _COMPILER_BY_MODE = {
     "audit": "compile-review",
     "fix": "compile-review",
@@ -94,6 +105,13 @@ _JOURNAL_EVENT_KEYS = frozenset(
     }
 )
 _JOURNAL_EVIDENCE_KEYS = frozenset({"artifact_digest", "artifact_id", "evidence_id", "evidence_status", "normalized_record_digest"})
+_BOUNDED_WORKSPACE_DIRECTORY_NAMES = frozenset(
+    {".cache", ".gradle", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox", ".venv", "build", "node_modules", "target"}
+)
+_BOUNDED_WORKSPACE_ENTRY_LIMIT = 256
+_BOUNDED_WORKSPACE_POLICY = "bounded-directory-metadata-v3"
+_RECURSIVE_WORKSPACE_POLICY = "recursive-content-sha256-v2"
+_SCHEMA_ID_VERSION_RE = re.compile(r"(?P<name>[^/]+)-v(?P<version>[1-9][0-9]*)\.schema\.json\Z")
 
 
 @dataclass(frozen=True)
@@ -114,19 +132,72 @@ def _sha256_bytes(value: bytes) -> str:
     return "sha256:" + hashlib.sha256(value).hexdigest()
 
 
+def _read_regular_file_no_follow(path: Path) -> bytes:
+    """Read an existing regular file without following a replaceable symlink."""
+    flags = os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        msg = f"immutable artifact target must be a regular non-symlink file: {path}"
+        raise ValueError(msg) from error
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            msg = f"immutable artifact target must be a regular non-symlink file: {path}"
+            raise ValueError(msg)
+        stream = os.fdopen(descriptor, "rb")
+        descriptor = -1
+        with stream:
+            return stream.read()
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def _write_bytes_once(path: Path, content: bytes) -> None:
     """Create an immutable artifact, permitting only an identical replay."""
     try:
         with path.open("xb") as stream:
             stream.write(content)
     except FileExistsError:
-        if path.read_bytes() != content:
+        if _read_regular_file_no_follow(path) != content:
             msg = f"refusing to overwrite non-identical artifact: {path}"
             raise ValueError(msg) from None
 
 
 def _write_text_once(path: Path, content: str) -> None:
     _write_bytes_once(path, content.encode("utf-8"))
+
+
+def _write_bytes_atomically_once(path: Path, content: bytes, *, mode: int) -> None:
+    """Atomically create immutable content, permitting only an identical replay."""
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temporary_path = Path(temporary_name)
+    created = False
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fchmod(stream.fileno(), mode)
+            os.fsync(stream.fileno())
+        try:
+            path.hardlink_to(temporary_path)
+            created = True
+        except FileExistsError:
+            if _read_regular_file_no_follow(path) != content:
+                msg = f"refusing to overwrite non-identical immutable artifact: {path}"
+                raise ValueError(msg) from None
+        if created:
+            _fsync_directory(path.parent)
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def _required_text(item: dict[str, Any], name: str) -> str:
@@ -788,22 +859,26 @@ def compile_independent_review(document: dict[str, Any], native_content: bytes) 
         raise ValueError(msg)
     sections = _independent_input_sections(native_content)
     node_id = _required_text(dispatch, "node_id")
+    input_blockers: list[str] = []
     if status != "blocked":
-        scope_blockers = _independent_scope_blockers(sections["## Scope Inspected"], dispatch)
-        if scope_blockers:
-            msg = "; ".join(scope_blockers)
-            raise ValueError(msg)
-    findings = _independent_findings(sections["## Findings"], node_id, status)
+        input_blockers.extend(_independent_scope_blockers(sections["## Scope Inspected"], dispatch))
+    try:
+        findings = _independent_findings(sections["## Findings"], node_id, status)
+    except (TypeError, ValueError) as error:
+        findings = ()
+        input_blockers.append(str(error))
     if status == "completed" and not findings:
-        msg = "completed independent review requires at least one finding"
-        raise ValueError(msg)
+        input_blockers.append("completed independent review requires at least one finding")
     if status == "no-findings":
         inspected_checks = set(_native_field_values(sections["## No-Finding Evidence"], "Inspected"))
         missing_checks = tuple(check for check in _text_list(dispatch, "adversarial_checks") if check not in inspected_checks)
         if missing_checks:
-            msg = "independent no-findings evidence omits dispatched adversarial checks: " + ", ".join(missing_checks)
-            raise ValueError(msg)
-    handoffs = _independent_handoffs(sections["## Routing Handoffs"], node_id, dispatch)
+            input_blockers.append("independent no-findings evidence omits dispatched adversarial checks: " + ", ".join(missing_checks))
+    try:
+        handoffs = _independent_handoffs(sections["## Routing Handoffs"], node_id, dispatch)
+    except (TypeError, ValueError) as error:
+        handoffs = ()
+        input_blockers.append(str(error))
     expected = _state(dispatch, "source_state")
     before = _state(dispatch, "before_state")
     after = _state(dispatch, "after_state")
@@ -821,7 +896,9 @@ def compile_independent_review(document: dict[str, Any], native_content: bytes) 
     if before != expected or after != expected:
         native_state_blockers = (*native_state_blockers, "independent review observed fingerprints differ from the dispatched expected fingerprints")
     if native_state_blockers:
-        msg = "independent native state proof failed validation: " + "; ".join(native_state_blockers)
+        input_blockers.append("independent native state proof failed validation: " + "; ".join(native_state_blockers))
+    if input_blockers:
+        msg = "independent native artifact failed contract validation: " + "; ".join(input_blockers)
         raise ValueError(msg)
     skill_path = Path(_required_text(dispatch, "skill_path")).resolve()
     if not skill_path.is_file():
@@ -1053,6 +1130,7 @@ def _validation_unit(raw: dict[str, Any]) -> ValidationUnit:
             status_source=_required_text(item, "status_source"),
             artifact_id=item.get("artifact_id"),
             artifact_digest=item.get("artifact_digest"),
+            artifact_digest_mode=item.get("artifact_digest_mode"),
             status_rule=item.get("status_rule"),
         )
         for item in _records(raw, "allowed_artifacts")
@@ -1273,27 +1351,55 @@ def _validation_state_verification(dispatch: dict[str, Any], evidence: Validatio
     )
 
 
-def _validation_artifacts_body(payload: dict[str, Any], unit: ValidationUnit) -> tuple[str, tuple[ValidationArtifact, ...]]:
-    raw_artifacts = _records(payload, "artifacts")
-    if len(raw_artifacts) != len(unit.allowed_artifacts):
-        msg = "validation artifacts must match the dispatched allowed artifacts"
+def _validation_artifacts_body(  # noqa: C901
+    payload: dict[str, Any], unit: ValidationUnit, workspace_after: dict[str, tuple[str, str, bool, str]]
+) -> tuple[str, tuple[ValidationArtifact, ...]]:
+    raw_artifacts = _records(payload, "artifacts") if "artifacts" in payload else ()
+    raw_by_path = {_required_text(raw, "path"): raw for raw in raw_artifacts}
+    if len(raw_by_path) != len(raw_artifacts):
+        msg = "validation payload contains duplicate artifact paths"
+        raise ValueError(msg)
+    approved_paths = {artifact.path for artifact in unit.allowed_artifacts}
+    unknown_paths = tuple(sorted(set(raw_by_path) - approved_paths))
+    if unknown_paths:
+        msg = "validation payload contains artifacts absent from its dispatch: " + ", ".join(unknown_paths)
         raise ValueError(msg)
     artifacts: list[ValidationArtifact] = []
     bodies: list[str] = []
-    for raw, approved in zip(raw_artifacts, unit.allowed_artifacts, strict=True):
-        path = _required_text(raw, "path")
-        kind = _required_text(raw, "kind")
-        repository_status = _required_text(raw, "repository_status")
-        artifact_id = raw.get("artifact_id")
-        artifact_digest = _required_text(raw, "artifact_digest")
-        if (path, kind, repository_status) != (approved.path, approved.kind, approved.repository_status):
-            msg = f"validation artifact {path} does not match its dispatch"
+    for approved in unit.allowed_artifacts:
+        raw = raw_by_path.get(approved.path)
+        observed = workspace_after.get(approved.path)
+        if observed is None:
+            msg = f"trusted workspace_after snapshot lacks validation artifact {approved.path}"
             raise ValueError(msg)
-        if approved.artifact_id is not None and artifact_id != approved.artifact_id:
-            msg = f"validation artifact {path} changed its approved artifact ID"
+        observed_status, observed_digest, exists, observed_digest_mode = observed
+        if not exists:
+            if raw is not None:
+                msg = f"validation payload claims an artifact absent from the trusted snapshot: {approved.path}"
+                raise ValueError(msg)
+            continue
+        path = approved.path
+        kind = approved.kind
+        repository_status = approved.repository_status
+        artifact_id = approved.artifact_id
+        artifact_digest = observed_digest
+        if observed_status != repository_status:
+            msg = f"validation artifact {path} repository status differs from trusted snapshot"
             raise ValueError(msg)
-        if approved.artifact_digest is not None and artifact_digest != approved.artifact_digest:
-            msg = f"validation artifact {path} changed its approved digest"
+        if raw is not None:
+            worker_identity = (_required_text(raw, "path"), _required_text(raw, "kind"), _required_text(raw, "repository_status"))
+            if worker_identity != (path, kind, repository_status):
+                msg = f"validation artifact {path} does not match its dispatch"
+                raise ValueError(msg)
+            if (
+                raw.get("artifact_id") != artifact_id
+                or _required_text(raw, "artifact_digest") != artifact_digest
+                or _required_text(raw, "artifact_digest_mode") != observed_digest_mode
+            ):
+                msg = f"validation artifact {path} identity differs from the trusted workspace snapshot"
+                raise ValueError(msg)
+        if approved.artifact_digest is not None and (artifact_digest, observed_digest_mode) != (approved.artifact_digest, approved.artifact_digest_mode):
+            msg = f"validation artifact {path} changed its approved digest or digest mode"
             raise ValueError(msg)
         artifact = ValidationArtifact(
             path=path,
@@ -1301,6 +1407,7 @@ def _validation_artifacts_body(payload: dict[str, Any], unit: ValidationUnit) ->
             repository_status=repository_status,
             artifact_id=artifact_id,
             artifact_digest=artifact_digest,
+            artifact_digest_mode=observed_digest_mode,
             status_source=approved.status_source,
             status_rule=approved.status_rule,
         )
@@ -1311,6 +1418,7 @@ def _validation_artifacts_body(payload: dict[str, Any], unit: ValidationUnit) ->
                     f"- Path: {path}",
                     f"  - Artifact ID: {artifact_id or 'none'}",
                     f"  - Artifact digest: {artifact_digest}",
+                    f"  - Artifact digest mode: {observed_digest_mode}",
                     f"  - Kind: {kind}",
                     f"  - Repository status: {repository_status}",
                     f"  - Status source: {approved.status_source}",
@@ -1341,7 +1449,12 @@ def _validation_executions_body(
         artifact_references = (
             json.dumps(
                 [
-                    {"artifact_digest": artifact_by_path[path].artifact_digest, "artifact_id": artifact_by_path[path].artifact_id, "path": path}
+                    {
+                        "artifact_digest": artifact_by_path[path].artifact_digest,
+                        "artifact_digest_mode": artifact_by_path[path].artifact_digest_mode,
+                        "artifact_id": artifact_by_path[path].artifact_id,
+                        "path": path,
+                    }
                     for path in result_artifacts
                 ],
                 sort_keys=True,
@@ -1421,13 +1534,137 @@ def _validation_normalized_record(payload: dict[str, Any], evidence: ValidationE
     }
 
 
-def _workspace_snapshot(dispatch: dict[str, Any], name: str) -> dict[str, tuple[str, str]]:
+def _workspace_path(path: str, repository_root: Path) -> Path:
+    candidate = Path(path)
+    return candidate.resolve(strict=False) if candidate.is_absolute() else (repository_root / candidate).resolve(strict=False)
+
+
+def _bounded_workspace_directory_digest(path: Path) -> str:
+    """Hash bounded root metadata for cache/build trees without reading contents."""
+    root_stat = path.stat()
+    all_entry_metadata: list[dict[str, object]] = []
+    truncated = False
+    with os.scandir(path) as stream:
+        ordered_entries = sorted(stream, key=lambda item: item.name)
+        truncated = len(ordered_entries) > _BOUNDED_WORKSPACE_ENTRY_LIMIT
+        for entry in ordered_entries:
+            stat = entry.stat(follow_symlinks=False)
+            if entry.is_symlink():
+                kind = "symlink"
+            elif entry.is_file(follow_symlinks=False):
+                kind = "file"
+            elif entry.is_dir(follow_symlinks=False):
+                kind = "directory"
+            else:
+                kind = "special"
+            all_entry_metadata.append({"kind": kind, "mode": stat.st_mode, "mtime_ns": stat.st_mtime_ns, "name": entry.name, "size": stat.st_size})
+    manifest = {
+        "entry_limit": _BOUNDED_WORKSPACE_ENTRY_LIMIT,
+        "entry_count": len(all_entry_metadata),
+        "entry_metadata_digest": _sha256_bytes(_canonical_json(all_entry_metadata).encode()),
+        "entry_name_digest": _sha256_bytes(_canonical_json([entry["name"] for entry in all_entry_metadata]).encode()),
+        "policy": _BOUNDED_WORKSPACE_POLICY,
+        "root": {"mode": root_stat.st_mode, "mtime_ns": root_stat.st_mtime_ns, "size": root_stat.st_size},
+        "sampled_entries": all_entry_metadata[:_BOUNDED_WORKSPACE_ENTRY_LIMIT],
+        "truncated": truncated,
+    }
+    return _sha256_bytes(_canonical_json(manifest).encode())
+
+
+def _recursive_workspace_directory_digest(path: Path) -> str:
+    """Hash recursive contents while pruning known cache and build subtrees."""
+    records: list[dict[str, object]] = []
+    for directory, directory_names, file_names in path.walk(top_down=True, follow_symlinks=False):
+        retained_directories: list[str] = []
+        for name in sorted(directory_names):
+            child = directory / name
+            relative = child.relative_to(path).as_posix()
+            if name in _BOUNDED_WORKSPACE_DIRECTORY_NAMES:
+                records.append(
+                    {"digest": _bounded_workspace_directory_digest(child), "digest_mode": _BOUNDED_WORKSPACE_POLICY, "kind": "directory", "path": relative}
+                )
+            else:
+                records.append({"kind": "directory", "path": relative})
+                retained_directories.append(name)
+        directory_names[:] = retained_directories
+        for name in sorted(file_names):
+            child = directory / name
+            relative = child.relative_to(path).as_posix()
+            if child.is_symlink():
+                records.append({"kind": "symlink", "path": relative, "target": str(child.readlink())})
+            elif child.is_file():
+                records.append({"digest": _sha256_bytes(child.read_bytes()), "kind": "file", "path": relative})
+            else:
+                records.append({"kind": "special", "mode": child.stat().st_mode, "path": relative})
+    records.sort(key=lambda item: str(item["path"]))
+    return _sha256_bytes(_canonical_json(records).encode())
+
+
+def _workspace_content_digest(path: Path) -> tuple[bool, str, str]:
+    if not path.exists() and not path.is_symlink():
+        return False, _sha256_bytes(b"absent"), "absent-v1"
+    if path.is_symlink():
+        return True, _sha256_bytes(f"symlink:{path.readlink()}".encode()), "symlink-target-v1"
+    if path.is_file():
+        return True, _sha256_bytes(path.read_bytes()), "content-sha256-v1"
+    if not path.is_dir():
+        return True, _sha256_bytes(f"special:{path.stat().st_mode}".encode()), "special-metadata-v1"
+    if path.name in _BOUNDED_WORKSPACE_DIRECTORY_NAMES:
+        return True, _bounded_workspace_directory_digest(path), _BOUNDED_WORKSPACE_POLICY
+    return True, _recursive_workspace_directory_digest(path), _RECURSIVE_WORKSPACE_POLICY
+
+
+def _git_path_status(repository_root: Path, path: Path) -> str:
+    if not path.is_relative_to(repository_root):
+        return "outside-repository"
+    git = shutil.which("git")
+    if git is None:
+        msg = "git is required to classify validation workspace paths"
+        raise ValueError(msg)
+    relative = path.relative_to(repository_root).as_posix()
+    tracked = subprocess.run(  # noqa: S603 - fixed executable and argument array; no shell interpretation
+        [git, "-C", str(repository_root), "ls-files", "--error-unmatch", "--", relative], check=False, capture_output=True, text=True, timeout=10
+    )
+    if tracked.returncode == 0:
+        return "tracked"
+    try:
+        status_source, status_rule = _verified_artifact_status(relative, "ignored", repository_root)
+    except ValueError:
+        return "untracked"
+    return "ignored" if status_source == "repository-rule" and status_rule is not None else "untracked"
+
+
+def capture_workspace_snapshot(dispatch: dict[str, Any]) -> dict[str, Any]:
+    """Capture canonical digests for one materialized validation workspace policy."""
+    raw_unit = dispatch.get("validation_unit")
+    if not isinstance(raw_unit, dict):
+        msg = "workspace snapshots require a materialized validation dispatch"
+        raise TypeError(msg)
+    unit = _validation_unit(raw_unit)
+    repository_root = Path(_required_text(dispatch, "repository_root")).resolve()
+    approved = {artifact.path: artifact for artifact in unit.allowed_artifacts}
+    paths = tuple(dict.fromkeys((*unit.expected_workspace_effects, *approved)))
+    records: list[dict[str, object]] = []
+    for raw_path in paths:
+        resolved = _workspace_path(raw_path, repository_root)
+        exists, digest, snapshot_mode = _workspace_content_digest(resolved)
+        status = _git_path_status(repository_root, resolved)
+        records.append({"digest": digest, "exists": exists, "path": raw_path, "snapshot_mode": snapshot_mode, "status": status})
+    return {"node_id": unit.node_id, "records": records, "schema_version": 1, "source_state": list(unit.source_state)}
+
+
+def _workspace_snapshot(dispatch: dict[str, Any], name: str) -> dict[str, tuple[str, str, bool, str]]:
     records = _records(dispatch, name)
-    snapshot: dict[str, tuple[str, str]] = {}
+    snapshot: dict[str, tuple[str, str, bool, str]] = {}
     for ordinal, raw in enumerate(records, start=1):
         path = _required_text(raw, "path")
         digest = _required_text(raw, "digest")
         status = _required_text(raw, "status")
+        snapshot_mode = _required_text(raw, "snapshot_mode")
+        exists = raw.get("exists", True)
+        if not isinstance(exists, bool):
+            msg = f"{name} record {ordinal} exists must be a boolean"
+            raise TypeError(msg)
         if path in snapshot:
             msg = f"{name} contains duplicate path {path}"
             raise ValueError(msg)
@@ -1435,7 +1672,13 @@ def _workspace_snapshot(dispatch: dict[str, Any], name: str) -> dict[str, tuple[
             msg = f"{name} record {ordinal} has invalid status {status}"
             raise ValueError(msg)
         _sha256_digest(digest, f"{name} digest")
-        snapshot[path] = (status, digest)
+        if snapshot_mode not in VALIDATION_ARTIFACT_DIGEST_MODES | {"absent-v1"}:
+            msg = f"{name} record {ordinal} has invalid snapshot mode {snapshot_mode}"
+            raise ValueError(msg)
+        if exists == (snapshot_mode == "absent-v1") or (not exists and digest != _sha256_bytes(b"absent")):
+            msg = f"{name} record {ordinal} has inconsistent existence and snapshot identity"
+            raise ValueError(msg)
+        snapshot[path] = (status, digest, exists, snapshot_mode)
     return snapshot
 
 
@@ -1483,7 +1726,7 @@ def _validation_workspace_audit(dispatch: dict[str, Any], unit: ValidationUnit) 
     changed = tuple(sorted(path for path in set(before) | set(after) if before.get(path) != after.get(path)))
     allowed = (*unit.expected_workspace_effects, *(artifact.path for artifact in unit.allowed_artifacts))
     unexpected = tuple(path for path in changed if not _path_allowed(path, allowed))
-    unsafe = tuple(path for path in changed if after.get(path, before.get(path, ("", "")))[0] not in {"ignored", "outside-repository"})
+    unsafe = tuple(path for path in changed if after.get(path, before.get(path, ("", "", False, "absent-v1")))[0] not in {"ignored", "outside-repository"})
     if unexpected:
         msg = "validation produced unexpected workspace paths: " + ", ".join(unexpected)
         raise ValueError(msg)
@@ -1492,7 +1735,12 @@ def _validation_workspace_audit(dispatch: dict[str, Any], unit: ValidationUnit) 
         raise ValueError(msg)
     if unit.requires_isolation:
         _validate_isolated_workspace_paths(dispatch, unit, changed)
-    return {"changed_paths": list(changed), "observed": True, "unexpected_paths": []}
+    return {
+        "changed_paths": list(changed),
+        "observed": True,
+        "snapshot_modes": {path: (after[path] if path in after else before[path])[3] for path in sorted(set(before) | set(after))},
+        "unexpected_paths": [],
+    }
 
 
 def compile_validation(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  # noqa: PLR0915
@@ -1557,8 +1805,23 @@ def compile_validation(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]
     if status == "blocked" and not limitations:
         msg = "blocked validation payload requires a limitation"
         raise ValueError(msg)
-    artifacts_body, artifacts = _validation_artifacts_body(payload, unit)
     workspace_audit = _validation_workspace_audit(dispatch, unit)
+    workspace_after = _workspace_snapshot(dispatch, "workspace_after") if workspace_audit["observed"] else {}
+    artifacts_body, artifacts = _validation_artifacts_body(payload, unit, workspace_after)
+    payload = {
+        **payload,
+        "artifacts": [
+            {
+                "artifact_digest": artifact.artifact_digest,
+                "artifact_digest_mode": artifact.artifact_digest_mode,
+                "artifact_id": artifact.artifact_id,
+                "kind": artifact.kind,
+                "path": artifact.path,
+                "repository_status": artifact.repository_status,
+            }
+            for artifact in artifacts
+        ],
+    }
     environment_identity = _validation_environment_identity(unit)
     executions_body, execution_results = _validation_executions_body(payload, evidence, environment_identity, artifacts)
     if status in {"passed", "failed"} and len(execution_results) != len(unit.commands):
@@ -1800,6 +2063,20 @@ def _read_json_object(path: Path) -> dict[str, Any]:
     return value
 
 
+def _operation_document(document: dict[str, Any], operation: str) -> dict[str, Any]:
+    """Accept a bootstrap bundle directly where it owns the operation input."""
+    field = {"materialize-dispatches": "materialization_input", "routing-projection": "planning_input"}.get(operation)
+    if field is None and operation in {"compile-node", "finalize-proof", "journal-append", "next-ready", "snapshot-workspace"}:
+        field = "lifecycle_input"
+    if field is None or field not in document:
+        return document
+    nested = document.get(field)
+    if not isinstance(nested, dict):
+        msg = f"bootstrap bundle {field} must be an object"
+        raise TypeError(msg)
+    return dict(nested)
+
+
 def _canonical_worker_payload(content: bytes) -> dict[str, Any]:
     prefix = b"- Canonical worker payload: "
     matches = [line.removeprefix(prefix) for line in content.splitlines() if line.startswith(prefix)]
@@ -1829,6 +2106,16 @@ def _load_evidence_source(  # noqa: C901, PLR0912, PLR0915
     if metadata.get("artifact_digest") != artifact_digest or evidence_raw.get("raw_result_digest") != artifact_digest:
         msg = f"artifact digest does not match evidence metadata: {artifact_path}"
         raise ValueError(msg)
+    worker_payload_fields = (metadata.get("worker_payload_path"), metadata.get("worker_payload_digest"), metadata.get("worker_payload_byte_count"))
+    if any(value is not None for value in worker_payload_fields):
+        payload_path, payload_digest, payload_byte_count = worker_payload_fields
+        if not isinstance(payload_path, str) or not isinstance(payload_digest, str) or not isinstance(payload_byte_count, int):
+            msg = f"worker payload provenance is incomplete: {metadata_path}"
+            raise TypeError(msg)
+        payload_bytes = Path(payload_path).read_bytes()
+        if _sha256_bytes(payload_bytes) != payload_digest or len(payload_bytes) != payload_byte_count:
+            msg = f"worker payload bytes do not match evidence metadata: {payload_path}"
+            raise ValueError(msg)
 
     kind = raw.get("kind")
     inferred_kind = "validation" if "validation_unit" in expectation_raw else "review"
@@ -1940,13 +2227,51 @@ def build_routing_projection_document(
     )
 
 
+def _required_schema_shape(node: dict[str, Any]) -> object:
+    """Return a compact recursive description of every schema-required field."""
+    if isinstance(node.get("enum"), list):
+        shape: object = " | ".join(str(value) for value in node["enum"])
+    elif "const" in node:
+        shape = node["const"]
+    elif node.get("type") == "object":
+        properties = node.get("properties", {})
+        required = node.get("required", [])
+        if not isinstance(properties, dict) or not isinstance(required, list):
+            shape = "object"
+        else:
+            shape = {name: _required_schema_shape(properties[name]) for name in required if name in properties}
+    elif node.get("type") == "array":
+        items = node.get("items")
+        shape = [_required_schema_shape(items)] if isinstance(items, dict) else []
+    elif isinstance(node.get("type"), list):
+        shape = " | ".join(str(value) for value in node["type"])
+    else:
+        shape = str(node.get("type") or "value")
+    return shape
+
+
 def _schema_reference(path: Path) -> dict[str, object]:
     raw = _read_json_object(path)
     required = raw.get("required")
     if not isinstance(required, list) or any(not isinstance(name, str) for name in required):
         msg = f"payload schema has no canonical required field list: {path}"
         raise ValueError(msg)
-    return {"digest": _file_identity_digest(str(path)), "id": _required_text(raw, "$id"), "path": str(path), "required_fields": required, "version": 1}
+    schema_id = _required_text(raw, "$id")
+    match = _SCHEMA_ID_VERSION_RE.search(schema_id)
+    if match is None:
+        msg = f"payload schema $id has no canonical version suffix: {schema_id}"
+        raise ValueError(msg)
+    if path.name != match.group(0):
+        msg = f"payload schema filename does not match its canonical $id: {path.name} != {match.group(0)}"
+        raise ValueError(msg)
+    return {
+        "digest": _file_identity_digest(str(path)),
+        "id": schema_id,
+        "path": str(path),
+        "required_fields": required,
+        "required_shape": _required_schema_shape(raw),
+        "version": int(match.group("version")),
+    }
 
 
 def _applicable_instruction_paths(repository_root: Path, owned_paths: tuple[str, ...], declared: tuple[str, ...]) -> tuple[str, ...]:
@@ -2001,13 +2326,27 @@ def _independent_adversarial_checks(paths: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(checks)
 
 
-def _inspection_groups(plan: GraphPlan, source_state: tuple[str, str, str], artifact_store: Path, repository_root: Path) -> dict[str, dict[str, object]]:
-    groups: dict[tuple[str, ...], list[str]] = {}
-    for node in plan.actual_worker_nodes:
-        if node.mode == "audit" and node.coverage:
-            groups.setdefault(node.coverage, []).append(node.node_id)
+def _inspection_groups(  # noqa: C901
+    plan: GraphPlan, source_state: tuple[str, str, str], artifact_store: Path, repository_root: Path
+) -> dict[str, dict[str, object]]:
+    audit_nodes = [node for node in plan.actual_worker_nodes if node.mode == "audit" and node.coverage]
+    remaining = {node.node_id: node for node in audit_nodes}
+    groups: list[tuple[tuple[str, ...], list[str]]] = []
+    while remaining:
+        _seed_id, seed = remaining.popitem()
+        members = [seed]
+        paths = set(seed.coverage)
+        changed = True
+        while changed:
+            changed = False
+            for node_id, node in tuple(remaining.items()):
+                if paths.intersection(node.coverage):
+                    members.append(remaining.pop(node_id))
+                    paths.update(node.coverage)
+                    changed = True
+        groups.append((tuple(sorted(paths)), [node.node_id for node in members]))
     output: dict[str, dict[str, object]] = {}
-    for paths, node_ids in groups.items():
+    for paths, node_ids in groups:
         if len(node_ids) < 2:
             continue
         observations: list[dict[str, object]] = []
@@ -2049,18 +2388,96 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
     schema = dispatch.get("payload_schema")
     schema_text = _canonical_json(schema) if isinstance(schema, dict) else "native independent-review Markdown contract"
     command_policy = _canonical_json(dispatch.get("command_policy", {}))
+    shared = dispatch.get("shared_inspection_evidence")
+    shared_text = (
+        " Treat shared_inspection_evidence as trusted read-only structural observation only; derive semantic conclusions independently."
+        if isinstance(shared, dict)
+        else ""
+    )
+    worker_payload_path = _required_text(dispatch, "worker_payload_path")
+    persistence = dispatch.get("worker_payload_persistence")
+    if not isinstance(persistence, dict) or persistence.get("operation") != "persist-worker-payload":
+        msg = "worker dispatch lacks its runtime-owned payload persistence contract"
+        raise ValueError(msg)
+    persistence_input = _required_text(persistence, "input_path")
+    persistence_candidate = _required_text(persistence, "candidate_path")
+    persistence_text = (
+        f" Before returning, write the exact result bytes to temporary sibling {persistence_candidate}, then invoke the runtime-owned "
+        f"persist-worker-payload operation with --input {persistence_input} and --payload {persistence_candidate}. "
+        f"Only after it atomically publishes {worker_payload_path} may you return those same bytes."
+    )
     if contract == "native-independent-review":
         return (
             "Perform only the dispatched repository-independent-review in fresh context. Return the six canonical native sections "
             "Scope Inspected, Findings, No-Finding Evidence, Routing Handoffs, Fingerprint Proof, and Git State; do not append graph IDs, "
             "an envelope, or Machine Evidence because compile-independent-review owns those identities. "
-            f"Command policy: {command_policy}"
+            f"Command policy: {command_policy}{persistence_text}{shared_text}"
         )
+    validation_text = (
+        " Omit artifacts: the runtime captures workspace status and artifact digests before and after execution." if contract == "compact-validation" else ""
+    )
     return (
         f"Return only the canonical {contract} payload using field names from {schema_text}. "
+        "Every field shown in payload_schema.required_shape is required whenever its parent object is present. "
         "Do not author fingerprints, evidence IDs, artifact IDs, or digests. "
-        f"Command policy: {command_policy}"
+        f"Command policy: {command_policy}{validation_text}{persistence_text}{shared_text}"
     )
+
+
+def _validate_worker_payload_bytes(contract: str, payload_bytes: bytes) -> None:
+    """Reject incomplete worker output before it can replace a persisted payload."""
+    if contract in {"compact-review", "compact-validation"}:
+        payload = json.loads(payload_bytes)
+        if not isinstance(payload, dict):
+            msg = "compact worker payload root must be an object"
+            raise TypeError(msg)
+        schema = _REVIEW_PAYLOAD_SCHEMA if contract == "compact-review" else _VALIDATION_PAYLOAD_SCHEMA
+        require_schema(payload, schema)
+        return
+    if contract == "native-independent-review":
+        _independent_input_sections(payload_bytes)
+        return
+    msg = f"unsupported worker payload result contract: {contract}"
+    raise ValueError(msg)
+
+
+def persist_worker_payload(contract_document: dict[str, Any], candidate_path: Path) -> dict[str, Any]:
+    """Validate and atomically publish one dispatch-bound worker payload."""
+    node_id = _required_text(contract_document, "node_id")
+    result_contract = _required_text(contract_document, "result_contract")
+    target_path = Path(_required_text(contract_document, "worker_payload_path")).resolve()
+    expected_candidate = Path(_required_text(contract_document, "candidate_path")).resolve()
+    candidate = candidate_path.resolve()
+    if candidate != expected_candidate:
+        msg = f"worker payload candidate differs from its materialized contract: {candidate}"
+        raise ValueError(msg)
+    if candidate == target_path or candidate.parent != target_path.parent:
+        msg = "worker payload candidate must be a distinct sibling of the materialized target"
+        raise ValueError(msg)
+    if candidate_path.is_symlink() or not candidate.is_file():
+        msg = f"worker payload candidate must be a regular non-symlink file: {candidate}"
+        raise ValueError(msg)
+    if not target_path.parent.is_dir():
+        msg = f"worker payload target directory does not exist: {target_path.parent}"
+        raise ValueError(msg)
+
+    with candidate.open("rb+") as stream:
+        payload_bytes = stream.read()
+        _validate_worker_payload_bytes(result_contract, payload_bytes)
+        stream.flush()
+        os.fsync(stream.fileno())
+    candidate.replace(target_path)
+    if target_path.read_bytes() != payload_bytes:
+        msg = f"atomically published worker payload bytes differ from the validated candidate: {target_path}"
+        raise ValueError(msg)
+    return {
+        "node_id": node_id,
+        "result_contract": result_contract,
+        "schema_version": 1,
+        "worker_payload_byte_count": len(payload_bytes),
+        "worker_payload_digest": _sha256_bytes(payload_bytes),
+        "worker_payload_path": str(target_path),
+    }
 
 
 def materialize_dispatches(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, PLR0912, PLR0915
@@ -2088,6 +2505,14 @@ def materialize_dispatches(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
         raise ValueError(msg)
     state_command = _required_text(document, "state_verification_command")
     artifact_store = Path(_required_text(document, "artifact_store")).resolve()
+    artifact_store.mkdir(parents=True, exist_ok=True)
+    if not artifact_store.is_dir():
+        msg = f"artifact_store is not a directory: {artifact_store}"
+        raise ValueError(msg)
+    inspection_profile = document.get("inspection_profile", "shared-read-only")
+    if inspection_profile not in {"independent-source", "shared-read-only"}:
+        msg = "inspection_profile must be independent-source or shared-read-only"
+        raise ValueError(msg)
     review_schema = _schema_reference(_REVIEW_PAYLOAD_SCHEMA)
     validation_schema = _schema_reference(_VALIDATION_PAYLOAD_SCHEMA)
     catalog_path = Path(document.get("routing_catalog_path", DEFAULT_ROUTING_CATALOG)).resolve()
@@ -2107,7 +2532,11 @@ def materialize_dispatches(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
     validation_units = {unit.node_id: unit for unit in plan.coalesced_validation_units}
     evidence_ids = {node.node_id: f"{'validation' if node.mode == 'validation' else 'review'}:{node.node_id}" for node in plan.actual_worker_nodes}
     line_bounds = dict(plan.captured_path_line_bounds)
-    inspection_groups = _inspection_groups(plan, source_state, artifact_store, repository_root_path.resolve())
+    inspection_groups = (
+        _inspection_groups(plan, source_state, artifact_store, repository_root_path.resolve()) if inspection_profile == "shared-read-only" else {}
+    )
+    for record in {str(record["artifact_path"]): record for record in inspection_groups.values()}.values():
+        _write_text_once(Path(cast("str", record["artifact_path"])), json.dumps(record, indent=2, sort_keys=True) + "\n")
     raw_duplicate_authorizations = document.get("duplicate_command_authorizations", {})
     if not isinstance(raw_duplicate_authorizations, dict) or any(
         not isinstance(node_id, str)
@@ -2132,6 +2561,10 @@ def materialize_dispatches(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
         artifact_suffix = "validation.md" if node.mode == "validation" else "review.md"
         artifact_path = artifact_store / f"{node.node_id}.{artifact_suffix}"
         metadata_path = artifact_store / f"{node.node_id}.evidence.json"
+        worker_payload_suffix = "md" if node.mode == "independent-review" else "json"
+        worker_payload_path = artifact_store / f"{node.node_id}.worker-payload.{worker_payload_suffix}"
+        worker_payload_candidate_path = artifact_store / f"{node.node_id}.worker-payload.candidate.{worker_payload_suffix}"
+        worker_payload_contract_path = artifact_store / f"{node.node_id}.worker-payload-contract.json"
         instruction_paths = _applicable_instruction_paths(repository_root_path.resolve(), node.coverage, node.instruction_paths)
         authorized_duplicates = tuple(sorted(set(raw_duplicate_authorizations.get(node.node_id, ()))))
         if node.mode == "validation" and authorized_duplicates:
@@ -2162,6 +2595,12 @@ def materialize_dispatches(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
             "skill_path": node.skill_path,
             "source_state": list(source_state),
             "state_verification_command": state_command,
+            "worker_payload_path": str(worker_payload_path),
+            "worker_payload_persistence": {
+                "candidate_path": str(worker_payload_candidate_path),
+                "input_path": str(worker_payload_contract_path),
+                "operation": "persist-worker-payload",
+            },
             "worker_created": location == "worker",
         }
         if node.node_id in inspection_groups:
@@ -2188,7 +2627,10 @@ def materialize_dispatches(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
             common.update(
                 {
                     "mode": node.mode,
-                    "predecessor_evidence_ids": [evidence_ids[predecessor] for predecessor in node.predecessors],
+                    "predecessor_evidence_ids": [
+                        *(evidence_ids[predecessor] for predecessor in node.predecessors),
+                        *_synthesis_reused_evidence_ids(plan, node.node_id),
+                    ],
                     "selection_reason": "; ".join(node.selection_reasons) or f"planner selected {node.skill_id}",
                 }
             )
@@ -2206,6 +2648,14 @@ def materialize_dispatches(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
             else:
                 common["payload_schema"] = review_schema
                 contract = "compact-review"
+        persistence_contract = {
+            "candidate_path": str(worker_payload_candidate_path),
+            "node_id": node.node_id,
+            "result_contract": contract,
+            "schema_version": 1,
+            "worker_payload_path": str(worker_payload_path),
+        }
+        _write_text_once(worker_payload_contract_path, json.dumps(persistence_contract, indent=2, sort_keys=True) + "\n")
         dispatches.append(
             {
                 "artifact_path": str(artifact_path),
@@ -2215,6 +2665,9 @@ def materialize_dispatches(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
                 "metadata_path": str(metadata_path),
                 "node_id": node.node_id,
                 "result_contract": contract,
+                "worker_payload_candidate_path": str(worker_payload_candidate_path),
+                "worker_payload_contract_path": str(worker_payload_contract_path),
+                "worker_payload_path": str(worker_payload_path),
                 "worker_prompt": _worker_prompt(contract, common),
             }
         )
@@ -2253,6 +2706,7 @@ def _epoch_scoped_plan(plan: GraphPlan, epoch: int) -> GraphPlan:
         validation_evidence_mapping=tuple(
             replace(mapping, validation_unit_id=node_ids[mapping.validation_unit_id]) for mapping in plan.validation_evidence_mapping
         ),
+        routing_decisions=tuple(replace(decision, synthesis_dependency=mapped(decision.synthesis_dependency)) for decision in plan.routing_decisions),
     )
 
 
@@ -2420,7 +2874,10 @@ def _verified_journal_evidence(
         raise ValueError(msg)
     if isinstance(evidence, ReviewEvidence):
         by_id = {candidate.node_id: candidate for candidate in plan.actual_worker_nodes}
-        expected_predecessors = tuple(_expected_evidence_id(by_id[predecessor_id]) for predecessor_id in node.predecessors)
+        expected_predecessors = (
+            *(_expected_evidence_id(by_id[predecessor_id]) for predecessor_id in node.predecessors),
+            *_synthesis_reused_evidence_ids(plan, node.node_id),
+        )
         if (
             not isinstance(expectation, ReviewEvidenceExpectation)
             or evidence.skill_id != node.skill_id
@@ -2556,6 +3013,13 @@ def read_execution_journal(path: Path, *, plan: GraphPlan, source_state: tuple[s
         content = path.read_bytes()
     except FileNotFoundError:
         content = b""
+    return _read_execution_journal_content(content, path=path, plan=plan, source_state=source_state)
+
+
+def _read_execution_journal_content(
+    content: bytes, *, path: Path, plan: GraphPlan, source_state: tuple[str, str, str]
+) -> tuple[tuple[dict[str, Any], ...], dict[str, str], str | None]:
+    """Validate journal bytes already protected by the caller's file lock."""
     if content and not content.endswith(b"\n"):
         msg = f"execution journal ends with a partial record: {path}"
         raise ValueError(msg)
@@ -2609,18 +3073,15 @@ def _new_journal_reason(request: JournalEventRequest, limitations: tuple[str, ..
     return reason
 
 
-def _persist_journal_event(path: Path, event: dict[str, Any], *, existing_size: int) -> None:
-    if not path.parent.is_dir():
-        msg = f"execution journal parent directory does not exist: {path.parent}"
-        raise ValueError(msg)
+def _persist_journal_event(stream: Any, path: Path, event: dict[str, Any], *, existing_size: int) -> None:
     encoded = (_canonical_json(event) + "\n").encode()
-    with path.open("ab") as stream:
-        if stream.tell() != existing_size:
-            msg = f"execution journal changed during append: {path}"
-            raise ValueError(msg)
-        stream.write(encoded)
-        stream.flush()
-        os.fsync(stream.fileno())
+    stream.seek(0, os.SEEK_END)
+    if stream.tell() != existing_size:
+        msg = f"execution journal changed during append: {path}"
+        raise ValueError(msg)
+    stream.write(encoded)
+    stream.flush()
+    os.fsync(stream.fileno())
 
 
 def append_journal_event(path: Path, document: dict[str, Any], request: JournalEventRequest) -> dict[str, Any]:
@@ -2631,32 +3092,46 @@ def append_journal_event(path: Path, document: dict[str, Any], request: JournalE
         raise TypeError(msg)
     plan = _graph_plan(raw_plan)
     source_state = _state(document, "source_state")
-    existing_size = path.stat().st_size if path.exists() else 0
-    events, state, head_digest = read_execution_journal(path, plan=plan, source_state=source_state)
-    node = next((candidate for candidate in plan.actual_worker_nodes if candidate.node_id == request.node_id), None)
-    if node is None:
-        msg = f"journal event references unknown node: {request.node_id}"
+    if not path.parent.is_dir():
+        msg = f"execution journal parent directory does not exist: {path.parent}"
         raise ValueError(msg)
-    if request.status not in _JOURNAL_STATUSES:
-        msg = f"invalid journal status {request.status}"
-        raise ValueError(msg)
-    evidence, limitations = _new_journal_evidence(request, plan=plan, node=node, source_state=source_state)
-    affected = _apply_journal_transition(plan, state, node_id=request.node_id, status=request.status)
-    event: dict[str, Any] = {
-        "affected_node_ids": list(affected),
-        "evidence": evidence,
-        "node_id": request.node_id,
-        "plan_digest": _plan_digest(plan),
-        "previous_event_digest": head_digest,
-        "reason": _new_journal_reason(request, limitations),
-        "schema_version": 1,
-        "sequence": len(events) + 1,
-        "source_state": list(source_state),
-        "status": request.status,
-    }
-    event["event_digest"] = _sha256_bytes(_canonical_json(event).encode())
-    _persist_journal_event(path, event, existing_size=existing_size)
-    return event
+    lock_path = path.with_name(path.name + ".lock")
+    with lock_path.open("a+b") as lock_stream:
+        fcntl.flock(lock_stream.fileno(), fcntl.LOCK_EX)
+        try:
+            try:
+                content = path.read_bytes()
+            except FileNotFoundError:
+                content = b""
+            existing_size = len(content)
+            events, state, head_digest = _read_execution_journal_content(content, path=path, plan=plan, source_state=source_state)
+            node = next((candidate for candidate in plan.actual_worker_nodes if candidate.node_id == request.node_id), None)
+            if node is None:
+                msg = f"journal event references unknown node: {request.node_id}"
+                raise ValueError(msg)
+            if request.status not in _JOURNAL_STATUSES:
+                msg = f"invalid journal status {request.status}"
+                raise ValueError(msg)
+            evidence, limitations = _new_journal_evidence(request, plan=plan, node=node, source_state=source_state)
+            affected = _apply_journal_transition(plan, state, node_id=request.node_id, status=request.status)
+            event: dict[str, Any] = {
+                "affected_node_ids": list(affected),
+                "evidence": evidence,
+                "node_id": request.node_id,
+                "plan_digest": _plan_digest(plan),
+                "previous_event_digest": head_digest,
+                "reason": _new_journal_reason(request, limitations),
+                "schema_version": 1,
+                "sequence": len(events) + 1,
+                "source_state": list(source_state),
+                "status": request.status,
+            }
+            event["event_digest"] = _sha256_bytes(_canonical_json(event).encode())
+            with path.open("ab") as journal_stream:
+                _persist_journal_event(journal_stream, path, event, existing_size=existing_size)
+            return event
+        finally:
+            fcntl.flock(lock_stream.fileno(), fcntl.LOCK_UN)
 
 
 def _dispatches_by_node(dispatch_set: dict[str, Any], *, plan: GraphPlan, source_state: tuple[str, str, str]) -> dict[str, dict[str, Any]]:
@@ -3033,40 +3508,78 @@ def finalize_proof(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, P
     }
 
 
+def _runtime_subparser(subparsers: Any, operation: str, help_text: str) -> argparse.ArgumentParser:
+    schema_reference = f"{_RUNTIME_OPERATION_INPUT_SCHEMA}#/$defs/{operation}"
+    example_reference = f"{_RUNTIME_OPERATION_EXAMPLES}#/{operation}"
+    parser = subparsers.add_parser(
+        operation,
+        description=help_text,
+        epilog=f"Input schema: {schema_reference}\nValid example: {example_reference}",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        help=help_text,
+    )
+    if not isinstance(parser, argparse.ArgumentParser):
+        msg = f"runtime parser factory returned an invalid parser for {operation}"
+        raise TypeError(msg)
+    return parser
+
+
 def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="operation", required=True)
-    compile_parser = subparsers.add_parser("compile-review", help="compile a compact review payload")
+    compile_parser = _runtime_subparser(subparsers, "compile-review", "compile a compact review payload")
     compile_parser.add_argument("--input", type=Path, required=True)
     compile_parser.add_argument("--artifact", type=Path, required=True)
     compile_parser.add_argument("--metadata", type=Path, required=True)
-    independent_parser = subparsers.add_parser("compile-independent-review", help="compile a native independent review")
+    independent_parser = _runtime_subparser(subparsers, "compile-independent-review", "compile a native independent review")
     independent_parser.add_argument("--input", type=Path, required=True)
     independent_parser.add_argument("--native-artifact", type=Path, required=True)
     independent_parser.add_argument("--artifact", type=Path, required=True)
     independent_parser.add_argument("--metadata", type=Path, required=True)
-    validation_parser = subparsers.add_parser("compile-validation", help="compile a compact validation payload")
+    validation_parser = _runtime_subparser(subparsers, "compile-validation", "compile a compact validation payload")
     validation_parser.add_argument("--input", type=Path, required=True)
     validation_parser.add_argument("--artifact", type=Path, required=True)
     validation_parser.add_argument("--metadata", type=Path, required=True)
-    synthesis_parser = subparsers.add_parser("synthesis-bundle", help="build a compact synthesis bundle")
+    node_parser = _runtime_subparser(subparsers, "compile-node", "compile and journal one materialized node by node ID")
+    node_parser.add_argument("--input", type=Path, required=True)
+    node_parser.add_argument("--dispatches", type=Path, required=True)
+    node_parser.add_argument("--node-id", required=True)
+    node_parser.add_argument("--payload", type=Path, help="deprecated; when supplied, must equal the materialized worker payload path")
+    node_parser.add_argument("--before-capture", type=Path, required=True)
+    node_parser.add_argument("--after-capture", type=Path, required=True)
+    node_parser.add_argument("--workspace-before", type=Path)
+    node_parser.add_argument("--workspace-after", type=Path)
+    node_parser.add_argument("--journal", type=Path, required=True)
+    node_parser.add_argument("--status", choices=sorted(_REVIEW_STATUSES))
+    node_parser.add_argument("--limitation", action="append")
+    node_parser.add_argument("--output", type=Path, required=True)
+    persist_parser = _runtime_subparser(subparsers, "persist-worker-payload", "validate and atomically publish one materialized worker payload")
+    persist_parser.add_argument("--input", type=Path, required=True)
+    persist_parser.add_argument("--payload", type=Path, required=True)
+    synthesis_parser = _runtime_subparser(subparsers, "synthesis-bundle", "build a compact synthesis bundle")
     synthesis_parser.add_argument("--input", type=Path, required=True)
     synthesis_parser.add_argument("--output", type=Path, required=True)
-    routing_parser = subparsers.add_parser("routing-projection", help="project the complete consulted routing catalog")
+    routing_parser = _runtime_subparser(subparsers, "routing-projection", "project the complete consulted routing catalog")
     routing_parser.add_argument("--input", type=Path, required=True)
     routing_parser.add_argument("--output", type=Path, required=True)
     routing_parser.add_argument("--catalog", type=Path, default=DEFAULT_ROUTING_CATALOG)
     routing_parser.add_argument("--skill-root", type=Path, action="append")
-    dispatch_parser = subparsers.add_parser("materialize-dispatches", help="derive exact dispatch bases from a graph plan")
+    dispatch_parser = _runtime_subparser(subparsers, "materialize-dispatches", "derive exact dispatch bases from a graph plan")
     dispatch_parser.add_argument("--input", type=Path, required=True)
     dispatch_parser.add_argument("--output", type=Path, required=True)
-    mutation_parser = subparsers.add_parser("advance-after-mutation", help="recapture and replan one serialized repair epoch")
+    snapshot_parser = _runtime_subparser(subparsers, "snapshot-workspace", "capture runtime-owned validation workspace evidence")
+    snapshot_parser.add_argument("--input", type=Path, required=True)
+    snapshot_parser.add_argument("--dispatches", type=Path, required=True)
+    snapshot_parser.add_argument("--node-id", required=True)
+    snapshot_parser.add_argument("--current-capture", type=Path, required=True)
+    snapshot_parser.add_argument("--output", type=Path, required=True)
+    mutation_parser = _runtime_subparser(subparsers, "advance-after-mutation", "recapture and replan one serialized repair epoch")
     mutation_parser.add_argument("--input", type=Path, required=True)
     mutation_parser.add_argument("--output", type=Path, required=True)
-    handoff_parser = subparsers.add_parser("reconcile-handoffs", help="resolve covered handoffs and return new routing triggers")
+    handoff_parser = _runtime_subparser(subparsers, "reconcile-handoffs", "resolve covered handoffs and return new routing triggers")
     handoff_parser.add_argument("--input", type=Path, required=True)
     handoff_parser.add_argument("--output", type=Path, required=True)
-    journal_parser = subparsers.add_parser("journal-append", help="append one verified graph lifecycle event")
+    journal_parser = _runtime_subparser(subparsers, "journal-append", "append one verified graph lifecycle event")
     journal_parser.add_argument("--input", type=Path, required=True)
     journal_parser.add_argument("--journal", type=Path, required=True)
     journal_parser.add_argument("--node-id", required=True)
@@ -3075,7 +3588,7 @@ def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     journal_parser.add_argument("--metadata", type=Path)
     journal_parser.add_argument("--kind", choices=("review", "validation"))
     journal_parser.add_argument("--reason")
-    ready_parser = subparsers.add_parser("next-ready", help="compute dependency-ready graph nodes")
+    ready_parser = _runtime_subparser(subparsers, "next-ready", "compute dependency-ready graph nodes")
     ready_parser.add_argument("--dispatches", type=Path, required=True)
     ready_parser.add_argument("--current-capture", type=Path, required=True)
     ready_parser.add_argument("--input", type=Path, required=True)
@@ -3083,9 +3596,11 @@ def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     ready_output = ready_parser.add_mutually_exclusive_group(required=True)
     ready_output.add_argument("--output", type=Path)
     ready_output.add_argument("--output-dir", type=Path, help="runtime-managed immutable next-ready generations")
-    final_parser = subparsers.add_parser("finalize-proof", help="derive and verify the repository proof")
+    final_parser = _runtime_subparser(subparsers, "finalize-proof", "derive and verify the repository proof")
     final_parser.add_argument("--current-capture", type=Path, required=True)
+    final_parser.add_argument("--dispatches", type=Path)
     final_parser.add_argument("--input", type=Path, required=True)
+    final_parser.add_argument("--journal", type=Path)
     final_parser.add_argument("--output", type=Path, required=True)
     return parser
 
@@ -3134,7 +3649,173 @@ def _with_current_capture(document: dict[str, Any], capture_path: Path) -> dict[
     return output
 
 
+def _finalize_document_from_files(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    output = _with_current_capture(document, args.current_capture)
+    if (args.dispatches is None) != (args.journal is None):
+        msg = "finalize-proof source discovery requires both --dispatches and --journal"
+        raise ValueError(msg)
+    if args.dispatches is None or "sources" in output:
+        return output
+    raw_plan = output.get("plan")
+    if not isinstance(raw_plan, dict):
+        msg = "finalize-proof requires a plan object"
+        raise TypeError(msg)
+    plan = _graph_plan(raw_plan)
+    source_state = _state(output, "source_state")
+    _events, lifecycle, _head = read_execution_journal(args.journal, plan=plan, source_state=source_state)
+    entries = _dispatches_by_node(_read_json_object(args.dispatches), plan=plan, source_state=source_state)
+    output["sources"] = [
+        {"artifact_path": _required_text(entries[node.node_id], "artifact_path"), "metadata_path": _required_text(entries[node.node_id], "metadata_path")}
+        for node in plan.actual_worker_nodes
+        if lifecycle.get(node.node_id) in {"accepted", "blocked"}
+    ]
+    return output
+
+
+def _capture_source_state(path: Path) -> tuple[str, str, str]:
+    capture = _read_json_object(path)
+    state = (capture.get("scope_fingerprint"), capture.get("captured_worktree_fingerprint"), capture.get("repository_state_fingerprint"))
+    if any(not isinstance(value, str) or not value for value in state):
+        msg = f"capture lacks canonical source-state fingerprints: {path}"
+        raise ValueError(msg)
+    return cast("tuple[str, str, str]", state)
+
+
+def _lifecycle_dispatch(document: dict[str, Any], dispatches_path: Path, node_id: str) -> tuple[GraphPlan, dict[str, Any]]:
+    raw_plan = document.get("plan")
+    if not isinstance(raw_plan, dict):
+        msg = "lifecycle operation requires a plan object"
+        raise TypeError(msg)
+    plan = _graph_plan(raw_plan)
+    source_state = _state(document, "source_state")
+    entries = _dispatches_by_node(_read_json_object(dispatches_path), plan=plan, source_state=source_state)
+    try:
+        return plan, entries[node_id]
+    except KeyError:
+        msg = f"dispatch set has no planned node {node_id}"
+        raise ValueError(msg) from None
+
+
+def _snapshot_workspace_from_files(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    _plan, entry = _lifecycle_dispatch(document, args.dispatches, args.node_id)
+    source_state = _state(document, "source_state")
+    if _capture_source_state(args.current_capture) != source_state:
+        msg = "workspace snapshot capture differs from the plan-bound source state"
+        raise ValueError(msg)
+    dispatch = entry.get("dispatch")
+    if not isinstance(dispatch, dict) or entry.get("result_contract") != "compact-validation":
+        msg = f"workspace snapshots apply only to validation nodes: {args.node_id}"
+        raise ValueError(msg)
+    return capture_workspace_snapshot(dispatch)
+
+
+def _independent_status(native_content: bytes, explicit: str | None) -> str:
+    if explicit is not None:
+        return explicit
+    sections = _independent_input_sections(native_content)
+    return "no-findings" if sections["## Findings"].strip() == "No findings." else "completed"
+
+
+def _workspace_records(path: Path, *, node_id: str, source_state: tuple[str, str, str]) -> list[dict[str, Any]]:
+    snapshot = _read_json_object(path)
+    if snapshot.get("node_id") != node_id or _state(snapshot, "source_state") != source_state:
+        msg = f"workspace snapshot belongs to a different node or source state: {path}"
+        raise ValueError(msg)
+    return list(_records(snapshot, "records"))
+
+
+def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:  # noqa: C901, PLR0912, PLR0915
+    _plan, entry = _lifecycle_dispatch(document, args.dispatches, args.node_id)
+    source_state = _state(document, "source_state")
+    before_state = _capture_source_state(args.before_capture)
+    after_state = _capture_source_state(args.after_capture)
+    if before_state != source_state or after_state != source_state:
+        msg = "compile-node capture differs from the plan-bound source state"
+        raise ValueError(msg)
+    raw_dispatch = entry.get("dispatch")
+    if not isinstance(raw_dispatch, dict):
+        msg = f"materialized node has no dispatch object: {args.node_id}"
+        raise TypeError(msg)
+    dispatch = {**raw_dispatch, "after_state": list(after_state), "before_state": list(before_state)}
+    contract = _required_text(entry, "result_contract")
+    payload_path = Path(_required_text(entry, "worker_payload_path")).resolve()
+    if _required_text(raw_dispatch, "worker_payload_path") != str(payload_path):
+        msg = f"materialized worker payload path differs between entry and dispatch: {args.node_id}"
+        raise ValueError(msg)
+    if args.payload is not None and args.payload.resolve() != payload_path:
+        msg = "compile-node accepts only the materialized worker payload path"
+        raise ValueError(msg)
+    if not payload_path.is_file():
+        msg = f"worker result was not persisted before compilation: {payload_path}"
+        raise ValueError(msg)
+    payload_bytes = payload_path.read_bytes()
+    if contract == "compact-validation":
+        if args.workspace_before is None or args.workspace_after is None:
+            msg = "validation compile-node requires --workspace-before and --workspace-after"
+            raise ValueError(msg)
+        dispatch["workspace_before"] = _workspace_records(args.workspace_before, node_id=args.node_id, source_state=source_state)
+        dispatch["workspace_after"] = _workspace_records(args.workspace_after, node_id=args.node_id, source_state=source_state)
+    elif args.workspace_before is not None or args.workspace_after is not None:
+        msg = "workspace snapshots apply only to validation compile-node operations"
+        raise ValueError(msg)
+
+    if contract in {"compact-review", "compact-validation"}:
+        payload = json.loads(payload_bytes)
+        if not isinstance(payload, dict):
+            msg = "compact worker payload root must be an object"
+            raise TypeError(msg)
+        require_schema(payload, _REVIEW_PAYLOAD_SCHEMA if contract == "compact-review" else _VALIDATION_PAYLOAD_SCHEMA)
+        compiler_input = {"dispatch": dispatch, "payload": payload}
+        content, metadata = compile_review(compiler_input) if contract == "compact-review" else compile_validation(compiler_input)
+    elif contract == "native-independent-review":
+        limitations = tuple(args.limitation or ())
+        compiler_input = {"dispatch": dispatch, "limitations": list(limitations), "status": _independent_status(payload_bytes, args.status)}
+        content, metadata = compile_independent_review(compiler_input, payload_bytes)
+    else:
+        msg = f"compile-node does not support result contract {contract}"
+        raise ValueError(msg)
+
+    artifact_path = Path(_required_text(entry, "artifact_path")).resolve()
+    metadata_path = Path(_required_text(entry, "metadata_path")).resolve()
+    for parent in {artifact_path.parent, metadata_path.parent, payload_path.parent, args.journal.parent.resolve()}:
+        parent.mkdir(parents=True, exist_ok=True)
+    worker_payload_digest = _sha256_bytes(payload_bytes)
+    sealed_payload_path = payload_path.with_name(f"{payload_path.stem}.{worker_payload_digest.removeprefix('sha256:')}.sealed{payload_path.suffix}")
+    _write_bytes_atomically_once(sealed_payload_path, payload_bytes, mode=0o444)
+    metadata = {
+        **metadata,
+        "worker_payload_byte_count": len(payload_bytes),
+        "worker_payload_digest": worker_payload_digest,
+        "worker_payload_path": str(sealed_payload_path),
+        "worker_payload_staging_path": str(payload_path),
+    }
+    _write_bytes_once(artifact_path, content)
+    _write_text_once(metadata_path, json.dumps(metadata, indent=2, sort_keys=True) + "\n")
+    evidence = metadata.get("evidence")
+    if not isinstance(evidence, dict):
+        msg = "compiler metadata lacks evidence"
+        raise TypeError(msg)
+    evidence_status = _required_text(evidence, "status")
+    journal_status = "blocked" if evidence_status in {"blocked", "not-applicable"} else "accepted"
+    source = {"artifact_path": str(artifact_path), "metadata_path": str(metadata_path)}
+    event = append_journal_event(
+        args.journal, document, JournalEventRequest(args.node_id, journal_status, source=source, reason="; ".join(args.limitation or ()) or None)
+    )
+    return {
+        "artifact_path": str(artifact_path),
+        "journal_event": event,
+        "metadata_path": str(metadata_path),
+        "node_id": args.node_id,
+        "schema_version": 1,
+        "worker_payload_path": str(sealed_payload_path),
+    }
+
+
 def _json_operation_output(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:  # noqa: PLR0911
+    if args.operation == "compile-node":
+        return _compile_node_from_files(document, args)
+    if args.operation == "snapshot-workspace":
+        return _snapshot_workspace_from_files(document, args)
     if args.operation == "synthesis-bundle":
         return build_synthesis_bundle(document)
     if args.operation == "routing-projection":
@@ -3147,10 +3828,13 @@ def _json_operation_output(document: dict[str, Any], args: argparse.Namespace) -
         return reconcile_handoffs(document)
     if args.operation == "next-ready":
         return _next_ready_from_files(document, args)
-    return finalize_proof(_with_current_capture(document, args.current_capture))
+    return finalize_proof(_finalize_document_from_files(document, args))
 
 
 def _run_operation(document: dict[str, Any], args: argparse.Namespace) -> int:
+    if args.operation == "persist-worker-payload":
+        print(_canonical_json(persist_worker_payload(document, args.payload)))
+        return 0
     if args.operation in {"compile-independent-review", "compile-review", "compile-validation"}:
         if args.operation in {"compile-review", "compile-validation"}:
             payload = document.get("payload")
@@ -3173,8 +3857,9 @@ def _run_operation(document: dict[str, Any], args: argparse.Namespace) -> int:
     output_path = args.output
     if args.operation == "next-ready" and args.output_dir is not None:
         output_directory = args.output_dir.resolve()
+        output_directory.mkdir(parents=True, exist_ok=True)
         if not output_directory.is_dir():
-            msg = f"next-ready output directory does not exist: {output_directory}"
+            msg = f"next-ready output path is not a directory: {output_directory}"
             raise ValueError(msg)
         generation = _required_int(cast("dict[str, Any]", output["journal"]), "event_count")
         output_path = output_directory / f"next-ready.{generation:06d}.json"
@@ -3193,7 +3878,9 @@ def main(argv: list[str] | None = None) -> int:
         if not isinstance(document, dict):
             msg = "input root must be an object"
             raise TypeError(msg)
-        return _run_operation(document, args)
+        operation_document = _operation_document(document, args.operation)
+        require_schema_definition(operation_document, _RUNTIME_OPERATION_INPUT_SCHEMA, args.operation)
+        return _run_operation(operation_document, args)
     except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as error:
         if isinstance(error, SchemaValidationError):
             attempt = document.get("handoff_attempt", 1) if isinstance(document, dict) else 1

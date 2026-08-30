@@ -10,9 +10,10 @@ from pathlib import Path
 from typing import Any
 
 from review_graph_plan import DEFAULT_ROUTING_CATALOG, DEFAULT_SKILL_ROOT, plan_from_document
-from review_graph_schema import SchemaValidationError, require_schema
+from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
 
 PLANNING_SCHEMA = Path(__file__).resolve().parents[1] / "references" / "schemas" / "planning-input-v1.schema.json"
+RUNTIME_SCHEMA = Path(__file__).resolve().parents[1] / "references" / "schemas" / "runtime-operation-inputs-v1.schema.json"
 _SCOPE_MODES = {"baseline": "baseline", "branch": "branch", "staged": "staged-only", "worktree": "changed-file-only"}
 
 
@@ -21,7 +22,8 @@ def _source_state(capture: dict[str, Any]) -> list[object]:
 
 
 def _capture_command(capture: dict[str, Any]) -> str:
-    command = ["capture_scope.py", "--mode", str(capture.get("capture_mode", "<missing>"))]
+    capture_script = Path(__file__).resolve().with_name("capture_scope.py")
+    command = [str(Path(sys.executable).resolve()), str(capture_script), "--mode", str(capture.get("capture_mode", "<missing>"))]
     repository_root = capture.get("repository_root")
     if isinstance(repository_root, str) and repository_root:
         command.extend(("--repo", repository_root))
@@ -133,7 +135,32 @@ def main(argv: list[str] | None = None) -> int:
         require_schema(document, PLANNING_SCHEMA)
         root = Path(str(document["repository_root"]))
         plan = plan_from_document(document, catalog_path=args.catalog, skill_roots=tuple(args.skill_root or (DEFAULT_SKILL_ROOT,)), repository_root=root)
-        output = {"plan": asdict(plan), "planning_input": document, "schema_version": 1}
+        plan_document = asdict(plan)
+        source_state = _source_state(document)
+        proof_store = args.output.resolve().parent
+        materialization_input = {
+            "artifact_store": str(proof_store / "artifacts"),
+            "authorization": document["authorization"],
+            "duplicate_command_authorizations": {},
+            "execution_locations": {},
+            "inspection_profile": "shared-read-only",
+            "plan": plan_document,
+            "repository_root": document["repository_root"],
+            "routing_catalog_path": str(args.catalog.resolve()),
+            "source_state": source_state,
+            "state_verification_command": _capture_command(document),
+        }
+        lifecycle_input = {"plan": plan_document, "source_state": source_state}
+        require_schema_definition(materialization_input, RUNTIME_SCHEMA, "materialize-dispatches")
+        for operation in ("compile-node", "finalize-proof", "journal-append", "next-ready", "snapshot-workspace"):
+            require_schema_definition(lifecycle_input, RUNTIME_SCHEMA, operation)
+        output = {
+            "lifecycle_input": lifecycle_input,
+            "materialization_input": materialization_input,
+            "plan": plan_document,
+            "planning_input": document,
+            "schema_version": 1,
+        }
         _write_once(args.output, output)
         return 0 if plan.dispatch_allowed else 2
     except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as error:

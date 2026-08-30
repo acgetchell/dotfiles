@@ -1,5 +1,5 @@
 {
-  "$id": "https://openai.com/codex/review-graph/validation-payload-v1.schema.json",
+  "$id": "https://openai.com/codex/review-graph/validation-payload-v2.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
@@ -8,12 +8,24 @@
         "additionalProperties": false,
         "properties": {
           "artifact_digest": {"pattern": "^sha256:[0-9a-f]{64}$", "type": "string"},
+          "artifact_digest_mode": {
+            "enum": [
+              "bounded-directory-metadata-v1",
+              "bounded-directory-metadata-v2",
+              "bounded-directory-metadata-v3",
+              "content-sha256-v1",
+              "recursive-content-sha256-v1",
+              "recursive-content-sha256-v2",
+              "special-metadata-v1",
+              "symlink-target-v1"
+            ]
+          },
           "artifact_id": {"type": ["string", "null"]},
           "kind": {"enum": ["build", "cache", "coverage", "log", "report", "test-result", "other"]},
           "path": {"type": "string"},
           "repository_status": {"enum": ["ignored", "outside-repository"]}
         },
-        "required": ["path", "kind", "repository_status", "artifact_digest"],
+        "required": ["path", "kind", "repository_status", "artifact_digest", "artifact_digest_mode"],
         "type": "object"
       },
       "type": "array"
@@ -31,7 +43,7 @@
           "result": {"enum": ["passed", "failed", "blocked", "not-run"]},
           "working_directory": {"type": "string"}
         },
-        "required": ["executor", "command", "working_directory", "result", "evidence", "artifact_paths"],
+        "required": ["executor", "command", "working_directory", "result", "exit_code", "elapsed", "evidence", "artifact_paths"],
         "type": "object"
       },
       "type": "array"
@@ -40,6 +52,6 @@
     "status": {"enum": ["passed", "failed", "blocked", "reused", "not-applicable"]}
   },
   "required": ["status", "executions", "limitations"],
-  "title": "Review Graph ValidationPayload v1",
+  "title": "Review Graph ValidationPayload v2",
   "type": "object"
 }

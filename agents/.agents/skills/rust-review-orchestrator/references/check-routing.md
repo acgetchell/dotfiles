@@ -28,6 +28,7 @@ Classify effects rather than routing only by extension:
 |---|---|
 | `cfg`, features in source, MSRV compilation, targets, `build.rs`, generated code, proc macros, cross-compilation, `no_std`, WASM, FFI/linking, external consumers | `rust-build-portability` |
 | Manifest dependencies/features, workspace inheritance, lockfile policy, edition/MSRV declaration, lint tables, package metadata, publishing | `rust-cargo-hygiene` |
+| Public concept ownership, module or crate layering, canonical workflow, adapter/wrapper/alias justification, orthogonal capabilities, compatibility | `rust-api-design` |
 | New/changed public item documentation, required Errors/Panics/Safety/Examples sections, intra-doc links, docs.rs rendering | `rust-api-docs` |
 | Prelude, `pub use`, visibility, feature-gated exports, downstream imports | `rust-prelude-exports` |
 | Builder, proposal, transaction, guard, staged workflow, chaining, duplicate fluent surface | `rust-fluent-api-design` |
@@ -56,7 +57,8 @@ Use documented repository commands first. Generic fallbacks are examples, not ma
 | Risk | Focused evidence |
 |---|---|
 | Core Rust behavior | affected package/test target; fallback `cargo test --lib` and focused Clippy |
-| Public API/docs | doctests, `cargo doc` with rustdoc warnings denied, representative downstream consumer |
+| Public API design | established public-API snapshot or diff, representative downstream consumer, compile-pass or focused compile-fail contract evidence |
+| Public API docs | doctests, `cargo doc` with rustdoc warnings denied, representative rendered or downstream documentation consumer |
 | Feature/target/MSRV | affected no-default/all/curated features, declared MSRV, target checks, external consumer |
 | State transition/rollback | focused success/rejection/failure-injection and operation-sequence tests |
 | Error contract | exact variant/field tests and affected public callers |

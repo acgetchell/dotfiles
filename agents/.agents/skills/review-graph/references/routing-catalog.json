@@ -298,6 +298,20 @@
       "semantic_triggers": ["Manifest dependencies, features, workspace inheritance, edition/MSRV, lint tables, metadata, or publishing are material."]
     },
     {
+      "catalog_id": "rust.api-design",
+      "router_id": "rust-review-orchestrator",
+      "rule_id": "rust-public-api-design",
+      "layer": "surface",
+      "surface": "rust",
+      "skill_id": "rust-api-design",
+      "skill_path": "$SKILLS_ROOT/rust-api-design/SKILL.md",
+      "target_kind": "leaf",
+      "default_priority": "supporting-quality",
+      "synthesis_dependency": "rust-synthesis",
+      "path_patterns": ["src/**/*.rs", "Cargo.toml"],
+      "semantic_triggers": ["Public modules, types, traits, functions, constructors, adapters, wrappers, canonical workflows, cross-crate concept ownership, or compatibility are material."]
+    },
+    {
       "catalog_id": "rust.api-docs",
       "router_id": "rust-review-orchestrator",
       "rule_id": "rust-api-documentation",
@@ -631,7 +645,7 @@
       "target_kind": "leaf",
       "default_priority": "supporting-quality",
       "synthesis_dependency": "python-synthesis",
-      "path_patterns": ["tests/**/*.py", "test/**/*.py", "conftest.py", "pyproject.toml"],
+      "path_patterns": ["tests/**/*.py", "test/**/*.py", "scripts/tests/**/*.py", "**/conftest.py", "pyproject.toml"],
       "semantic_triggers": ["Tests, fixtures, pytest configuration, coverage, properties, async/subprocess evidence, or regression durability are material."]
     },
     {
@@ -702,7 +716,13 @@
       "target_kind": "leaf",
       "default_priority": "supporting-quality",
       "synthesis_dependency": "repository-synthesis",
-      "path_patterns": ["Doxyfile*", "doxygen/**", "**/*.h", "**/*.hpp", "docs/**"],
+      "path_patterns": ["Doxyfile*", "doxygen/**", "**/*.h", "**/*.hpp", "**/*.hxx", "**/*.ixx", "**/*.cppm"],
+      "classifier_guarded_path_patterns": [
+        {
+          "classifier_surface": "cpp",
+          "path_patterns": ["docs/**"]
+        }
+      ],
       "semantic_triggers": ["C++ public comments, Doxygen, generated references, headers/modules, caller contracts, or canonical examples are material."]
     },
     {

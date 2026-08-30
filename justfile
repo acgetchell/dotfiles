@@ -9,7 +9,7 @@ python_paths := "agents/.agents/skills scripts"
 dprint_version := "0.56.1"
 just_version := "1.58.0"
 rumdl_version := "0.2.60"
-uv_version := "0.12.5"
+uv_version := "0.12.6"
 zizmor_version := "1.29.0"
 
 _ensure-actionlint:

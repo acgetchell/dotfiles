@@ -100,6 +100,19 @@
       "additionalProperties": false,
       "properties": {
         "artifact_digest": {"pattern": "^sha256:[0-9a-f]{64}$", "type": ["string", "null"]},
+        "artifact_digest_mode": {
+          "enum": [
+            "bounded-directory-metadata-v1",
+            "bounded-directory-metadata-v2",
+            "bounded-directory-metadata-v3",
+            "content-sha256-v1",
+            "recursive-content-sha256-v1",
+            "recursive-content-sha256-v2",
+            "special-metadata-v1",
+            "symlink-target-v1",
+            null
+          ]
+        },
         "artifact_id": {"type": ["string", "null"]},
         "kind": {"enum": ["build", "cache", "coverage", "log", "report", "test-result", "other"]},
         "path": {"type": "string"},
@@ -244,7 +257,7 @@
         "elapsed_time_budget": {"type": "string"},
         "environment": {"type": "string"},
         "evidence_id": {"type": ["string", "null"]},
-        "execution_strategy": {"type": "string"},
+        "execution_strategy": {"enum": ["sequential", "parallel-independent"]},
         "expected_evidence": {"type": "string"},
         "expected_workspace_effects": {"$ref": "#/$defs/stringArray"},
         "features": {"$ref": "#/$defs/stringArray"},

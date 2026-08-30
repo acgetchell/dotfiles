@@ -4,6 +4,7 @@ import argparse
 import fnmatch
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -44,10 +45,10 @@ _CONTEXT_KEYS = frozenset(
 
 DEFAULT_TOTAL_FRESH_WORKER_BUDGET = 24
 DEFAULT_RECOVERY_FINALIZATION_RESERVE = 1
-EVIDENCE_SCHEMA_VERSION = 1
+EVIDENCE_SCHEMA_VERSION = 2
 REPOSITORY_ROUTER_ID = "review-graph"
 FINAL_SYNTHESIS_IDENTITY = ("repository-synthesis", "repository-production-review", "synthesis")
-NATIVE_EVIDENCE_BLOCK_OPEN = "<!-- review-graph-evidence-v1\n"
+NATIVE_EVIDENCE_BLOCK_OPEN = "<!-- review-graph-evidence-v2\n"
 NATIVE_EVIDENCE_BLOCK_CLOSE = "\n-->"
 MAX_NATIVE_RESULT_BYTES = 1_048_576
 MAX_NATIVE_EVIDENCE_BLOCK_BYTES = 65_536
@@ -55,6 +56,18 @@ MAX_NATIVE_SECTION_BYTES = 65_536
 MAX_NATIVE_IDENTIFIER_LENGTH = 4_096
 MAX_NATIVE_IDENTIFIER_COUNT = 1_024
 _SHA256_DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}")
+VALIDATION_ARTIFACT_DIGEST_MODES = frozenset(
+    {
+        "bounded-directory-metadata-v1",
+        "bounded-directory-metadata-v2",
+        "bounded-directory-metadata-v3",
+        "content-sha256-v1",
+        "recursive-content-sha256-v1",
+        "recursive-content-sha256-v2",
+        "special-metadata-v1",
+        "symlink-target-v1",
+    }
+)
 _REVIEW_RESULT_SECTIONS = (
     "## Skill Loading",
     "## State Verification",
@@ -124,6 +137,7 @@ ROUTING_DISPOSITIONS = frozenset({"selected", "not-applicable", "exact-evidence-
 COMPLETION_BLOCKING_DISPOSITIONS = frozenset({"budget-deferred", "capability-blocked", "failed"})
 ROUTING_TARGET_KINDS = frozenset({"router", "leaf", "synthesis", "independent"})
 ROUTING_LAYERS = frozenset({"repository", "surface", "finalization"})
+_CLASSIFIER_SURFACES = ("tooling", "cpp", "rust", "python", "documentation")
 DEFAULT_SKILL_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ROUTING_CATALOG = Path(__file__).resolve().parents[1] / "references" / "routing-catalog.json"
 _FRONTMATTER_NAME = re.compile(r"^name:\s*[\"']?([^\"'\s]+)[\"']?\s*$")
@@ -220,6 +234,7 @@ class RoutingCatalogEntry:
     synthesis_dependency: str | None
     required_static_references: tuple[str, ...] = ()
     path_patterns: tuple[str, ...] = ()
+    classifier_guarded_path_patterns: tuple[tuple[str, tuple[str, ...]], ...] = ()
     semantic_triggers: tuple[str, ...] = ()
 
 
@@ -348,6 +363,7 @@ class ValidationArtifact:
     status_source: str
     artifact_id: str | None = None
     artifact_digest: str | None = None
+    artifact_digest_mode: str | None = None
     status_rule: str | None = None
 
 
@@ -710,10 +726,15 @@ class RepositoryReviewProofExpectation:
         if set(validation_units) != planned_validator_ids:
             msg = "repository review proof expectation validation nodes do not match exact coalesced units"
             raise ValueError(msg)
-        final_synthesis_nodes = tuple(node for node in self.plan.actual_worker_nodes if (node.node_id, node.skill_id, node.mode) == FINAL_SYNTHESIS_IDENTITY)
+        final_synthesis_nodes = tuple(
+            node
+            for node in self.plan.actual_worker_nodes
+            if node.skill_id == FINAL_SYNTHESIS_IDENTITY[1] and node.mode == FINAL_SYNTHESIS_IDENTITY[2] and node.node_id in self.plan.synthesis_nodes
+        )
         if len(final_synthesis_nodes) != 1:
             msg = "repository review proof expectation requires exactly one planner-derived repository synthesis node"
             raise ValueError(msg)
+        final_synthesis_identity = (final_synthesis_nodes[0].node_id, final_synthesis_nodes[0].skill_id, final_synthesis_nodes[0].mode)
         reused_mapping = self.plan.exact_reused_review_evidence
         reused_identities = self.plan.reused_review_identities
         if any(not _nonempty_text(requirement_id) or not _nonempty_text(evidence_id) for requirement_id, evidence_id in reused_mapping):
@@ -813,7 +834,7 @@ class RepositoryReviewProofExpectation:
                 for node in self.plan.actual_worker_nodes
             ),
         )
-        object.__setattr__(self, "final_synthesis_identity", FINAL_SYNTHESIS_IDENTITY)
+        object.__setattr__(self, "final_synthesis_identity", final_synthesis_identity)
 
 
 @dataclass(frozen=True)
@@ -1090,6 +1111,24 @@ def load_routing_catalog(path: Path, *, skill_roots: Sequence[Path] = (DEFAULT_S
             raise TypeError(msg)
         skill_id = str(raw["skill_id"])
         skill_path = _resolve_checked_skill_path(str(raw["skill_path"]), skill_id, skill_roots)
+        raw_guarded_patterns = raw.get("classifier_guarded_path_patterns", [])
+        if not isinstance(raw_guarded_patterns, list) or any(not isinstance(item, Mapping) for item in raw_guarded_patterns):
+            msg = "classifier_guarded_path_patterns must be an array of classifier-surface/path-pattern objects"
+            raise TypeError(msg)
+        guarded_patterns: list[tuple[str, tuple[str, ...]]] = []
+        for item in raw_guarded_patterns:
+            classifier_surface = item.get("classifier_surface")
+            path_patterns = item.get("path_patterns")
+            if (
+                not isinstance(classifier_surface, str)
+                or classifier_surface not in _CLASSIFIER_SURFACES
+                or not isinstance(path_patterns, list)
+                or not path_patterns
+                or any(not isinstance(pattern, str) or not pattern for pattern in path_patterns)
+            ):
+                msg = "classifier-guarded catalog patterns require a known classifier_surface and non-empty path_patterns"
+                raise ValueError(msg)
+            guarded_patterns.append((classifier_surface, tuple(path_patterns)))
         entry = RoutingCatalogEntry(
             catalog_id=str(raw["catalog_id"]),
             router_id=str(raw["router_id"]),
@@ -1103,6 +1142,7 @@ def load_routing_catalog(path: Path, *, skill_roots: Sequence[Path] = (DEFAULT_S
             synthesis_dependency=(str(raw["synthesis_dependency"]) if raw.get("synthesis_dependency") is not None else None),
             required_static_references=tuple(str(_resolve_skill_root_path(str(item), skill_roots)) for item in raw.get("required_static_references", [])),
             path_patterns=tuple(str(item) for item in raw.get("path_patterns", [])),
+            classifier_guarded_path_patterns=tuple(guarded_patterns),
             semantic_triggers=tuple(str(item) for item in raw.get("semantic_triggers", [])),
         )
         if entry.layer not in ROUTING_LAYERS:
@@ -1148,7 +1188,7 @@ def _decision_matches_entry(decision: RoutingDecision, entry: RoutingCatalogEntr
     if decision.disposition in {"selected", "exact-evidence-reused"} and missing_references:
         blockers.append(f"{decision.catalog_id} omitted required static references: {', '.join(missing_references)}")
     expected_synthesis = entry.synthesis_dependency
-    if decision.disposition == "selected" and expected_synthesis is not None and decision.synthesis_dependency != expected_synthesis:
+    if decision.disposition in {"selected", "exact-evidence-reused"} and expected_synthesis is not None and decision.synthesis_dependency != expected_synthesis:
         blockers.append(f"{decision.catalog_id} must depend on synthesis {expected_synthesis}")
     if decision.priority is not None:
         _priority_rank(decision.priority)
@@ -1284,7 +1324,7 @@ def review_requirements_from_routing(catalog: Sequence[RoutingCatalogEntry], dec
 
 
 def independent_nodes_from_routing(
-    catalog: Sequence[RoutingCatalogEntry], decisions: Sequence[RoutingDecision], *, change_target: str
+    catalog: Sequence[RoutingCatalogEntry], decisions: Sequence[RoutingDecision], *, change_target: str, reserved_node_ids: Sequence[str] = ()
 ) -> tuple[WorkerNode, ...]:
     """Create executable selected independent-review nodes without treating them as audits."""
     entries = {entry.catalog_id: entry for entry in catalog}
@@ -1299,27 +1339,32 @@ def independent_nodes_from_routing(
     if selected and (not _nonempty_text(change_target) or len(change_target) > MAX_NATIVE_IDENTIFIER_LENGTH):
         msg = "selected independent review requires one bounded non-empty change target"
         raise ValueError(msg)
-    return tuple(
-        WorkerNode(
-            node_id=f"independent-{ordinal:03d}",
-            skill_id=decision.skill_id,
-            skill_path=decision.skill_path,
-            mode="independent-review",
-            priority=decision.priority or entries[decision.catalog_id].default_priority,
-            required=True,
-            requirement_ids=(decision.requirement_id,),
-            coverage=decision.review_surface,
-            synthesis_dependency=decision.synthesis_dependency,
-            router_ids=(decision.router_id,),
-            rule_ids=(decision.rule_id,),
-            selection_reasons=(decision.reason,),
-            owners=decision.owners,
-            instruction_paths=decision.instruction_paths,
-            static_references=decision.static_references,
-            change_target=change_target,
+    nodes: list[WorkerNode] = []
+    allocated = set(reserved_node_ids)
+    for ordinal, decision in enumerate(selected, start=1):
+        node_id = _allocate_node_id("independent", ordinal, allocated)
+        allocated.add(node_id)
+        nodes.append(
+            WorkerNode(
+                node_id=node_id,
+                skill_id=decision.skill_id,
+                skill_path=decision.skill_path,
+                mode="independent-review",
+                priority=decision.priority or entries[decision.catalog_id].default_priority,
+                required=True,
+                requirement_ids=(decision.requirement_id,),
+                coverage=decision.review_surface,
+                synthesis_dependency=decision.synthesis_dependency,
+                router_ids=(decision.router_id,),
+                rule_ids=(decision.rule_id,),
+                selection_reasons=(decision.reason,),
+                owners=decision.owners,
+                instruction_paths=decision.instruction_paths,
+                static_references=decision.static_references,
+                change_target=change_target,
+            )
         )
-        for ordinal, decision in enumerate(selected, start=1)
-    )
+    return tuple(nodes)
 
 
 def assess_routing_discoveries(decisions: Sequence[RoutingDecision], discoveries: Sequence[RoutingDiscovery]) -> Assessment:
@@ -1339,7 +1384,7 @@ def assess_routing_discoveries(decisions: Sequence[RoutingDecision], discoveries
 def classify_repository_paths(paths: Sequence[str], *, release_readiness: bool = False) -> dict[str, tuple[str, ...]]:  # noqa: C901
     """Return conservative repository-surface signals, including shared owners."""
     normalized = tuple(str(PurePosixPath(path)) for path in paths)
-    signals: dict[str, set[str]] = {surface: set() for surface in ("tooling", "cpp", "rust", "python", "documentation")}
+    signals: dict[str, set[str]] = {surface: set() for surface in _CLASSIFIER_SURFACES}
 
     def add(surface: str, path: str, reason: str) -> None:
         signals[surface].add(f"{path}: {reason}")
@@ -1439,10 +1484,12 @@ def expand_compact_routing(  # noqa: C901, PLR0912, PLR0913, PLR0915
     decisions: list[RoutingDecision] = []
     for entry in active_entries:
         override = overrides_by_id.get(entry.catalog_id)
+        matched_paths = _catalog_matched_paths(entry, normalized_paths, signals)
         selected_by_classifier = entry.router_id == REPOSITORY_ROUTER_ID and entry.layer == "repository" and entry.surface in signals
+        selected_by_projection = entry.target_kind == "leaf" and bool(matched_paths)
         selected_independent = entry.target_kind == "independent" and bool(change_target)
         selected_synthesis = entry.target_kind == "synthesis"
-        default_selected = selected_by_classifier or selected_independent or selected_synthesis
+        default_selected = selected_by_classifier or selected_by_projection or selected_independent or selected_synthesis
         disposition = str(override.get("disposition")) if override is not None else ("selected" if default_selected else "not-applicable")
 
         if override is not None:
@@ -1451,6 +1498,9 @@ def expand_compact_routing(  # noqa: C901, PLR0912, PLR0913, PLR0915
         elif selected_by_classifier:
             reason = f"deterministic repository classifier selected the {entry.surface} surface"
             applicability_evidence = signals[entry.surface]
+        elif selected_by_projection:
+            reason = f"routing projection matched the {entry.catalog_id} review surface"
+            applicability_evidence = tuple(f"matched path: {path}" for path in matched_paths)
         elif selected_independent:
             reason = "captured scope has a concrete change target requiring independent review"
             applicability_evidence = (change_target or "concrete change target",)
@@ -1466,7 +1516,9 @@ def expand_compact_routing(  # noqa: C901, PLR0912, PLR0913, PLR0915
             raise ValueError(msg)
 
         default_surface: tuple[str, ...] = ()
-        if selected_by_classifier and entry.target_kind == "leaf":
+        if selected_by_projection:
+            default_surface = matched_paths
+        elif selected_by_classifier and entry.target_kind == "leaf":
             default_surface = signal_paths.get(entry.surface, ())
         elif selected_independent:
             default_surface = normalized_paths
@@ -1497,7 +1549,7 @@ def expand_compact_routing(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 instruction_paths=entry_instruction_paths if disposition in {"selected", "exact-evidence-reused"} else (),
                 static_references=static_references if disposition in {"selected", "exact-evidence-reused"} else (),
                 validation_requirement_ids=validation_requirement_ids,
-                synthesis_dependency=entry.synthesis_dependency if disposition == "selected" else None,
+                synthesis_dependency=entry.synthesis_dependency if disposition in {"selected", "exact-evidence-reused"} else None,
                 priority=entry.default_priority,
                 owners=owners if disposition in {"selected", "exact-evidence-reused"} and entry.target_kind in {"leaf", "independent"} else (),
                 evidence_id=evidence_id,
@@ -1526,6 +1578,15 @@ def _catalog_path_matches(path: str, pattern: str) -> bool:
     return any(fnmatch.fnmatch(path, candidate) for candidate in variants)
 
 
+def _catalog_matched_paths(entry: RoutingCatalogEntry, normalized_paths: Sequence[str], classifier_signals: Mapping[str, Sequence[str]]) -> tuple[str, ...]:
+    """Match unconditional paths plus paths guarded by a repository-surface signal."""
+    active_patterns = [*entry.path_patterns]
+    for classifier_surface, patterns in entry.classifier_guarded_path_patterns:
+        if classifier_surface in classifier_signals:
+            active_patterns.extend(patterns)
+    return tuple(path for path in normalized_paths if any(_catalog_path_matches(path, pattern) for pattern in active_patterns))
+
+
 def build_routing_projection(catalog: Sequence[RoutingCatalogEntry], *, consulted_routers: Sequence[str], captured_paths: Sequence[str]) -> dict[str, Any]:
     """Project the complete consulted catalog into a compact semantic routing view."""
     consulted = tuple(dict.fromkeys(consulted_routers))
@@ -1538,11 +1599,12 @@ def build_routing_projection(catalog: Sequence[RoutingCatalogEntry], *, consulte
         msg = "routing projection references unknown routers: " + ", ".join(unknown)
         raise ValueError(msg)
     normalized_paths = _normalized_repository_paths(captured_paths, label="routing projection captured_paths")
+    classifier_signals = classify_repository_paths(normalized_paths)
     entries: list[dict[str, Any]] = []
     for entry in catalog:
         if entry.router_id not in consulted:
             continue
-        matched_paths = tuple(path for path in normalized_paths if any(_catalog_path_matches(path, pattern) for pattern in entry.path_patterns))
+        matched_paths = _catalog_matched_paths(entry, normalized_paths, classifier_signals)
         entries.append(
             {
                 "catalog_id": entry.catalog_id,
@@ -1553,7 +1615,7 @@ def build_routing_projection(catalog: Sequence[RoutingCatalogEntry], *, consulte
         )
     projection: dict[str, Any] = {
         "captured_paths": list(normalized_paths),
-        "classifier_signals": {key: list(value) for key, value in classify_repository_paths(normalized_paths).items()},
+        "classifier_signals": {key: list(value) for key, value in classifier_signals.items()},
         "consulted_routers": list(consulted),
         "entries": entries,
         "schema_version": 1,
@@ -1583,8 +1645,46 @@ def assess_repository_classifier_floor(
     return Assessment(not blockers, tuple(blockers))
 
 
-def coalesce_review_requirements(requirements: Sequence[ReviewRequirement]) -> tuple[tuple[WorkerNode, ...], tuple[tuple[str, str], ...]]:
-    """Coalesce identical leaf dispatches without merging distinct scopes."""
+def _reserved_node_ids(evidence_ids: Iterable[str]) -> frozenset[str]:
+    reserved: set[str] = set()
+    for evidence_id in evidence_ids:
+        for prefix in ("review:", "validation:", "artifact://"):
+            if evidence_id.startswith(prefix) and evidence_id != prefix:
+                reserved.add(evidence_id.removeprefix(prefix))
+    return frozenset(reserved)
+
+
+def _allocate_node_id(prefix: str, ordinal: int, reserved: set[str] | frozenset[str]) -> str:
+    candidate = max(1, ordinal)
+    while f"{prefix}-{candidate:03d}" in reserved:
+        candidate += 1
+    return f"{prefix}-{candidate:03d}"
+
+
+def _expected_planned_evidence_id(node: WorkerNode) -> str:
+    return f"{'validation' if node.mode == 'validation' else 'review'}:{node.node_id}"
+
+
+def _synthesis_reused_evidence_ids(plan: GraphPlan, node_id: str) -> tuple[str, ...]:
+    """Return planner-routed exact reuse required by one synthesis node."""
+    node = next((candidate for candidate in plan.actual_worker_nodes if candidate.node_id == node_id), None)
+    if node is None or node.mode != "synthesis":
+        return ()
+    mapping = dict(plan.exact_reused_review_evidence)
+    if (node.skill_id, node.mode) == FINAL_SYNTHESIS_IDENTITY[1:]:
+        return tuple(evidence_id for _requirement_id, evidence_id in plan.exact_reused_review_evidence)
+    routed_requirement_ids = {
+        decision.requirement_id
+        for decision in plan.routing_decisions
+        if decision.disposition == "exact-evidence-reused" and decision.synthesis_dependency == node.node_id
+    }
+    return tuple(mapping[requirement_id] for requirement_id in mapping if requirement_id in routed_requirement_ids)
+
+
+def coalesce_review_requirements(
+    requirements: Sequence[ReviewRequirement], *, reserved_node_ids: Sequence[str] = ()
+) -> tuple[tuple[WorkerNode, ...], tuple[tuple[str, str], ...]]:
+    """Coalesce identical semantic work while retaining every catalog owner."""
     _validate_unique_ids((item.requirement_id for item in requirements), label="review requirement")
     groups: dict[tuple[object, ...], list[ReviewRequirement]] = {}
     for item in requirements:
@@ -1600,19 +1700,20 @@ def coalesce_review_requirements(requirements: Sequence[ReviewRequirement]) -> t
             tuple(sorted(item.review_surface)),
             tuple(sorted(item.instruction_paths)),
             tuple(sorted(item.static_references)),
-            item.synthesis_dependency,
-            tuple(sorted(item.owners)),
         )
         groups.setdefault(key, []).append(item)
 
     nodes: list[WorkerNode] = []
     mappings: list[tuple[str, str]] = []
+    allocated = set(reserved_node_ids)
     for ordinal, key in enumerate(sorted(groups, key=repr), start=1):
         members = sorted(groups[key], key=lambda item: item.requirement_id)
-        node_id = f"audit-{ordinal:03d}"
+        node_id = _allocate_node_id("audit", ordinal, allocated)
+        allocated.add(node_id)
         priority = min((item.priority for item in members), key=_priority_rank)
         requirement_ids = tuple(item.requirement_id for item in members)
         coverage = tuple(sorted({path for item in members for path in item.review_surface}))
+        synthesis_dependencies = {item.synthesis_dependency for item in members}
         nodes.append(
             WorkerNode(
                 node_id=node_id,
@@ -1623,7 +1724,7 @@ def coalesce_review_requirements(requirements: Sequence[ReviewRequirement]) -> t
                 required=True,
                 requirement_ids=requirement_ids,
                 coverage=coverage,
-                synthesis_dependency=members[0].synthesis_dependency,
+                synthesis_dependency=members[0].synthesis_dependency if len(synthesis_dependencies) == 1 else None,
                 router_ids=tuple(sorted({item.router_id for item in members})),
                 rule_ids=tuple(sorted({item.rule_id for item in members})),
                 selection_reasons=tuple(sorted({item.reason for item in members})),
@@ -1687,7 +1788,9 @@ def _validate_validation_isolation(item: ValidationRequirement) -> None:
         raise ValueError(msg)
 
 
-def coalesce_validation_requirements(requirements: Sequence[ValidationRequirement]) -> tuple[tuple[ValidationUnit, ...], tuple[ValidationEvidenceMapping, ...]]:
+def coalesce_validation_requirements(
+    requirements: Sequence[ValidationRequirement], *, reserved_node_ids: Sequence[str] = ()
+) -> tuple[tuple[ValidationUnit, ...], tuple[ValidationEvidenceMapping, ...]]:
     """Group exactly compatible validator needs and retain complete reuse maps."""
     _validate_unique_ids((item.requirement_id for item in requirements), label="validation requirement")
     groups: dict[tuple[object, ...], list[ValidationRequirement]] = {}
@@ -1735,6 +1838,8 @@ def coalesce_validation_requirements(requirements: Sequence[ValidationRequiremen
                 or artifact.status_source not in {"isolated-output-directory", "repository-rule"}
                 or (artifact.artifact_id is not None and (not _nonempty_text(artifact.artifact_id) or len(artifact.artifact_id) > MAX_NATIVE_IDENTIFIER_LENGTH))
                 or (artifact.artifact_digest is not None and _SHA256_DIGEST_RE.fullmatch(artifact.artifact_digest) is None)
+                or (artifact.artifact_digest_mode is not None and artifact.artifact_digest_mode not in VALIDATION_ARTIFACT_DIGEST_MODES)
+                or ((artifact.artifact_digest is None) != (artifact.artifact_digest_mode is None))
                 for artifact in item.allowed_artifacts
             )
         ):
@@ -1744,10 +1849,12 @@ def coalesce_validation_requirements(requirements: Sequence[ValidationRequiremen
 
     units: list[ValidationUnit] = []
     mappings: list[ValidationEvidenceMapping] = []
+    allocated = set(reserved_node_ids)
     for ordinal, key in enumerate(sorted(groups, key=repr), start=1):
         members = sorted(groups[key], key=lambda item: item.requirement_id)
         first = members[0]
-        node_id = f"validation-{ordinal:03d}"
+        node_id = _allocate_node_id("validation", ordinal, allocated)
+        allocated.add(node_id)
         unit = ValidationUnit(
             node_id=node_id,
             requirement_ids=tuple(item.requirement_id for item in members),
@@ -1854,12 +1961,16 @@ def _synthesis_nodes(
         if node.mode != "synthesis":
             msg = f"declared synthesis node {node.node_id} has mode {node.mode}"
             raise ValueError(msg)
-        routed_audits = tuple(audit.node_id for audit in audit_nodes if audit.synthesis_dependency == node.node_id)
+        routed_audits = tuple(
+            audit.node_id
+            for audit in audit_nodes
+            if any(review_by_id[requirement_id].synthesis_dependency == node.node_id for requirement_id in audit.requirement_ids)
+        )
         routed_validators = tuple(
             dict.fromkeys(
                 validation_node_by_requirement[validation_requirement_id]
                 for audit in audit_nodes
-                if audit.synthesis_dependency == node.node_id
+                if any(review_by_id[requirement_id].synthesis_dependency == node.node_id for requirement_id in audit.requirement_ids)
                 for review_requirement_id in audit.requirement_ids
                 for validation_requirement_id in review_by_id[review_requirement_id].validation_requirement_ids
             )
@@ -1870,11 +1981,7 @@ def _synthesis_nodes(
             if (node.node_id, node.skill_id, node.mode) == FINAL_SYNTHESIS_IDENTITY
             else ()
         )
-        required_validators = (
-            tuple(unit.node_id for unit in validation_units if unit.required or unit.baseline)
-            if (node.node_id, node.skill_id, node.mode) == FINAL_SYNTHESIS_IDENTITY
-            else ()
-        )
+        required_validators = tuple(unit.node_id for unit in validation_units if unit.required or unit.baseline)
         result.append(
             replace(
                 node,
@@ -2023,8 +2130,10 @@ def plan_graph(  # noqa: C901, PLR0913, PLR0915
         normalized_line_bounds[normalized_path] = bound
     captured_path_line_bounds = tuple(sorted(normalized_line_bounds.items()))
 
-    audit_nodes, requirement_to_node = coalesce_review_requirements(review_requirements)
-    validation_units, evidence_mapping = coalesce_validation_requirements(validation_requirements)
+    reused_evidence_ids = tuple(evidence_id for _requirement_id, evidence_id in (routing_assessment.exact_reused_review_evidence if routing_assessment else ()))
+    reserved_node_ids = _reserved_node_ids(reused_evidence_ids)
+    audit_nodes, requirement_to_node = coalesce_review_requirements(review_requirements, reserved_node_ids=tuple(reserved_node_ids))
+    validation_units, evidence_mapping = coalesce_validation_requirements(validation_requirements, reserved_node_ids=tuple(reserved_node_ids))
     if not any(unit.baseline for unit in validation_units):
         msg = "bounded review graphs require at least one baseline validation unit"
         raise ValueError(msg)
@@ -2075,6 +2184,11 @@ def plan_graph(  # noqa: C901, PLR0913, PLR0915
             *_synthesis_nodes(synthesis_nodes, audit_nodes, review_requirements, validation_units, normalized_additional_nodes),
         )
     )
+    executable_evidence_ids = {_expected_planned_evidence_id(node) for node in all_nodes}
+    evidence_overlap = tuple(sorted(executable_evidence_ids & set(reused_evidence_ids)))
+    if evidence_overlap:
+        msg = "exactly reused evidence identities overlap executable nodes: " + ", ".join(evidence_overlap)
+        raise ValueError(msg)
     _validate_plan_edges(all_nodes)
     scheduled = _schedule_nodes(all_nodes)
     epochs = _partition_execution_epochs(scheduled, budget) if execution_profile in {"isolated", "isolated-only", "mixed"} else ()
@@ -2415,6 +2529,8 @@ def _native_fingerprint_proof_blockers(body: str, fingerprints: FingerprintEvide
 
 
 def _independent_finding_location_matches_dispatch(location: str, planned_paths: Sequence[str], planned_path_line_bounds: Sequence[tuple[str, int]]) -> bool:
+    if len(location) >= 2 and location.startswith("`") and location.endswith("`"):
+        location = location[1:-1]
     if len(location) > MAX_NATIVE_IDENTIFIER_LENGTH:
         return False
     line_bounds = dict(planned_path_line_bounds)
@@ -2478,7 +2594,7 @@ def _ordinary_finding_blockers(body: str, evidence: ReviewEvidence) -> tuple[str
 def _native_repository_path_list(value: str, *, label: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
     if value == "none":
         return (), ()
-    raw_paths = tuple(value.split(", "))
+    raw_paths = tuple(item[1:-1] if len(item) >= 2 and item.startswith("`") and item.endswith("`") else item for item in value.split(", "))
     try:
         paths = _normalized_repository_paths(raw_paths, label=label)
     except ValueError:
@@ -2624,15 +2740,22 @@ def _ordinary_review_native_blockers(  # noqa: C901, PLR0912
     return tuple(blockers)
 
 
-def _independent_review_native_blockers(  # noqa: C901, PLR0912
+def _independent_review_native_blockers(  # noqa: C901, PLR0912, PLR0915
     sections: Mapping[str, str], expectation: ReviewEvidenceExpectation, evidence: ReviewEvidence
 ) -> tuple[str, ...]:
     blockers: list[str] = []
     scope = sections["## Scope Inspected"]
-    blockers.extend(_native_nonempty_section_blockers(scope, section="Scope Inspected"))
     planned_paths = ", ".join(expectation.planned_paths)
+    blockers.extend(_native_nonempty_section_blockers(scope, section="Scope Inspected"))
     blockers.extend(_native_values_blockers(scope, section="Scope Inspected", label="Change target", expected=(expectation.change_target or "",)))
-    blockers.extend(_native_values_blockers(scope, section="Scope Inspected", label="Files", expected=(planned_paths,)))
+    file_values = _native_field_values(scope, "Files")
+    if len(file_values) != 1:
+        blockers.append("native result Scope Inspected requires exactly one Files value")
+    else:
+        inspected_paths, file_blockers = _native_repository_path_list(file_values[0], label="native result Scope Inspected Files")
+        blockers.extend(file_blockers)
+        if not file_blockers and inspected_paths != expectation.planned_paths:
+            blockers.append("native result Scope Inspected Files values do not match its evidence envelope")
     findings = sections["## Findings"]
     if evidence.status == "completed":
         blockers.extend(_independent_finding_blockers(findings, expectation, evidence))
@@ -2779,15 +2902,21 @@ def _validation_artifact_blockers(  # noqa: C901
     reported: list[ValidationArtifact] = []
     for (path, record_body), approved in zip(records, expected, strict=False):
         fields, field_blockers = _native_record_fields(
-            record_body, section=f"Artifact {path}", labels=("Artifact ID", "Artifact digest", "Kind", "Repository status", "Status source", "Status rule")
+            record_body,
+            section=f"Artifact {path}",
+            labels=("Artifact ID", "Artifact digest", "Artifact digest mode", "Kind", "Repository status", "Status source", "Status rule"),
         )
         blockers.extend(field_blockers)
         artifact_id = fields.get("Artifact ID")
         artifact_id = None if artifact_id == "none" else artifact_id
         artifact_digest = fields.get("Artifact digest")
         artifact_digest = None if artifact_digest == "none" else artifact_digest
+        artifact_digest_mode = fields.get("Artifact digest mode")
+        artifact_digest_mode = None if artifact_digest_mode == "none" else artifact_digest_mode
         if artifact_digest is None or _SHA256_DIGEST_RE.fullmatch(artifact_digest) is None:
-            blockers.append(f"native validation result artifact {path} requires a lowercase SHA-256 content digest")
+            blockers.append(f"native validation result artifact {path} requires a lowercase SHA-256 digest")
+        if artifact_digest_mode not in VALIDATION_ARTIFACT_DIGEST_MODES:
+            blockers.append(f"native validation result artifact {path} requires a recognized digest mode")
         if artifact_id is not None and (not _nonempty_text(artifact_id) or len(artifact_id) > MAX_NATIVE_IDENTIFIER_LENGTH):
             blockers.append(f"native validation result artifact {path} has an invalid artifact ID")
         if fields.get("Kind") != approved.kind or fields.get("Repository status") != approved.repository_status:
@@ -2796,8 +2925,8 @@ def _validation_artifact_blockers(  # noqa: C901
             blockers.append(f"native validation result artifact {path} does not match its verified repository-status provenance")
         if approved.artifact_id is not None and artifact_id != approved.artifact_id:
             blockers.append(f"native validation result artifact {path} does not match its approved artifact ID")
-        if approved.artifact_digest is not None and artifact_digest != approved.artifact_digest:
-            blockers.append(f"native validation result artifact {path} does not match its approved content digest")
+        if approved.artifact_digest is not None and (artifact_digest, artifact_digest_mode) != (approved.artifact_digest, approved.artifact_digest_mode):
+            blockers.append(f"native validation result artifact {path} does not match its approved digest and mode")
         reported.append(
             ValidationArtifact(
                 path=path,
@@ -2805,6 +2934,7 @@ def _validation_artifact_blockers(  # noqa: C901
                 repository_status=fields.get("Repository status", ""),
                 artifact_id=artifact_id,
                 artifact_digest=artifact_digest,
+                artifact_digest_mode=artifact_digest_mode,
                 status_source=fields.get("Status source", ""),
                 status_rule=None if fields.get("Status rule") == "none" else fields.get("Status rule"),
             )
@@ -2824,7 +2954,7 @@ def _validation_execution_artifact_reference_blockers(value: str | None, artifac
         raw_references = json.loads(value)
     except json.JSONDecodeError:
         return (f"native validation result Execution {execution_id} artifact references are not valid JSON",)
-    expected_keys = {"artifact_digest", "artifact_id", "path"}
+    expected_keys = {"artifact_digest", "artifact_digest_mode", "artifact_id", "path"}
     if (
         not isinstance(raw_references, list)
         or not raw_references
@@ -2838,18 +2968,24 @@ def _validation_execution_artifact_reference_blockers(value: str | None, artifac
         path = reference["path"]
         artifact_id = reference["artifact_id"]
         artifact_digest = reference["artifact_digest"]
+        artifact_digest_mode = reference["artifact_digest_mode"]
         if (
             not isinstance(path, str)
             or not _nonempty_text(path)
             or (artifact_id is not None and not isinstance(artifact_id, str))
             or not isinstance(artifact_digest, str)
             or _SHA256_DIGEST_RE.fullmatch(artifact_digest) is None
+            or artifact_digest_mode not in VALIDATION_ARTIFACT_DIGEST_MODES
         ):
             blockers.append(f"native validation result Execution {execution_id} has a malformed artifact reference")
             continue
         paths.append(path)
         approved = approved_by_path.get(path)
-        if approved is None or (artifact_id, artifact_digest) != (approved.artifact_id, approved.artifact_digest):
+        if approved is None or (artifact_id, artifact_digest, artifact_digest_mode) != (
+            approved.artifact_id,
+            approved.artifact_digest,
+            approved.artifact_digest_mode,
+        ):
             blockers.append(f"native validation result Execution {execution_id} artifact reference does not match a reported artifact identity")
     if _duplicate_values(paths):
         blockers.append(f"native validation result Execution {execution_id} artifact references must be unique")
@@ -3963,11 +4099,7 @@ def _planned_node_bundle_blockers(  # noqa: C901, PLR0912, PLR0915
             dict.fromkeys(
                 (
                     *(evidence_by_node[predecessor] for predecessor in node.predecessors if predecessor in evidence_by_node),
-                    *(
-                        (evidence_id for _, evidence_id in expectation.exact_reused_review_evidence)
-                        if node.node_id == expectation.final_synthesis_identity[0]
-                        else ()
-                    ),
+                    *_synthesis_reused_evidence_ids(expectation.plan, node.node_id),
                 )
             )
         )
@@ -4869,7 +5001,11 @@ def _verified_artifact_status(  # noqa: C901, PLR0912, PLR0915
     result: subprocess.CompletedProcess[str] | None = None
     for probe in (relative, relative.rstrip("/") + "/.review-graph-generated-descendant"):
         current = subprocess.run(  # noqa: S603 - resolved Git executable and fixed arguments only.
-            [git, "-C", str(repository_root), "check-ignore", "--no-index", "-v", "--", probe], capture_output=True, check=False, text=True, timeout=30
+            [git, "-c", f"core.excludesFile={os.devnull}", "-C", str(repository_root), "check-ignore", "--no-index", "-v", "--", probe],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=30,
         )
         if current.returncode == 0 and current.stdout.strip():
             result = current
@@ -4904,7 +5040,7 @@ def _verified_artifact_status(  # noqa: C901, PLR0912, PLR0915
 def _allowed_artifacts_field(item: Mapping[str, Any], repository_root: Path | None, isolation_root: str | None) -> tuple[ValidationArtifact, ...]:
     value = item.get("allowed_artifacts", [])
     required_keys = {"kind", "path", "repository_status"}
-    optional_keys = {"artifact_digest", "artifact_id"}
+    optional_keys = {"artifact_digest", "artifact_digest_mode", "artifact_id"}
     if not isinstance(value, list) or any(
         not isinstance(entry, Mapping) or not required_keys.issubset(entry) or not set(entry).issubset(required_keys | optional_keys) for entry in value
     ):
@@ -4918,8 +5054,14 @@ def _allowed_artifacts_field(item: Mapping[str, Any], repository_root: Path | No
             raise ValueError(msg)
         artifact_id = entry.get("artifact_id")
         artifact_digest = entry.get("artifact_digest")
-        if (artifact_id is not None and not isinstance(artifact_id, str)) or (artifact_digest is not None and not isinstance(artifact_digest, str)):
-            msg = "allowed_artifacts artifact_id and artifact_digest must be strings or null"
+        artifact_digest_mode = entry.get("artifact_digest_mode", "content-sha256-v1" if artifact_digest is not None else None)
+        if (
+            (artifact_id is not None and not isinstance(artifact_id, str))
+            or (artifact_digest is not None and not isinstance(artifact_digest, str))
+            or (artifact_digest_mode is not None and not isinstance(artifact_digest_mode, str))
+            or ((artifact_digest is None) != (artifact_digest_mode is None))
+        ):
+            msg = "allowed_artifacts artifact identity requires paired string digest and digest mode values"
             raise ValueError(msg)
         status_source, status_rule = _verified_artifact_status(path, repository_status, repository_root, isolation_root)
         result.append(
@@ -4929,6 +5071,7 @@ def _allowed_artifacts_field(item: Mapping[str, Any], repository_root: Path | No
                 repository_status=repository_status,
                 artifact_id=artifact_id,
                 artifact_digest=artifact_digest,
+                artifact_digest_mode=artifact_digest_mode,
                 status_source=status_source,
                 status_rule=status_rule,
             )
@@ -5316,7 +5459,12 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0915
         if not discovery_assessment.feasible:
             routing_assessment = replace(routing_assessment, feasible=False, blockers=(*routing_assessment.blockers, *discovery_assessment.blockers))
         review_requirements = review_requirements_from_routing(routing_catalog, routing_decisions)
-        routed_additional_nodes = independent_nodes_from_routing(routing_catalog, routing_decisions, change_target=change_target or "")
+        routed_additional_nodes = independent_nodes_from_routing(
+            routing_catalog,
+            routing_decisions,
+            change_target=change_target or "",
+            reserved_node_ids=tuple(_reserved_node_ids(evidence_id for _requirement_id, evidence_id in routing_assessment.exact_reused_review_evidence)),
+        )
     else:
         allow_legacy_fixture = document.get("allow_legacy_fixture", False)
         if not isinstance(allow_legacy_fixture, bool):
@@ -5474,7 +5622,7 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0915
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run one deterministic, read-only fixture-based planning dry run."""
+    """Run one deterministic planning dry run or inspect a terminal bootstrap bundle."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, required=True, help="JSON graph-planning fixture")
     parser.add_argument("--catalog", type=Path, default=DEFAULT_ROUTING_CATALOG, help="machine-readable routing catalog")
@@ -5486,6 +5634,29 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not isinstance(document, Mapping):
             msg = "input root must be a JSON object"
             raise TypeError(msg)
+        bundle_fields = {"lifecycle_input", "materialization_input", "plan", "planning_input", "schema_version"}
+        if bundle_fields <= set(document):
+            plan_document = document.get("plan")
+            planning_input = document.get("planning_input")
+            materialization_input = document.get("materialization_input")
+            lifecycle_input = document.get("lifecycle_input")
+            if (
+                document.get("schema_version") != 1
+                or not isinstance(plan_document, Mapping)
+                or not isinstance(planning_input, Mapping)
+                or not isinstance(materialization_input, Mapping)
+                or not isinstance(lifecycle_input, Mapping)
+                or materialization_input.get("plan") != plan_document
+                or lifecycle_input.get("plan") != plan_document
+            ):
+                msg = "bootstrap bundle plan and stage inputs must contain one identical terminal plan"
+                raise ValueError(msg)
+            dispatch_allowed = plan_document.get("dispatch_allowed")
+            if not isinstance(dispatch_allowed, bool):
+                msg = "bootstrap bundle terminal plan requires dispatch_allowed=true or false"
+                raise ValueError(msg)
+            print(json.dumps(plan_document, indent=2, sort_keys=True))
+            return 0 if dispatch_allowed else 2
         plan = plan_from_document(
             document, catalog_path=args.catalog, skill_roots=tuple(args.skill_root or (DEFAULT_SKILL_ROOT,)), repository_root=args.repository_root
         )

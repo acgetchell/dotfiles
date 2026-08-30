@@ -1,0 +1,199 @@
+{
+  "$id": "https://openai.com/codex/review-graph/runtime-operation-inputs-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Review Graph Runtime Operation Inputs v1",
+  "$defs": {
+    "advance-after-mutation": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_store": {"minLength": 1, "type": "string"},
+        "authorization_after": {"const": "review-and-fix"},
+        "authorization_before": {"enum": ["review-only", "review-and-fix"]},
+        "changed_paths": {"$ref": "#/$defs/stringArray"},
+        "new_capture": {"type": "object"},
+        "plan": {"type": "object"},
+        "planning_template": {"type": "object"},
+        "repair_epoch": {"minimum": 1, "type": "integer"},
+        "routing_catalog_path": {"minLength": 1, "type": "string"},
+        "source_state": {"$ref": "#/$defs/sourceState"},
+        "state_verification_command": {"minLength": 1, "type": "string"}
+      },
+      "required": [
+        "artifact_store",
+        "authorization_after",
+        "authorization_before",
+        "changed_paths",
+        "new_capture",
+        "plan",
+        "planning_template",
+        "repair_epoch",
+        "source_state",
+        "state_verification_command"
+      ],
+      "type": "object"
+    },
+    "compile-independent-review": {
+      "additionalProperties": false,
+      "properties": {
+        "dispatch": {"type": "object"},
+        "handoff_attempt": {"minimum": 1, "type": "integer"},
+        "limitations": {"$ref": "#/$defs/stringArray"},
+        "status": {"enum": ["blocked", "completed", "no-findings"]}
+      },
+      "required": ["dispatch", "limitations", "status"],
+      "type": "object"
+    },
+    "compile-node": {
+      "additionalProperties": false,
+      "properties": {
+        "current_source_state": {"$ref": "#/$defs/sourceState"},
+        "plan": {"type": "object"},
+        "source_state": {"$ref": "#/$defs/sourceState"}
+      },
+      "required": ["plan", "source_state"],
+      "type": "object"
+    },
+    "compile-review": {
+      "additionalProperties": false,
+      "properties": {
+        "dispatch": {"type": "object"},
+        "handoff_attempt": {"minimum": 1, "type": "integer"},
+        "payload": {"type": "object"}
+      },
+      "required": ["dispatch", "payload"],
+      "type": "object"
+    },
+    "compile-validation": {
+      "additionalProperties": false,
+      "properties": {
+        "dispatch": {"type": "object"},
+        "handoff_attempt": {"minimum": 1, "type": "integer"},
+        "payload": {"type": "object"}
+      },
+      "required": ["dispatch", "payload"],
+      "type": "object"
+    },
+    "finalize-proof": {
+      "additionalProperties": false,
+      "properties": {
+        "current_source_state": {"$ref": "#/$defs/sourceState"},
+        "manifest_id": {"minLength": 1, "type": "string"},
+        "plan": {"type": "object"},
+        "proof_id": {"minLength": 1, "type": "string"},
+        "source_state": {"$ref": "#/$defs/sourceState"},
+        "sources": {"items": {"$ref": "#/$defs/sourceRecord"}, "type": "array"},
+        "stale_evidence_ids": {"$ref": "#/$defs/stringArray"},
+        "verifier_id": {"minLength": 1, "type": "string"}
+      },
+      "required": ["plan", "source_state"],
+      "type": "object"
+    },
+    "journal-append": {
+      "additionalProperties": false,
+      "properties": {
+        "current_source_state": {"$ref": "#/$defs/sourceState"},
+        "plan": {"type": "object"},
+        "source_state": {"$ref": "#/$defs/sourceState"}
+      },
+      "required": ["plan", "source_state"],
+      "type": "object"
+    },
+    "materialize-dispatches": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_store": {"minLength": 1, "type": "string"},
+        "authorization": {"enum": ["review-only", "review-and-fix"]},
+        "duplicate_command_authorizations": {"additionalProperties": {"$ref": "#/$defs/stringArray"}, "type": "object"},
+        "execution_locations": {"additionalProperties": {"enum": ["worker", "coordinator"]}, "type": "object"},
+        "inspection_profile": {"enum": ["independent-source", "shared-read-only"]},
+        "plan": {"type": "object"},
+        "repository_root": {"minLength": 1, "type": "string"},
+        "routing_catalog_path": {"minLength": 1, "type": "string"},
+        "source_state": {"$ref": "#/$defs/sourceState"},
+        "state_verification_command": {"minLength": 1, "type": "string"}
+      },
+      "required": ["artifact_store", "authorization", "plan", "repository_root", "source_state", "state_verification_command"],
+      "type": "object"
+    },
+    "next-ready": {
+      "additionalProperties": false,
+      "properties": {
+        "current_source_state": {"$ref": "#/$defs/sourceState"},
+        "plan": {"type": "object"},
+        "source_state": {"$ref": "#/$defs/sourceState"}
+      },
+      "required": ["plan", "source_state"],
+      "type": "object"
+    },
+    "persist-worker-payload": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_path": {"minLength": 1, "type": "string"},
+        "node_id": {"minLength": 1, "type": "string"},
+        "result_contract": {"enum": ["compact-review", "compact-validation", "native-independent-review"]},
+        "schema_version": {"const": 1},
+        "worker_payload_path": {"minLength": 1, "type": "string"}
+      },
+      "required": ["candidate_path", "node_id", "result_contract", "schema_version", "worker_payload_path"],
+      "type": "object"
+    },
+    "reconcile-handoffs": {
+      "additionalProperties": false,
+      "properties": {
+        "plan": {"type": "object"},
+        "source_state": {"$ref": "#/$defs/sourceState"},
+        "sources": {"items": {"$ref": "#/$defs/sourceRecord"}, "type": "array"}
+      },
+      "required": ["plan", "source_state", "sources"],
+      "type": "object"
+    },
+    "routing-projection": {
+      "additionalProperties": true,
+      "properties": {
+        "captured_paths": {"$ref": "#/$defs/stringArray"},
+        "consulted_routers": {"$ref": "#/$defs/stringArray"}
+      },
+      "required": ["captured_paths", "consulted_routers"],
+      "type": "object"
+    },
+    "snapshot-workspace": {
+      "additionalProperties": false,
+      "properties": {
+        "current_source_state": {"$ref": "#/$defs/sourceState"},
+        "plan": {"type": "object"},
+        "source_state": {"$ref": "#/$defs/sourceState"}
+      },
+      "required": ["plan", "source_state"],
+      "type": "object"
+    },
+    "sourceRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_path": {"minLength": 1, "type": "string"},
+        "kind": {"enum": ["review", "validation"]},
+        "metadata_path": {"minLength": 1, "type": "string"}
+      },
+      "required": ["artifact_path", "metadata_path"],
+      "type": "object"
+    },
+    "sourceState": {
+      "items": {"minLength": 1, "type": "string"},
+      "maxItems": 3,
+      "minItems": 3,
+      "type": "array"
+    },
+    "stringArray": {
+      "items": {"minLength": 1, "type": "string"},
+      "type": "array"
+    },
+    "synthesis-bundle": {
+      "additionalProperties": false,
+      "properties": {
+        "source_state": {"$ref": "#/$defs/sourceState"},
+        "sources": {"items": {"$ref": "#/$defs/sourceRecord"}, "minItems": 1, "type": "array"}
+      },
+      "required": ["source_state", "sources"],
+      "type": "object"
+    }
+  }
+}

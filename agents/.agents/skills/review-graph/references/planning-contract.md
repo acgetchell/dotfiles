@@ -29,7 +29,10 @@ closure, path validation, coalescing, epochs, acceptance, resume, and completion
 input schema. Build it with `scripts/review_graph_bootstrap.py`, which merges the
 trusted `capture_scope.py` manifest, binds every validation requirement to the
 captured fingerprint triple, and returns aggregate JSON-path diagnostics before
-planning. Do not discover required capture fields by retrying planner failures.
+planning. Bootstrap also runs the planner and emits a terminal bundle; the
+planner CLI accepts that bundle only to print its embedded plan unchanged. Do
+not discover required capture fields by retrying planner failures or feed the
+nested `planning_input` back through the documented bootstrap-to-plan sequence.
 
 Load `routing-catalog.json` under one or more approved skill roots. Validate for
 every catalog entry:
@@ -47,6 +50,11 @@ closure validation. The planner derives router, rule, skill, resolved path,
 priority, requirement, and synthesis identity; sparse inputs containing those
 catalog-owned fields are rejected. After expansion, reject missing, duplicated,
 unknown, unconsulted, or mismatched entries exactly as before.
+
+An omitted leaf with a projection path match is selected with those matched
+paths as its surface. An override may add a semantic trigger when paths alone
+do not match, or explicitly exclude/block a projected candidate. Only an
+unmatched, untriggered omission becomes `not-applicable`.
 
 Selected leaves require a concrete scope, evidence, reason, priority, owners,
 references, validators, and synthesis dependency. Convert every selected leaf
@@ -101,6 +109,10 @@ changing selected coverage.
 Exact reused review evidence is not part of the executable graph, consumes no
 worker creation, and receives no execution epoch or dependency edge. Its routed
 mapping remains a proof prerequisite for synthesis and completion.
+
+Reserve every node suffix encoded by exact reused `review:`, `validation:`, or
+`artifact://` identities before allocating new nodes. Reject any remaining
+executable/reuse evidence overlap during planning, before materialization.
 
 For isolated execution, use a positive per-root fresh-worker budget, defaulting
 to 24, and reserve at least one creation for recovery/finalization. When
@@ -202,11 +214,10 @@ Coalesce review requirements only when all of these match:
 skill ID and resolved absolute path
 mode and exact review surface
 instruction and static-reference paths
-synthesis dependency
-compatible ownership
 ```
 
-Retain every router/rule/requirement/owner on the coalesced node.
+Retain every router/rule/requirement/owner and derive every requirement's
+synthesis edge independently on the coalesced node.
 
 Coalesce validation only when all of these match:
 
@@ -268,11 +279,11 @@ stale old-plan nodes to terminal `awaiting-replan`, and emits replacement
 identities with lineage. Old immutable dispatches cannot be scheduled from that
 state.
 
-Derive the final `repository-production-review` synthesis edges in the planner.
-It must depend on every selected non-repository synthesis node in addition to
-the routed audits, validators, and additional nodes already assigned to it;
-caller-supplied predecessor lists may add constraints but may not omit these
-dependencies.
+Derive synthesis edges in the planner. Every synthesis waits for required
+validation, its routed audits and validators, and its routed exact reuse.
+`repository-production-review` also depends on every selected non-repository
+synthesis and every exact-reuse mapping. Caller predecessor lists may add but
+not omit these dependencies.
 
 ## Failure And Resume
 

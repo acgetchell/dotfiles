@@ -20,31 +20,15 @@ before loading references:
 ## Graph-Dispatched Mode
 
 Use graph mode whenever the request names `review-graph`, even if the dispatch
-is incomplete. Require the exact coalesced `ValidationUnit`, captured source
-identity, execution location, fresh-context identity, state-verification
-command, commands, working directories, environment, toolchain, features,
-platform, artifact policy, dependency policy, and elapsed bounds. Return
-`blocked` for an omission; never fall through to standalone discovery.
+is incomplete. Follow the compact graph-dispatch contract exactly; omissions
+are `blocked` and never trigger standalone discovery.
 
-Require the graph-owned effects, exact isolation root, artifact-provenance, and
-snapshot policy. Keep isolated working directories and outside-repository
-artifacts beneath that root. Capture relevant filesystem and Git state before
-and after; return both snapshots beside, not inside, the compact payload for
-compiler audit.
+Honor placement and the coalesced unit. Do not re-plan, split or broaden it,
+create another worker, or inspect implementation semantics. The coordinator
+owns before/after snapshots and all evidence identities and digests.
 
-Honor executor placement. A worker uses `fork_turns: "none"`; a coordinator
-fallback executes the same unit locally. Do not create another worker, split a
-coalesced unit, re-plan, broaden commands, or inspect implementation semantics.
-
-Run the exact state check before and after the unit. Independently reject a
-dispatched command if its repository-owned definition is source- or
-Git-mutating. Execute each command once in its declared order, honoring the
-dependency policy. Record exact command, working directory, executor, result,
-exit code, elapsed time, concise output evidence, and approved artifact paths.
-
-Return only the compact payload. The graph owns evidence identities, command
-and environment digests, mappings, canonical artifact compilation, acceptance,
-reuse, invalidation, and final reporting.
+Write the recursive payload to the dispatched candidate path, publish it through
+the runtime-owned `persist-worker-payload` operation, and return those bytes.
 
 ## Universal Boundaries
 

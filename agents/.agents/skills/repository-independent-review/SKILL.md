@@ -34,7 +34,9 @@ Return exactly `# Repository Independent Review` followed by these six level-2
 sections, in order, with no preamble or machine-authored identifiers:
 
 - `## Scope Inspected`: exactly one each of `Change target`, `Files`,
-  `Branches`, `Boundary cases`, and `Tests`; paths and target match the dispatch
+  `Branches`, `Boundary cases`, and `Tests`; paths and target match the dispatch.
+  Ordinary Markdown backticks around repository paths are accepted and
+  normalized by the compiler.
 - `## Findings`: `No findings.` for a no-findings result; otherwise ordered
   `- Finding:` records with `Severity`, `Location`, `Summary`, `Evidence`,
   `Impact`, `Owner`, and `Remediation`
@@ -44,6 +46,10 @@ sections, in order, with no preamble or machine-authored identifiers:
   `Observed trigger`, `Reason`, and comma-separated repository `Scope`
 - `## Fingerprint Proof`: expected, before, and after identities
 - `## Git State`: confirmation that no source or Git mutation occurred
+
+Use [references/native-example.md](references/native-example.md) as the exact
+syntax example. Its concrete values are illustrative; copy the dispatched
+target, paths, fingerprints, and adversarial checks instead of those values.
 
 The coordinator runs `compile-independent-review`. That compiler assigns
 finding, handoff, evidence, and artifact identities; appends the canonical

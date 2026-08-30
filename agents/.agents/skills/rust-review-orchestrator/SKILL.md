@@ -1,6 +1,6 @@
 ---
 name: rust-review-orchestrator
-description: "Coordinate multi-pass Rust reviews by selecting individual skills for build portability and Cargo, public surfaces, invariant state and errors, scientific correctness, concurrency, implementation, tests, and final synthesis. Use for changed, staged, PR, release-readiness, repository-wide, or fix-all Rust work spanning multiple concerns; use one focused Rust skill directly for a single concern."
+description: "Coordinate multi-pass Rust reviews by selecting individual skills for build portability and Cargo, API design and public surfaces, invariant state and errors, scientific correctness, concurrency, implementation, tests, and final synthesis. Use for changed, staged, PR, release-readiness, repository-wide, or fix-all Rust work spanning multiple concerns; use one focused Rust skill directly for a single concern."
 ---
 
 # Rust Review Orchestrator
@@ -77,13 +77,14 @@ Select both only when manifest decisions and demonstrated configuration behavior
 
 ### 2. Public Surface and Usage
 
+- Use `rust-api-design` for material changes to public modules, types, traits, functions, constructors, adapters, wrappers, aliases, cross-crate boundaries, canonical workflows, concept ownership, or compatibility. Do not select it for documentation-only, re-export-only, or private implementation changes.
 - Use `rust-api-docs` for new or changed public items whose documented contract must be assessed, public documentation edits, required rustdoc sections, examples as documentation, intra-doc links, or docs.rs presentation.
 - Use `rust-prelude-exports` only for preludes, `pub use`, visibility, feature-gated re-exports, or downstream import ergonomics.
 - Use `rust-fluent-api-design` only for staged workflows, builders, proposals, transactions, guards, chaining, or duplicate fluent/non-fluent surfaces.
 - Use `rust-trait-bounds` only for generic constraints, associated types, HRTBs, `impl Trait`, callable bounds, or downstream generic diagnostics.
 - Use `rust-cli-design` only for CLI packaging, argument parsing, process behavior, command examples, or optional CLI features.
 
-A public item does not automatically select all five skills. Choose the specific contract affected.
+A public item does not automatically select every skill in this group. Choose the specific contract affected.
 
 ### 3. Invariants, State, Errors, and Views
 

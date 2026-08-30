@@ -43,6 +43,7 @@ from review_graph_plan import (
     WorkerBudget,
     WorkerNode,
     _review_native_result_blockers,
+    _synthesis_reused_evidence_ids,
     _validation_coalescing_identity,
     _validation_environment_identity,
     _validation_ledger_expected_fields,
@@ -511,6 +512,7 @@ def _validation_result_payload(expectation: ValidationEvidenceExpectation, evide
                         f"- Path: {artifact.path}",
                         f"  - Artifact ID: {artifact.artifact_id or 'none'}",
                         f"  - Artifact digest: {artifact.artifact_digest or 'none'}",
+                        f"  - Artifact digest mode: {artifact.artifact_digest_mode or 'none'}",
                         f"  - Kind: {artifact.kind}",
                         f"  - Repository status: {artifact.repository_status}",
                         f"  - Status source: {artifact.status_source}",
@@ -860,7 +862,7 @@ def _set_instruction_path(document: dict[str, object], *, target: str, instructi
 def test_real_routing_catalog_resolves_every_skill_path_and_frontmatter() -> None:
     catalog = load_routing_catalog(ROUTING_CATALOG)
 
-    assert len(catalog) == 53
+    assert len(catalog) == 54
     assert all(Path(entry.skill_path).is_absolute() for entry in catalog)
     assert {entry.router_id for entry in catalog} == {
         "review-graph",
@@ -896,6 +898,7 @@ def test_real_routing_catalog_resolves_every_skill_path_and_frontmatter() -> Non
     assert by_router["rust-review-orchestrator"] == {
         "rust-build-portability",
         "rust-cargo-hygiene",
+        "rust-api-design",
         "rust-api-docs",
         "rust-prelude-exports",
         "rust-fluent-api-design",
@@ -1257,6 +1260,7 @@ def test_graph_document_preserves_optional_validation_artifact_identity() -> Non
             path="/external/review-validator/command.log",
             artifact_id="artifact://command-log",
             artifact_digest=artifact_digest,
+            artifact_digest_mode="content-sha256-v1",
             kind="log",
             repository_status="outside-repository",
             status_source="isolated-output-directory",
@@ -1744,18 +1748,42 @@ def test_repeated_validation_requirements_coalesce_and_reuse_mapping_is_complete
     assert {item.evidence_id for item in mappings} == {"ledger-current-host"}
 
 
-def test_review_coalescing_preserves_reasons_and_does_not_merge_distinct_owners() -> None:
+def test_review_coalescing_preserves_reasons_and_aggregates_distinct_catalog_owners() -> None:
     first = _review_requirement(1)
     second = replace(first, requirement_id="R02", reason="second routing reason")
-    distinct_owner = replace(first, requirement_id="R03", owners=("documentation",))
+    distinct_owner = replace(first, requirement_id="R03", owners=("documentation",), synthesis_dependency="repository-synthesis")
 
     nodes, mappings = coalesce_review_requirements((first, second, distinct_owner))
 
-    assert len(nodes) == 2
-    merged = next(node for node in nodes if set(node.requirement_ids) == {"R01", "R02"})
+    assert len(nodes) == 1
+    merged = nodes[0]
+    assert set(merged.requirement_ids) == {"R01", "R02", "R03"}
     assert merged.selection_reasons == ("fixture surface owns this contract", "second routing reason")
-    assert merged.owners == ()
+    assert merged.owners == ("documentation",)
+    assert merged.synthesis_dependency is None
     assert dict(mappings).keys() == {"R01", "R02", "R03"}
+
+
+def test_replan_allocates_new_audit_identity_after_all_exact_reuse_ids() -> None:
+    reused = tuple((f"reused-{ordinal:03d}", f"review:audit-{ordinal:03d}") for ordinal in range(1, 24))
+    routing = RoutingLedgerAssessment(
+        feasible=True,
+        blockers=(),
+        selected_requirement_ids=("R01",),
+        exact_reused_review_evidence=reused,
+        reused_review_identities=(),
+        user_excluded_catalog_ids=(),
+        completion_blocking_catalog_ids=(),
+        consulted_routers=("review-graph", "rust-review-orchestrator"),
+        catalog_closed=True,
+    )
+
+    plan = plan_graph((_review_requirement(1),), (_validation_requirement("V-baseline", baseline=True),), (_synthesis(),), routing_assessment=routing)
+
+    audit = next(node for node in plan.actual_worker_nodes if node.mode == "audit")
+    assert audit.node_id == "audit-024"
+    assert f"review:{audit.node_id}" not in {evidence_id for _requirement_id, evidence_id in reused}
+    assert f"artifact://{audit.node_id}" not in {evidence_id.replace("review:", "artifact://") for _requirement_id, evidence_id in reused}
 
 
 def test_budget_never_reclassifies_applicable_specialists_as_skips() -> None:
@@ -2305,6 +2333,16 @@ def test_adaptive_review_accepts_the_same_proof_from_coordinator_or_worker() -> 
     assert coordinator.satisfies_requirements
     assert worker.feasible
     assert worker.satisfies_requirements
+
+
+def test_review_evidence_v2_rejects_legacy_v1_envelopes() -> None:
+    expectation, evidence = _review_evidence()
+
+    result = assess_review_evidence(expectation, replace(evidence, schema_version=1))
+
+    assert EVIDENCE_SCHEMA_VERSION == 2
+    assert not result.feasible
+    assert "review evidence schema must be exactly 2" in result.blockers
 
 
 def test_isolated_review_rejects_coordinator_evidence() -> None:
@@ -2882,7 +2920,7 @@ def test_validation_native_provenance_artifacts_and_ledger_are_dispatch_bound() 
     external_content = _validation_result_payload(external_expectation, external_evidence)
     assert b"  - Artifact digest: none" in external_content
     assert any(
-        "requires a lowercase SHA-256 content digest" in blocker
+        "requires a lowercase SHA-256 digest" in blocker
         for blocker in _validation_native_result_blockers(external_content, external_expectation, external_evidence)
     )
 
@@ -2904,6 +2942,7 @@ def test_validation_native_artifact_references_require_matching_content_identity
                 path="/external/review-validator/command.log",
                 artifact_id="artifact://command-log",
                 artifact_digest=artifact_digest,
+                artifact_digest_mode="content-sha256-v1",
                 kind="log",
                 repository_status="outside-repository",
                 status_source="isolated-output-directory",
@@ -2920,7 +2959,14 @@ def test_validation_native_artifact_references_require_matching_content_identity
     )
     evidence = replace(evidence, environment_digest=expectation.environment_digest)
     reference = json.dumps(
-        [{"path": "/external/review-validator/command.log", "artifact_id": "artifact://command-log", "artifact_digest": artifact_digest}],
+        [
+            {
+                "path": "/external/review-validator/command.log",
+                "artifact_id": "artifact://command-log",
+                "artifact_digest": artifact_digest,
+                "artifact_digest_mode": "content-sha256-v1",
+            }
+        ],
         sort_keys=True,
         separators=(",", ":"),
     )
@@ -2945,7 +2991,7 @@ def test_validation_native_artifact_references_require_matching_content_identity
     )
 
     assert any("artifact reference does not match" in blocker for blocker in _validation_native_result_blockers(mismatched_reference, expectation, evidence))
-    assert any("approved content digest" in blocker for blocker in _validation_native_result_blockers(mismatched_artifact, expectation, evidence))
+    assert any("approved digest and mode" in blocker for blocker in _validation_native_result_blockers(mismatched_artifact, expectation, evidence))
     assert any("approved artifact ID" in blocker for blocker in _validation_native_result_blockers(mismatched_artifact_id, expectation, evidence))
     assert any("requires a lowercase SHA-256" in blocker for blocker in _validation_native_result_blockers(missing_artifact_digest, expectation, evidence))
     assert any(
@@ -3095,6 +3141,7 @@ def test_validation_dispatch_digest_fixed_vectors() -> None:
                 status_source="repository-rule",
                 artifact_id="artifact://log",
                 artifact_digest="sha256:" + "a" * 64,
+                artifact_digest_mode="content-sha256-v1",
                 status_rule=".gitignore:1:logs/",
             ),
         ),
@@ -3107,7 +3154,7 @@ def test_validation_dispatch_digest_fixed_vectors() -> None:
     )
 
     assert validation_command_identity_digest(unit) == "sha256:0a7cf4ab06b8269b3807b1d8727bd01a82aaf85d649be501f42745136843e93d"
-    assert validation_environment_digest(unit) == "sha256:e143568fb0d1707c14dbc1fbe3530fc53be445f9f802b120cfda35d5cce412e7"
+    assert validation_environment_digest(unit) == "sha256:4dfc441ae6c5f504018125c5cfb886fdb6b546ea35e7012b67af74e6f22c36a7"
 
 
 def test_isolated_validation_rejects_coordinator_evidence() -> None:
@@ -3270,12 +3317,7 @@ def _predecessor_evidence_ids(expectation: RepositoryReviewProofExpectation, pro
     evidence_by_node = dict(proof.planned_node_evidence)
     node = next(item for item in expectation.planned_evidence_nodes if item.node_id == node_id)
     return tuple(
-        dict.fromkeys(
-            (
-                *(evidence_by_node[predecessor] for predecessor in node.predecessors),
-                *((evidence_id for _, evidence_id in expectation.exact_reused_review_evidence) if node_id == expectation.final_synthesis_identity[0] else ()),
-            )
-        )
+        dict.fromkeys((*(evidence_by_node[predecessor] for predecessor in node.predecessors), *_synthesis_reused_evidence_ids(expectation.plan, node_id)))
     )
 
 

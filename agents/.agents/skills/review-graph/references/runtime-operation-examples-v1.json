@@ -1,0 +1,98 @@
+{
+  "advance-after-mutation": {
+    "artifact_store": "/tmp/review-proof",
+    "authorization_after": "review-and-fix",
+    "authorization_before": "review-and-fix",
+    "changed_paths": ["src/lib.py"],
+    "new_capture": {},
+    "plan": {},
+    "planning_template": {},
+    "repair_epoch": 1,
+    "source_state": ["scope-before", "worktree-before", "repository-before"],
+    "state_verification_command": "capture_scope.py --mode branch"
+  },
+  "compile-independent-review": {
+    "dispatch": {},
+    "limitations": [],
+    "status": "no-findings"
+  },
+  "compile-node": {
+    "plan": {},
+    "source_state": ["scope", "worktree", "repository"]
+  },
+  "compile-review": {
+    "dispatch": {},
+    "payload": {
+      "changes": [],
+      "command_policy_attested": true,
+      "commands_executed": [],
+      "files_inspected": ["src/lib.py"],
+      "findings": [],
+      "handoffs": [],
+      "limitations": [],
+      "nearby_contract_owners": [],
+      "status": "no-findings",
+      "validation_requirements": []
+    }
+  },
+  "compile-validation": {
+    "dispatch": {},
+    "payload": {
+      "artifacts": [],
+      "executions": [],
+      "limitations": [],
+      "status": "not-applicable"
+    }
+  },
+  "finalize-proof": {
+    "plan": {},
+    "source_state": ["scope", "worktree", "repository"],
+    "sources": []
+  },
+  "journal-append": {
+    "plan": {},
+    "source_state": ["scope", "worktree", "repository"]
+  },
+  "materialize-dispatches": {
+    "artifact_store": "/tmp/review-proof",
+    "authorization": "review-only",
+    "inspection_profile": "shared-read-only",
+    "plan": {},
+    "repository_root": "/workspace/repository",
+    "source_state": ["scope", "worktree", "repository"],
+    "state_verification_command": "capture_scope.py --mode branch"
+  },
+  "next-ready": {
+    "plan": {},
+    "source_state": ["scope", "worktree", "repository"]
+  },
+  "persist-worker-payload": {
+    "candidate_path": "/tmp/review-proof/audit.worker-payload.candidate.json",
+    "node_id": "audit",
+    "result_contract": "compact-review",
+    "schema_version": 1,
+    "worker_payload_path": "/tmp/review-proof/audit.worker-payload.json"
+  },
+  "reconcile-handoffs": {
+    "plan": {},
+    "source_state": ["scope", "worktree", "repository"],
+    "sources": []
+  },
+  "routing-projection": {
+    "captured_paths": ["src/lib.py"],
+    "consulted_routers": ["review-graph", "python-review-orchestrator"]
+  },
+  "snapshot-workspace": {
+    "plan": {},
+    "source_state": ["scope", "worktree", "repository"]
+  },
+  "synthesis-bundle": {
+    "source_state": ["scope", "worktree", "repository"],
+    "sources": [
+      {
+        "artifact_path": "/tmp/review-proof/audit.review.md",
+        "metadata_path": "/tmp/review-proof/audit.evidence.json"
+      }
+    ]
+  }
+}
