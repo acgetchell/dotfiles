@@ -18,6 +18,12 @@ The script extracts DOI labels from Markdown, queries DOI content negotiation
 for CSL JSON metadata, and compares the resolved title with the surrounding
 bibliography entry. Use `--json` for machine-readable output.
 
+A badge-only paragraph reports `INSUFFICIENT_CONTEXT` when its DOI resolves:
+missing author/title/year context is not contradictory metadata. Compare the
+resolved identity with `CITATION.cff` or primary metadata. This outcome retains
+exit status 1 (manual verification needed), not a successful bibliographic match.
+Resolution failures remain `FAIL`; contradictory reference text remains `MISMATCH`.
+
 Network access is required. If the environment blocks network calls, request
 approval and explain that validation must query DOI, Crossref, or publisher
 metadata.

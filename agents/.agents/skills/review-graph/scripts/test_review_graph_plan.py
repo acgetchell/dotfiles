@@ -3438,7 +3438,7 @@ def _verified_binding(
             selection_reason=f"exact routed reuse for {reuse.requirement_id}",
             authorization="review-only",
             change_target=reuse.change_target,
-            planned_paths=reuse.planned_paths,
+            planned_paths=reuse.planned_paths if reuse.mode == "independent-review" else (),
             planned_path_line_bounds=reuse.planned_path_line_bounds,
         )
         review_records.append(
@@ -3675,6 +3675,7 @@ def test_exact_routed_reuse_satisfies_only_its_requirement_without_execution(cat
 
     assert result.feasible
     assert not ({item.requirement_id for item in expectation.reused_review_identities} & set(expectation.plan.selected_review_requirements))
+    assert all(item.planned_paths == (RUST_FIXTURE_PATH,) for item in expectation.reused_review_identities)
     if catalog_id == "repo.independent":
         (reuse,) = tuple(item for item in expectation.reused_review_identities if item.mode == "independent-review")
         assert reuse.change_target == f"git diff origin/main...HEAD -- {RUST_FIXTURE_PATH}"

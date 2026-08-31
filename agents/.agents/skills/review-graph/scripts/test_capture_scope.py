@@ -10,6 +10,7 @@ from typing import cast
 
 import pytest
 from capture_scope import _scope_data
+from review_graph_reuse import source_snapshot
 
 _TIMEOUT_SECONDS = 30
 
@@ -153,6 +154,63 @@ def test_baseline_includes_untracked_files(tmp_path: Path) -> None:
     assert manifest["untracked_paths"] == ["new.txt"]
 
 
+def test_baseline_path_identities_detect_repeated_dirty_edits_without_inventing_untouched_paths(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    (repo / "edited.txt").write_text("initial\n", encoding="utf-8")
+    (repo / "LICENSE").write_text("unchanged\n", encoding="utf-8")
+    _commit_all(repo)
+    (repo / "edited.txt").write_text("first\n", encoding="utf-8")
+    first = _capture(repo, "baseline")
+    (repo / "edited.txt").write_text("later\n", encoding="utf-8")
+
+    second = _capture(repo, "baseline")
+
+    assert first["status"] == second["status"]
+    before = cast("dict[str, str]", first["repository_path_fingerprints"])
+    after = cast("dict[str, str]", second["repository_path_fingerprints"])
+    assert {path for path in before if before[path] != after[path]} == {"edited.txt"}
+    assert first["index_fingerprint"] == second["index_fingerprint"]
+
+
+@pytest.mark.parametrize("field", ["repository_path_fingerprints", "captured_scope_paths", "requested_paths", "index_fingerprint"])
+def test_capture_fingerprint_binds_path_identity_and_context(tmp_path: Path, field: str) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    (repo / "source.txt").write_text("original\n", encoding="utf-8")
+    _commit_all(repo)
+    capture = _capture(repo, "baseline")
+    source_snapshot(capture).verify()
+    if field == "repository_path_fingerprints":
+        capture[field] = {"source.txt": "f" * 64}
+    elif field == "index_fingerprint":
+        capture[field] = "f" * 64
+    else:
+        capture[field] = ["substituted.txt"]
+
+    with pytest.raises(ValueError, match="do not match its repository fingerprint"):
+        source_snapshot(capture).verify()
+
+
+def test_baseline_path_identities_cover_rename_deletion_and_executable_mode(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    for name in ("old.txt", "deleted.txt", "script.sh"):
+        (repo / name).write_text("content\n", encoding="utf-8")
+    _commit_all(repo)
+    first = _capture(repo, "baseline")
+    (repo / "old.txt").rename(repo / "new.txt")
+    (repo / "deleted.txt").unlink()
+    (repo / "script.sh").chmod(0o755)
+
+    second = _capture(repo, "baseline")
+
+    before = cast("dict[str, str]", first["repository_path_fingerprints"])
+    after = cast("dict[str, str]", second["repository_path_fingerprints"])
+    assert {path for path in before.keys() | after.keys() if before.get(path) != after.get(path)} == {"old.txt", "new.txt", "deleted.txt", "script.sh"}
+    assert first["index_fingerprint"] == second["index_fingerprint"]
+
+
 def test_untracked_executable_mode_changes_fingerprint(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     _init_repo(repo)
@@ -244,6 +302,9 @@ def test_staged_line_bounds_use_head_and_index_not_unstaged_worktree(tmp_path: P
     manifest = _capture(repo, "staged")
 
     assert manifest["captured_path_line_bounds"] == {"added.txt": 2, "deleted.txt": 3, "linked.txt": 0, "tracked.txt": 4}
+    identities = manifest["repository_path_fingerprints"]
+    assert isinstance(identities, dict)
+    assert {"added.txt", "deleted.txt", "linked.txt", "tracked.txt"} <= identities.keys()
 
 
 def test_branch_line_bounds_use_numeric_maximum_of_base_and_head(tmp_path: Path) -> None:

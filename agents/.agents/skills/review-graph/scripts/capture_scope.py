@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from review_graph_reuse import SNAPSHOT_FORMAT, source_snapshot
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -28,6 +30,23 @@ class _Digest(Protocol):
 
     def hexdigest(self) -> str:
         """Return the hexadecimal digest."""
+
+
+class _PathDigest:
+    """Collect a path identity from the same bytes as the repository digest."""
+
+    def __init__(self, parent: _Digest) -> None:
+        self.parent = parent
+        self.digest = hashlib.sha256()
+
+    def update(self, value: bytes) -> None:
+        """Feed bytes to both the parent and per-path digests."""
+        self.parent.update(value)
+        self.digest.update(value)
+
+    def hexdigest(self) -> str:
+        """Return the per-path digest as a hexadecimal string."""
+        return self.digest.hexdigest()
 
 
 def _run_git(git: str, repo: Path, arguments: Sequence[str]) -> bytes:
@@ -204,14 +223,27 @@ def _update_worktree_path(digest: _Digest, git: str, repo: Path, relative: str) 
     raise RuntimeError(message)
 
 
-def _worktree_fingerprint(*, git: str, identity: Sequence[tuple[str, bytes]], pathspecs: Sequence[str], paths: Sequence[str], repo: Path) -> str:
+def _worktree_fingerprint(  # noqa: PLR0913 - optional path identities share the canonical fingerprint traversal.
+    *,
+    git: str,
+    identity: Sequence[tuple[str, bytes]],
+    pathspecs: Sequence[str],
+    paths: Sequence[str],
+    repo: Path,
+    path_fingerprints: dict[str, str] | None = None,
+) -> str:
     """Hash the selected worktree state from canonical path content and modes."""
     digest = hashlib.sha256()
     for label, value in identity:
         _update_part(digest, label, value)
     _update_part(digest, "requested-paths", json.dumps(pathspecs, separators=(",", ":")).encode())
     for relative in sorted(set(paths)):
-        _update_worktree_path(digest, git, repo, relative)
+        if path_fingerprints is None:
+            _update_worktree_path(digest, git, repo, relative)
+        else:
+            path_digest = _PathDigest(digest)
+            _update_worktree_path(path_digest, git, repo, relative)
+            path_fingerprints[relative] = path_digest.hexdigest()
     return digest.hexdigest()
 
 
@@ -301,23 +333,31 @@ def _captured_path_line_bounds(*, git: str, repo: Path, mode: str, base_revision
     return bounds
 
 
-def _repository_state_fingerprint(*, git: str, repo: Path, head: str, branch: str) -> str:
+def _repository_state_snapshot(*, git: str, repo: Path, head: str, branch: str, captured_paths: Sequence[str]) -> tuple[str, dict[str, str], str]:
     """Hash HEAD, branch, index, tracked worktree, and nonignored untracked content."""
     tracked = _decode_zlist(_run_git(git, repo, ("ls-files", "-z")))
     untracked = _decode_zlist(_run_git(git, repo, ("ls-files", "--others", "--exclude-standard", "-z")))
+    path_fingerprints: dict[str, str] = {}
     worktree = _worktree_fingerprint(
         git=git,
         identity=(("head", head.encode()), ("branch", branch.encode()), ("mode", b"repository-state")),
         pathspecs=(),
         paths=(*tracked, *untracked),
         repo=repo,
+        path_fingerprints=path_fingerprints,
     )
+    index_entries = _run_git(git, repo, ("ls-files", "--stage", "-z"))
     digest = hashlib.sha256()
     _update_part(digest, "head", head.encode())
     _update_part(digest, "branch", branch.encode())
-    _update_part(digest, "index-entries", _run_git(git, repo, ("ls-files", "--stage", "-z")))
+    _update_part(digest, "index-entries", index_entries)
     _update_part(digest, "worktree", worktree.encode())
-    return digest.hexdigest()
+    # Deleted branch/index paths remain in the review scope but not ls-files.
+    for relative in sorted(set(captured_paths) - path_fingerprints.keys()):
+        path_digest = hashlib.sha256()
+        _update_worktree_path(path_digest, git, repo, relative)
+        path_fingerprints[relative] = path_digest.hexdigest()
+    return digest.hexdigest(), path_fingerprints, hashlib.sha256(index_entries).hexdigest()
 
 
 def _scope_data(git: str, repo: Path, mode: str, base: str | None, pathspecs: Sequence[str]) -> dict[str, object]:  # noqa: PLR0915
@@ -402,9 +442,11 @@ def _scope_data(git: str, repo: Path, mode: str, base: str | None, pathspecs: Se
     )
     status_arguments = _with_paths(("status", "--porcelain=v1", "-z", "--untracked-files=all"), pathspecs)
     status = _decode_zlist(_run_git(git, repo, status_arguments))
-    repository_state_fingerprint = _repository_state_fingerprint(git=git, repo=repo, head=head, branch=branch)
+    repository_state_fingerprint, repository_path_fingerprints, index_fingerprint = _repository_state_snapshot(
+        git=git, repo=repo, head=head, branch=branch, captured_paths=captured_scope_paths
+    )
 
-    return {
+    manifest = {
         "base_ref": base_ref,
         "branch": branch or None,
         "capture_mode": mode,
@@ -412,14 +454,19 @@ def _scope_data(git: str, repo: Path, mode: str, base: str | None, pathspecs: Se
         "captured_scope_paths": captured_scope_paths,
         "captured_worktree_fingerprint": captured_worktree_fingerprint,
         "head": head,
+        "index_fingerprint": index_fingerprint,
         "merge_base": merge_base,
         "repository_root": os.fspath(repo),
+        "repository_path_fingerprints": repository_path_fingerprints,
         "repository_state_fingerprint": repository_state_fingerprint,
+        "repository_state_format": SNAPSHOT_FORMAT,
         "requested_paths": list(pathspecs),
         "scope_fingerprint": scope_fingerprint,
         "status": status,
         "untracked_paths": selected_untracked,
     }
+    manifest["repository_state_fingerprint"] = source_snapshot(manifest).computed_fingerprint()
+    return manifest
 
 
 def _parser() -> argparse.ArgumentParser:

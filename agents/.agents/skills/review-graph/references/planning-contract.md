@@ -236,7 +236,13 @@ Map every validation requirement to exactly one unit and accepted execution or
 verified reuse. A failed validator is evidence for its owning reviewer, not an
 automatic review finding.
 
-Require at least one baseline validator. Require all applicable language
+Require at least one baseline validator in every review scope. The validation
+requirement's `baseline: true` identifies the repository check (such as
+`just ci`); it does not select baseline review scope or expand captured paths.
+A minimal branch template therefore marks its repository check `baseline: true`
+while retaining `requested_scope: branch`. Other targeted units may use false.
+The bootstrap help and validation-requirement schema expose this distinction.
+Require all applicable language
 production syntheses, `repository-independent-review` for concrete change
 targets, and `repository-production-review` for final broad reconciliation.
 
@@ -279,6 +285,47 @@ stale old-plan nodes to terminal `awaiting-replan`, and emits replacement
 identities with lineage. Old immutable dispatches cannot be scheduled from that
 state.
 
+Supply the immediately preceding `previous_capture`, not the initial planning
+template's capture. Its fingerprint triple must equal the prior plan state.
+`capture_scope.py` records per-path content/type/mode identities for the whole
+repository and an index identity. V2 repository fingerprints bind those maps
+and the capture context together. Compare the maps to derive `changed_paths`, including repeated
+edits to already-dirty files, additions, removals, and mode changes. Reject
+caller-declared deltas that differ, capture-boundary changes, and HEAD, branch,
+or index mutation before publication. Older manifests without these identities
+require a fresh pre-repair capture; status strings cannot recover content deltas.
+
+`newly_touched_paths` is the new captured inventory minus the previous captured
+inventory, never minus node-owned coverage. Invalidate changed-path owners,
+expanded or changed review contracts, applicable instruction dependencies, and
+their transitive downstream nodes. Validator ownership comes from its captured
+paths, not the commands stored in its node coverage. Verified optional `sources`
+also contribute inspected nearby-contract dependencies.
+
+For supplied accepted audit `sources`, preserve original artifacts and verify
+complete compiler-bound ownership, inspected dependencies, instructions,
+skill/reference identities, and unchanged inputs between content-bound v2
+captures. Only predecessor-free, complete audits without limitations qualify.
+Convert their exact routed requirements to non-executable reuse before
+materialization; exclude their original IDs from the stale set. Required
+validators, independent reviews, and syntheses still execute against the new
+capture. Unbound legacy reports/captures and failed unchanged-input checks leave
+the audit executable; never assert reuse solely because a node was unaffected.
+
+The plan's `audit_reuse_transitions` binds each original evidence ID, source and
+target states, artifact digest and persisted source locations, and current
+instruction digests. `reuse_source_snapshots` stores the needed origin/target
+captures once, shared across transitions. These records participate in the plan
+digest and final proof verification. Neither the original envelope nor its raw
+artifact is rewritten. Repeated epochs verify prior reuse and retain its origin
+only while the inputs still match; a changed dependency returns it to execution.
+
+`next-ready`, `synthesis-bundle` with a plan, and `finalize-proof` discover and
+reverify these sources automatically. Synthesis exposes both original and
+verified source states. Missing/tampered artifacts or changed instruction/skill
+files block consumption and require repair or replanning. The output's `capture`
+is the next epoch's previous capture; `lifecycle_input` drives the new graph.
+
 Derive synthesis edges in the planner. Every synthesis waits for required
 validation, its routed audits and validators, and its routed exact reuse.
 `repository-production-review` also depends on every selected non-repository
@@ -286,6 +333,12 @@ synthesis and every exact-reuse mapping. Caller predecessor lists may add but
 not omit these dependencies.
 
 ## Failure And Resume
+
+Capacity-only creation failures permit one unchanged-dispatch retry after waiting
+up to 30 seconds for host lifecycle progress. A completed worker may still occupy
+a slot. Track reservations separately from started work and append `in-flight`
+only after creation succeeds. Exhausting this bounded retry follows the profile
+rules below; never replay accepted reviews or validators to recover capacity.
 
 In adaptive grouped execution, a failed worker creation or pre-acceptance worker
 result selects coordinator execution for that exact node. Preserve the failed
@@ -323,6 +376,44 @@ Accept a result after its elapsed cap only when the complete native report
 arrived and every ordinary isolation, skill, reference, structure, and
 fingerprint check passes.
 
+## Late Validation Expansion
+
+Accepted review `validation_requirements` are proof obligations, not advisory
+text. `next-ready` reparses journal-bound artifacts and blocks synthesis for an
+unmapped requirement or a command/directory/environment/dependency mismatch.
+`finalize-proof` performs the same reconciliation even if every original node
+already has accepted evidence. A generic CI pass cannot cover a different
+validation identity.
+
+Use `reconcile-validation-requirements` with `--journal`, `--dispatches`,
+`--current-capture`, and an input containing `plan` and `source_state` to inspect
+requirements and their exact origin/digest. To expand, supply `artifact_store`
+and full `validation_requirements` from the planning schema. Keep the discovered
+requirement ID, ordered commands, working directory for each command, environment,
+and dependency policy; explicitly plan toolchain, platform, expected artifacts,
+isolation, and remaining execution fields. Units must be required and source-bound.
+An existing requirement ID cannot be repurposed for different commands.
+
+Alternatively, record an actual user scope decision in `user_exclusions`, using
+the returned `originating_evidence_id`, `requirement_id`, `requirement_digest`,
+and a specific `reason`. Do not infer exclusion from unavailable capacity or a
+passing unrelated check. Exclusions remain visible in synthesis and final proof.
+
+Expansion requires quiescent workers and no blocked/source-mutated nodes. It
+coalesces only the new requirements, preserves existing validator units and
+accepted non-synthesis artifacts, and adds validators to synthesis dependencies.
+It emits an immutable plan revision, dispatch set, and journal with reverified
+acceptance events under an external expansion directory. Follow the returned
+`lifecycle_input_path`, `dispatches_path`, and `journal_path`; preserve the original
+journal and artifacts as lineage. Source fingerprints do not change, no mutation
+epoch is fabricated, and accepted CI/audit workers are not redispatched. Previously
+accepted synthesis must be refreshed because its evidence inputs changed.
+
+The hashed synthesis `plan_context` includes consulted-router closure, routing
+exceptions and exclusions, exact review reuse, requirement-to-node and validation
+evidence mappings, late-validation reconciliation, and catalog-handoff closure.
+This is a runtime-derived compact projection, not a coordinator-authored ledger.
+
 ## Completion Gate
 
 Report `complete` only when:
@@ -332,14 +423,16 @@ Report `complete` only when:
 - every consulted catalog is exhaustive and path-valid
 - no budget-deferred, capability-blocked, or failed routing disposition remains
 - every late handoff is resolved
+- every accepted late validation need has matching required validator evidence
+  or an exact explicit user exclusion
 - routing was rerun after every surface-changing fix
 - every epoch and selected node completed and was accepted
 - required documentation/citation coverage completed
 - baseline and all required validation completed
 - applicable language and repository synthesis completed
 - required independent review completed for a concrete change
-- all accepted reports have matching source fingerprints; isolated completion
-  additionally has no isolation failure
+- accepted reports match the final source fingerprints or have verified
+  unchanged-input audit reuse; isolated completion has no isolation failure
 - final findings, changes, validation, and lifecycle ledgers reconcile
 
 Bind completion to the exact planner-derived proof expectation and proof, the

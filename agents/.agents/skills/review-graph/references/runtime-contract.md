@@ -1,13 +1,11 @@
 # Review Graph Runtime Contract
 
-Use this contract for ordinary adaptive, isolated, and mixed execution. The
-planner and runtime own identities, fingerprints, digests, canonical artifacts,
-envelopes, and proof reconciliation. Load maintainer contracts only when
-changing those implementations or diagnosing a rejection.
+The runtime owns identities, fingerprints, artifacts, and proof reconciliation.
+Load maintainer contracts only for implementation changes or rejection diagnosis.
 
 ## Bootstrap And Route
 
-The versioned public contracts are:
+Public contracts:
 
 - `schemas/planning-input-v1.schema.json`
 - `schemas/review-payload-v1.schema.json`
@@ -15,57 +13,70 @@ The versioned public contracts are:
 - `schemas/runtime-operation-inputs-v1.schema.json`
 - `runtime-operation-examples-v1.json`
 
-Every runtime subcommand links its exact input definition and a valid example
-from `--help`.
+`--help` links input definitions and examples.
 
-Bootstrap capture provenance into the compact routing and validation template:
+Bootstrap capture provenance into the routing/validation template:
 
 ```sh
 uv run --locked python scripts/review_graph_bootstrap.py \
   --capture <capture.json> --input <template.json> --output <planning.json>
 ```
 
-Bootstrap binds each validator to the captured scope, worktree, and repository
-fingerprints, capture command, and paths. Schema failures aggregate missing,
-unknown, and malformed fields with JSON paths, accepted shapes, and enums.
-The bundle contains stage inputs and the terminal `plan`. Runtime
-commands accept it directly; `review_graph_plan.py --input` prints the embedded
-plan without replanning.
+Bootstrap binds capture identities with JSON-path diagnostics. Runtime commands
+consume its stage inputs; `review_graph_plan.py --input` prints the plan.
+
+Every graph needs a repository check with `baseline: true`, independent of review
+scope: branch `just ci` keeps `requested_scope: branch`.
 
 Supply `consulted_routers`, validation requirements, and sparse
-`routing_overrides`. Each override contains `catalog_id`, `disposition`,
-`reason`, `applicability_evidence`, `review_surface`, and `owners`; selected
-records may add `validation_requirement_ids`, `instruction_paths`, and
-`static_references`, while exact reuse may add `evidence_id`. Do not author
-router, rule, skill, path, priority, requirement, or synthesis identities.
+`routing_overrides`: `catalog_id`, `disposition`, `reason`,
+`applicability_evidence`, `review_surface`, `owners`, plus applicable validation,
+instruction, reference, and reuse `evidence_id` fields. Catalog identities are derived.
 
-The planner expands omissions to `not-applicable`, applies the repository
-classifier, and selects independent review for a concrete change plus every
-consulted surface synthesis and repository synthesis. Use
-`routing-projection` for the complete candidate list and classifier signals.
-Route shared workflows, recipes, lockfiles, toolchains, examples, and build
-configuration to tooling/documentation and every affected language owner.
+The planner marks omissions `not-applicable`, applies the repository classifier,
+and selects independent review for concrete changes, consulted surface syntheses,
+and repository synthesis. `routing-projection` lists all candidates and signals.
 
 ## Materialize And Schedule
 
-After planning, run `materialize-dispatches` once. Its input names the accepted
-plan, source triple, repository root, authorization, state command, and external
-artifact store. Every output dispatch binds its compiler and journal operation,
-canonical evidence/artifact paths, worker payload path, recursive required
-payload shape, schema digest, applicable
-repository instructions and digests, command policy, validation unit, and
-predecessor evidence. Planning stops before dispatch when a node mode lacks a
-deterministic compiler or journal path.
+`materialize-dispatches` takes plan, source triple, repository root, authorization,
+state command, and external artifact store; binds compiler/journal operations,
+artifact paths, payload schemas, instruction digests, command policy, validation
+units, and predecessors.
+`worker_input_path` names the immutable per-node dispatch wrapper and prompt.
+Send it directly; do not extract aggregate wrappers. `next-ready` verifies these
+files and returns their paths in `ready_dispatches`.
 
-`inspection_profile` defaults to `shared-read-only`: overlapping audit nodes
-receive one persisted, digest-bound structural observation while retaining
-separate semantic judgments. Use `independent-source` to disable this bounded
-reuse.
+`inspection_profile` defaults to `shared-read-only`: overlapping audits share a
+persisted, digest-bound structural observation, not semantic judgments.
+`independent-source` disables this reuse.
 
-Append lifecycle events serially with `journal-append`; valid states are
-`in-flight`, `accepted`, `blocked`, `invalidated`, and terminal
-`awaiting-replan`. Accepted events require the compiled artifact and metadata.
-After each event, request only dependency-ready work:
+`journal-append` serializes `in-flight`, `accepted`, `blocked`, `invalidated`,
+and terminal `awaiting-replan` states; acceptance requires compiled evidence.
+Its CLI field contract is:
+
+| Status | Artifact + metadata | Kind | Reason |
+| --- | --- | --- | --- |
+| `in-flight` | forbidden | forbidden | forbidden |
+| `accepted` | required | optional with evidence | forbidden |
+| `blocked` | optional as a pair | optional with evidence | required |
+| `invalidated` | forbidden | forbidden | required |
+| `awaiting-replan` | forbidden | forbidden | required |
+
+Reserve ready dispatches locally; append `in-flight` only after creation succeeds.
+A final result may not immediately release capacity. On capacity-only failure,
+preserve the reservation, wait for lifecycle/capacity progress (at most 30 seconds),
+and retry once. Never probe with throwaway workers or replay accepted work.
+If unavailable, apply the profile's fallback/resume policy and record attempts;
+no worker means no execution evidence.
+For unstarted adaptive nodes, `fallback-to-coordinator` takes lifecycle input plus
+`node_id`, `worker_created: false`, `reason`, `artifact_store`, and flags
+`--dispatches`, `--journal`, `--current-capture`. Follow returned paths; other
+dispatches/artifacts remain unchanged. Never rematerialize for one executor.
+
+`next-ready` treats missing/zero-byte journals as empty without writing.
+`journal-append` creates missing files if their parent exists. Nonempty journals
+reject blank records. After each event, request dependency-ready work:
 
 ```sh
 uv run --locked python scripts/review_graph_runtime.py next-ready \
@@ -74,134 +85,110 @@ uv run --locked python scripts/review_graph_runtime.py next-ready \
   --output-dir <proof-store>
 ```
 
-The runtime verifies the journal chain, dispatch digest, and current source
-triple. Managed filenames use the journal generation, avoiding overwrite or
-caller-invented sequences.
+The runtime verifies journal, dispatch, and current-source identities, accepting
+both established empty-reuse-field plan digests without rewriting records.
+Freeze the runtime/skill checkout per run; compatibility never permits changed
+non-empty plan fields or ignored instruction digests.
+`--output-dir` prints JSON `output_path`/`output_generation` after publication;
+journal-generation filenames ensure immutable, replayable output.
 
 ## Review Workers
 
-Create workers with `fork_turns: "none"`. Send only their exact dispatch, skill,
-references, repository instructions, and owned paths. Never send prior
-conclusions, unrelated routing, the journal, or proof-format instructions.
-Review nodes may use shared trusted read-only inspection observations, but each
-still returns an independent semantic payload. Planned validators own their
-commands; reviews attest to commands executed and normally return validation
-requirements without rerunning validator recipes. An exact duplicate-command
-authorization keeps the execution visible as reusable evidence.
+Use `fork_turns: "none"` with only the worker input, skill, references, and
+instructions. Exclude coordinator conclusions, routing, and journals. Shared
+observations do not replace independent judgment. Reviews attest to commands;
+validator-command duplicates need explicit authorization and reusable evidence.
 
-Return only this `ReviewPayload` object. Before returning, write its exact bytes
-to the dispatched candidate path and invoke the runtime-owned
-`persist-worker-payload` operation with its materialized input contract. That
-operation validates the schema before atomically renaming the candidate to
-`worker_payload_path`:
+Return only `ReviewPayload`. Write its exact bytes to the candidate, then execute
+`worker_payload_persistence.command` unchanged. Its complete argv includes the
+executable, script, and bound paths; it validates and atomically publishes
+`worker_payload_path`.
 
-```json
-{
-  "status": "completed | no-findings | blocked",
-  "commands_executed": [],
-  "command_policy_attested": true,
-  "files_inspected": ["path"],
-  "nearby_contract_owners": ["path"],
-  "findings": [{
-    "severity": "P0 | P1 | P2 | P3",
-    "location": "path:line",
-    "summary": "actionable defect",
-    "evidence": "violated behavior or contract",
-    "remediation": "smallest safe correction"
-  }],
-  "validation_requirements": [{
-    "requirement_id": "stable-id",
-    "owner": "skill-id",
-    "reason": "risk requiring evidence",
-    "commands": ["exact command"],
-    "working_directory": "/absolute/path",
-    "environment": "relevant identity",
-    "expected_evidence": "observable success",
-    "dependency_policy": "stop-on-failure | continue-independent"
-  }],
-  "handoffs": [{
-    "catalog_id": "catalog.entry",
-    "observed_trigger": "new applicability evidence",
-    "reason": "why another owner is required",
-    "scope": ["path"]
-  }],
-  "changes": [],
-  "limitations": []
-}
-```
+Use the materialized payload schema for fields and enum values.
 
-`compile-node` copies accepted bytes to a read-only content-addressed sibling
-and records that sealed path in evidence metadata. The dispatch-bound payload
-path remains staging only; later valid retries cannot replace accepted proof
-bytes.
+`compile-node` seals accepted bytes in a read-only content-addressed sibling,
+recorded in evidence metadata. The dispatch-bound path remains staging;
+retries cannot replace accepted proof bytes.
 
 Use empty arrays for absent fields. `blocked` requires a limitation;
-`no-findings` requires no findings. The compiler rejects validator-owned
+`no-findings` requires no findings and inspection of every audit-owned path.
+A completed audit may omit an owned path only with exactly one path-specific
+`scope_limitations` reason. Inspected paths must be unique and dispatch-owned;
+persistence and compilation both enforce this.
+Bundle-only synthesis allows empty `files_inspected`, but requires predecessor
+evidence. Never invent source reads.
+The compiler rejects validator-owned
 commands and non-catalog handoffs. One schema mismatch permits one retry using
 field diagnostics; a second mismatch blocks the node. For authorized fixes,
 each change names finding IDs, files, what changed, why, and the preserved
 contract; the trusted dispatch records mutation facts.
 
-Run `compile-node` with the node ID, signed dispatch set, before/after captures,
-and journal. It selects the dispatch and reads only its bound worker payload
-path, preserving the original
-payload bytes, assigns identities, renders the native artifact and envelope,
-runs both evidence gates, and journals verified evidence. The lower-level
-`compile-review` command remains available for compiler diagnosis.
+`compile-node` takes node ID, signed dispatches, captures, and journal; reads only
+the bound payload, preserves bytes, assigns identities, renders/verifies native
+evidence, then journals it. `compile-review` supports diagnosis.
 
 ## Independent Review And Validation
 
-The conclusion-blind independent worker returns the six sections defined by
-`repository-independent-review`. Pass the native result to `compile-node`; its
-compiler verifies target/path
-provenance, line bounds, before/after fingerprints, dispatched adversarial
-checks, findings, and catalog handoffs; it assigns identities, appends the
-envelope and Machine Evidence, and emits journal-compatible metadata.
+The conclusion-blind independent worker returns `repository-independent-review`'s
+six sections. Pass the native result to `compile-node`, which verifies target/path
+provenance, line bounds, before/after fingerprints, dispatched adversarial checks,
+findings, and catalog handoffs; assigns identities; appends the envelope and
+Machine Evidence; and emits journal-compatible metadata.
 
 Coalesced validators read only `review-validator/references/graph-dispatch.md`,
-publish their `ValidationPayload` through `persist-worker-payload`, and then
-return those same bytes. Run `snapshot-workspace` immediately before
-and after the exact command sequence, then pass both snapshots to
-`compile-node`. The worker omits artifact records and digests; the runtime
-derives them from the post-execution snapshot. Every derived artifact carries
-its digest mode, distinguishing bounded metadata manifests from content
-digests. `compile-validation` derives
-command/environment digests, mappings, ledger export, and canonical evidence.
-Declared artifacts include independently verified status provenance. `ignored` requires a tracked repository
-`.gitignore`; repository-local and global excludes are rejected. Declared
-workspace effects require trusted before/after filesystem and Git snapshots;
-unexpected tracked, untracked, or ignored outputs fail acceptance. Validators
-that can create source-adjacent intermediates run under the exact dispatched
-isolation root; outside-repository artifacts must resolve beneath that root.
-Known cache/build directory roots such as `target/` use
-`bounded-directory-metadata-v3`: existence and metadata for every immediate
-entry, plus a bounded detailed sample. Recursive directory hashing uses
-`recursive-content-sha256-v2`, replacing any nested known cache/build root with
-its bounded manifest while retaining content hashing elsewhere.
+publish through `persist-worker-payload`, and return identical bytes. Snapshot
+the workspace immediately before and after commands; the runtime derives
+artifact records, digest modes, command/environment identities, mappings, and
+ledger evidence. `ignored` artifacts require a tracked `.gitignore`; other
+excludes fail. Unexpected workspace effects fail. Source-adjacent intermediates
+and outside-repository artifacts stay under the dispatched isolation root.
+Known cache/build roots use bounded metadata manifests; other recursive content
+uses content digests.
+Isolation roots must not overlap the repository, including through symlinks or
+ignored directories. Planning, materialization, and snapshots enforce this
+before execution.
 
-Use `synthesis-bundle` to verify accepted artifacts and derive the compact,
-hashed findings, mappings, validation, handoff, limitation, and artifact view.
-Synthesis receives that bundle, never full predecessor reports.
+`synthesis-bundle` verifies accepted artifacts, hashing findings, mappings,
+validation, handoffs, limitations, and artifacts. Synthesis receives only this
+bundle, never full reports. Supply `plan` for hashed router closure, exclusions,
+exact reuse, requirement/validator mappings, and handoff reconciliation in
+`plan_context`.
 
 ## Mutation, Handoffs, And Proof
 
-Run `reconcile-handoffs` before expansion. Selected, exactly reused, or
-user-excluded catalog entries resolve existing handoffs; only
-`new_routing_triggers` expand routing. Final proof classification is derived
-from the typed catalog mappings reparsed from accepted evidence, not from
-caller-provided resolved IDs.
+Accepted late validation requirements block synthesis/proof until exactly planned
+or explicitly user-excluded. Run
+`reconcile-validation-requirements --input <request.json> --journal <journal>
+--dispatches <dispatches.json> --current-capture <capture.json> --output <result.json>`.
+Supply `plan` and `source_state` to inspect discoveries. Expand with
+`validation_requirements` (planning-schema objects) and `artifact_store`, or
+`user_exclusions` bound to returned origin, requirement ID/digest, and reason.
+Follow returned lifecycle/journal/dispatch paths. Source state and accepted
+audits/CI remain; synthesis inputs refresh. Wait for active workers before expansion.
+Details: [planning-contract.md](planning-contract.md#late-validation-expansion).
 
-After an authorized repair batch, run `advance-after-mutation`. It records an
-authorization upgrade when applicable, one serialized repair epoch and
-recapture, terminally invalidates stale nodes as `awaiting-replan`, includes
-newly touched paths, and emits replacement identities, lineage, and dispatches
-bound to the final source triple. Never redispatch an old immutable dispatch.
+Run `reconcile-handoffs` before expansion. Selected, exactly reused, or user-excluded
+catalog entries resolve handoffs; only `new_routing_triggers` expand routing.
+Final proof classification uses typed catalog mappings reparsed from accepted
+evidence, never caller-provided resolved IDs.
+
+After authorized repairs, run `advance-after-mutation` with the immediately
+preceding `previous_capture`, `new_capture`, and their exact `changed_paths`
+content delta. Invalidation follows owners and downstream dependencies. Supply
+accepted `sources` for verified unchanged-input audit reuse; validators,
+independent reviews, syntheses, and unproven audits rerun. Follow returned
+`lifecycle_input_path`, `dispatches_path`, `journal_path`, and `capture_path`;
+old artifacts remain unchanged. `preserved_evidence` contains only proven reuse.
+Per-node `reuse_decisions` explain disposition and reason code, distinguishing
+`coverage-limitations` from `unclassified-limitations`. Untyped caveats prevent
+reuse, never inferred informational exemptions.
 
 Persist all capture, plan, payload, compiled evidence, journal, synthesis,
 invalidation, manifest, and proof artifacts outside the reviewed repository.
 Run `finalize-proof` with the lifecycle bundle, signed dispatch set, journal,
-and `--current-capture`; it discovers accepted evidence paths without a
-caller-authored sources document. It rejects stale source state, unresolved handoffs, missing
-evidence, or verifier failures. Report `repository_validation_status`
+and `--current-capture`; it discovers accepted evidence paths, rejecting stale
+source state, unresolved handoffs, missing evidence, or verifier failures.
+Blocked events without evidence produce an incomplete proof with their reason,
+not nonexistent-artifact reads. Report `repository_validation_status`
 separately from `graph_proof_status`; structural independent-evidence
 acceptance does not imply semantic agreement or adjudicated recall.

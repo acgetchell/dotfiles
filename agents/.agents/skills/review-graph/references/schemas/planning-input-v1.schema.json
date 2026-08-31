@@ -248,7 +248,11 @@
         "allowed_artifacts": {"items": {"$ref": "#/$defs/artifact"}, "type": "array"},
         "artifact_owner": {"type": "string"},
         "authority": {"type": "string"},
-        "baseline": {"type": "boolean"},
+        "baseline": {
+          "description": "Marks the repository's baseline check, not baseline review scope. Every graph requires at least one validation unit with baseline: true, including branch/staged/worktree reviews. For a branch gate such as just ci, set baseline: true and retain requested_scope: branch.",
+          "examples": [true],
+          "type": "boolean"
+        },
         "canonical_recipe": {"type": ["string", "null"]},
         "capture_command": {"type": "string"},
         "captured_paths": {"$ref": "#/$defs/stringArray"},
@@ -269,7 +273,10 @@
         "planning_blocker": {"type": ["string", "null"]},
         "platform": {"type": "string"},
         "request": {"type": "string"},
-        "requested_scope": {"type": "string"},
+        "requested_scope": {
+          "description": "Scope being validated; independent of the baseline flag that designates the repository check. A branch review normally uses branch even when baseline is true.",
+          "enum": ["branch", "staged", "worktree", "baseline", "release"]
+        },
         "requires_isolation": {"type": "boolean"},
         "required": {"type": "boolean"},
         "requirement_id": {"type": "string"},

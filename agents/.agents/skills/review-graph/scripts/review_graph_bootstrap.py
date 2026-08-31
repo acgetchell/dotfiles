@@ -118,7 +118,15 @@ def _write_once(path: Path, value: object) -> None:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        epilog=(
+            "Every graph needs a repository validation requirement with baseline: true. "
+            "This marks the repository check, not baseline review scope: a branch just ci unit uses "
+            "baseline: true with requested_scope: branch. "
+            f"Field contracts: {PLANNING_SCHEMA}#/$defs/validationRequirement"
+        ),
+    )
     parser.add_argument("--capture", type=Path, required=True, help="capture_scope.py JSON manifest")
     parser.add_argument("--input", type=Path, required=True, help="compact routing and validation template")
     parser.add_argument("--output", type=Path, required=True, help="immutable normalized planning document")
@@ -131,7 +139,8 @@ def main(argv: list[str] | None = None) -> int:
     """Normalize, validate, plan, and persist one deterministic bootstrap result."""
     args = _parser().parse_args(argv)
     try:
-        document = bootstrap_document(_read_object(args.capture), _read_object(args.input))
+        capture = _read_object(args.capture)
+        document = bootstrap_document(capture, _read_object(args.input))
         require_schema(document, PLANNING_SCHEMA)
         root = Path(str(document["repository_root"]))
         plan = plan_from_document(document, catalog_path=args.catalog, skill_roots=tuple(args.skill_root or (DEFAULT_SKILL_ROOT,)), repository_root=root)
@@ -155,6 +164,7 @@ def main(argv: list[str] | None = None) -> int:
         for operation in ("compile-node", "finalize-proof", "journal-append", "next-ready", "snapshot-workspace"):
             require_schema_definition(lifecycle_input, RUNTIME_SCHEMA, operation)
         output = {
+            "capture": capture,
             "lifecycle_input": lifecycle_input,
             "materialization_input": materialization_input,
             "plan": plan_document,

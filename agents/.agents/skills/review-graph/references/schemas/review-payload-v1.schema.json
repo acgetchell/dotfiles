@@ -51,6 +51,18 @@
       "type": "array"
     },
     "limitations": {"items": {"type": "string"}, "type": "array"},
+    "scope_limitations": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {"minLength": 1, "type": "string"},
+          "reason": {"minLength": 1, "type": "string"}
+        },
+        "required": ["path", "reason"],
+        "type": "object"
+      },
+      "type": "array"
+    },
     "nearby_contract_owners": {"items": {"type": "string"}, "type": "array"},
     "status": {"enum": ["completed", "no-findings", "blocked"]},
     "validation_requirements": {
@@ -81,6 +93,7 @@
     "handoffs",
     "changes",
     "limitations",
+    "scope_limitations",
     "commands_executed",
     "command_policy_attested"
   ],

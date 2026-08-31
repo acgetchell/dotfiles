@@ -95,6 +95,9 @@ Create every worker in every profile with `fork_turns: "none"` and never dispatc
 a later node through a follow-up to a completed worker. In adaptive execution,
 use fresh independent workers when possible; if creation fails before accepted
 evidence, record the attempt and execute that same node in the coordinator.
+Capacity-only failures first permit the single bounded unchanged-dispatch retry
+in `runtime-contract.md`. Reserve locally before creation; journal `in-flight`
+only after successful creation, not when selecting the next ready node.
 Isolated-only instead stops and emits the resume manifest from
 `planning-contract.md`.
 
@@ -312,9 +315,12 @@ Accept a result only when:
 - the named skill file and digest are the dispatched file and digest
 - every dispatched static routing/repository reference appears under
   `References loaded` with its dispatched digest
-- inspected files overlap the assigned scope or the report explains why the
-  scope contains no applicable contract
-- `completed` and `no-findings` results contain concrete inspection evidence
+- audit inspected files are unique and owned by the dispatch; `no-findings`
+  inspects every owned path, while `completed` names every omitted owned path
+  once with a structured, accepted limitation
+- `completed` and `no-findings` audits contain concrete inspection evidence;
+  bundle-only synthesis may have no inspected source files and instead binds
+  its complete predecessor evidence
 - audit, synthesis, and revalidation results with `completed` or `no-findings`
   matched all three state identities before and after and changed no repository
   path or git state

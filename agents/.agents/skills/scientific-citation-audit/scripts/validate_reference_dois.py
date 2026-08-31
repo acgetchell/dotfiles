@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
 
 STOPWORDS = {"a", "an", "and", "are", "as", "by", "for", "from", "in", "into", "is", "it", "of", "on", "or", "the", "to", "using", "with"}
+_ENTRY_BOUNDARY = re.compile(r"^(?:\s*$| {0,3}#{1,6}(?:[ \t]|$))")
 
 
 class AuditStatus(StrEnum):
@@ -31,6 +32,7 @@ class AuditStatus(StrEnum):
 
     OK = "OK"
     MISMATCH = "MISMATCH"
+    INSUFFICIENT_CONTEXT = "INSUFFICIENT_CONTEXT"
     FAIL = "FAIL"
 
 
@@ -67,6 +69,7 @@ class DoiEntry:
     doi: Doi
     line: int
     entry: str
+    badge_only: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,7 +161,11 @@ def extract_entries(markdown: str) -> list[DoiEntry]:
             if key in seen:
                 continue
             seen.add(key)
-            entries.append(DoiEntry(doi=doi, line=idx + 1, entry=collect_entry(lines, idx)))
+            paragraph = collect_entry(lines, idx)
+            # Remove linked images, not ordinary citation links or their labels.
+            without_badges = re.sub(r"\[!\[[^\]]*\]\([^\n]*?\)\]\(https?://[^\s]+\)", "", paragraph)
+            badge_only = without_badges != paragraph and not re.search(r"\w", without_badges)
+            entries.append(DoiEntry(doi=doi, line=idx + 1, entry=paragraph, badge_only=badge_only))
 
     return entries
 
@@ -217,11 +224,11 @@ def trim_raw_url_doi(value: str) -> str:
 
 
 def collect_entry(lines: Sequence[str], doi_idx: int) -> str:
-    """Collect the current bibliography item around a DOI line."""
+    """Collect a bibliography item, stopping at blank lines or ATX headings."""
     start = doi_idx
     while start > 0:
         prev = lines[start - 1]
-        if not prev.strip():
+        if _ENTRY_BOUNDARY.match(prev):
             break
         if re.match(r"^\s*(?:[-*]|\d+\.)\s+", prev) and start - 1 != doi_idx:
             start -= 1
@@ -229,7 +236,7 @@ def collect_entry(lines: Sequence[str], doi_idx: int) -> str:
         start -= 1
 
     end = doi_idx + 1
-    while end < len(lines) and lines[end].strip():
+    while end < len(lines) and not _ENTRY_BOUNDARY.match(lines[end]):
         if re.match(r"^\s*(?:[-*]|\d+\.)\s+", lines[end]) and end > doi_idx + 1:
             break
         end += 1
@@ -334,6 +341,20 @@ def validate_entry(entry: DoiEntry, timeout: float, min_title_score: float, fetc
             message=f"{type(exc).__name__}: {exc}",
         )
 
+    if entry.badge_only:
+        return DoiResult(
+            doi=entry.doi.value,
+            line=entry.line,
+            status=AuditStatus.INSUFFICIENT_CONTEXT,
+            title_score=None,
+            author_score=None,
+            resolved_title=metadata.title,
+            resolved_year=metadata.year,
+            resolved_container=metadata.container,
+            resolved_authors=metadata.author_families,
+            message="DOI resolves, but this badge supplies no bibliographic context; compare its identity with CITATION.cff or primary metadata",
+        )
+
     resolved_title_score = title_score(metadata.title, entry.entry)
     resolved_author_score = author_score(metadata.author_families, entry.entry)
     problems: list[str] = []
@@ -384,7 +405,7 @@ def print_text_report(results: Sequence[DoiResult]) -> None:
             f"{result.status.value}\tline={result.line}\t"
             f"title_score={title_score_text}\tauthor_score={author_score_text}\t"
             f"{result.doi}\t{result.resolved_year or '-'}\t"
-            f"{result.resolved_title or result.message}"
+            f"{result.resolved_title or '-'}\t{result.message}"
         )
 
 

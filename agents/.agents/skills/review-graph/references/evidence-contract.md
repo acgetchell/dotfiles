@@ -24,6 +24,9 @@ deterministic verifier.
   missing predecessor evidence.
 - Reuse evidence only after recapturing source state and verifying the complete
   identity. Mark mismatches stale rather than overwriting them.
+- Mutation impact alone does not establish proof eligibility. Cross-capture
+  audit reuse requires the unchanged-input transition proof below; never rewrite
+  an old envelope's fingerprints or accept an unaffected-node label as evidence.
 - Treat exact review reuse as typed non-executable evidence. Preserve the
   router's exact requirement-to-evidence mapping; do not create a leaf or
   independent-review node for reused work.
@@ -225,12 +228,46 @@ recaptured plan. The only accepted review evidence without a planned executable
 node is an exact evidence ID declared by the routing ledger and preserved
 unchanged in the plan, expectation, and proof. Its envelope must match the
 routed requirement, skill, path, mode, static references, and source state
-through the normal review-evidence gate. Independent planned and exact-reuse
+(or the verified audit-reuse transition below). Independent planned and exact-reuse
 identities additionally retain the exact trusted change target and ordered
 planned paths. A synthesis record is accepted only
 after every planned predecessor and declared exact-reuse record have accepted
 mapped evidence, and its native payload names those exact predecessor evidence
 IDs.
+
+### Cross-Capture Audit Reuse
+
+The sole cross-source exception is a planner-bound `AuditReuseTransition` for a
+complete, predecessor-free audit. The compiler seals an `AuditInputIdentity`
+into the native report and expectation: owned paths, inspected paths, nearby
+contract owners, and loaded instruction digests. Preserve and verify the report
+and envelope at their original source state; do not create a synthetic audit or
+claim that a worker executed again.
+
+The transition binds the original evidence ID, artifact digest, source and
+target triples, persisted artifact/metadata locations, and target instruction
+digests. The plan contains shared `ReviewSourceSnapshot` records. Their v2
+repository fingerprints commit to every captured repository path identity,
+index identity, scoped fingerprints, and capture context. Recompute these
+commitments before comparing dependencies; unbound caller-authored path maps
+cannot establish reuse. Capture boundaries, HEAD, branch, and index must match.
+
+Require unchanged owned/inspected/nearby paths, applicable instructions, routed
+requirements and scope, skill/reference digests, and execution profile. Full
+owned-path inspection is mandatory; blocked, limited, partial, legacy-unbound,
+validation, independent-review, fix, revalidation, and synthesis results cannot
+use this exception. Changed or newly applicable instructions invalidate reuse.
+
+The runtime reroutes qualifying audits as non-executable exact reuse and binds
+the transitions/snapshots in the plan digest. Scheduling and synthesis reload
+the original sources; finalization discovers them without manual source
+transcription. The bundle verifier independently checks each transition against
+the routed identity, raw artifact digest, and target proof state, then runs the
+ordinary native/envelope gates at the original state. Missing transitions,
+tampered snapshots, substituted artifacts, or changed inputs fail closed.
+Validators and syntheses remain current-state executions. Repeated transitions
+retain the original audit provenance while rebinding only the verified reuse
+claim to the newest capture.
 
 Use the planner's canonical typed artifact structures:
 
