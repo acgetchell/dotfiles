@@ -2309,11 +2309,34 @@ def _identifier_tuple_blockers(values: Sequence[str], *, label: str) -> tuple[st
 
 
 def graph_plan_digest(plan: GraphPlan) -> str:
-    """Hash a plan while preserving pre-exclusion identities when none are present."""
+    """Hash a plan without empty optional fields absent from legacy identities."""
     document = asdict(plan)
     if not plan.validation_exclusions:
         document.pop("validation_exclusions")
+    if not plan.audit_reuse_transitions:
+        document.pop("audit_reuse_transitions")
+    if not plan.reuse_source_snapshots:
+        document.pop("reuse_source_snapshots")
     return _sha256_json(document)
+
+
+def graph_plan_digest_matches(plan: GraphPlan, digest: str) -> bool:
+    """Verify canonical and previously emitted empty-reuse-field representations."""
+    if digest == graph_plan_digest(plan):
+        return True
+    legacy = asdict(plan)
+    if not plan.validation_exclusions:
+        legacy.pop("validation_exclusions")
+    return digest == _sha256_json(legacy)
+
+
+def validate_isolation_root(isolation_root: str, repository_root: Path) -> None:
+    """Reject isolation roots overlapping the captured repository before execution."""
+    root = Path(isolation_root).resolve(strict=False)
+    repository = repository_root.resolve()
+    if root.is_relative_to(repository) or repository.is_relative_to(root):
+        msg = f"isolated validation root overlaps the captured repository: {root}; use an external copied tree or worktree"
+        raise ValueError(msg)
 
 
 def _sha256_json(value: object) -> str:
@@ -5428,7 +5451,7 @@ def _compact_routing_overrides_from_document(
 
 def validation_requirements_from_document(document: Mapping[str, Any], repository_root: Path | None) -> tuple[ValidationRequirement, ...]:
     """Parse validation plans consistently for bootstrap and source-preserving expansion."""
-    return tuple(
+    requirements = tuple(
         ValidationRequirement(
             requirement_id=_bounded_text_field(item, "requirement_id"),
             source_state=_source_state_field(item),
@@ -5470,6 +5493,11 @@ def validation_requirements_from_document(document: Mapping[str, Any], repositor
         )
         for item in document.get("validation_requirements", [])
     )
+    for item in requirements:
+        _validate_validation_isolation(item)
+        if item.requires_isolation and repository_root is not None:
+            validate_isolation_root(item.isolation_root or "", repository_root)
+    return requirements
 
 
 def plan_from_document(  # noqa: C901, PLR0912, PLR0915

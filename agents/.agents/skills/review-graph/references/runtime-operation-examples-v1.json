@@ -46,6 +46,14 @@
       "status": "not-applicable"
     }
   },
+  "fallback-to-coordinator": {
+    "artifact_store": "/tmp/review-fallback",
+    "node_id": "audit-001",
+    "plan": {},
+    "reason": "bounded worker-capacity retry exhausted; no worker created",
+    "source_state": ["scope", "worktree", "repository"],
+    "worker_created": false
+  },
   "finalize-proof": {
     "plan": {},
     "source_state": ["scope", "worktree", "repository"],

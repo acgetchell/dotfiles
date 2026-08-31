@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
 
 STOPWORDS = {"a", "an", "and", "are", "as", "by", "for", "from", "in", "into", "is", "it", "of", "on", "or", "the", "to", "using", "with"}
+_ENTRY_BOUNDARY = re.compile(r"^(?:\s*$| {0,3}#{1,6}(?:[ \t]|$))")
 
 
 class AuditStatus(StrEnum):
@@ -223,11 +224,11 @@ def trim_raw_url_doi(value: str) -> str:
 
 
 def collect_entry(lines: Sequence[str], doi_idx: int) -> str:
-    """Collect the current bibliography item around a DOI line."""
+    """Collect a bibliography item, stopping at blank lines or ATX headings."""
     start = doi_idx
     while start > 0:
         prev = lines[start - 1]
-        if not prev.strip():
+        if _ENTRY_BOUNDARY.match(prev):
             break
         if re.match(r"^\s*(?:[-*]|\d+\.)\s+", prev) and start - 1 != doi_idx:
             start -= 1
@@ -235,7 +236,7 @@ def collect_entry(lines: Sequence[str], doi_idx: int) -> str:
         start -= 1
 
     end = doi_idx + 1
-    while end < len(lines) and lines[end].strip():
+    while end < len(lines) and not _ENTRY_BOUNDARY.match(lines[end]):
         if re.match(r"^\s*(?:[-*]|\d+\.)\s+", lines[end]) and end > doi_idx + 1:
             break
         end += 1

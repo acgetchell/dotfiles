@@ -40,10 +40,12 @@ class _PathDigest:
         self.digest = hashlib.sha256()
 
     def update(self, value: bytes) -> None:
+        """Feed bytes to both the parent and per-path digests."""
         self.parent.update(value)
         self.digest.update(value)
 
     def hexdigest(self) -> str:
+        """Return the per-path digest as a hexadecimal string."""
         return self.digest.hexdigest()
 
 

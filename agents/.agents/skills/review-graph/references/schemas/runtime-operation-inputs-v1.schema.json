@@ -76,6 +76,19 @@
       "required": ["dispatch", "payload"],
       "type": "object"
     },
+    "fallback-to-coordinator": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_store": {"minLength": 1, "type": "string"},
+        "node_id": {"minLength": 1, "type": "string"},
+        "plan": {"type": "object"},
+        "reason": {"minLength": 1, "type": "string"},
+        "source_state": {"$ref": "#/$defs/sourceState"},
+        "worker_created": {"const": false}
+      },
+      "required": ["artifact_store", "node_id", "plan", "reason", "source_state", "worker_created"],
+      "type": "object"
+    },
     "finalize-proof": {
       "additionalProperties": false,
       "properties": {

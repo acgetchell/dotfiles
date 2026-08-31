@@ -8,10 +8,8 @@ import json
 import sys
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    import pytest
+import pytest
 
 SCRIPT = Path(__file__).with_name("validate_reference_dois.py")
 SPEC = importlib.util.spec_from_file_location("validate_reference_dois", SCRIPT)
@@ -117,11 +115,12 @@ def test_validation_reports_malformed_fetcher_response() -> None:
     assert result.message == "TypeError: DOI resolver response must be a JSON object"
 
 
+@pytest.mark.parametrize("heading", ["# Project\n\n", "# Project\n", "### Project\n", "   ###### Project\n", "#\tProject\n", "#\n"])
 def test_resolved_badge_needs_context_instead_of_reporting_mismatch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], heading: str
 ) -> None:
     path = tmp_path / "README.md"
-    path.write_text("# Project\n\n[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.123.svg)](https://doi.org/10.5281/zenodo.123)\n", encoding="utf-8")
+    path.write_text(f"{heading}[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.123.svg)](https://doi.org/10.5281/zenodo.123)\n", encoding="utf-8")
     original = MODULE.validate_entries
     monkeypatch.setattr(
         MODULE,
@@ -131,12 +130,19 @@ def test_resolved_badge_needs_context_instead_of_reporting_mismatch(
     assert MODULE.run([str(path), "--json"]) == 1
     result = json.loads(capsys.readouterr().out)[0]
     assert result["status"] == "INSUFFICIENT_CONTEXT"
-    assert result["line"] == 3
+    assert result["line"] == heading.count("\n") + 1
     assert result["resolved_title"] == "Project"
     assert result["resolved_authors"] == ["Author"]
     assert result["title_score"] is None
     assert result["author_score"] is None
     assert "no bibliographic context" in result["message"]
+
+
+def test_heading_after_badge_terminates_entry() -> None:
+    badge = "[![DOI](https://example.org/badge.svg)](https://doi.org/10.1234/test)"
+    entry = MODULE.extract_entries(f"{badge}\n## Unrelated section\nOther text.")[0]
+    assert entry.entry == badge
+    assert entry.badge_only
 
 
 def test_badge_does_not_hide_contradictory_bibliographic_context() -> None:

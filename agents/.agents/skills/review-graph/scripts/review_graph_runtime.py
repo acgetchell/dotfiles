@@ -73,6 +73,7 @@ from review_graph_plan import (
     coalesce_validation_requirements,
     create_artifact_manifest,
     graph_plan_digest,
+    graph_plan_digest_matches,
     load_routing_catalog,
     plan_from_document,
     repository_review_proof_expectation,
@@ -1742,6 +1743,8 @@ def capture_workspace_snapshot(dispatch: dict[str, Any]) -> dict[str, Any]:
         raise TypeError(msg)
     unit = _validation_unit(raw_unit)
     repository_root = Path(_required_text(dispatch, "repository_root")).resolve()
+    if unit.requires_isolation:
+        _validate_isolated_workspace_paths(dispatch, unit, ())
     approved = {artifact.path: artifact for artifact in unit.allowed_artifacts}
     paths = tuple(dict.fromkeys((*unit.expected_workspace_effects, *approved)))
     records: list[dict[str, object]] = []
@@ -2337,7 +2340,7 @@ def _validation_reconciliation(plan: GraphPlan, records: list[dict[str, Any]]) -
 
 def _synthesis_plan_context(plan: GraphPlan, records: list[dict[str, Any]]) -> dict[str, Any]:
     by_evidence = {str(record["evidence_id"]): record for record in records}
-    review_ids = tuple(str(record["evidence_id"]) for record in records if record.get("result_type") != "validation-result")
+    review_ids = tuple(str(record["evidence_id"]) for record in records if record.get("record_type") == "review")
     handoffs, unresolved, blockers = _reconciled_handoffs(plan, by_evidence, review_ids)
     return {
         "plan_digest": _plan_digest(plan),
@@ -2437,6 +2440,9 @@ def _verified_reused_sources(plan: GraphPlan, source_state: tuple[str, str, str]
         inputs = expectation.audit_input_identity
         if inputs is None:  # Narrowed by the reuse gate.
             msg = "audit reuse lacks compiler-bound inputs"
+            raise ValueError(msg)
+        if source_state not in snapshots:
+            msg = "audit reuse lacks a source snapshot for current source_state"
             raise ValueError(msg)
         explicit = tuple(path for decision in plan.routing_decisions if decision.evidence_id == evidence.evidence_id for path in decision.instruction_paths)
         paths = _applicable_instruction_paths(Path(snapshots[source_state].repository_root), inputs.owned_paths, explicit)
@@ -2756,6 +2762,9 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         msg = "repository_root must be an existing absolute directory"
         raise ValueError(msg)
     repository_root = str(repository_root_path.resolve())
+    for unit in plan.coalesced_validation_units:
+        if unit.requires_isolation:
+            _validate_isolated_workspace_paths({"repository_root": repository_root}, unit, ())
     authorization = _required_text(document, "authorization")
     if authorization not in {"review-only", "review-and-fix"}:
         msg = "authorization must be review-only or review-and-fix"
@@ -3132,7 +3141,19 @@ def _compact_reuse_overrides(plan: GraphPlan, reused_requirements: dict[str, str
     return json.loads(_canonical_json(overrides))
 
 
-def _carry_forward_audits(  # noqa: C901, PLR0913
+def _audit_reuse_blocker(record: dict[str, Any], *, invalidated: bool) -> tuple[str, str] | None:
+    if invalidated:
+        return "invalidated-inputs", "Owned inputs, routing, or a predecessor changed."
+    if record.get("mode") != "audit" or record.get("status") not in {"completed", "no-findings"}:
+        return "ineligible-evidence", "Only completed audit leaves can be reused across captures."
+    if record.get("scope_limitations"):
+        return "coverage-limitations", "The audit declares incomplete owned-path coverage."
+    if record.get("limitations"):
+        return "unclassified-limitations", "Free-text caveats cannot prove independence from changed inputs or prior validation."
+    return None
+
+
+def _carry_forward_audits(  # noqa: C901, PLR0913, PLR0915 - preserve provenance and report every reuse rejection.
     document: dict[str, Any],
     old_plan: GraphPlan,
     candidate_plan: GraphPlan,
@@ -3140,11 +3161,21 @@ def _carry_forward_audits(  # noqa: C901, PLR0913
     *,
     invalidated: tuple[str, ...],
     sources: dict[str, tuple[dict[str, Any], dict[str, Any]]],
-) -> GraphPlan:
+) -> tuple[GraphPlan, list[dict[str, str]]]:
     """Convert only proven unchanged leaves into non-executable routed reuse."""
+    decisions = {
+        node.node_id: {"node_id": node.node_id, "disposition": "not-reused", "reason_code": "missing-evidence", "reason": "No accepted source was supplied."}
+        for node in old_plan.actual_worker_nodes
+    }
+
+    def decision(node_id: str, code: str, reason: str) -> None:
+        decisions[node_id] = {"node_id": node_id, "disposition": "reused" if code == "verified" else "not-reused", "reason_code": code, "reason": reason}
+
     previous, current = document["previous_capture"], document["new_capture"]
     if current.get("repository_state_format") != SNAPSHOT_FORMAT:
-        return candidate_plan
+        for node_id in sources:
+            decision(node_id, "unsupported-snapshot", "The current capture lacks content-bound path identities.")
+        return candidate_plan, list(decisions.values())
     target = source_snapshot(current)
     target.verify()
     snapshots = {item.source_state: item for item in old_plan.reuse_source_snapshots}
@@ -3158,16 +3189,18 @@ def _carry_forward_audits(  # noqa: C901, PLR0913
     records: list[tuple[ReviewEvidenceExpectation, ReviewEvidence]] = []
     reused_requirements: dict[str, str] = {}
     for node_id, (source, record) in sources.items():
-        if node_id in invalidated or record.get("mode") != "audit" or record.get("status") not in {"completed", "no-findings"}:
-            continue
-        if record.get("scope_limitations") or record.get("limitations"):
+        blocker = _audit_reuse_blocker(record, invalidated=node_id in invalidated)
+        if blocker is not None:
+            decision(node_id, *blocker)
             continue
         _kind, expectation, evidence, _content, _normalized = _load_evidence_source(source, require_normalized=True)
         if not isinstance(expectation, ReviewEvidenceExpectation) or not isinstance(evidence, ReviewEvidence):
+            decision(node_id, "ineligible-evidence", "The source is not typed review evidence.")
             continue
         inputs = expectation.audit_input_identity
         origin = snapshots.get(expectation.source_state)
         if inputs is None or origin is None or evidence.predecessor_evidence_ids or expectation.execution_profile != candidate_plan.execution_profile:
+            decision(node_id, "unproven-inputs", "Bound origin/inputs, predecessor independence, or the execution profile do not permit reuse.")
             continue
         candidates = tuple(
             node
@@ -3179,6 +3212,7 @@ def _carry_forward_audits(  # noqa: C901, PLR0913
             == (evidence.skill_id, evidence.skill_path, evidence.skill_digest, evidence.reference_digests, inputs.owned_paths)
         )
         if len(candidates) != 1:
+            decision(node_id, "routing-identity-changed", "No unique unchanged audit leaf owns the same requirements and inputs.")
             continue
         candidate = candidates[0]
         instructions = _applicable_instruction_paths(root, candidate.coverage, candidate.instruction_paths)
@@ -3193,14 +3227,16 @@ def _carry_forward_audits(  # noqa: C901, PLR0913
         )
         try:
             verify_reuse_inputs(origin, target, inputs, transition)
-        except ValueError:
+        except ValueError as error:
             # Incomplete/changed inputs are ordinary fresh review work, not reuse.
+            decision(node_id, "input-proof-failed", str(error))
             continue
+        decision(node_id, "verified", "Complete audit inputs and dependencies are unchanged.")
         transitions.append(transition)
         records.append((expectation, evidence))
         reused_requirements.update(dict.fromkeys(evidence.requirement_ids, evidence.evidence_id))
     if not transitions:
-        return candidate_plan
+        return candidate_plan, list(decisions.values())
     planning_input.pop("routing_decisions", None)
     planning_input["routing_overrides"] = _compact_reuse_overrides(candidate_plan, reused_requirements)
     require_schema(planning_input, _PLANNING_INPUT_SCHEMA)
@@ -3221,7 +3257,7 @@ def _carry_forward_audits(  # noqa: C901, PLR0913
         if blockers:
             msg = "rerouted audit reuse is inconsistent: " + "; ".join(blockers)
             raise ValueError(msg)
-    return routed
+    return routed, list(decisions.values())
 
 
 def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa: PLR0915
@@ -3269,7 +3305,7 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
         msg = "recaptured repair epoch produced a blocked final-state plan: " + "; ".join(new_plan.blockers)
         raise ValueError(msg)
     invalidated = _mutation_invalidated_nodes(old_plan, new_plan, changed_paths, repository_root, sources)
-    new_plan = _carry_forward_audits(document, old_plan, new_plan, planning_input, invalidated=invalidated, sources=sources)
+    new_plan, reuse_decisions = _carry_forward_audits(document, old_plan, new_plan, planning_input, invalidated=invalidated, sources=sources)
     new_plan = _epoch_scoped_plan(new_plan, epoch)
     reused_ids = {item.evidence_id for item in new_plan.audit_reuse_transitions}
     artifact_store = Path(_required_text(document, "artifact_store")).resolve() / f"repair-epoch-{epoch:03d}"
@@ -3284,6 +3320,16 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
             "state_verification_command": _required_text(document, "state_verification_command"),
         }
     )
+    lifecycle = {"plan": asdict(new_plan), "source_state": list(new_state)}
+    continuation = {
+        "lifecycle_input_path": artifact_store / "lifecycle.json",
+        "dispatches_path": artifact_store / "dispatches.json",
+        "capture_path": artifact_store / "capture.json",
+        "journal_path": artifact_store / "execution.jsonl",
+    }
+    for key, value in (("lifecycle_input_path", lifecycle), ("dispatches_path", dispatch_set), ("capture_path", new_capture)):
+        _write_text_once(continuation[key], json.dumps(value, indent=2, sort_keys=True) + "\n")
+    _write_text_once(continuation["journal_path"], "")
     old_paths = set(_text_list(previous_capture, "captured_scope_paths"))
     newly_touched_paths = tuple(sorted(set(captured_paths) - old_paths))
     unaffected = tuple(node for node in old_plan.actual_worker_nodes if node.node_id not in invalidated)
@@ -3303,18 +3349,20 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
         "dispatch_set": dispatch_set,
         "invalidated_nodes": [{"node_id": node_id, "state": "awaiting-replan"} for node_id in invalidated],
         "capture": new_capture,
-        "lifecycle_input": {"plan": asdict(new_plan), "source_state": list(new_state)},
+        "lifecycle_input": lifecycle,
+        **{key: str(path) for key, path in continuation.items()},
         "new_plan": asdict(new_plan),
         "new_source_state": list(new_state),
         "newly_touched_paths": list(newly_touched_paths),
         "old_source_state": list(old_source_state),
         "preserved_evidence": [
-            {"node_id": node.node_id, "source": sources[node.node_id][0], "evidence_id": sources[node.node_id][1]["evidence_id"]}
-            for node in unaffected
-            if node.mode == "audit" and node.node_id in sources and sources[node.node_id][1]["status"] in {"completed", "no-findings"}
+            {"node_id": node_id, "source": source, "evidence_id": record["evidence_id"]}
+            for node_id, (source, record) in sources.items()
+            if record["evidence_id"] in reused_ids
         ],
         "preservation_policy": "verified-unchanged-audit-inputs",
         "reused_evidence_ids": sorted(reused_ids),
+        "reuse_decisions": sorted(reuse_decisions, key=lambda item: item["node_id"]),
         "unaffected_node_ids": [node.node_id for node in unaffected],
         "repair_epoch": {
             "changed_paths": list(changed_paths),
@@ -3492,7 +3540,7 @@ def _validated_journal_record(
     if _required_int(event, "schema_version") != 1 or _required_int(event, "sequence") != expected_sequence:
         msg = f"journal event sequence is invalid at record {expected_sequence}"
         raise ValueError(msg)
-    if _required_text(event, "plan_digest") != _plan_digest(plan) or _state(event, "source_state") != source_state:
+    if not graph_plan_digest_matches(plan, _required_text(event, "plan_digest")) or _state(event, "source_state") != source_state:
         msg = f"journal event {expected_sequence} belongs to a different plan or source state"
         raise ValueError(msg)
     if event.get("previous_event_digest") != previous_digest:
@@ -3649,7 +3697,7 @@ def append_journal_event(path: Path, document: dict[str, Any], request: JournalE
                 "affected_node_ids": list(affected),
                 "evidence": evidence,
                 "node_id": request.node_id,
-                "plan_digest": _plan_digest(plan),
+                "plan_digest": events[0]["plan_digest"] if events else _plan_digest(plan),
                 "previous_event_digest": head_digest,
                 "reason": _new_journal_reason(request, limitations),
                 "schema_version": 1,
@@ -3669,7 +3717,7 @@ def _dispatches_by_node(dispatch_set: dict[str, Any], *, plan: GraphPlan, source
     if _required_int(dispatch_set, "schema_version") != 1:
         msg = "dispatch set has an unsupported schema version"
         raise ValueError(msg)
-    if _required_text(dispatch_set, "plan_digest") != _plan_digest(plan) or _state(dispatch_set, "source_state") != source_state:
+    if not graph_plan_digest_matches(plan, _required_text(dispatch_set, "plan_digest")) or _state(dispatch_set, "source_state") != source_state:
         msg = "dispatch set belongs to a different plan or source state"
         raise ValueError(msg)
     expected_digest = _required_text(dispatch_set, "dispatch_set_digest")
@@ -3700,20 +3748,26 @@ def _dispatches_by_node(dispatch_set: dict[str, Any], *, plan: GraphPlan, source
 
 
 def _accepted_journal_sources(
-    plan: GraphPlan, source_state: tuple[str, str, str], events: tuple[dict[str, Any], ...], entries: dict[str, dict[str, Any]]
+    plan: GraphPlan,
+    source_state: tuple[str, str, str],
+    events: tuple[dict[str, Any], ...],
+    entries: dict[str, dict[str, Any]],
+    *,
+    include_blocked: bool = False,
 ) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
     state, _head = _fold_execution_journal(plan, source_state, events)
     latest = {str(event["node_id"]): event for event in events}
     sources: dict[str, dict[str, Any]] = {}
     records: list[dict[str, Any]] = []
     for node in plan.actual_worker_nodes:
-        if state.get(node.node_id) != "accepted":
+        status = state.get(node.node_id)
+        if status != "accepted" and not (include_blocked and status == "blocked" and latest[node.node_id]["evidence"] is not None):
             continue
         entry = entries[node.node_id]
         source = {"artifact_path": entry["artifact_path"], "metadata_path": entry["metadata_path"]}
         verified, _limitations = _verified_journal_evidence(source, plan=plan, node=node, source_state=source_state)
         if verified != latest[node.node_id]["evidence"]:
-            msg = f"accepted artifact differs from journal: {node.node_id}"
+            msg = f"{status} artifact differs from journal: {node.node_id}"
             raise ValueError(msg)
         _kind, _expectation, _evidence, _content, record = _load_evidence_source(source, require_normalized=True)
         if record is not None:
@@ -3788,6 +3842,77 @@ def next_ready_nodes(document: dict[str, Any], *, journal_events: tuple[dict[str
         "schema_version": 1,
         "validation_reconciliation": validation_reconciliation,
         "waiting": waiting,
+    }
+
+
+def fallback_to_coordinator(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    """Publish one unstarted adaptive fallback while preserving the current journal."""
+    lock_path = args.journal.with_name(args.journal.name + ".lock")
+    with lock_path.open("a+b") as lock_stream:
+        fcntl.flock(lock_stream.fileno(), fcntl.LOCK_EX)
+        try:
+            return _fallback_to_coordinator_locked(document, args)
+        finally:
+            fcntl.flock(lock_stream.fileno(), fcntl.LOCK_UN)
+
+
+def _fallback_to_coordinator_locked(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    plan = _graph_plan(document["plan"])
+    source_state = _state(document, "source_state")
+    if _capture_source_state(args.current_capture) != source_state:
+        msg = "fallback current capture differs from plan-bound source state"
+        raise ValueError(msg)
+    if plan.execution_profile not in {"grouped", "mixed"} or document.get("worker_created") is not False:
+        msg = "coordinator fallback requires an adaptive profile and worker_created=false"
+        raise ValueError(msg)
+    reason = _required_text(document, "reason")
+    node_id = _required_text(document, "node_id")
+    events, state, head = read_execution_journal(args.journal, plan=plan, source_state=source_state)
+    dispatch_set = _read_json_object(args.dispatches)
+    entries = _dispatches_by_node(dispatch_set, plan=plan, source_state=source_state)
+    if node_id not in entries or node_id in state:
+        msg = "fallback requires a planned node with no prior execution or lifecycle event"
+        raise ValueError(msg)
+    ready = next_ready_nodes({**document, "current_source_state": list(source_state)}, journal_events=events, dispatch_set=dispatch_set)
+    if node_id not in ready["ready_node_ids"]:
+        msg = f"fallback node is not dependency-ready: {node_id}"
+        raise ValueError(msg)
+    original = entries[node_id]
+    if original["dispatch"]["execution_location"] != "worker":
+        msg = f"fallback node is not assigned to a worker: {node_id}"
+        raise ValueError(msg)
+    if any(Path(original[field]).exists() for field in ("artifact_path", "metadata_path", "worker_payload_path", "worker_payload_candidate_path")):
+        msg = f"fallback node already has execution output: {node_id}"
+        raise ValueError(msg)
+    identity = _sha256_bytes(_canonical_json({"dispatch_set_digest": dispatch_set["dispatch_set_digest"], "node_id": node_id, "journal_head": head}).encode())
+    store = Path(_required_text(document, "artifact_store")).resolve() / f"fallback-{identity[7:23]}"
+    entry = json.loads(_canonical_json(original))
+    entry["dispatch"].update({"execution_location": "coordinator", "worker_created": False, "fresh_context": False})
+    entry["worker_prompt"] = _worker_prompt(entry["result_contract"], entry["dispatch"])
+    entry["worker_input_path"] = str(store / f"{node_id}.worker-input.json")
+    updated = {**dispatch_set, "dispatches": [entry if item["node_id"] == node_id else item for item in dispatch_set["dispatches"]]}
+    updated.pop("dispatch_set_digest")
+    updated["dispatch_set_digest"] = _sha256_bytes(_canonical_json(updated).encode())
+    lifecycle = {"plan": document["plan"], "source_state": list(source_state)}
+    store.mkdir(parents=True, exist_ok=True)
+    _write_bytes_atomically_once(Path(entry["worker_input_path"]), (json.dumps(entry, indent=2, sort_keys=True) + "\n").encode(), mode=0o444)
+    dispatches_path = store / "dispatches.json"
+    lifecycle_path = store / "lifecycle.json"
+    _write_text_once(dispatches_path, json.dumps(updated, indent=2, sort_keys=True) + "\n")
+    _write_text_once(lifecycle_path, json.dumps(lifecycle, indent=2, sort_keys=True) + "\n")
+    return {
+        "schema_version": 1,
+        "status": "transitioned",
+        "node_id": node_id,
+        "execution_location": "coordinator",
+        "worker_created": False,
+        "reason": reason,
+        "source_state": list(source_state),
+        "dispatches_path": str(dispatches_path),
+        "lifecycle_input_path": str(lifecycle_path),
+        "journal_path": str(args.journal.resolve()),
+        "worker_input_path": entry["worker_input_path"],
+        "lineage": {"previous_dispatch_set_digest": dispatch_set["dispatch_set_digest"], "journal_head": head},
     }
 
 
@@ -4023,9 +4148,6 @@ def finalize_proof(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, P
     expectation = repository_review_proof_expectation(plan, source_state=source_state)
     stale_ids = set(_text_list(document, "stale_evidence_ids"))
     sources = _evidence_sources(document, plan)
-    if not sources:
-        msg = "finalize-proof requires persisted evidence sources"
-        raise ValueError(msg)
 
     loaded: dict[
         str, tuple[str, ReviewEvidenceExpectation | ValidationEvidenceExpectation, ReviewEvidence | ValidationEvidence, bytes, dict[str, Any] | None]
@@ -4036,7 +4158,7 @@ def finalize_proof(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, P
         if evidence.evidence_id in loaded:
             duplicate_evidence.add(evidence.evidence_id)
         loaded[evidence.evidence_id] = (kind, record_expectation, evidence, content, normalized)
-    preblockers: list[str] = []
+    preblockers = list(_text_list(document, "lifecycle_blockers"))
     if duplicate_evidence:
         preblockers.append("duplicate evidence sources: " + ", ".join(sorted(duplicate_evidence)))
 
@@ -4308,6 +4430,12 @@ def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     validation_parser.add_argument("--dispatches", type=Path, required=True)
     validation_parser.add_argument("--current-capture", type=Path, required=True)
     validation_parser.add_argument("--output", type=Path, required=True)
+    fallback_parser = _runtime_subparser(subparsers, "fallback-to-coordinator", "transition one unstarted adaptive node without rebinding accepted evidence")
+    fallback_parser.add_argument("--input", type=Path, required=True)
+    fallback_parser.add_argument("--journal", type=Path, required=True)
+    fallback_parser.add_argument("--dispatches", type=Path, required=True)
+    fallback_parser.add_argument("--current-capture", type=Path, required=True)
+    fallback_parser.add_argument("--output", type=Path, required=True)
     journal_parser = _runtime_subparser(
         subparsers,
         "journal-append",
@@ -4418,12 +4546,15 @@ def _finalize_document_from_files(document: dict[str, Any], args: argparse.Names
         raise TypeError(msg)
     plan = _graph_plan(raw_plan)
     source_state = _state(output, "source_state")
-    _events, lifecycle, _head = read_execution_journal(args.journal, plan=plan, source_state=source_state)
+    events, lifecycle, _head = read_execution_journal(args.journal, plan=plan, source_state=source_state)
     entries = _dispatches_by_node(_read_json_object(args.dispatches), plan=plan, source_state=source_state)
-    output["sources"] = [
-        {"artifact_path": _required_text(entries[node.node_id], "artifact_path"), "metadata_path": _required_text(entries[node.node_id], "metadata_path")}
-        for node in plan.actual_worker_nodes
-        if lifecycle.get(node.node_id) in {"accepted", "blocked"}
+    sources, _records = _accepted_journal_sources(plan, source_state, events, entries, include_blocked=True)
+    output["sources"] = list(sources.values())
+    latest = {str(event["node_id"]): event for event in events}
+    output["lifecycle_blockers"] = [
+        f"{status} node {node_id}: {latest[node_id].get('reason') or 'execution has not completed'}"
+        for node_id, status in lifecycle.items()
+        if status in {"blocked", "in-flight", "awaiting-replan", "invalidated"}
     ]
     return output
 
@@ -4582,8 +4713,9 @@ def _json_operation_output(document: dict[str, Any], args: argparse.Namespace) -
         return advance_after_mutation(document)
     if args.operation == "reconcile-handoffs":
         return reconcile_handoffs(document)
-    if args.operation == "reconcile-validation-requirements":
-        return reconcile_validation_requirements(document, args)
+    if args.operation in {"reconcile-validation-requirements", "fallback-to-coordinator"}:
+        operation = {"reconcile-validation-requirements": reconcile_validation_requirements, "fallback-to-coordinator": fallback_to_coordinator}[args.operation]
+        return operation(document, args)
     if args.operation == "next-ready":
         return _next_ready_from_files(document, args)
     return finalize_proof(_finalize_document_from_files(document, args))
