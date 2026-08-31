@@ -7,6 +7,7 @@
     "new_capture": {},
     "plan": {},
     "planning_template": {},
+    "previous_capture": {},
     "repair_epoch": 1,
     "source_state": ["scope-before", "worktree-before", "repository-before"],
     "state_verification_command": "capture_scope.py --mode branch"
@@ -31,6 +32,7 @@
       "handoffs": [],
       "limitations": [],
       "nearby_contract_owners": [],
+      "scope_limitations": [],
       "status": "no-findings",
       "validation_requirements": []
     }
@@ -68,7 +70,9 @@
   },
   "persist-worker-payload": {
     "candidate_path": "/tmp/review-proof/audit.worker-payload.candidate.json",
+    "mode": "audit",
     "node_id": "audit",
+    "owned_paths": ["src/lib.py"],
     "result_contract": "compact-review",
     "schema_version": 1,
     "worker_payload_path": "/tmp/review-proof/audit.worker-payload.json"
@@ -77,6 +81,10 @@
     "plan": {},
     "source_state": ["scope", "worktree", "repository"],
     "sources": []
+  },
+  "reconcile-validation-requirements": {
+    "plan": {},
+    "source_state": ["scope", "worktree", "repository"]
   },
   "routing-projection": {
     "captured_paths": ["src/lib.py"],

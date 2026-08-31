@@ -32,6 +32,12 @@
       "expected_surfaces": ["tooling"]
     },
     {
+      "id": "canonical-bibliography",
+      "mode": "baseline",
+      "paths": ["REFERENCES.md"],
+      "expected_surfaces": ["documentation", "tooling"]
+    },
+    {
       "id": "cross-surface-shared-owners",
       "mode": "branch",
       "paths": ["Cargo.toml", "pyproject.toml", "CMakeLists.txt", "src/lib.rs", "src/tool.py", "src/model.cpp", ".github/workflows/ci.yml", "README.md"],

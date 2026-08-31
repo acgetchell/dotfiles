@@ -4,9 +4,14 @@
 import contextlib
 import importlib.util
 import io
+import json
 import sys
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pytest
 
 SCRIPT = Path(__file__).with_name("validate_reference_dois.py")
 SPEC = importlib.util.spec_from_file_location("validate_reference_dois", SCRIPT)
@@ -110,6 +115,44 @@ def test_validation_reports_malformed_fetcher_response() -> None:
 
     assert result.status == MODULE.AuditStatus.FAIL
     assert result.message == "TypeError: DOI resolver response must be a JSON object"
+
+
+def test_resolved_badge_needs_context_instead_of_reporting_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "README.md"
+    path.write_text("# Project\n\n[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.123.svg)](https://doi.org/10.5281/zenodo.123)\n", encoding="utf-8")
+    original = MODULE.validate_entries
+    monkeypatch.setattr(
+        MODULE,
+        "validate_entries",
+        lambda entries, timeout, score: original(entries, timeout, score, lambda *_: metadata("Project", family="Author", year=2026)),
+    )
+    assert MODULE.run([str(path), "--json"]) == 1
+    result = json.loads(capsys.readouterr().out)[0]
+    assert result["status"] == "INSUFFICIENT_CONTEXT"
+    assert result["line"] == 3
+    assert result["resolved_title"] == "Project"
+    assert result["resolved_authors"] == ["Author"]
+    assert result["title_score"] is None
+    assert result["author_score"] is None
+    assert "no bibliographic context" in result["message"]
+
+
+def test_badge_does_not_hide_contradictory_bibliographic_context() -> None:
+    entry = MODULE.extract_entries("Wrong. Unrelated science. 2001.\n[![DOI](https://example.org/badge.svg)](https://doi.org/10.1234/test)")[0]
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: metadata("Actual title", year=2026))
+    assert result.status == MODULE.AuditStatus.MISMATCH
+
+
+def test_unresolved_badge_is_still_a_resolution_failure() -> None:
+    entry = MODULE.extract_entries("[![DOI](https://example.org/badge.svg)](https://doi.org/10.1234/test)")[0]
+
+    def unavailable(*_args: object) -> dict[str, object]:
+        message = "resolver unavailable"
+        raise TimeoutError(message)
+
+    assert MODULE.validate_entry(entry, 1.0, 0.45, unavailable).status == MODULE.AuditStatus.FAIL
 
 
 def test_empty_input_fails_without_allow_empty() -> None:

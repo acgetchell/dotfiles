@@ -6,11 +6,11 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 export UV_CACHE_DIR := env_var_or_default("UV_CACHE_DIR", ".uv-cache")
 
 python_paths := "agents/.agents/skills scripts"
-dprint_version := "0.56.1"
+dprint_version := "0.57.0"
 just_version := "1.58.0"
-rumdl_version := "0.2.60"
-uv_version := "0.12.6"
-zizmor_version := "1.29.0"
+rumdl_version := "0.2.62"
+uv_version := "0.12.7"
+zizmor_version := "1.30.0"
 
 _ensure-actionlint:
     #!/usr/bin/env bash

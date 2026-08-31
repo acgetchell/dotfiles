@@ -68,7 +68,7 @@
       "target_kind": "router",
       "default_priority": "required-routing-synthesis",
       "synthesis_dependency": null,
-      "path_patterns": ["README.md", "AGENTS.md", "CONTRIBUTING.md", "SECURITY.md", "CITATION.cff", "docs/**"],
+      "path_patterns": ["README.md", "AGENTS.md", "CONTRIBUTING.md", "SECURITY.md", "CITATION.cff", "REFERENCES.md", "BIBLIOGRAPHY.md", "CITATIONS.md", "docs/**"],
       "semantic_triggers": ["Active documentation, API docs, scientific claims, citations, publication material, or release-readiness coverage are in scope."]
     },
     {
@@ -674,7 +674,7 @@
       "target_kind": "leaf",
       "default_priority": "required-routing-synthesis",
       "synthesis_dependency": "repository-synthesis",
-      "path_patterns": ["README.md", "AGENTS.md", "CONTRIBUTING.md", "SECURITY.md", "docs/**"],
+      "path_patterns": ["README.md", "AGENTS.md", "CONTRIBUTING.md", "SECURITY.md", "REFERENCES.md", "BIBLIOGRAPHY.md", "CITATIONS.md", "docs/**"],
       "semantic_triggers": ["Active docs, navigation, operations, architecture, policies, release guidance, generated ownership, or cross-document consistency are material."]
     },
     {
@@ -750,8 +750,8 @@
       "target_kind": "leaf",
       "default_priority": "required-routing-synthesis",
       "synthesis_dependency": "repository-synthesis",
-      "path_patterns": ["CITATION.cff", "**/*.bib", "docs/**", "papers/**"],
-      "semantic_triggers": ["DOIs, source identity, bibliography, algorithm provenance, scientific credit, or citation claims are material."]
+      "path_patterns": ["README.md", "CITATION.cff", "REFERENCES.md", "BIBLIOGRAPHY.md", "CITATIONS.md", "**/*.bib", "docs/**", "papers/**"],
+      "semantic_triggers": ["DOIs, source identity, bibliography, public README citation guidance, algorithm provenance, scientific credit, or citation claims are material."]
     },
     {
       "catalog_id": "docs.authorship",

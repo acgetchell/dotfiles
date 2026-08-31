@@ -13,9 +13,11 @@
         "new_capture": {"type": "object"},
         "plan": {"type": "object"},
         "planning_template": {"type": "object"},
+        "previous_capture": {"type": "object"},
         "repair_epoch": {"minimum": 1, "type": "integer"},
         "routing_catalog_path": {"minLength": 1, "type": "string"},
         "source_state": {"$ref": "#/$defs/sourceState"},
+        "sources": {"items": {"$ref": "#/$defs/sourceRecord"}, "type": "array"},
         "state_verification_command": {"minLength": 1, "type": "string"}
       },
       "required": [
@@ -26,6 +28,7 @@
         "new_capture",
         "plan",
         "planning_template",
+        "previous_capture",
         "repair_epoch",
         "source_state",
         "state_verification_command"
@@ -129,12 +132,14 @@
       "additionalProperties": false,
       "properties": {
         "candidate_path": {"minLength": 1, "type": "string"},
+        "mode": {"enum": ["audit", "fix", "independent-review", "revalidation", "synthesis", "validation"]},
         "node_id": {"minLength": 1, "type": "string"},
+        "owned_paths": {"$ref": "#/$defs/stringArray"},
         "result_contract": {"enum": ["compact-review", "compact-validation", "native-independent-review"]},
         "schema_version": {"const": 1},
         "worker_payload_path": {"minLength": 1, "type": "string"}
       },
-      "required": ["candidate_path", "node_id", "result_contract", "schema_version", "worker_payload_path"],
+      "required": ["candidate_path", "mode", "node_id", "owned_paths", "result_contract", "schema_version", "worker_payload_path"],
       "type": "object"
     },
     "reconcile-handoffs": {
@@ -145,6 +150,35 @@
         "sources": {"items": {"$ref": "#/$defs/sourceRecord"}, "type": "array"}
       },
       "required": ["plan", "source_state", "sources"],
+      "type": "object"
+    },
+    "reconcile-validation-requirements": {
+      "additionalProperties": false,
+      "properties": {
+        "plan": {"type": "object"},
+        "source_state": {"$ref": "#/$defs/sourceState"},
+        "artifact_store": {"minLength": 1, "type": "string"},
+        "validation_requirements": {
+          "description": "New full validationRequirement objects from planning-input-v1; each is validated against that definition and the accepted review's exact command, working-directory, environment and dependency identity.",
+          "items": {"type": "object"},
+          "type": "array"
+        },
+        "user_exclusions": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "originating_evidence_id": {"minLength": 1, "type": "string"},
+              "requirement_id": {"minLength": 1, "type": "string"},
+              "requirement_digest": {"minLength": 1, "type": "string"},
+              "reason": {"minLength": 1, "type": "string"}
+            },
+            "required": ["originating_evidence_id", "requirement_id", "requirement_digest", "reason"],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["plan", "source_state"],
       "type": "object"
     },
     "routing-projection": {
@@ -189,8 +223,9 @@
     "synthesis-bundle": {
       "additionalProperties": false,
       "properties": {
+        "plan": {"type": "object"},
         "source_state": {"$ref": "#/$defs/sourceState"},
-        "sources": {"items": {"$ref": "#/$defs/sourceRecord"}, "minItems": 1, "type": "array"}
+        "sources": {"items": {"$ref": "#/$defs/sourceRecord"}, "type": "array"}
       },
       "required": ["source_state", "sources"],
       "type": "object"

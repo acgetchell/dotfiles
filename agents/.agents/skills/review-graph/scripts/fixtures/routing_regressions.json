@@ -1,6 +1,14 @@
 {
   "cases": [
     {
+      "id": "release-tooling-change-keeps-readme-citation-ownership-without-bibliography-changes",
+      "consulted_routers": ["review-graph", "docs-review-orchestrator", "python-review-orchestrator", "rust-review-orchestrator"],
+      "paths": ["README.md", "docs/BENCHMARKING.md", "docs/RELEASING.md", "docs/code_organization.md", "docs/dev/rust.md", "scripts/update_release_version.py"],
+      "expected_matches": {
+        "docs.citations": ["README.md", "docs/BENCHMARKING.md", "docs/RELEASING.md", "docs/code_organization.md", "docs/dev/rust.md"]
+      }
+    },
+    {
       "id": "documentation-only-does-not-activate-cpp-api-docs",
       "consulted_routers": ["review-graph", "docs-review-orchestrator"],
       "paths": ["docs/architecture.md"],
@@ -30,6 +38,15 @@
       "paths": ["scripts/tests/test_release.py", "scripts/tests/integration/conftest.py"],
       "expected_matches": {
         "python.tests": ["scripts/tests/test_release.py", "scripts/tests/integration/conftest.py"]
+      }
+    },
+    {
+      "id": "canonical-bibliography-routes-to-citation-audit",
+      "consulted_routers": ["review-graph", "docs-review-orchestrator"],
+      "paths": ["REFERENCES.md"],
+      "expected_matches": {
+        "docs.repository": ["REFERENCES.md"],
+        "docs.citations": ["REFERENCES.md"]
       }
     }
   ]

@@ -16,6 +16,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from capture_scope import _scope_data
+from review_graph_reuse import AuditInputIdentity, AuditReuseTransition, ReviewSourceSnapshot, verify_reuse_inputs
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -484,6 +485,16 @@ class WorkerBudget:
 
 
 @dataclass(frozen=True)
+class ValidationExclusion:
+    """Explicit user scope decision bound to an exact discovered requirement."""
+
+    originating_evidence_id: str
+    requirement_id: str
+    requirement_digest: str
+    reason: str
+
+
+@dataclass(frozen=True)
 class GraphPlan:
     """Complete required graph, partitioned only for isolated scheduling."""
 
@@ -511,6 +522,9 @@ class GraphPlan:
     routing_completion_blockers: tuple[str, ...]
     dispatch_allowed: bool
     blockers: tuple[str, ...]
+    audit_reuse_transitions: tuple[AuditReuseTransition, ...] = ()
+    reuse_source_snapshots: tuple[ReviewSourceSnapshot, ...] = ()
+    validation_exclusions: tuple[ValidationExclusion, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -543,6 +557,7 @@ class ReviewEvidenceExpectation:
     change_target: str | None = None
     planned_paths: tuple[str, ...] = ()
     planned_path_line_bounds: tuple[tuple[str, int], ...] = ()
+    audit_input_identity: AuditInputIdentity | None = None
 
 
 @dataclass(frozen=True)
@@ -747,6 +762,12 @@ class RepositoryReviewProofExpectation:
         if identity_mapping != reused_mapping:
             msg = "repository review proof expectation exact-reuse identities do not match the routed evidence mapping"
             raise ValueError(msg)
+        transitions = self.plan.audit_reuse_transitions
+        if len({item.evidence_id for item in transitions}) != len(transitions) or any(
+            item.evidence_id not in {evidence_id for _, evidence_id in reused_mapping} or item.target_state != self.source_state for item in transitions
+        ):
+            msg = "audit reuse transitions must uniquely match current non-executable reuse identities"
+            raise ValueError(msg)
         if any(
             not _nonempty_text(item.skill_id)
             or not _nonempty_text(item.skill_path)
@@ -793,7 +814,7 @@ class RepositoryReviewProofExpectation:
         required_validation_ids = tuple(
             sorted(requirement_id for unit in self.plan.coalesced_validation_units if unit.required or unit.baseline for requirement_id in unit.requirement_ids)
         )
-        object.__setattr__(self, "plan_digest", _sha256_json(asdict(self.plan)))
+        object.__setattr__(self, "plan_digest", graph_plan_digest(self.plan))
         object.__setattr__(self, "required_review_requirement_ids", required_review_ids)
         object.__setattr__(
             self,
@@ -1272,7 +1293,7 @@ def validate_routing_ledger(  # noqa: C901
             skill_path=item.skill_path,
             mode="independent-review" if active_entries[item.catalog_id].target_kind == "independent" else "audit",
             static_references=item.static_references,
-            planned_paths=item.review_surface if active_entries[item.catalog_id].target_kind == "independent" else (),
+            planned_paths=item.review_surface,
         )
         for item in reused_decisions
     )
@@ -1413,7 +1434,16 @@ def classify_repository_paths(paths: Sequence[str], *, release_readiness: bool =
                 add("rust", path, "shared workflow/recipe may alter Rust validation")
             if has_python:
                 add("python", path, "shared workflow/recipe may alter Python validation")
-        if basename in {"README.md", "AGENTS.md", "CONTRIBUTING.md", "SECURITY.md", "CITATION.cff"} or path.startswith("docs/"):
+        if basename in {
+            "README.md",
+            "AGENTS.md",
+            "CONTRIBUTING.md",
+            "SECURITY.md",
+            "CITATION.cff",
+            "REFERENCES.md",
+            "BIBLIOGRAPHY.md",
+            "CITATIONS.md",
+        } or path.startswith("docs/"):
             add("documentation", path, "active repository documentation")
             add("tooling", path, "documentation may describe commands or maintainer workflow")
     if release_readiness:
@@ -1672,13 +1702,13 @@ def _synthesis_reused_evidence_ids(plan: GraphPlan, node_id: str) -> tuple[str, 
         return ()
     mapping = dict(plan.exact_reused_review_evidence)
     if (node.skill_id, node.mode) == FINAL_SYNTHESIS_IDENTITY[1:]:
-        return tuple(evidence_id for _requirement_id, evidence_id in plan.exact_reused_review_evidence)
+        return tuple(dict.fromkeys(evidence_id for _requirement_id, evidence_id in plan.exact_reused_review_evidence))
     routed_requirement_ids = {
         decision.requirement_id
         for decision in plan.routing_decisions
         if decision.disposition == "exact-evidence-reused" and decision.synthesis_dependency == node.node_id
     }
-    return tuple(mapping[requirement_id] for requirement_id in mapping if requirement_id in routed_requirement_ids)
+    return tuple(dict.fromkeys(mapping[requirement_id] for requirement_id in mapping if requirement_id in routed_requirement_ids))
 
 
 def coalesce_review_requirements(
@@ -2135,7 +2165,11 @@ def plan_graph(  # noqa: C901, PLR0913, PLR0915
     audit_nodes, requirement_to_node = coalesce_review_requirements(review_requirements, reserved_node_ids=tuple(reserved_node_ids))
     validation_units, evidence_mapping = coalesce_validation_requirements(validation_requirements, reserved_node_ids=tuple(reserved_node_ids))
     if not any(unit.baseline for unit in validation_units):
-        msg = "bounded review graphs require at least one baseline validation unit"
+        msg = (
+            "bounded review graphs require at least one baseline validation unit: set validation_requirements[i].baseline=true "
+            "on the repository check (for example just ci). This flag does not select baseline review scope; "
+            "keep requested_scope=branch for a branch review"
+        )
         raise ValueError(msg)
     declared_validation_ids = {item.requirement_id for item in validation_requirements}
     missing_validation_ids = sorted(
@@ -2272,6 +2306,14 @@ def _identifier_tuple_blockers(values: Sequence[str], *, label: str) -> tuple[st
     if _duplicate_values(values):
         blockers.append(f"{label} must be unique")
     return tuple(blockers)
+
+
+def graph_plan_digest(plan: GraphPlan) -> str:
+    """Hash a plan while preserving pre-exclusion identities when none are present."""
+    document = asdict(plan)
+    if not plan.validation_exclusions:
+        document.pop("validation_exclusions")
+    return _sha256_json(document)
 
 
 def _sha256_json(value: object) -> str:
@@ -2707,6 +2749,9 @@ def _ordinary_review_native_blockers(  # noqa: C901, PLR0912
         )
     )
     scope = sections["## Scope Inspected"]
+    if expectation.audit_input_identity is not None:
+        serialized_inputs = json.dumps(asdict(expectation.audit_input_identity), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        blockers.extend(_native_values_blockers(scope, section="Scope Inspected", label="Audit input identity", expected=(serialized_inputs,)))
     if evidence.status != "blocked":
         blockers.extend(_native_nonempty_section_blockers(scope, section="Scope Inspected"))
         files = _native_field_values(scope, "Files")
@@ -3874,6 +3919,45 @@ def assess_repository_review_proof(  # noqa: C901, PLR0912
     return Assessment(not blockers, tuple(blockers))
 
 
+def review_source_state_blockers(  # noqa: PLR0911 - fail closed at each provenance boundary.
+    plan: GraphPlan, expectation: ReviewEvidenceExpectation, evidence: ReviewEvidence, source_state: tuple[str, str, str]
+) -> tuple[str, ...]:
+    """Accept old audit bytes only through a planner-bound unchanged-input proof."""
+    if expectation.source_state == source_state:
+        return ()
+    transitions = tuple(item for item in plan.audit_reuse_transitions if item.evidence_id == evidence.evidence_id)
+    if len(transitions) != 1:
+        return (f"review evidence has a different source state without verified reuse: {evidence.evidence_id}",)
+    transition = transitions[0]
+    inputs = expectation.audit_input_identity
+    if (
+        expectation.mode != "audit"
+        or evidence.mode != "audit"
+        or evidence.status not in {"completed", "no-findings"}
+        or inputs is None
+        or evidence.predecessor_evidence_ids
+        or expectation.execution_profile != plan.execution_profile
+    ):
+        return ("cross-capture reuse requires a complete independent audit leaf with bound inputs",)
+    if (transition.source_state, transition.target_state, transition.artifact_digest) != (expectation.source_state, source_state, evidence.raw_result_digest):
+        return ("audit reuse transition differs from original artifact or current source state",)
+    identities = tuple(item for item in plan.reused_review_identities if item.evidence_id == evidence.evidence_id)
+    if {item.requirement_id for item in identities} != set(evidence.requirement_ids) or any(
+        (item.skill_id, item.skill_path, item.skill_digest, item.reference_digests, item.mode, item.planned_paths)
+        != (evidence.skill_id, evidence.skill_path, evidence.skill_digest, evidence.reference_digests, "audit", inputs.owned_paths)
+        for item in identities
+    ):
+        return ("audit reuse routed requirements, scope, or skill/reference identity changed",)
+    snapshots = {item.source_state: item for item in plan.reuse_source_snapshots}
+    if len(snapshots) != len(plan.reuse_source_snapshots) or transition.source_state not in snapshots or source_state not in snapshots:
+        return ("audit reuse requires unique origin and target source snapshots",)
+    try:
+        verify_reuse_inputs(snapshots[transition.source_state], snapshots[source_state], inputs, transition)
+    except ValueError as error:
+        return (str(error),)
+    return ()
+
+
 def _review_bundle_blockers(  # noqa: C901, PLR0912
     proof_expectation: RepositoryReviewProofExpectation, proof: RepositoryReviewProof, records: Sequence[tuple[ReviewEvidenceExpectation, ReviewEvidence]]
 ) -> tuple[tuple[str, ...], dict[str, tuple[ReviewEvidenceExpectation, ReviewEvidence]]]:
@@ -3930,8 +4014,7 @@ def _review_bundle_blockers(  # noqa: C901, PLR0912
         blockers.extend(f"{evidence_id}: {blocker}" for blocker in assessment.blockers)
         if not assessment.satisfies_requirements:
             blockers.append(f"accepted review evidence does not satisfy its requirements: {evidence_id}")
-        if expectation.source_state != proof.source_state:
-            blockers.append(f"accepted review evidence has a different source state: {evidence_id}")
+        blockers.extend(review_source_state_blockers(proof_expectation.plan, expectation, evidence, proof.source_state))
     synthesis_record = by_id.get(proof.final_synthesis_evidence_id)
     if synthesis_record is not None:
         expectation, evidence = synthesis_record
@@ -5343,6 +5426,52 @@ def _compact_routing_overrides_from_document(
     return tuple(overrides)
 
 
+def validation_requirements_from_document(document: Mapping[str, Any], repository_root: Path | None) -> tuple[ValidationRequirement, ...]:
+    """Parse validation plans consistently for bootstrap and source-preserving expansion."""
+    return tuple(
+        ValidationRequirement(
+            requirement_id=_bounded_text_field(item, "requirement_id"),
+            source_state=_source_state_field(item),
+            commands=_tuple_field(item, "commands"),
+            working_directories=_tuple_field(item, "working_directories"),
+            environment=_bounded_text_field(item, "environment"),
+            toolchain=_bounded_text_field(item, "toolchain"),
+            features=_tuple_field(item, "features"),
+            platform=_bounded_text_field(item, "platform"),
+            artifact_owner=_bounded_text_field(item, "artifact_owner"),
+            mutation_lock=_bounded_text_field(item, "mutation_lock"),
+            request=_bounded_text_field(item, "request"),
+            requested_scope=_bounded_text_field(item, "requested_scope"),
+            capture_command=_bounded_text_field(item, "capture_command"),
+            captured_paths=_tuple_field(item, "captured_paths"),
+            authority=_bounded_text_field(item, "authority"),
+            selection_reason=_bounded_text_field(item, "selection_reason"),
+            mutation_classification=_bounded_text_field(item, "mutation_classification"),
+            expected_evidence=_bounded_text_field(item, "expected_evidence"),
+            elapsed_time_budget=_bounded_text_field(item, "elapsed_time_budget"),
+            dependency_policy=_bounded_text_field(item, "dependency_policy"),
+            meaningful_skips=_tuple_field(item, "meaningful_skips"),
+            execution_strategy=_bounded_text_field(item, "execution_strategy"),
+            independence_basis=_bounded_text_field(item, "independence_basis"),
+            planning_blocker=_optional_bounded_text_field(item, "planning_blocker"),
+            allowed_artifacts=_allowed_artifacts_field(item, repository_root, _optional_bounded_text_field(item, "isolation_root")),
+            canonical_recipe=_optional_bounded_text_field(item, "canonical_recipe"),
+            evidence_id=_optional_bounded_text_field(item, "evidence_id"),
+            required=_boolean_field(item, "required", default=True, label=f"validation requirement {item.get('requirement_id', '<unknown>')} required"),
+            baseline=_boolean_field(item, "baseline", default=False, label=f"validation requirement {item.get('requirement_id', '<unknown>')} baseline"),
+            expected_workspace_effects=_normalized_repository_paths(
+                _tuple_field(item, "expected_workspace_effects"),
+                label=f"validation requirement {item.get('requirement_id', '<unknown>')} expected_workspace_effects",
+            ),
+            requires_isolation=_boolean_field(
+                item, "requires_isolation", default=False, label=f"validation requirement {item.get('requirement_id', '<unknown>')} requires_isolation"
+            ),
+            isolation_root=_optional_bounded_text_field(item, "isolation_root"),
+        )
+        for item in document.get("validation_requirements", [])
+    )
+
+
 def plan_from_document(  # noqa: C901, PLR0912, PLR0915
     document: Mapping[str, Any],
     *,
@@ -5493,48 +5622,7 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0915
             )
             for item in document.get("review_requirements", [])
         )
-    validation_requirements = tuple(
-        ValidationRequirement(
-            requirement_id=_bounded_text_field(item, "requirement_id"),
-            source_state=_source_state_field(item),
-            commands=_tuple_field(item, "commands"),
-            working_directories=_tuple_field(item, "working_directories"),
-            environment=_bounded_text_field(item, "environment"),
-            toolchain=_bounded_text_field(item, "toolchain"),
-            features=_tuple_field(item, "features"),
-            platform=_bounded_text_field(item, "platform"),
-            artifact_owner=_bounded_text_field(item, "artifact_owner"),
-            mutation_lock=_bounded_text_field(item, "mutation_lock"),
-            request=_bounded_text_field(item, "request"),
-            requested_scope=_bounded_text_field(item, "requested_scope"),
-            capture_command=_bounded_text_field(item, "capture_command"),
-            captured_paths=_tuple_field(item, "captured_paths"),
-            authority=_bounded_text_field(item, "authority"),
-            selection_reason=_bounded_text_field(item, "selection_reason"),
-            mutation_classification=_bounded_text_field(item, "mutation_classification"),
-            expected_evidence=_bounded_text_field(item, "expected_evidence"),
-            elapsed_time_budget=_bounded_text_field(item, "elapsed_time_budget"),
-            dependency_policy=_bounded_text_field(item, "dependency_policy"),
-            meaningful_skips=_tuple_field(item, "meaningful_skips"),
-            execution_strategy=_bounded_text_field(item, "execution_strategy"),
-            independence_basis=_bounded_text_field(item, "independence_basis"),
-            planning_blocker=_optional_bounded_text_field(item, "planning_blocker"),
-            allowed_artifacts=_allowed_artifacts_field(item, repository_root, _optional_bounded_text_field(item, "isolation_root")),
-            canonical_recipe=_optional_bounded_text_field(item, "canonical_recipe"),
-            evidence_id=_optional_bounded_text_field(item, "evidence_id"),
-            required=_boolean_field(item, "required", default=True, label=f"validation requirement {item.get('requirement_id', '<unknown>')} required"),
-            baseline=_boolean_field(item, "baseline", default=False, label=f"validation requirement {item.get('requirement_id', '<unknown>')} baseline"),
-            expected_workspace_effects=_normalized_repository_paths(
-                _tuple_field(item, "expected_workspace_effects"),
-                label=f"validation requirement {item.get('requirement_id', '<unknown>')} expected_workspace_effects",
-            ),
-            requires_isolation=_boolean_field(
-                item, "requires_isolation", default=False, label=f"validation requirement {item.get('requirement_id', '<unknown>')} requires_isolation"
-            ),
-            isolation_root=_optional_bounded_text_field(item, "isolation_root"),
-        )
-        for item in document.get("validation_requirements", [])
-    )
+    validation_requirements = validation_requirements_from_document(document, repository_root)
     synthesis_nodes = (
         synthesis_nodes_from_routing(routing_catalog, routing_decisions)
         if compact_routing and document.get("synthesis_nodes") is None
