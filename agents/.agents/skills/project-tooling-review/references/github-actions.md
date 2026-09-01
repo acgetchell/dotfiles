@@ -13,6 +13,19 @@ Use this reference for `.github/workflows/**`, reusable workflow calls, Actions-
 - Caches should key on lockfiles and toolchain files, not only broad branch names. Cache restore should not hide dependency drift.
 - Artifacts should have clear names, bounded retention, and no secrets or oversized generated clutter.
 
+## Native Matrix Evidence
+
+Treat a configured CI matrix, a local aggregate recipe, native platform jobs,
+and platform-boundary emulation as different evidence. Record the actual host
+for every executed check; never summarize a successful local command as proof
+that unexecuted native jobs passed.
+
+When relevant native CI for the reviewed source state is available, reconcile
+its result before reporting the tooling change as fully validated. A native
+failure remains failed evidence until the defect is corrected and current
+native evidence passes. Do not weaken the regression, remove the supported
+matrix cell, or add a skip merely to make the workflow green.
+
 ## Version And Pinning Checks
 
 - Verify action versions against live releases when the user asks for currentness or when changing versions. Do not rely on model memory for latest action versions.

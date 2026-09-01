@@ -111,6 +111,13 @@ nondeterminism diagnosis. Do not run full CI solely because this is the final
 pass; follow repository requirements and escalate only when narrower
 non-overlapping coverage is insufficient.
 
+Key platform entries by the actual executor and distinguish native runs from
+focused emulation. Emulated boundary coverage cannot satisfy a native platform
+configuration, and unexecuted matrix cells remain limitations. If available
+native CI for the same source state fails after local or modeled checks passed,
+preserve the contradiction as a readiness blocker until the defect is fixed
+and current native evidence is reconciled.
+
 ## Output
 
 In orchestrated mode, synthesize specialist outcomes, remove duplicate findings, identify cross-cutting blockers, and name residual risk. In standalone mode, lead with findings ordered by severity and list focused skills or checklist sections used. Always report validation performed, reused ledger evidence, and meaningful limitations.

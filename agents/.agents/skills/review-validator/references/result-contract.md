@@ -66,18 +66,24 @@ repository_state_fingerprint: content digest covering HEAD, branch, index,
 state_verification_command: exact read-only command that recomputes all three digests
 requirement_ids: exact validation requirements owned by this unit
 unit_coalescing_basis: source state, command or canonical recipe, working
-  directories, environment/toolchain, features, platform, artifact ownership,
-  and mutation/locking compatibility shared by those requirements
+  directories, environment/toolchain, features, actual executor platform,
+  target platform, native/emulated mode, artifact ownership, and
+  mutation/locking compatibility shared by those requirements
 requirement_evidence_mapping: every requirement ID mapped to this unit and its
   exact candidate ledger entry or none
 commands: ordered exact commands, including arguments
 working_directories: one exact directory for each command
-environment_configuration: toolchain, platform, features, target, dependency,
-  instrumentation, service, and relevant environment identity
+environment_configuration: toolchain, actual executor platform and runtime,
+  target platform, native or emulated mode, features, target, dependency,
+  instrumentation, service, and relevant environment identity; encode target
+  platform and mode in the digest-covered environment or features, and leave an
+  unexecuted target as a limitation rather than an execution
 command_identity_digest: canonical SHA-256 digest of the exact commands,
   corresponding working directories, and canonical recipe
 environment_digest: canonical SHA-256 digest of the environment, toolchain,
-  features, platform, artifact owner, and mutation/locking identity
+  features, actual executor platform, artifact owner, and mutation/locking
+  identity; environment or features carry target platform and native/emulated
+  mode
 command_mutation_classification: non-mutating, with exact definition or policy basis
 expected_evidence: what successful execution must demonstrate
 dependency_policy: stop-on-failure | continue-independent
@@ -106,6 +112,11 @@ serialize in this order: `allowed_artifacts`, `artifact_owner`, `environment`,
 `allowed_artifacts` is one object whose fields serialize in this order:
 `artifact_digest`, `artifact_digest_mode`, `artifact_id`, `kind`, `path`,
 `repository_status`, `status_rule`, and `status_source`.
+
+Encode target platform and native/emulated mode in `environment` or `features`
+before computing this digest. `expected_evidence` and other narrative fields may
+explain that boundary but cannot be its only identity because they are not part
+of the canonical environment digest.
 
 Sort object keys lexicographically at every level; preserve array element
 order; serialize tuples as JSON arrays and absent optional values as JSON
@@ -174,7 +185,9 @@ Return every heading, using `none` when a section has no entries.
 - Command identity digest: <canonical digest from the exact dispatched commands,
   working directories, and canonical recipe>
 - Environment digest: <canonical digest from the exact dispatched environment,
-  toolchain, features, platform, artifact owner, and mutation/locking identity>
+  toolchain, features, actual executor platform, artifact owner, and
+  mutation/locking identity, with target platform and native/emulated mode
+  encoded in environment or features>
 - Requirement-to-evidence mapping:
   - <requirement-id>: <this unit and exact candidate ledger entry, or none>
 - Meaningful skips: <command and reason or none>
@@ -208,7 +221,8 @@ Return every heading, using `none` when a section has no entries.
   - Executor: <parent|subagent node-id>
   - Command: <exact command>
   - Working directory: <absolute path>
-  - Environment/configuration: <complete relevant identity>
+  - Environment/configuration: <complete relevant identity, including actual
+    executor platform/runtime and native or emulated evidence mode>
   - Result: <passed|failed|blocked|not-run>
   - Exit code: <integer|none>
   - Elapsed: <duration|none>
@@ -329,7 +343,9 @@ sample; it must never be interpreted as a content digest.
 
 ## Limitations
 
-<unavailable configurations, skipped dependent commands, stale evidence, or none>
+<unavailable or unexecuted configurations, boundaries modeled only by
+emulation, conflicting native evidence, skipped dependent commands, stale
+evidence, or none>
 
 ## Machine Evidence
 
@@ -388,6 +404,11 @@ Accept a result only when:
   working directories, environment/toolchain, features, platform, artifact
   ownership, and mutation/locking compatibility; every requirement maps
   exactly once to this unit and any candidate evidence
+- environment and execution evidence identify the actual executor platform and
+  runtime; target platform and native/emulated mode are encoded in the
+  digest-covered environment or features, emulation states its modeled boundary
+  under Limitations, and never satisfies or is reused for a native
+  target-platform requirement; unexecuted matrix cells remain explicit
 - command and environment digests use the canonical validation-dispatch
   serialization above over the exact coalesced dispatch fields, are repeated
   exactly in the result, and match the graph's independently derived

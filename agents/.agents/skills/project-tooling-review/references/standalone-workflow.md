@@ -45,6 +45,8 @@ approval, use the strongest read-only local check and report the remaining gap.
 
 Lead with unresolved tooling risks. Then report files changed and why, surfaces
 reviewed, references loaded, parent-handoff evidence, validators and results,
+the actual platform for each native or emulated check, unexecuted matrix cells,
 live or local-only version checks, managed tool updates and before/after
 versions, pins reconciled, language-orchestrator handoffs, deferred work, and
-git-state status.
+git-state status. Reconcile any available native CI result for the reviewed
+source state instead of presenting a narrower local pass as matrix coverage.

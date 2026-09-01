@@ -58,6 +58,9 @@ Keep absolute paths, usernames, temporary roots, process IDs, nondeterministic h
 
 Use argument arrays rather than interpolated shells. Check return status, preserve stderr/stdout context, set a timeout when a hang can block automation, and pass deterministic environment values when output is parsed.
 
+For byte-sensitive or platform-dependent transport, read
+[platform subprocess evidence](references/platform-subprocess-evidence.md).
+
 Do not log tokens, signing material, GitHub credentials, or private payloads. Distinguish command absence, timeout, nonzero exit, malformed output, and empty-but-valid output when callers need different actions.
 
 Avoid catching `CalledProcessError` only to discard its command and diagnostics. Keep publish, upload, tag, or release effects behind explicit intent and dry-run support where appropriate.

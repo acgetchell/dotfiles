@@ -37,8 +37,15 @@ an unresolved applicability handoff. Never infer that omitted work passed.
    `remaining`, `accepted-risk`, or `blocked`.
 5. Treat validator failures as evidence until an owning reviewer diagnoses
    them; do not manufacture findings from command output.
-6. Require accepted independent review for a concrete change target.
-7. Classify production readiness only after all required evidence and
+6. Preserve platform provenance: actual native executor, focused emulation, and
+   unexecuted matrix cells are distinct evidence. Never promote local or
+   emulated success into a native-platform pass.
+7. When available native CI for the reviewed source state contradicts earlier
+   local or emulated evidence, keep the native failure and resulting gap visible
+   until owning review and current native validation reconcile it. Do not infer
+   readiness from a configured matrix or a narrower successful aggregate run.
+8. Require accepted independent review for a concrete change target.
+9. Classify production readiness only after all required evidence and
    fingerprints reconcile.
 
 ## Result Contract
@@ -49,9 +56,11 @@ Return:
 - `Routing Closure`: consulted routers, exhaustive-ledger status, exclusions,
   reuse, and unresolved handoffs
 - `Canonical Findings`: severity, owner, evidence, duplicates, and disposition
-- `Validation Reconciliation`: each requirement and its accepted validator or
-  exact reuse evidence
-- `Cross-Surface Risks`: conflicts, shared-file ownership, and residual gaps
+- `Validation Reconciliation`: each requirement, actual executor platform,
+  native or emulated mode, unexecuted cells, and its accepted validator or exact
+  reuse evidence
+- `Cross-Surface Risks`: conflicts, shared-file ownership, contradictory native
+  CI, and residual gaps
 - `Repository Verdict`: `ready`, `not-ready`, or `blocked`, with exact reasons
 
 Do not create subagents or recursively invoke `review-graph`.

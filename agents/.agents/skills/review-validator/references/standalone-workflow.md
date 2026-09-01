@@ -35,6 +35,11 @@ the final user-visible result.
 Build stable requirement IDs, exact commands and working directories, complete
 relevant environment and toolchain identity, expected evidence, mutation
 classification, dependency policy, approved artifacts, and elapsed bounds.
+Identify the actual executor platform and runtime separately from any target
+platform. Classify target-bound evidence as native execution, focused emulation,
+or unexecuted; emulation is a distinct configuration and cannot satisfy a
+native requirement. Encode target platform and mode in the digest-covered
+environment or features before coalescing.
 Coalesce only requirements with identical source state, recipe or commands,
 working directories, environment, toolchain, features, platform, artifact
 ownership, and mutation lock. Preserve unit-to-requirement and
@@ -55,7 +60,10 @@ each coalesced command once and map its accepted evidence to every owned
 requirement. Stop dependent commands after prerequisite failure; continue only
 independent units when the plan permits it. Preserve exact commands, exit codes,
 concise output facts, environment identity, elapsed time, approved artifacts,
-and limitations.
+and limitations. Include the actual host, native or emulated evidence mode, the
+modeled boundary, and every unexecuted target cell. If supplied native CI
+evidence for the same source state conflicts with local or emulated evidence,
+preserve the native failure instead of reporting the matrix as passed.
 
 Run the source-state check again. Any scoped source, repository source, index,
 HEAD, or branch mutation makes the evidence stale and the result `blocked`.
@@ -80,7 +88,9 @@ preserves each status and execution record, and reconciles the final result.
 Always return the complete `Validation Result` from `result-contract.md`, even
 for passed, reused, blocked, or not-applicable outcomes. Lead with outcome and
 counts. State that P0 through P3 were not evaluated because this is
-validation-only. Include the full ledger export and mappings.
+validation-only. Include the full ledger export and mappings. Scope every
+platform claim to its actual executor, distinguish native runs from emulation,
+and name unexecuted matrix cells.
 
 Standalone evidence is portable candidate evidence, not a transferable pass.
 A later graph must recapture state and verify exact source, command,
