@@ -38,7 +38,8 @@ classification, dependency policy, approved artifacts, and elapsed bounds.
 Identify the actual executor platform and runtime separately from any target
 platform. Classify target-bound evidence as native execution, focused emulation,
 or unexecuted; emulation is a distinct configuration and cannot satisfy a
-native requirement.
+native requirement. Encode target platform and mode in the digest-covered
+environment or features before coalescing.
 Coalesce only requirements with identical source state, recipe or commands,
 working directories, environment, toolchain, features, platform, artifact
 ownership, and mutation lock. Preserve unit-to-requirement and

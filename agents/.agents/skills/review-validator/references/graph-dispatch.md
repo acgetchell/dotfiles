@@ -14,8 +14,8 @@ Require:
 - execution location and fresh-context identity
 - exact commands, corresponding working directories, environment, toolchain,
   features, platform naming the actual executor, artifact owner, and mutation
-  lock; target-platform emulation must be distinct in the supplied
-  environment, features, target, or expected evidence
+  lock; encode the target platform and native/emulated mode in the
+  digest-covered environment or features rather than only in narrative evidence
 - approved artifacts with status provenance; exact effects, absolute isolation
   root, and runtime snapshot policy
 - recursive required payload shape and the exact worker payload path
