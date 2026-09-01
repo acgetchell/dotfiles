@@ -14,6 +14,10 @@ Maintain a ledger keyed by source and environment state, built artifact, Python
 version, platform, dependency/configuration set, instrumentation, and exact
 test selection. Inspect repository recipes before execution, decide whether
 policy or scope requires an indivisible full gate, and reuse valid evidence.
+Record the actual executor platform separately from any target platform and
+classify each result as native execution or focused emulation. An unexecuted
+target cell remains a gap even when its workflow is configured or its boundary
+has been modeled elsewhere.
 
 Choose the smallest single selection proving the touched risk. Do not run a
 named case followed by its class, module, suite, and full CI as successive
@@ -39,4 +43,5 @@ Classify the result as `PASS`, `NEEDS IMPROVEMENT`, or `FAIL`. Order findings
 by behavioral risk. Identify the unproven contract, why current evidence can
 pass incorrectly, and a concrete Given/When/Then scenario or property. Report
 the non-overlapping ledger, seeds or counterexamples, skipped environments,
-justified reruns, independent reproduction, and other limitations.
+justified reruns, independent reproduction, native versus emulated platform
+evidence, unexecuted matrix cells, and other limitations.

@@ -72,8 +72,11 @@ requirement_evidence_mapping: every requirement ID mapped to this unit and its
   exact candidate ledger entry or none
 commands: ordered exact commands, including arguments
 working_directories: one exact directory for each command
-environment_configuration: toolchain, platform, features, target, dependency,
-  instrumentation, service, and relevant environment identity
+environment_configuration: toolchain, actual executor platform and runtime,
+  features, target, dependency, instrumentation, service, and relevant
+  environment identity; target-platform emulation must be distinguished in the
+  existing configuration or expected evidence, and an unexecuted target remains
+  a limitation rather than an execution
 command_identity_digest: canonical SHA-256 digest of the exact commands,
   corresponding working directories, and canonical recipe
 environment_digest: canonical SHA-256 digest of the environment, toolchain,
@@ -208,7 +211,8 @@ Return every heading, using `none` when a section has no entries.
   - Executor: <parent|subagent node-id>
   - Command: <exact command>
   - Working directory: <absolute path>
-  - Environment/configuration: <complete relevant identity>
+  - Environment/configuration: <complete relevant identity, including actual
+    executor platform/runtime and native or emulated evidence mode>
   - Result: <passed|failed|blocked|not-run>
   - Exit code: <integer|none>
   - Elapsed: <duration|none>
@@ -329,7 +333,9 @@ sample; it must never be interpreted as a content digest.
 
 ## Limitations
 
-<unavailable configurations, skipped dependent commands, stale evidence, or none>
+<unavailable or unexecuted configurations, boundaries modeled only by
+emulation, conflicting native evidence, skipped dependent commands, stale
+evidence, or none>
 
 ## Machine Evidence
 
@@ -388,6 +394,10 @@ Accept a result only when:
   working directories, environment/toolchain, features, platform, artifact
   ownership, and mutation/locking compatibility; every requirement maps
   exactly once to this unit and any candidate evidence
+- environment and execution evidence identify the actual executor platform and
+  runtime; target-platform emulation is a distinct configuration, states the
+  modeled boundary under Limitations, and never satisfies or is reused for a
+  native target-platform requirement; unexecuted matrix cells remain explicit
 - command and environment digests use the canonical validation-dispatch
   serialization above over the exact coalesced dispatch fields, are repeated
   exactly in the result, and match the graph's independently derived

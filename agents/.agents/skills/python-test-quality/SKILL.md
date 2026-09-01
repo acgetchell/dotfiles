@@ -70,6 +70,9 @@ When relevant, test cancellation, timeout, shutdown, worker exceptions, backpres
 
 For subprocess code, distinguish command-not-found, timeout, nonzero exit, malformed output, and successful empty output. Assert the resulting diagnostic without leaking secrets.
 
+For platform-sensitive or byte-sensitive subprocess regressions, read
+[platform regression evidence](references/platform-regression-evidence.md).
+
 ## Packaging And Configuration Evidence
 
 When build or install behavior is the contract, test built artifacts rather than only in-tree imports. Cover the minimal supported Python/platform/extra/configuration combinations that distinguish behavior, external entry points, package data, optional imports, and installed consumers.

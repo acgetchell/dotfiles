@@ -40,6 +40,8 @@ the runtime-owned `persist-worker-payload` operation, and return those bytes.
   configuration to make a command pass.
 - Reuse evidence only when source, command, environment, configuration,
   selection, and artifact identity match exactly.
+- Bind evidence to the actual executor; emulation never proves an unexecuted
+  native matrix cell.
 - A failed command is validation evidence, not automatically a product finding.
 
 ## Status

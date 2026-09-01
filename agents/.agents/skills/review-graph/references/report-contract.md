@@ -64,16 +64,27 @@ that no files were changed.
 ### Validation
 
 List each unique command or canonical recipe once with requirement IDs and
-result. Distinguish execution from exact reuse. Failed or blocked validation
-remains evidence, not an automatically promoted finding.
+result. For every platform-sensitive result, name the actual executor platform
+and runtime and distinguish a native target-platform run from focused emulation.
+List unexecuted matrix cells explicitly; neither configured CI nor a successful
+local aggregate command proves those cells. Distinguish execution from exact
+reuse. Failed or blocked validation remains evidence, not an automatically
+promoted finding.
 Report `repository_validation_status` independently from
 `graph_proof_status`; a command failure and an orchestration-proof gap are
 different outcomes.
 
+When native CI for the reviewed source state becomes available and contradicts
+earlier local or emulated evidence, report the native failure and the resulting
+portability gap until a corrected revision has current native evidence. Do not
+describe the change as fully validated, weaken the regression, or omit the
+supported platform merely to make the matrix green.
+
 ### Coverage And Limitations
 
 Name selected skills, explicit exclusions, blocked or stale requirements,
-unresolved handoffs, untested configurations, and remaining risks. Omit routine
+unresolved handoffs, untested configurations, emulation boundaries, unexecuted
+native matrix cells, and remaining risks. Omit routine
 `not-applicable` candidates; their exhaustive records remain in the proof
 store.
 For independent review, distinguish structurally accepted evidence from
