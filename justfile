@@ -367,6 +367,13 @@ update-dependencies: _ensure-brew
     #!/usr/bin/env bash
     set -euo pipefail
 
+    uv_executable="$(brew --prefix uv)/bin/uv"
+    if [[ ! -x "$uv_executable" ]]; then
+        echo "Homebrew-managed uv is unavailable at $uv_executable." >&2
+        exit 1
+    fi
+    "$uv_executable" run --locked --no-sync python scripts/update_tool_pins.py --check-uv-version --uv-executable "$uv_executable"
+
     brew bundle upgrade --file="$PWD/Brewfile"
     uv_executable="$(brew --prefix uv)/bin/uv"
     if [[ ! -x "$uv_executable" ]]; then

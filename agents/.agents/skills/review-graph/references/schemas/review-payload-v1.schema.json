@@ -88,7 +88,7 @@
             "properties": {
               "expected_evidence": {"type": "string"},
               "owner": {"type": "string"},
-              "planned_validation_digest": {"pattern": "sha256:[0-9a-f]{64}", "type": "string"},
+              "planned_validation_digest": {"pattern": "^sha256:[0-9a-f]{64}$", "type": "string"},
               "reason": {"type": "string"},
               "requirement_id": {"type": "string"}
             },
