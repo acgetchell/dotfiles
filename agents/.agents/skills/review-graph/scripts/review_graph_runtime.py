@@ -130,6 +130,37 @@ _BOUNDED_WORKSPACE_ENTRY_LIMIT = 256
 _BOUNDED_WORKSPACE_POLICY = "bounded-directory-metadata-v3"
 _RECURSIVE_WORKSPACE_POLICY = "recursive-content-sha256-v2"
 _SCHEMA_ID_VERSION_RE = re.compile(r"(?P<name>[^/]+)-v(?P<version>[1-9][0-9]*)\.schema\.json\Z")
+_PLANNED_VALIDATION_IDENTITY_KEYS = frozenset(
+    {
+        "allowed_artifacts",
+        "artifact_owner",
+        "baseline",
+        "canonical_recipe",
+        "capture_command",
+        "captured_paths",
+        "commands",
+        "dependency_policy",
+        "environment",
+        "execution_strategy",
+        "expected_workspace_effects",
+        "features",
+        "independence_basis",
+        "isolation_root",
+        "mutation_lock",
+        "planning_blocker",
+        "platform",
+        "requested_scope",
+        "required",
+        "requires_isolation",
+        "source_state",
+        "toolchain",
+        "working_directories",
+    }
+)
+_PLANNED_VALIDATION_REFERENCE_KEYS = frozenset({"expected_evidence", "owner", "planned_validation_digest", "reason", "requirement_id"})
+_LEGACY_VALIDATION_REQUIREMENT_KEYS = frozenset(
+    {"commands", "dependency_policy", "environment", "expected_evidence", "owner", "reason", "requirement_id", "working_directory"}
+)
 
 
 @dataclass(frozen=True)
@@ -294,9 +325,20 @@ def _validation_records(payload: dict[str, Any]) -> tuple[tuple[str, dict[str, A
     records: list[tuple[str, dict[str, Any]]] = []
     for requirement in _records(payload, "validation_requirements"):
         requirement_id = _required_text(requirement, "requirement_id")
-        for field_name in ("owner", "reason", "working_directory", "environment", "expected_evidence", "dependency_policy"):
+        for field_name in ("owner", "reason", "expected_evidence"):
             _required_text(requirement, field_name)
-        _text_list(requirement, "commands", required=True)
+        if "planned_validation_digest" in requirement:
+            if frozenset(requirement) != _PLANNED_VALIDATION_REFERENCE_KEYS:
+                msg = f"planned validation reference {requirement_id} must contain only its ID, digest, owner, reason, and expected evidence"
+                raise ValueError(msg)
+            _sha256_digest(_required_text(requirement, "planned_validation_digest"), "planned validation digest")
+        else:
+            if frozenset(requirement) != _LEGACY_VALIDATION_REQUIREMENT_KEYS:
+                msg = f"validation requirement {requirement_id} must contain the complete legacy execution identity"
+                raise ValueError(msg)
+            for field_name in ("working_directory", "environment", "dependency_policy"):
+                _required_text(requirement, field_name)
+            _text_list(requirement, "commands", required=True)
         records.append((requirement_id, requirement))
     identifiers = tuple(requirement_id for requirement_id, _ in records)
     if len(identifiers) != len(set(identifiers)):
@@ -377,23 +419,31 @@ def _findings_body(findings: tuple[tuple[str, dict[str, Any]], ...]) -> str:
 def _validation_body(records: tuple[tuple[str, dict[str, Any]], ...]) -> str:
     if not records:
         return "none"
-    return "\n".join(
-        "\n".join(
-            (
-                f"- Requirement ID: {requirement_id}",
-                f"  - Owner: {record['owner']}",
-                f"  - Reason: {record['reason']}",
+    rendered: list[str] = []
+    for requirement_id, record in records:
+        if "planned_validation_digest" in record:
+            identity = (f"  - Planned validation digest: {record['planned_validation_digest']}", "  - Execution identity: dispatch-planned validation unit")
+        else:
+            identity = (
                 f"  - Commands: {' && '.join(record['commands'])}",
                 f"  - Working directories: {record['working_directory']}",
                 f"  - Environment/configuration: {record['environment']}",
-                f"  - Expected evidence: {record['expected_evidence']}",
                 f"  - Dependency policy: {record['dependency_policy']}",
-                "  - Disposition: required",
-                "  - Ledger evidence: none",
+            )
+        rendered.append(
+            "\n".join(
+                (
+                    f"- Requirement ID: {requirement_id}",
+                    f"  - Owner: {record['owner']}",
+                    f"  - Reason: {record['reason']}",
+                    *identity,
+                    f"  - Expected evidence: {record['expected_evidence']}",
+                    "  - Disposition: required",
+                    "  - Ledger evidence: none",
+                )
             )
         )
-        for requirement_id, record in records
-    )
+    return "\n".join(rendered)
 
 
 def _handoffs_body(records: tuple[tuple[str, dict[str, Any]], ...]) -> str:
@@ -512,6 +562,116 @@ def _review_command_policy_blockers(dispatch: dict[str, Any], payload: dict[str,
     if duplicates:
         return ("review payload executed commands owned by planned validators: " + ", ".join(duplicates),)
     return ()
+
+
+def _planned_validation_identity(unit: ValidationUnit) -> dict[str, Any]:
+    """Return the exact non-narrative identity used to coalesce validator work."""
+    return {
+        "allowed_artifacts": [asdict(artifact) for artifact in unit.allowed_artifacts],
+        "artifact_owner": unit.artifact_owner,
+        "baseline": unit.baseline,
+        "canonical_recipe": unit.canonical_recipe,
+        "capture_command": unit.capture_command,
+        "captured_paths": list(unit.captured_paths),
+        "commands": list(unit.commands),
+        "dependency_policy": unit.dependency_policy,
+        "environment": unit.environment,
+        "execution_strategy": unit.execution_strategy,
+        "expected_workspace_effects": list(unit.expected_workspace_effects),
+        "features": list(unit.features),
+        "independence_basis": unit.independence_basis,
+        "isolation_root": unit.isolation_root,
+        "mutation_lock": unit.mutation_lock,
+        "planning_blocker": unit.planning_blocker,
+        "platform": unit.platform,
+        "requested_scope": unit.requested_scope,
+        "required": unit.required,
+        "requires_isolation": unit.requires_isolation,
+        "source_state": list(unit.source_state),
+        "toolchain": unit.toolchain,
+        "working_directories": list(unit.working_directories),
+    }
+
+
+def _planned_validation_digest(unit: ValidationUnit) -> str:
+    return _sha256_bytes(_canonical_json(_planned_validation_identity(unit)).encode())
+
+
+def _planned_validation_units(plan: GraphPlan) -> list[dict[str, Any]]:
+    return [
+        {
+            "execution_identity": _planned_validation_identity(unit),
+            "planned_validation_digest": _planned_validation_digest(unit),
+            "requirement_ids": list(unit.requirement_ids),
+            "validation_unit_id": unit.node_id,
+        }
+        for unit in sorted(plan.coalesced_validation_units, key=lambda item: item.node_id)
+    ]
+
+
+def _dispatched_planned_validations(dispatch: dict[str, Any]) -> dict[str, tuple[str, str, dict[str, Any]]]:
+    raw_policy = dispatch.get("command_policy")
+    if raw_policy is None:
+        return {}
+    if not isinstance(raw_policy, dict):
+        msg = "review dispatch command_policy must be an object"
+        raise TypeError(msg)
+    by_requirement: dict[str, tuple[str, str, dict[str, Any]]] = {}
+    unit_ids: set[str] = set()
+    for record in _records(raw_policy, "planned_validation_units"):
+        if frozenset(record) != frozenset({"execution_identity", "planned_validation_digest", "requirement_ids", "validation_unit_id"}):
+            msg = "planned validation unit dispatch records must contain only unit ID, requirement IDs, identity, and digest"
+            raise ValueError(msg)
+        unit_id = _required_text(record, "validation_unit_id")
+        if unit_id in unit_ids:
+            msg = f"planned validation unit dispatch contains duplicate unit ID {unit_id}"
+            raise ValueError(msg)
+        unit_ids.add(unit_id)
+        requirement_ids = _text_list(record, "requirement_ids", required=True)
+        identity = record.get("execution_identity")
+        if not isinstance(identity, dict) or frozenset(identity) != _PLANNED_VALIDATION_IDENTITY_KEYS:
+            msg = f"planned validation unit {unit_id} has an incomplete execution identity"
+            raise ValueError(msg)
+        digest = _required_text(record, "planned_validation_digest")
+        _sha256_digest(digest, "planned validation digest")
+        if digest != _sha256_bytes(_canonical_json(identity).encode()):
+            msg = f"planned validation unit {unit_id} digest does not match its execution identity"
+            raise ValueError(msg)
+        for requirement_id in requirement_ids:
+            if requirement_id in by_requirement:
+                msg = f"planned validation dispatch maps requirement {requirement_id} more than once"
+                raise ValueError(msg)
+            by_requirement[requirement_id] = (unit_id, digest, identity)
+    return by_requirement
+
+
+def _review_validation_requirement_blockers(dispatch: dict[str, Any], validations: tuple[tuple[str, dict[str, Any]], ...]) -> tuple[str, ...]:
+    try:
+        planned = _dispatched_planned_validations(dispatch)
+    except (TypeError, ValueError) as error:
+        return (str(error),)
+    blockers: list[str] = []
+    for requirement_id, requirement in validations:
+        planned_record = planned.get(requirement_id)
+        if "planned_validation_digest" in requirement:
+            if planned_record is None:
+                blockers.append(f"validation requirement {requirement_id} references an unplanned validation identity")
+            elif requirement["planned_validation_digest"] != planned_record[1]:
+                blockers.append(f"validation requirement {requirement_id} planned validation digest conflicts with its dispatch")
+            continue
+        if planned_record is None:
+            continue
+        identity = planned_record[2]
+        matches = (
+            identity["commands"] == list(_text_list(requirement, "commands"))
+            and identity["working_directories"] == [requirement["working_directory"]] * len(cast("list[str]", identity["commands"]))
+            and identity["environment"] == requirement["environment"]
+            and identity["dependency_policy"] == requirement["dependency_policy"]
+            and identity["required"] is True
+        )
+        if not matches:
+            blockers.append(f"validation requirement {requirement_id} restates a conflicting planned validation identity")
+    return tuple(blockers)
 
 
 def _review_handoff_catalog_blockers(dispatch: dict[str, Any], handoffs: tuple[tuple[str, dict[str, Any]], ...]) -> tuple[str, ...]:
@@ -637,6 +797,7 @@ def compile_review(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  #
     validations = _validation_records(payload)
     handoffs = _handoff_records(payload, node_id)
     policy_blockers = _review_command_policy_blockers(dispatch, payload)
+    validation_requirement_blockers = _review_validation_requirement_blockers(dispatch, validations)
     handoff_blockers = _review_handoff_catalog_blockers(dispatch, handoffs)
     scope_blockers = _review_scope_coverage_blockers(dispatch, payload, status=status)
     limitations = _text_list(payload, "limitations")
@@ -786,7 +947,7 @@ def compile_review(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  #
     evidence = replace(evidence, raw_result_digest=_sha256_bytes(content))
     envelope_assessment = assess_review_evidence(expectation, evidence)
     native_blockers = _review_native_result_blockers(content, expectation, evidence)
-    blockers = (*policy_blockers, *handoff_blockers, *scope_blockers, *envelope_assessment.blockers, *native_blockers)
+    blockers = (*policy_blockers, *validation_requirement_blockers, *handoff_blockers, *scope_blockers, *envelope_assessment.blockers, *native_blockers)
     if blockers:
         msg = "compiled review artifact failed verification: " + "; ".join(blockers)
         raise ValueError(msg)
@@ -2302,7 +2463,7 @@ def _load_evidence_source(  # noqa: C901, PLR0912, PLR0915
 
 def _validation_reconciliation(plan: GraphPlan, records: list[dict[str, Any]]) -> dict[str, Any]:
     """Bind discovered needs to exact command plans, never to a generic CI pass."""
-    units = {requirement: unit for unit in plan.coalesced_validation_units for requirement in unit.requirement_ids}
+    units = {requirement: (unit, _planned_validation_digest(unit)) for unit in plan.coalesced_validation_units for requirement in unit.requirement_ids}
     exclusions = {(item.originating_evidence_id, item.requirement_id, item.requirement_digest): item for item in plan.validation_exclusions}
     results: list[dict[str, Any]] = []
     blockers: list[str] = []
@@ -2312,15 +2473,19 @@ def _validation_reconciliation(plan: GraphPlan, records: list[dict[str, Any]]) -
         for requirement_id, requirement in _validation_records(record):
             digest = _sha256_bytes(_canonical_json(requirement).encode())
             origin = _required_text(record, "evidence_id")
-            unit = units.get(requirement_id)
+            planned = units.get(requirement_id)
+            unit = planned[0] if planned is not None else None
             exclusion = exclusions.get((origin, requirement_id, digest))
-            matches = unit is not None and (
-                unit.commands == _text_list(requirement, "commands")
-                and unit.working_directories == (requirement["working_directory"],) * len(unit.commands)
-                and unit.environment == requirement["environment"]
-                and unit.dependency_policy == requirement["dependency_policy"]
-                and unit.required
-            )
+            if "planned_validation_digest" in requirement:
+                matches = planned is not None and requirement["planned_validation_digest"] == planned[1] and unit is not None and unit.required
+            else:
+                matches = unit is not None and (
+                    unit.commands == _text_list(requirement, "commands")
+                    and unit.working_directories == (requirement["working_directory"],) * len(unit.commands)
+                    and unit.environment == requirement["environment"]
+                    and unit.dependency_policy == requirement["dependency_policy"]
+                    and unit.required
+                )
             resolution = "planned" if matches else "user-excluded" if exclusion else "identity-conflict" if unit else "requires-expansion"
             if resolution in {"identity-conflict", "requires-expansion"}:
                 blockers.append(f"validation requirement {requirement_id} from {origin} needs exact validation reconciliation ({resolution})")
@@ -2485,8 +2650,11 @@ def build_routing_projection_document(
 
 def _required_schema_shape(node: dict[str, Any]) -> object:
     """Return a compact recursive description of every schema-required field."""
-    if isinstance(node.get("enum"), list):
-        shape: object = " | ".join(str(value) for value in node["enum"])
+    shape: object
+    if isinstance(node.get("oneOf"), list):
+        shape = {"oneOf": [_required_schema_shape(branch) for branch in node["oneOf"] if isinstance(branch, dict)]}
+    elif isinstance(node.get("enum"), list):
+        shape = " | ".join(str(value) for value in node["enum"])
     elif "const" in node:
         shape = node["const"]
     elif node.get("type") == "object":
@@ -2566,7 +2734,12 @@ def _materialized_command_policy(plan: GraphPlan, node: WorkerNode, authorized_d
         "allowed_commands": ["read-only inspection commands that do not execute a planned validator recipe"],
         "authorized_duplicate_commands": list(authorized_duplicates),
         "attestation_required": True,
-        "policy": "planned validators own execution; return validation requirements without rerunning their commands",
+        "planned_validation_units": _planned_validation_units(plan),
+        "policy": (
+            "planned validators own execution; for a covered need, return the planned-reference validation requirement variant with the exact "
+            "requirement_id and planned_validation_digest while keeping owner, reason, and expected_evidence audit-specific; use the full execution "
+            "variant only for a genuinely new validation identity; do not rerun validator commands"
+        ),
         "prohibited_commands": list(prohibited),
         "validator_owned_commands": list(validator_commands),
     }

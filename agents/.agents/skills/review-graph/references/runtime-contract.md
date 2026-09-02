@@ -104,7 +104,8 @@ Return only `ReviewPayload`. Write its exact bytes to the candidate, then execut
 executable, script, and bound paths; it validates and atomically publishes
 `worker_payload_path`.
 
-Use the materialized payload schema for fields and enum values.
+Use the materialized payload schema; planned needs reference dispatched
+validation IDs/digests.
 
 `compile-node` seals accepted bytes in a read-only content-addressed sibling,
 recorded in evidence metadata. The dispatch-bound path remains staging;

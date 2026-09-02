@@ -56,6 +56,12 @@ def parse_tool_version(output: str, tool: str) -> str:
     return require_stable_version(versions[0], tool)
 
 
+def read_stable_uv_version(uv_executable: Path) -> str:
+    """Read and validate the stable version of the selected uv executable."""
+    result = subprocess.run([str(uv_executable), "--version"], check=True, capture_output=True, text=True, timeout=30)  # noqa: S603
+    return parse_tool_version(result.stdout, "uv")
+
+
 def sanitize_diagnostic(value: object) -> str:
     """Return one bounded line without terminal control sequences."""
     text = value.decode(errors="replace") if isinstance(value, bytes) else str(value)
@@ -133,18 +139,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--justfile", type=Path, default=Path("justfile"), help="Just source containing repository tool pins")
     parser.add_argument("--uv-executable", type=Path, required=True, help="Verified Homebrew-managed uv executable")
+    parser.add_argument("--check-uv-version", action="store_true", help="validate that uv reports exactly one stable X.Y.Z version without reconciling pins")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     """Reconcile managed tool pins from the local installations."""
     args = parse_args(argv)
+    operation = "validate uv version" if args.check_uv_version else "update tool pins"
     try:
+        uv_version = read_stable_uv_version(args.uv_executable)
+        if args.check_uv_version:
+            print(f"Homebrew-managed uv {uv_version} satisfies the stable X.Y.Z contract.")
+            return 0
         cargo = subprocess.run(["cargo", "install", "--list"], check=True, capture_output=True, text=True, timeout=30)  # noqa: S607
-        uv = subprocess.run([str(args.uv_executable), "--version"], check=True, capture_output=True, text=True, timeout=30)  # noqa: S603
-        changes = reconcile_pins(args.justfile, cargo.stdout, uv.stdout)
+        changes = reconcile_pins(args.justfile, cargo.stdout, uv_version)
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError) as error:
-        print(f"failed to update tool pins: {format_failure(error)}", file=sys.stderr)
+        print(f"failed to {operation}: {format_failure(error)}", file=sys.stderr)
         return 1
 
     if not changes:

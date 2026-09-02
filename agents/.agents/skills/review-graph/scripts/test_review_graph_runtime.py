@@ -36,6 +36,7 @@ from review_graph_runtime import (
     _argument_parser,
     _git_path_status,
     _graph_plan,
+    _planned_validation_digest,
     _reconciled_handoffs,
     _schema_reference,
     _validation_workspace_audit,
@@ -431,6 +432,35 @@ def test_review_payload_schema_reports_all_field_diagnostics() -> None:
     assert {"$.changes", "$.command_policy_attested", "$.commands_executed", "$.status", "$.unexpected"} <= paths
     status = next(item for item in diagnostics if item["path"] == "$.status")
     assert status["accepted_values"] == ["completed", "no-findings", "blocked"]
+
+
+def test_review_payload_schema_accepts_only_one_validation_requirement_shape() -> None:
+    payload = {
+        "changes": [],
+        "command_policy_attested": True,
+        "commands_executed": [],
+        "files_inspected": [STATE_FIXTURE],
+        "findings": [],
+        "handoffs": [],
+        "limitations": [],
+        "nearby_contract_owners": [],
+        "scope_limitations": [],
+        "status": "no-findings",
+        "validation_requirements": [
+            {
+                "expected_evidence": "planned validation passes",
+                "owner": "rust-build-portability",
+                "planned_validation_digest": "sha256:" + "0" * 64,
+                "reason": "the audit confirms the planned validation need",
+                "requirement_id": "baseline-validation",
+            }
+        ],
+    }
+
+    require_schema(payload, SCHEMA_ROOT / "review-payload-v1.schema.json")
+    cast("list[dict[str, Any]]", payload["validation_requirements"])[0]["commands"] = ["true"]
+    with pytest.raises(SchemaValidationError):
+        require_schema(payload, SCHEMA_ROOT / "review-payload-v1.schema.json")
 
 
 def test_planning_schema_aggregates_enum_and_required_field_diagnostics() -> None:
@@ -2021,6 +2051,22 @@ def test_validation_coalescing_ignores_narrative_differences_without_losing_prov
     )
 
 
+def _assert_planned_validation_policy(audit_dispatch: dict[str, Any], validation_dispatch: dict[str, Any]) -> None:
+    assert "command_policy_attested" in audit_dispatch["payload_schema"]["required_fields"]
+    assert audit_dispatch["command_policy"]["validator_owned_commands"] == ["true"]
+    planned_validation = audit_dispatch["command_policy"]["planned_validation_units"]
+    assert len(planned_validation) == 1
+    assert planned_validation[0]["requirement_ids"] == ["baseline-validation"]
+    assert planned_validation[0]["validation_unit_id"] == validation_dispatch["validation_unit"]["node_id"]
+    assert planned_validation[0]["execution_identity"]["working_directories"] == validation_dispatch["validation_unit"]["working_directories"]
+    assert planned_validation[0]["planned_validation_digest"].startswith("sha256:")
+    validation_requirement_shape = audit_dispatch["payload_schema"]["required_shape"]["validation_requirements"][0]
+    assert {tuple(sorted(shape)) for shape in validation_requirement_shape["oneOf"]} == {
+        ("commands", "dependency_policy", "environment", "expected_evidence", "owner", "reason", "requirement_id", "working_directory"),
+        ("expected_evidence", "owner", "planned_validation_digest", "reason", "requirement_id"),
+    }
+
+
 def test_dispatch_materialization_and_ready_nodes_are_plan_derived(tmp_path: Path) -> None:
     plan = _sparse_plan()
     result = materialize_dispatches(
@@ -2052,8 +2098,7 @@ def test_dispatch_materialization_and_ready_nodes_are_plan_derived(tmp_path: Pat
     assert validation_dispatch["payload_schema"]["id"].endswith("validation-payload-v2.schema.json")
     assert audit_dispatch["payload_schema"]["version"] == 1
     assert validation_dispatch["payload_schema"]["version"] == 2
-    assert "command_policy_attested" in audit_dispatch["payload_schema"]["required_fields"]
-    assert audit_dispatch["command_policy"]["validator_owned_commands"] == ["true"]
+    _assert_planned_validation_policy(audit_dispatch, validation_dispatch)
     assert str(SKILL_ROOT.parents[2] / "AGENTS.md") in audit_dispatch["instruction_paths"]
     assert all(entry["worker_prompt"] for entry in result["dispatches"])
     assert all("persist-worker-payload" in entry["worker_prompt"] for entry in result["dispatches"])
@@ -3094,6 +3139,7 @@ def _compile_materialized_evidence(  # noqa: PLR0913
     plan: GraphPlan | None = None,
     skip_node_ids: tuple[str, ...] = (),
     late_requirements: list[dict[str, Any]] | None = None,
+    reference_planned_validation: bool = False,
 ) -> tuple[GraphPlan, list[dict[str, str]]]:
     plan = plan or _sparse_plan()
     materialized = materialize_dispatches(
@@ -3113,6 +3159,9 @@ def _compile_materialized_evidence(  # noqa: PLR0913
         dispatch = entry["dispatch"]
         dispatch.update({"after_state": ["scope", "worktree", "repository"], "before_state": ["scope", "worktree", "repository"]})
         if entry["result_contract"] == "compact-validation":
+            if dispatch["workspace_policy"]["snapshots_required"]:
+                snapshot = capture_workspace_snapshot(dispatch)["records"]
+                dispatch.update({"workspace_after": snapshot, "workspace_before": snapshot})
             unit = dispatch["validation_unit"]
             payload = {
                 "artifacts": [],
@@ -3155,6 +3204,19 @@ def _compile_materialized_evidence(  # noqa: PLR0913
                 ]
             else:
                 handoffs = []
+            if reference_planned_validation and dispatch["mode"] == "audit":
+                planned = dispatch["command_policy"]["planned_validation_units"][0]
+                validation_requirements = [
+                    {
+                        "expected_evidence": f"{dispatch['skill_id']} expects the planned command to pass",
+                        "owner": dispatch["skill_id"],
+                        "planned_validation_digest": planned["planned_validation_digest"],
+                        "reason": f"{dispatch['node_id']} independently confirms the planned validation need",
+                        "requirement_id": planned["requirement_ids"][0],
+                    }
+                ]
+            else:
+                validation_requirements = late_requirements or [] if dispatch["node_id"] == "audit-001" else []
             payload = {
                 "command_policy_attested": True,
                 "commands_executed": [],
@@ -3165,7 +3227,7 @@ def _compile_materialized_evidence(  # noqa: PLR0913
                 "scope_limitations": [],
                 "nearby_contract_owners": [],
                 "status": "no-findings",
-                "validation_requirements": late_requirements or [] if dispatch["node_id"] == "audit-001" else [],
+                "validation_requirements": validation_requirements,
             }
             content, metadata = compile_review({"dispatch": dispatch, "payload": payload})
             kind = "review"
@@ -3179,6 +3241,94 @@ def _compile_materialized_evidence(  # noqa: PLR0913
 
 def _source_by_node(sources: list[dict[str, str]]) -> dict[str, dict[str, str]]:
     return {json.loads(Path(source["metadata_path"]).read_text(encoding="utf-8"))["evidence"]["node_id"]: source for source in sources}
+
+
+def test_isolated_validator_identity_reconciles_multiple_audit_references(tmp_path: Path) -> None:
+    isolation_root = tmp_path / "isolated-validator"
+    working_directory = isolation_root / "repository-copy"
+    working_directory.mkdir(parents=True)
+    plan = _sparse_plan()
+    unit = replace(
+        plan.coalesced_validation_units[0],
+        environment="isolated repository replica",
+        isolation_root=str(isolation_root),
+        requires_isolation=True,
+        working_directories=(str(working_directory),),
+    )
+    isolated_plan = replace(plan, coalesced_validation_units=(unit,))
+
+    isolated_plan, sources = _compile_materialized_evidence(tmp_path / "evidence", plan=isolated_plan, reference_planned_validation=True)
+    final = finalize_proof(
+        {
+            "current_source_state": ["scope", "worktree", "repository"],
+            "plan": _json_plan(isolated_plan),
+            "source_state": ["scope", "worktree", "repository"],
+            "sources": sources,
+        }
+    )
+
+    reconciled = [item for item in final["validation_reconciliation"]["requirements"] if item["requirement_id"] == "baseline-validation"]
+    assert final["status"] == "complete", final["blockers"]
+    assert len(reconciled) == 2
+    assert {item["resolution"] for item in reconciled} == {"planned"}
+    assert {item["validation_unit_id"] for item in reconciled} == {unit.node_id}
+    assert len({item["requirement"]["reason"] for item in reconciled}) == 2
+    assert {item["requirement"]["planned_validation_digest"] for item in reconciled} == {_planned_validation_digest(unit)}
+
+
+@pytest.mark.parametrize("conflict", ["digest", "restatement"])
+def test_compile_review_rejects_conflicting_planned_validation_identity(tmp_path: Path, conflict: str) -> None:
+    plan = _sparse_plan()
+    materialized = materialize_dispatches(
+        {
+            "artifact_store": str(tmp_path),
+            "authorization": "review-only",
+            "plan": _json_plan(plan),
+            "repository_root": str(SKILL_ROOT.parents[2]),
+            "source_state": ["scope", "worktree", "repository"],
+            "state_verification_command": "capture_scope.py --mode baseline",
+        }
+    )
+    dispatch = next(entry["dispatch"] for entry in materialized["dispatches"] if entry["dispatch"].get("mode") == "audit")
+    dispatch.update({"after_state": dispatch["source_state"], "before_state": dispatch["source_state"]})
+    planned = dispatch["command_policy"]["planned_validation_units"][0]
+    if conflict == "digest":
+        requirement = {
+            "expected_evidence": "planned validation passes",
+            "owner": dispatch["skill_id"],
+            "planned_validation_digest": "sha256:" + "0" * 64,
+            "reason": "audit confirms the planned need",
+            "requirement_id": planned["requirement_ids"][0],
+        }
+        expected = "planned validation digest conflicts"
+    else:
+        requirement = {
+            "commands": planned["execution_identity"]["commands"],
+            "dependency_policy": planned["execution_identity"]["dependency_policy"],
+            "environment": planned["execution_identity"]["environment"],
+            "expected_evidence": "planned validation passes",
+            "owner": dispatch["skill_id"],
+            "reason": "audit restates the planned need incorrectly",
+            "requirement_id": planned["requirement_ids"][0],
+            "working_directory": str(tmp_path / "different-live-root"),
+        }
+        expected = "restates a conflicting planned validation identity"
+    payload = {
+        "changes": [],
+        "command_policy_attested": True,
+        "commands_executed": [],
+        "files_inspected": dispatch["owned_paths"],
+        "findings": [],
+        "handoffs": [],
+        "limitations": [],
+        "nearby_contract_owners": [],
+        "scope_limitations": [],
+        "status": "no-findings",
+        "validation_requirements": [requirement],
+    }
+
+    with pytest.raises(ValueError, match=expected):
+        compile_review({"dispatch": dispatch, "payload": payload})
 
 
 def _late_validation_requirement() -> dict[str, Any]:
@@ -3260,6 +3410,7 @@ def test_late_validation_blocks_readiness_and_finalization_then_expands_without_
         for path in [journal, dispatch_path, *(Path(source[field]) for source in sources for field in ("artifact_path", "metadata_path"))]
     }
     discovery = ready["validation_reconciliation"]["requirements"][0]
+    assert discovery["resolution"] == "requires-expansion"
     request = {**lifecycle, "artifact_store": str(tmp_path / "revision")}
     if exclude:
         request["user_exclusions"] = [
