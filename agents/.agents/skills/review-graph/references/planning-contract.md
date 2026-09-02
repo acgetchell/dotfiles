@@ -385,6 +385,14 @@ unmapped requirement or a command/directory/environment/dependency mismatch.
 already has accepted evidence. A generic CI pass cannot cover a different
 validation identity.
 
+Materialized review dispatches carry each planned unit's complete non-narrative
+execution identity and canonical digest. An audit that confirms a planned need
+references the dispatched requirement ID and digest instead of reconstructing
+commands, directories, or environment. Audit-specific reason and expected
+evidence remain provenance only: different narratives can map to the same unit.
+Unknown references and conflicting restatements fail compilation; a full
+requirement with a genuinely new identity still enters late expansion.
+
 Use `reconcile-validation-requirements` with `--journal`, `--dispatches`,
 `--current-capture`, and an input containing `plan` and `source_state` to inspect
 requirements and their exact origin/digest. To expand, supply `artifact_store`

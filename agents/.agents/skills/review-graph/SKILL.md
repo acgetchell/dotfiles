@@ -72,6 +72,8 @@ planner-owned fields in prompts.
 The materialized command policy is authoritative. Review nodes attest to every
 command and do not execute validator-owned commands without an exact duplicate
 authorization; authorized results remain explicit reusable evidence.
+Audits reference dispatched planned-validation IDs/digests instead of restating
+execution identities.
 Identical skill/source/scope leaves execute once; each catalog requirement
 retains ownership of the coalesced judgment and evidence.
 

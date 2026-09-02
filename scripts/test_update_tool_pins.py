@@ -1,14 +1,12 @@
 """Tests for atomic repository tool-pin reconciliation."""
 
+import shutil
 import subprocess
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 
 import update_tool_pins
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def cargo_output(*, override: tuple[str, str] | None = None) -> str:
@@ -115,7 +113,77 @@ def test_main_uses_supplied_uv_executable(tmp_path: Path, monkeypatch: pytest.Mo
     result = update_tool_pins.main(["--justfile", str(justfile), "--uv-executable", str(uv_executable)])
 
     assert result == 0
-    assert commands[1] == [str(uv_executable), "--version"]
+    assert commands[0] == [str(uv_executable), "--version"]
+
+
+def test_check_uv_version_accepts_a_newer_stable_version_without_reading_cargo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    uv_executable = tmp_path / "homebrew-uv"
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="uv 9.8.7\n", stderr="")
+
+    monkeypatch.setattr(update_tool_pins.subprocess, "run", fake_run)
+
+    result = update_tool_pins.main(["--check-uv-version", "--uv-executable", str(uv_executable)])
+
+    assert result == 0
+    assert commands == [[str(uv_executable), "--version"]]
+    assert "uv 9.8.7 satisfies the stable X.Y.Z contract" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("output", ["uv 1.2.3-rc.1", "uv release-1.2.3", "uv unknown", "uv 1.2.3 using runtime 3.14.0"])
+def test_check_uv_version_rejects_unstable_or_ambiguous_output_before_reading_cargo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], output: str
+) -> None:
+    uv_executable = tmp_path / "homebrew-uv"
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+    monkeypatch.setattr(update_tool_pins.subprocess, "run", fake_run)
+
+    result = update_tool_pins.main(["--check-uv-version", "--uv-executable", str(uv_executable)])
+
+    assert result == 1
+    assert commands == [[str(uv_executable), "--version"]]
+    assert "failed to validate uv version: invalid tool state:" in capsys.readouterr().err
+
+
+def test_update_recipes_preflight_uv_before_homebrew_and_cargo_mutations() -> None:
+    repository = Path(__file__).resolve().parents[1]
+    just = shutil.which("just")
+    assert just is not None
+
+    dependency_result = subprocess.run(  # noqa: S603 - resolved Just executable and fixed arguments.
+        [just, "--justfile", str(repository / "justfile"), "--dry-run", "update-dependencies"], check=True, capture_output=True, text=True, cwd=repository
+    )
+    dependency_output = f"{dependency_result.stdout}\n{dependency_result.stderr}"
+    preflight = "scripts/update_tool_pins.py --check-uv-version"
+    first_dependency_preflight = dependency_output.index(preflight)
+    homebrew_mutation = dependency_output.index('brew bundle upgrade --file="$PWD/Brewfile"')
+    second_dependency_preflight = dependency_output.index(preflight, first_dependency_preflight + 1)
+    uv_mutation = dependency_output.index('"$uv_executable" lock --upgrade')
+    assert first_dependency_preflight < homebrew_mutation < second_dependency_preflight < uv_mutation
+
+    result = subprocess.run(  # noqa: S603 - resolved Just executable and fixed arguments.
+        [just, "--justfile", str(repository / "justfile"), "--dry-run", "update"], check=True, capture_output=True, text=True, cwd=repository
+    )
+
+    output = f"{result.stdout}\n{result.stderr}"
+    first_preflight = output.index(preflight)
+    second_preflight = output.index(preflight, first_preflight + 1)
+    third_preflight = output.index(preflight, second_preflight + 1)
+    homebrew_mutation = output.index('brew bundle upgrade --file="$PWD/Brewfile"')
+    fourth_preflight = output.index(preflight, third_preflight + 1)
+    uv_mutation = output.index('"$uv_executable" lock --upgrade')
+    cargo_mutation = output.index('cargo install-update --locked "${packages[@]}"')
+    assert first_preflight < second_preflight < homebrew_mutation < third_preflight < uv_mutation < fourth_preflight < cargo_mutation
 
 
 @pytest.mark.parametrize(

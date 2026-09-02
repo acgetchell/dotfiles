@@ -9,7 +9,7 @@ python_paths := "agents/.agents/skills scripts"
 dprint_version := "0.57.0"
 just_version := "1.58.0"
 rumdl_version := "0.2.62"
-uv_version := "0.12.7"
+uv_version := "0.12.8"
 zizmor_version := "1.30.0"
 
 _ensure-actionlint:
@@ -325,8 +325,19 @@ setup:
     DOTFILES_DIR="$PWD" bin/bootstrap.sh
     just python-sync
 
+_preflight-stable-uv: _ensure-brew
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    uv_executable="$(brew --prefix uv)/bin/uv"
+    if [[ ! -x "$uv_executable" ]]; then
+        echo "Homebrew-managed uv is unavailable at $uv_executable." >&2
+        exit 1
+    fi
+    "$uv_executable" run --locked --no-sync python scripts/update_tool_pins.py --check-uv-version --uv-executable "$uv_executable"
+
 # Update the Homebrew bundle, uv lock, and repository-owned Cargo tools.
-update: update-dependencies update-cargo-tools
+update: _preflight-stable-uv update-dependencies update-cargo-tools
     @echo "Repository dependencies and tools updated."
 
 # Update the Cargo CLI tools installed by bootstrap.sh and reconcile their pins.
@@ -345,6 +356,7 @@ update-cargo-tools: _ensure-brew
         echo "Homebrew-managed uv is unavailable at $uv_executable." >&2
         exit 1
     fi
+    "$uv_executable" run --locked --no-sync python scripts/update_tool_pins.py --check-uv-version --uv-executable "$uv_executable"
 
     packages=(dprint just rumdl zizmor)
     cargo install-update --locked "${packages[@]}"
@@ -355,12 +367,20 @@ update-dependencies: _ensure-brew
     #!/usr/bin/env bash
     set -euo pipefail
 
+    uv_executable="$(brew --prefix uv)/bin/uv"
+    if [[ ! -x "$uv_executable" ]]; then
+        echo "Homebrew-managed uv is unavailable at $uv_executable." >&2
+        exit 1
+    fi
+    "$uv_executable" run --locked --no-sync python scripts/update_tool_pins.py --check-uv-version --uv-executable "$uv_executable"
+
     brew bundle upgrade --file="$PWD/Brewfile"
     uv_executable="$(brew --prefix uv)/bin/uv"
     if [[ ! -x "$uv_executable" ]]; then
         echo "Homebrew-managed uv is unavailable at $uv_executable." >&2
         exit 1
     fi
+    "$uv_executable" run --locked --no-sync python scripts/update_tool_pins.py --check-uv-version --uv-executable "$uv_executable"
     "$uv_executable" lock --upgrade
     "$uv_executable" sync --locked --group dev
 

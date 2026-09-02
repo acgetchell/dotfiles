@@ -113,10 +113,28 @@ def _shape(schema: dict[str, Any]) -> str:
     return "value described by schema"
 
 
-def _diagnose(value: object, schema: dict[str, Any], root: dict[str, Any], path: str, output: list[SchemaDiagnostic]) -> None:  # noqa: C901, PLR0912
+def _diagnose(  # noqa: C901, PLR0912, PLR0915
+    value: object, schema: dict[str, Any], root: dict[str, Any], path: str, output: list[SchemaDiagnostic]
+) -> None:
     reference = schema.get("$ref")
     if isinstance(reference, str):
         _diagnose(value, _resolve_ref(root, reference), root, path, output)
+        return
+    one_of = schema.get("oneOf")
+    if isinstance(one_of, list) and one_of and all(isinstance(branch, dict) for branch in one_of):
+        branch_diagnostics: list[list[SchemaDiagnostic]] = []
+        for branch in one_of:
+            diagnostics: list[SchemaDiagnostic] = []
+            _diagnose(value, branch, root, path, diagnostics)
+            branch_diagnostics.append(diagnostics)
+        matching = tuple(diagnostics for diagnostics in branch_diagnostics if not diagnostics)
+        if len(matching) == 1:
+            return
+        if not matching:
+            best = min(branch_diagnostics, key=lambda diagnostics: (len(diagnostics), tuple((item.path, item.code) for item in diagnostics)))
+            output.extend(best)
+        else:
+            output.append(SchemaDiagnostic(path, "oneOf", "matches more than one allowed shape", "exactly one allowed shape"))
         return
     accepted = _accepted_types(schema)
     if accepted and not _matches_type(value, accepted):

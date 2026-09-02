@@ -67,19 +67,35 @@
     "status": {"enum": ["completed", "no-findings", "blocked"]},
     "validation_requirements": {
       "items": {
-        "additionalProperties": false,
-        "properties": {
-          "commands": {"items": {"type": "string"}, "minItems": 1, "type": "array"},
-          "dependency_policy": {"enum": ["stop-on-failure", "continue-independent"]},
-          "environment": {"type": "string"},
-          "expected_evidence": {"type": "string"},
-          "owner": {"type": "string"},
-          "reason": {"type": "string"},
-          "requirement_id": {"type": "string"},
-          "working_directory": {"type": "string"}
-        },
-        "required": ["requirement_id", "owner", "reason", "commands", "working_directory", "environment", "expected_evidence", "dependency_policy"],
-        "type": "object"
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "commands": {"items": {"type": "string"}, "minItems": 1, "type": "array"},
+              "dependency_policy": {"enum": ["stop-on-failure", "continue-independent"]},
+              "environment": {"type": "string"},
+              "expected_evidence": {"type": "string"},
+              "owner": {"type": "string"},
+              "reason": {"type": "string"},
+              "requirement_id": {"type": "string"},
+              "working_directory": {"type": "string"}
+            },
+            "required": ["requirement_id", "owner", "reason", "commands", "working_directory", "environment", "expected_evidence", "dependency_policy"],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "expected_evidence": {"type": "string"},
+              "owner": {"type": "string"},
+              "planned_validation_digest": {"pattern": "^sha256:[0-9a-f]{64}$", "type": "string"},
+              "reason": {"type": "string"},
+              "requirement_id": {"type": "string"}
+            },
+            "required": ["requirement_id", "planned_validation_digest", "owner", "reason", "expected_evidence"],
+            "type": "object"
+          }
+        ]
       },
       "type": "array"
     }

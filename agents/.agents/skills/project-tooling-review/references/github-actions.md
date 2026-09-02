@@ -26,6 +26,42 @@ failure remains failed evidence until the defect is corrected and current
 native evidence passes. Do not weaken the regression, remove the supported
 matrix cell, or add a skip merely to make the workflow green.
 
+## Pull Request Review State
+
+Treat third-party review surfaces as separate evidence:
+
+- a successful commit status or check run means that provider finished its
+  work for a particular head; it is not CI success or approval
+- the latest review decision may remain `CHANGES_REQUESTED` while an
+  incremental review finds no new issues
+- unresolved inline threads remain actionable or require an evidence-backed
+  maintainer disposition even when the provider has finished
+- walkthrough and aggregate-summary claims can lag current code and must not
+  override current source, thread state, or authoritative platform/tool docs
+
+Bind each observation to the current PR head and timestamp. Reconcile every
+outstanding claim against current code before recommending another patch;
+distinguish a stale summary, a false positive, and a genuine unresolved defect.
+Do not infer that an older thread was fixed merely because it disappeared from
+an incremental review.
+
+When a tool bundled by a review provider rejects newer platform syntax, retain
+the repository's local validation gate and look for a documented rule-level or
+path-level control. Do not disable the entire provider tool merely to suppress
+one unsupported diagnostic. CodeRabbit's
+[published actionlint integration](https://docs.coderabbit.ai/tools/actionlint)
+currently uses default actionlint configuration, and its
+[configuration reference](https://docs.coderabbit.ai/reference/configuration)
+exposes only tool-wide enablement. A narrow unsupported-syntax exception
+therefore requires provider/upstream support rather than a broad
+`.coderabbit.yaml` suppression.
+
+Replying with evidence, requesting a fresh incremental or full review,
+resolving a false-positive thread, or escalating reproducible provider behavior
+requires explicit maintainer authorization. Never dismiss a review, resolve a
+genuine finding, weaken branch protection, or trigger repeated reviews solely
+because the latest incremental pass produced no new comments.
+
 ## Version And Pinning Checks
 
 - Verify action versions against live releases when the user asks for currentness or when changing versions. Do not rely on model memory for latest action versions.

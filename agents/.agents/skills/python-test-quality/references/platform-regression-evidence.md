@@ -12,6 +12,18 @@ compare literal bytes or their independently computed digests. Cover text-mode
 translation, encoding, and newline composition when reachable; do not assume a
 downstream tool option controls earlier runtime or pipe conversion.
 
+For subprocess pipelines, trace and test producer stdout capture, every
+intermediate representation, and consumer stdin separately. Use a real child
+process to emit CRLF, mixed-newline, and non-UTF-8 fixtures when stdout
+transport owns the risk; a mock returning decoded text bypasses that boundary.
+
+For command output, exercise a strict legacy encoding such as CP1252 in
+addition to UTF-8 capture when Windows console behavior matters. Include output
+emitted after a mocked successful external mutation. Assert the exit status,
+exactly-once mutation, unchanged payload, and usable diagnostics or next-step
+instructions so an encoding failure cannot masquerade as a failed tag, upload,
+or publish.
+
 ## Prove Regression Sensitivity
 
 Include durable focused coverage and a sensitivity check showing, through an
