@@ -5,11 +5,13 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 
 export UV_CACHE_DIR := env_var_or_default("UV_CACHE_DIR", ".uv-cache")
 
-python_paths := "agents/.agents/skills scripts"
-dprint_version := "0.57.0"
+python_fixture_paths := "tests/semgrep"
+python_primary_paths := "agents/.agents/skills scripts"
+python_paths := python_primary_paths + " " + python_fixture_paths
+dprint_version := "0.57.1"
 just_version := "1.58.0"
-rumdl_version := "0.2.62"
-uv_version := "0.12.8"
+rumdl_version := "0.2.64"
+uv_version := "0.12.9"
 zizmor_version := "1.30.0"
 
 _ensure-actionlint:
@@ -139,7 +141,7 @@ check-skills: _ensure-uv
     fi
     echo "Skill checks complete!"
 
-ci: check
+ci: check python-fixture-lint
     @echo "CI checks complete!"
 
 fix: justfile-fmt python-fix yaml-fix markdown-fix
@@ -197,9 +199,9 @@ macos-defaults:
 macos-defaults-rectangle-pro:
     bin/macos-defaults.sh --rectangle-pro-takeover
 
-python-check: _ensure-uv
+python-check: _ensure-uv python-fixture-lint
     uv run --locked ruff format --check {{ python_paths }}
-    uv run --locked ruff check {{ python_paths }}
+    uv run --locked ruff check {{ python_primary_paths }}
     just python-typecheck
 
 python-ci: python-check test-python
@@ -208,6 +210,9 @@ python-ci: python-check test-python
 python-fix: _ensure-uv
     uv run --locked ruff check {{ python_paths }} --fix
     uv run --locked ruff format {{ python_paths }}
+
+python-fixture-lint: _ensure-uv
+    uv run --locked ruff check {{ python_fixture_paths }}
 
 python-lint: python-check
 

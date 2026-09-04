@@ -38,8 +38,9 @@ sections, in order, with no preamble or machine-authored identifiers:
   Ordinary Markdown backticks around repository paths are accepted and
   normalized by the compiler.
 - `## Findings`: `No findings.` for a no-findings result; otherwise ordered
-  `- Finding:` records with `Severity`, `Location`, `Summary`, `Evidence`,
-  `Impact`, `Owner`, and `Remediation`
+  `- Finding: <short identity>` records with a non-empty identity on that same
+  line, followed by `Severity`, `Location`, `Summary`, `Evidence`, `Impact`,
+  `Owner`, and `Remediation`. Severity is exactly `P0`, `P1`, `P2`, or `P3`.
 - `## No-Finding Evidence`: one `- Inspected:` record for every dispatched
   adversarial check and every material contract supporting a no-findings claim
 - `## Routing Handoffs`: exact `none` or ordered `- Catalog ID:` records with
@@ -47,9 +48,13 @@ sections, in order, with no preamble or machine-authored identifiers:
 - `## Fingerprint Proof`: expected, before, and after identities
 - `## Git State`: confirmation that no source or Git mutation occurred
 
-Use [references/native-example.md](references/native-example.md) as the exact
-syntax example. Its concrete values are illustrative; copy the dispatched
-target, paths, fingerprints, and adversarial checks instead of those values.
+Use [the no-findings example](references/native-example.md) or [the positive
+finding example](references/native-positive-example.md) as the exact syntax
+example. Their concrete values are illustrative; copy the dispatched target,
+paths, fingerprints, and adversarial checks instead of those values. Ordinary
+single-backtick Markdown is normalized only around repository path items and
+catalog IDs. Keep severity and field labels unformatted; descriptive field
+values are preserved as written.
 
 The coordinator runs `compile-independent-review`. That compiler assigns
 finding, handoff, evidence, and artifact identities; appends the canonical

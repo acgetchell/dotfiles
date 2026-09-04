@@ -13,6 +13,8 @@ Public contracts:
 - `schemas/runtime-operation-inputs-v1.schema.json`
 - `runtime-operation-examples-v1.json`
 
+Safety details: [runtime-safety.md](runtime-safety.md).
+
 `--help` links input definitions and examples.
 
 Bootstrap capture provenance into the routing/validation template:

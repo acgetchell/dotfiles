@@ -2536,8 +2536,8 @@ def _native_nonempty_section_blockers(body: str, *, section: str) -> tuple[str, 
 
 def _native_records(body: str, label: str) -> tuple[tuple[str, str], ...]:
     lines = body.splitlines()
-    prefix = f"- {label}: "
-    positions = tuple(index for index, line in enumerate(lines) if line.startswith(prefix))
+    prefix = f"- {label}:"
+    positions = tuple(index for index, line in enumerate(lines) if line == prefix or line.startswith(prefix + " "))
     records: list[tuple[str, str]] = []
     for ordinal, position in enumerate(positions):
         end = positions[ordinal + 1] if ordinal + 1 < len(positions) else len(lines)

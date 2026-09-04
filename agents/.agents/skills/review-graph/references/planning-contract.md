@@ -401,6 +401,10 @@ requirement ID, ordered commands, working directory for each command, environmen
 and dependency policy; explicitly plan toolchain, platform, expected artifacts,
 isolation, and remaining execution fields. Units must be required and source-bound.
 An existing requirement ID cannot be repurposed for different commands.
+Before expansion, the runtime checks Cargo benchmark target `required-features`,
+requires a repository canonical `just` benchmark recipe when one exists, checks
+non-isolated working directories against the captured current state, and rejects
+post-remediation-only evidence in a review-only source epoch.
 
 Alternatively, record an actual user scope decision in `user_exclusions`, using
 the returned `originating_evidence_id`, `requirement_id`, `requirement_digest`,

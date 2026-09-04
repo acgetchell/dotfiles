@@ -32,7 +32,10 @@ reviews:
   auto_assign_reviewers: false
   poem: true
   labeling_instructions: []
-  path_filters: []
+  # Deliberately invalid Semgrep fixtures are validated by repository-owned
+  # Ruff, ty, and Semgrep gates instead of general-purpose AI review.
+  path_filters:
+    - "!tests/semgrep/**"
   path_instructions:
     - path: "agents/.agents/skills/**"
       instructions: |
@@ -91,7 +94,7 @@ reviews:
       enabled: true
   pre_merge_checks:
     docstrings:
-      mode: warning
+      mode: off
       threshold: 100
     title:
       mode: warning
