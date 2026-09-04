@@ -549,3 +549,10 @@ or detected mutation; its Result dispositions must reconcile with the observed
 identities, its handoffs must still match the typed tuple, and it must state one
 concrete limitation. Assign stable graph-finding IDs deterministically without
 rewriting the preserved native report.
+
+In the worker-authored native input, each positive record starts with
+`- Finding: <short identity>` and the identity must be non-empty on that same
+line. The runtime reports all missing, duplicate, empty, out-of-order, and
+invalid-severity fields it can determine in one compilation pass. It normalizes
+ordinary single-backtick Markdown around repository path items and catalog IDs;
+field labels and `P0` through `P3` severity values remain unformatted.

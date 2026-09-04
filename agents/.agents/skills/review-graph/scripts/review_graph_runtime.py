@@ -12,6 +12,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import tomllib
 from collections import Counter
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
@@ -42,6 +43,7 @@ from review_graph_plan import (
     ValidationEvidenceExpectation,
     ValidationEvidenceMapping,
     ValidationExclusion,
+    ValidationRequirement,
     ValidationUnit,
     WorkerBudget,
     WorkerNode,
@@ -225,11 +227,12 @@ def _write_text_once(path: Path, content: str) -> None:
     _write_bytes_once(path, content.encode("utf-8"))
 
 
-def _write_bytes_atomically_once(path: Path, content: bytes, *, mode: int) -> None:
-    """Atomically create immutable content, permitting only an identical replay."""
+def _write_bytes_atomically_once(path: Path, content: bytes, *, mode: int) -> bool:
+    """Atomically create immutable content and report whether this call published it."""
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     temporary_path = Path(temporary_name)
     created = False
+    completed = False
     try:
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(content)
@@ -245,8 +248,88 @@ def _write_bytes_atomically_once(path: Path, content: bytes, *, mode: int) -> No
                 raise ValueError(msg) from None
         if created:
             _fsync_directory(path.parent)
+        completed = True
+        return created
     finally:
         temporary_path.unlink(missing_ok=True)
+        if created and not completed:
+            path.unlink(missing_ok=True)
+
+
+def _queue_materialized_write(pending: dict[Path, tuple[bytes, int]], path: Path, content: bytes, *, mode: int) -> None:
+    """Queue one immutable materialization output without touching its final store."""
+    existing = pending.get(path)
+    candidate = (content, mode)
+    if existing is not None and existing != candidate:
+        msg = f"materialization produced conflicting content for immutable artifact: {path}"
+        raise ValueError(msg)
+    pending[path] = candidate
+
+
+def _publish_materialized_writes(artifact_store: Path, pending: dict[Path, tuple[bytes, int]]) -> bool:
+    """Stage a complete materialization and report whether a new store was published."""
+    artifact_store.parent.mkdir(parents=True, exist_ok=True)
+    staging_root = Path(tempfile.mkdtemp(prefix=f".{artifact_store.name}.materialize.", dir=artifact_store.parent))
+    try:
+        for final_path, (content, mode) in pending.items():
+            try:
+                relative = final_path.relative_to(artifact_store)
+            except ValueError:
+                msg = f"materialized artifact escapes its requested store: {final_path}"
+                raise ValueError(msg) from None
+            staged_path = staging_root / relative
+            staged_path.parent.mkdir(parents=True, exist_ok=True)
+            _write_bytes_atomically_once(staged_path, content, mode=mode)
+
+        if artifact_store.exists() and not artifact_store.is_dir():
+            msg = f"artifact_store is not a directory: {artifact_store}"
+            raise ValueError(msg)
+        # Check every conflict before publishing any new immutable output. This
+        # keeps corrected retries safe even when a prior store already exists.
+        for final_path, (content, _mode) in pending.items():
+            if final_path.exists() and _read_regular_file_no_follow(final_path) != content:
+                msg = f"refusing to overwrite non-identical immutable artifact: {final_path}"
+                raise ValueError(msg)
+
+        if not artifact_store.exists() or not any(artifact_store.iterdir()):
+            if artifact_store.exists():
+                artifact_store.rmdir()
+            staging_root.rename(artifact_store)
+            try:
+                _fsync_directory(artifact_store.parent)
+            except OSError:
+                artifact_store.rename(staging_root)
+                raise
+            return True
+        missing = tuple(final_path for final_path in pending if not final_path.exists())
+        if missing:
+            msg = "existing materialization store is incomplete; refusing a partial immutable publish: " + ", ".join(map(str, missing))
+            raise ValueError(msg)
+        return False
+    finally:
+        shutil.rmtree(staging_root, ignore_errors=True)
+
+
+def _publish_materialization_with_result(
+    artifact_store: Path, pending: dict[Path, tuple[bytes, int]], operation_output_path: Path, output: dict[str, Any]
+) -> None:
+    """Publish a CLI result and its immutable store as one rollback-safe operation."""
+    output_path = operation_output_path.absolute()
+    output_bytes = (json.dumps(output, indent=2, sort_keys=True) + "\n").encode()
+    _preflight_compile_destination(output_path, output_bytes)
+    resolved_output_path = output_path.resolve()
+    if resolved_output_path == artifact_store or resolved_output_path.is_relative_to(artifact_store):
+        msg = "materialize-dispatches operation-result path must be outside the artifact store"
+        raise ValueError(msg)
+    output_created = _write_bytes_atomically_once(output_path, output_bytes, mode=0o444)
+    materialization_completed = False
+    try:
+        _publish_materialized_writes(artifact_store, pending)
+        materialization_completed = True
+    finally:
+        if not materialization_completed and output_created:
+            output_path.unlink()
+            _fsync_directory(output_path.parent)
 
 
 def _required_text(item: dict[str, Any], name: str) -> str:
@@ -561,6 +644,11 @@ def _review_command_policy_blockers(dispatch: dict[str, Any], payload: dict[str,
     duplicates = tuple(command for command in commands if command in prohibited)
     if duplicates:
         return ("review payload executed commands owned by planned validators: " + ", ".join(duplicates),)
+    if dispatch.get("fresh_context") is True:
+        forbidden = _text_list(dispatch, "fresh_context_forbidden_artifacts")
+        violations = tuple(f"{command} -> {path}" for command in commands for path in forbidden if path in command)
+        if violations:
+            return ("fresh-context review read another node's worker/report/evidence artifact: " + "; ".join(violations),)
     return ()
 
 
@@ -997,17 +1085,20 @@ def _independent_findings(body: str, node_id: str, status: str) -> tuple[tuple[s
         msg = "independent Findings must contain ordered Finding records"
         raise ValueError(msg)
     output: list[tuple[str, dict[str, str]]] = []
+    blockers: list[str] = []
     labels = ("Severity", "Location", "Summary", "Evidence", "Impact", "Owner", "Remediation")
-    for ordinal, (_worker_identity, record_body) in enumerate(records, start=1):
-        fields, blockers = _native_record_fields(record_body, section=f"independent Finding {ordinal}", labels=labels)
-        if blockers:
-            msg = "; ".join(blockers)
-            raise ValueError(msg)
-        severity = fields["Severity"]
-        if severity not in _SEVERITIES:
-            msg = f"independent Finding {ordinal} has invalid severity {severity}"
-            raise ValueError(msg)
-        output.append((f"{node_id}-finding-{ordinal}", dict(fields)))
+    for ordinal, (worker_identity, record_body) in enumerate(records, start=1):
+        if not worker_identity:
+            blockers.append(f"independent Finding {ordinal} requires a non-empty value on the same line as - Finding:")
+        fields, field_blockers = _native_record_fields(record_body, section=f"independent Finding {ordinal}", labels=labels)
+        blockers.extend(field_blockers)
+        severity = fields.get("Severity")
+        if severity is not None and severity not in _SEVERITIES:
+            blockers.append(f"independent Finding {ordinal} has invalid severity {severity}; expected P0, P1, P2, or P3")
+        if not field_blockers and worker_identity and severity in _SEVERITIES:
+            output.append((f"{node_id}-finding-{ordinal}", dict(fields)))
+    if blockers:
+        raise ValueError("; ".join(blockers))
     return tuple(output)
 
 
@@ -1038,6 +1129,8 @@ def _independent_handoffs(body: str, node_id: str, dispatch: dict[str, Any]) -> 
         raise ValueError(msg)
     output: list[tuple[str, dict[str, Any]]] = []
     for ordinal, (catalog_id, record_body) in enumerate(records, start=1):
+        if len(catalog_id) >= 2 and catalog_id.startswith("`") and catalog_id.endswith("`"):
+            catalog_id = catalog_id[1:-1]
         fields, blockers = _native_record_fields(record_body, section=f"independent Handoff {ordinal}", labels=("Observed trigger", "Reason", "Scope"))
         if blockers:
             msg = "; ".join(blockers)
@@ -2917,7 +3010,7 @@ def persist_worker_payload(contract_document: dict[str, Any], candidate_path: Pa
 
 
 def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
-    document: dict[str, Any], *, preserved_entries: dict[str, dict[str, Any]] | None = None
+    document: dict[str, Any], *, preserved_entries: dict[str, dict[str, Any]] | None = None, operation_output_path: Path | None = None
 ) -> dict[str, Any]:
     """Derive exact per-node dispatch bases from one accepted graph plan."""
     raw_plan = document.get("plan")
@@ -2929,6 +3022,13 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         msg = "cannot materialize dispatches from a blocked graph plan"
         raise ValueError(msg)
     source_state = _state(document, "source_state")
+    if source_state == ("scope", "worktree", "repository"):
+        planned_states = {unit.source_state for unit in plan.coalesced_validation_units}
+        if len(planned_states) > 1:
+            msg = "symbolic materialization source_state requires one unambiguous plan-bound fingerprint triple"
+            raise ValueError(msg)
+        if planned_states:
+            source_state = planned_states.pop()
     _verified_reused_sources(plan, source_state)
     repository_root_path = Path(_required_text(document, "repository_root"))
     if not repository_root_path.is_absolute() or not repository_root_path.is_dir():
@@ -2947,10 +3047,10 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         raise ValueError(msg)
     state_command = _required_text(document, "state_verification_command")
     artifact_store = Path(_required_text(document, "artifact_store")).resolve()
-    artifact_store.mkdir(parents=True, exist_ok=True)
-    if not artifact_store.is_dir():
+    if artifact_store.exists() and not artifact_store.is_dir():
         msg = f"artifact_store is not a directory: {artifact_store}"
         raise ValueError(msg)
+    pending_writes: dict[Path, tuple[bytes, int]] = {}
     inspection_profile = document.get("inspection_profile", "shared-read-only")
     if inspection_profile not in {"independent-source", "shared-read-only"}:
         msg = "inspection_profile must be independent-source or shared-read-only"
@@ -2978,7 +3078,9 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         _inspection_groups(plan, source_state, artifact_store, repository_root_path.resolve()) if inspection_profile == "shared-read-only" else {}
     )
     for record in {str(record["artifact_path"]): record for record in inspection_groups.values()}.values():
-        _write_text_once(Path(cast("str", record["artifact_path"])), json.dumps(record, indent=2, sort_keys=True) + "\n")
+        _queue_materialized_write(
+            pending_writes, Path(cast("str", record["artifact_path"])), (json.dumps(record, indent=2, sort_keys=True) + "\n").encode(), mode=0o444
+        )
     raw_duplicate_authorizations = document.get("duplicate_command_authorizations", {})
     if not isinstance(raw_duplicate_authorizations, dict) or any(
         not isinstance(node_id, str)
@@ -3112,7 +3214,9 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             "schema_version": 1,
             "worker_payload_path": str(worker_payload_path),
         }
-        _write_text_once(worker_payload_contract_path, json.dumps(persistence_contract, indent=2, sort_keys=True) + "\n")
+        _queue_materialized_write(
+            pending_writes, worker_payload_contract_path, (json.dumps(persistence_contract, indent=2, sort_keys=True) + "\n").encode(), mode=0o444
+        )
         worker_input_path = artifact_store / f"{node.node_id}.worker-input.json"
         entry = {
             "artifact_path": str(artifact_path),
@@ -3128,10 +3232,14 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             "worker_payload_path": str(worker_payload_path),
             "worker_prompt": _worker_prompt(contract, common),
         }
-        _write_bytes_atomically_once(worker_input_path, (json.dumps(entry, indent=2, sort_keys=True) + "\n").encode(), mode=0o444)
+        _queue_materialized_write(pending_writes, worker_input_path, (json.dumps(entry, indent=2, sort_keys=True) + "\n").encode(), mode=0o444)
         dispatches.append(entry)
     output: dict[str, Any] = {"dispatches": dispatches, "plan_digest": _plan_digest(plan), "schema_version": 1, "source_state": list(source_state)}
     output["dispatch_set_digest"] = _sha256_bytes(_canonical_json(output).encode())
+    if operation_output_path is None:
+        _publish_materialized_writes(artifact_store, pending_writes)
+    else:
+        _publish_materialization_with_result(artifact_store, pending_writes, operation_output_path, output)
     return output
 
 
@@ -3836,6 +3944,37 @@ def _persist_journal_event(stream: Any, path: Path, event: dict[str, Any], *, ex
     os.fsync(stream.fileno())
 
 
+def _prepare_journal_event(
+    path: Path, *, plan: GraphPlan, source_state: tuple[str, str, str], request: JournalEventRequest, content: bytes
+) -> tuple[dict[str, Any], int]:
+    """Validate and build a journal event without committing it."""
+    existing_size = len(content)
+    events, state, head_digest = _read_execution_journal_content(content, path=path, plan=plan, source_state=source_state)
+    node = next((candidate for candidate in plan.actual_worker_nodes if candidate.node_id == request.node_id), None)
+    if node is None:
+        msg = f"journal event references unknown node: {request.node_id}"
+        raise ValueError(msg)
+    if request.status not in _JOURNAL_STATUSES:
+        msg = f"invalid journal status {request.status}"
+        raise ValueError(msg)
+    evidence, limitations = _new_journal_evidence(request, plan=plan, node=node, source_state=source_state)
+    affected = _apply_journal_transition(plan, state, node_id=request.node_id, status=request.status)
+    event: dict[str, Any] = {
+        "affected_node_ids": list(affected),
+        "evidence": evidence,
+        "node_id": request.node_id,
+        "plan_digest": events[0]["plan_digest"] if events else _plan_digest(plan),
+        "previous_event_digest": head_digest,
+        "reason": _new_journal_reason(request, limitations),
+        "schema_version": 1,
+        "sequence": len(events) + 1,
+        "source_state": list(source_state),
+        "status": request.status,
+    }
+    event["event_digest"] = _sha256_bytes(_canonical_json(event).encode())
+    return event, existing_size
+
+
 def append_journal_event(path: Path, document: dict[str, Any], request: JournalEventRequest) -> dict[str, Any]:
     """Append one graph-validated lifecycle event and return its canonical record."""
     raw_plan = document.get("plan")
@@ -3855,30 +3994,7 @@ def append_journal_event(path: Path, document: dict[str, Any], request: JournalE
                 content = path.read_bytes()
             except FileNotFoundError:
                 content = b""
-            existing_size = len(content)
-            events, state, head_digest = _read_execution_journal_content(content, path=path, plan=plan, source_state=source_state)
-            node = next((candidate for candidate in plan.actual_worker_nodes if candidate.node_id == request.node_id), None)
-            if node is None:
-                msg = f"journal event references unknown node: {request.node_id}"
-                raise ValueError(msg)
-            if request.status not in _JOURNAL_STATUSES:
-                msg = f"invalid journal status {request.status}"
-                raise ValueError(msg)
-            evidence, limitations = _new_journal_evidence(request, plan=plan, node=node, source_state=source_state)
-            affected = _apply_journal_transition(plan, state, node_id=request.node_id, status=request.status)
-            event: dict[str, Any] = {
-                "affected_node_ids": list(affected),
-                "evidence": evidence,
-                "node_id": request.node_id,
-                "plan_digest": events[0]["plan_digest"] if events else _plan_digest(plan),
-                "previous_event_digest": head_digest,
-                "reason": _new_journal_reason(request, limitations),
-                "schema_version": 1,
-                "sequence": len(events) + 1,
-                "source_state": list(source_state),
-                "status": request.status,
-            }
-            event["event_digest"] = _sha256_bytes(_canonical_json(event).encode())
+            event, existing_size = _prepare_journal_event(path, plan=plan, source_state=source_state, request=request, content=content)
             with path.open("ab") as journal_stream:
                 _persist_journal_event(journal_stream, path, event, existing_size=existing_size)
             return event
@@ -4089,7 +4205,121 @@ def _fallback_to_coordinator_locked(document: dict[str, Any], args: argparse.Nam
     }
 
 
-def _expanded_validation_plan(document: dict[str, Any], plan: GraphPlan, records: list[dict[str, Any]], repository_root: Path) -> GraphPlan:
+def _just_recipe_names(repository_root: Path) -> set[str]:
+    justfile = repository_root / "justfile"
+    if not justfile.is_file():
+        return set()
+    recipe = re.compile(r"^([A-Za-z0-9_-]+)(?:\s+[^:]*)?:")
+    return {match.group(1) for line in justfile.read_text(encoding="utf-8").splitlines() if (match := recipe.match(line)) is not None}
+
+
+def _cargo_subcommand_index(arguments: list[str], subcommand: str) -> int | None:
+    """Locate a Cargo subcommand after any rustup selector and global options."""
+    if len(arguments) < 2:
+        return None
+    index = 1
+    if arguments[index].startswith("+") and len(arguments[index]) > 1:
+        index += 1
+    global_flags = {"--frozen", "--locked", "--offline", "--quiet", "--verbose", "-q", "-v"}
+    global_value_options = {"--color", "--config", "--explain", "-C", "-Z"}
+    attached_value_prefixes = ("--color=", "--config=", "--explain=", "-C", "-Z")
+    while index < len(arguments) and arguments[index] != subcommand:
+        argument = arguments[index]
+        if argument in global_flags or (argument.startswith("-v") and set(argument[1:]) == {"v"}):
+            index += 1
+        elif argument in global_value_options:
+            index += 2
+        elif argument.startswith(attached_value_prefixes):
+            index += 1
+        else:
+            return None
+    return index if index < len(arguments) and arguments[index] == subcommand else None
+
+
+def _cargo_benchmark_options(arguments: list[str], subcommand_index: int) -> tuple[str | None, set[str], bool]:
+    """Extract a targeted benchmark and its feature-selection options."""
+    target: str | None = None
+    features: set[str] = set()
+    all_features = False
+    for argument_index, argument in enumerate(arguments[subcommand_index + 1 :], start=subcommand_index + 1):
+        if argument == "--":
+            break
+        if argument == "--bench" and argument_index + 1 < len(arguments):
+            target = arguments[argument_index + 1]
+        elif argument.startswith("--bench="):
+            target = argument.partition("=")[2]
+        elif argument in {"--features", "-F"} and argument_index + 1 < len(arguments):
+            features.update(item for item in re.split(r"[\s,]+", arguments[argument_index + 1]) if item)
+        elif argument.startswith("--features="):
+            features.update(item for item in re.split(r"[\s,]+", argument.partition("=")[2]) if item)
+        elif argument.startswith("-F") and argument != "-F":
+            features.update(item for item in re.split(r"[\s,]+", argument[2:]) if item)
+        elif argument == "--all-features":
+            all_features = True
+    return target, features, all_features
+
+
+def _cargo_benchmark_identity(command: str) -> tuple[str, set[str], bool] | None:
+    try:
+        arguments = shlex.split(command)
+    except ValueError:
+        return None
+    if len(arguments) < 2 or Path(arguments[0]).name != "cargo":
+        return None
+    index = _cargo_subcommand_index(arguments, "bench")
+    if index is None:
+        return None
+    target, features, all_features = _cargo_benchmark_options(arguments, index)
+    return (target, features, all_features) if target else None
+
+
+def _late_validation_quality_blockers(  # noqa: C901
+    requirement: ValidationRequirement, *, repository_root: Path, authorization: str
+) -> tuple[str, ...]:
+    """Reject audit-authored proof obligations that cannot validate the captured epoch."""
+    blockers: list[str] = []
+    recipe_names = _just_recipe_names(repository_root)
+    cargo_manifest = repository_root / "Cargo.toml"
+    benches: dict[str, set[str]] = {}
+    if cargo_manifest.is_file():
+        manifest = tomllib.loads(cargo_manifest.read_text(encoding="utf-8"))
+        for raw in manifest.get("bench", []):
+            if isinstance(raw, dict) and isinstance(raw.get("name"), str):
+                required = raw.get("required-features", [])
+                if isinstance(required, list) and all(isinstance(item, str) for item in required):
+                    benches[raw["name"]] = set(cast("list[str]", required))
+    for command in requirement.commands:
+        identity = _cargo_benchmark_identity(command)
+        if identity is None:
+            continue
+        target, enabled, all_features = identity
+        required = benches.get(target, set())
+        canonical_name = f"bench-{target}"
+        canonical = f"just {canonical_name}" if canonical_name in recipe_names else None
+        missing = [] if all_features else sorted(required - enabled)
+        if missing:
+            detail = f"cargo benchmark target {target} is missing required features: {', '.join(missing)}"
+            if canonical is not None:
+                detail += f"; use the repository canonical recipe {canonical}"
+            blockers.append(detail)
+        elif canonical is not None and (requirement.commands != (canonical,) or requirement.canonical_recipe != canonical):
+            blockers.append(f"cargo benchmark target {target} must use the repository canonical recipe {canonical}")
+    if not requirement.requires_isolation:
+        blockers.extend(
+            f"working directory does not exist in the captured current state: {directory}"
+            for directory in requirement.working_directories
+            if not Path(directory).is_dir()
+        )
+    epoch_text = f"{requirement.request} {requirement.selection_reason} {requirement.expected_evidence}"
+    post_remediation = r"\b(?:post[- ]remediation|(?:after|following|once)\s+(?:the\s+)?(?:remediation|repair|fix(?:es|ed)?))\b"
+    if authorization == "review-only" and re.search(post_remediation, epoch_text, re.IGNORECASE):
+        blockers.append("review-only late validation cannot require post-remediation evidence from the unchanged source epoch")
+    return tuple(blockers)
+
+
+def _expanded_validation_plan(
+    document: dict[str, Any], plan: GraphPlan, records: list[dict[str, Any]], repository_root: Path, *, authorization: str
+) -> GraphPlan:
     reconciliation = _validation_reconciliation(plan, records)
     pending = {item["requirement_id"] for item in reconciliation["requirements"] if item["resolution"] != "planned"}
     raw_requirements = _records(document, "validation_requirements")
@@ -4099,6 +4329,10 @@ def _expanded_validation_plan(document: dict[str, Any], plan: GraphPlan, records
     existing = {requirement for unit in plan.coalesced_validation_units for requirement in unit.requirement_ids}
     source_state = _state(document, "source_state")
     for item in additions:
+        quality_blockers = _late_validation_quality_blockers(item, repository_root=repository_root, authorization=authorization)
+        if quality_blockers:
+            msg = f"late validation requirement {item.requirement_id} failed quality gate: " + "; ".join(quality_blockers)
+            raise ValueError(msg)
         if item.requirement_id not in pending or item.requirement_id in existing or item.source_state != source_state or not item.required:
             msg = f"late validation must be a new, required, source-matching discovered identity: {item.requirement_id}"
             raise ValueError(msg)
@@ -4172,7 +4406,7 @@ def reconcile_validation_requirements(document: dict[str, Any], args: argparse.N
         msg = "validation expansion requires an existing dispatch"
         raise ValueError(msg)
     sample = first_entry["dispatch"]
-    expanded = _expanded_validation_plan(document, plan, records, Path(sample["repository_root"]))
+    expanded = _expanded_validation_plan(document, plan, records, Path(sample["repository_root"]), authorization=_required_text(sample, "authorization"))
     if expanded == plan:
         return {"schema_version": 1, "status": "resolved", **reconciliation}
     store = Path(_required_text(document, "artifact_store")).resolve() / f"validation-expansion-{_plan_digest(expanded)[7:23]}"
@@ -4570,7 +4804,9 @@ def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     node_parser.add_argument("--journal", type=Path, required=True, help=_INITIAL_JOURNAL_HELP)
     node_parser.add_argument("--status", choices=sorted(_REVIEW_STATUSES))
     node_parser.add_argument("--limitation", action="append")
-    node_parser.add_argument("--output", type=Path, required=True)
+    node_parser.add_argument(
+        "--output", type=Path, required=True, help="operation-result JSON path; must be distinct from the compiled artifact and metadata paths"
+    )
     persist_parser = _runtime_subparser(subparsers, "persist-worker-payload", "validate and atomically publish one materialized worker payload")
     persist_parser.add_argument("--input", type=Path, required=True)
     persist_parser.add_argument("--payload", type=Path, required=True)
@@ -4584,7 +4820,7 @@ def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     routing_parser.add_argument("--skill-root", type=Path, action="append")
     dispatch_parser = _runtime_subparser(subparsers, "materialize-dispatches", "derive exact dispatch bases from a graph plan")
     dispatch_parser.add_argument("--input", type=Path, required=True)
-    dispatch_parser.add_argument("--output", type=Path, required=True)
+    dispatch_parser.add_argument("--output", type=Path, required=True, help="operation-result JSON path; must be outside the artifact store")
     snapshot_parser = _runtime_subparser(subparsers, "snapshot-workspace", "capture runtime-owned validation workspace evidence")
     snapshot_parser.add_argument("--input", type=Path, required=True)
     snapshot_parser.add_argument("--dispatches", type=Path, required=True)
@@ -4635,6 +4871,7 @@ def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     ready_parser.add_argument("--current-capture", type=Path, required=True)
     ready_parser.add_argument("--input", type=Path, required=True)
     ready_parser.add_argument("--journal", type=Path, required=True, help=_INITIAL_JOURNAL_HELP)
+    ready_parser.add_argument("--compact", action="store_true", help="return node IDs and immutable worker-input references without embedded dispatches")
     ready_output = ready_parser.add_mutually_exclusive_group(required=True)
     ready_output.add_argument("--output", type=Path)
     ready_output.add_argument(
@@ -4692,7 +4929,21 @@ def _next_ready_from_files(document: dict[str, Any], args: argparse.Namespace) -
         capture.get("repository_state_fingerprint"),
     ]
     journal_events, _state_view, _head_digest = read_execution_journal(args.journal, plan=plan, source_state=source_state)
-    return next_ready_nodes(document, journal_events=journal_events, dispatch_set=_read_json_object(args.dispatches))
+    result = next_ready_nodes(document, journal_events=journal_events, dispatch_set=_read_json_object(args.dispatches))
+    if not getattr(args, "compact", False):
+        return result
+    compact = dict(result)
+    compact["compact"] = True
+    compact["ready_dispatches"] = [
+        {
+            "execution_location": entry["dispatch"]["execution_location"],
+            "node_id": entry["node_id"],
+            "result_contract": entry["result_contract"],
+            "worker_input_path": entry["worker_input_path"],
+        }
+        for entry in result["ready_dispatches"]
+    ]
+    return compact
 
 
 def _with_current_capture(document: dict[str, Any], capture_path: Path) -> dict[str, Any]:
@@ -4750,10 +5001,30 @@ def _lifecycle_dispatch(document: dict[str, Any], dispatches_path: Path, node_id
     source_state = _state(document, "source_state")
     entries = _dispatches_by_node(_read_json_object(dispatches_path), plan=plan, source_state=source_state)
     try:
-        return plan, entries[node_id]
+        selected = json.loads(_canonical_json(entries[node_id]))
     except KeyError:
         msg = f"dispatch set has no planned node {node_id}"
         raise ValueError(msg) from None
+    dispatch = selected.get("dispatch")
+    if isinstance(dispatch, dict) and dispatch.get("fresh_context") is True:
+        forbidden: set[str] = set()
+        for other_id, entry in entries.items():
+            if other_id == node_id:
+                continue
+            for field in (
+                "artifact_path",
+                "metadata_path",
+                "worker_input_path",
+                "worker_payload_candidate_path",
+                "worker_payload_contract_path",
+                "worker_payload_path",
+            ):
+                value = entry.get(field)
+                if isinstance(value, str) and value:
+                    path = Path(value)
+                    forbidden.update((str(path), path.name))
+        dispatch["fresh_context_forbidden_artifacts"] = sorted(forbidden)
+    return plan, selected
 
 
 def _snapshot_workspace_from_files(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
@@ -4784,8 +5055,39 @@ def _workspace_records(path: Path, *, node_id: str, source_state: tuple[str, str
     return list(_records(snapshot, "records"))
 
 
+def _preflight_compile_destination(path: Path, content: bytes) -> None:
+    """Reject an immutable destination conflict before any compile output is published."""
+    if path.is_symlink():
+        msg = f"compile-node destination must not be a symlink: {path}"
+        raise ValueError(msg)
+    if path.exists() and _read_regular_file_no_follow(path) != content:
+        msg = f"refusing to overwrite non-identical artifact: {path}"
+        raise ValueError(msg)
+
+
+def _rollback_compile_journal(path: Path, *, existing_size: int, remove_after_truncate: bool) -> None:
+    """Remove a failed append while preserving the pre-attempt journal prefix."""
+    with path.open("r+b") as stream:
+        stream.truncate(existing_size)
+        stream.flush()
+        os.fsync(stream.fileno())
+    if remove_after_truncate:
+        path.unlink()
+        _fsync_directory(path.parent)
+
+
+def _remove_attempt_created_files(paths: list[Path]) -> None:
+    """Remove only immutable files published by the current failed attempt."""
+    parents: set[Path] = set()
+    for path in reversed(paths):
+        path.unlink(missing_ok=True)
+        parents.add(path.parent)
+    for parent in parents:
+        _fsync_directory(parent)
+
+
 def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:  # noqa: C901, PLR0912, PLR0915
-    _plan, entry = _lifecycle_dispatch(document, args.dispatches, args.node_id)
+    plan, entry = _lifecycle_dispatch(document, args.dispatches, args.node_id)
     source_state = _state(document, "source_state")
     before_state = _capture_source_state(args.before_capture)
     after_state = _capture_source_state(args.after_capture)
@@ -4837,11 +5139,8 @@ def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace)
 
     artifact_path = Path(_required_text(entry, "artifact_path")).resolve()
     metadata_path = Path(_required_text(entry, "metadata_path")).resolve()
-    for parent in {artifact_path.parent, metadata_path.parent, payload_path.parent, args.journal.parent.resolve()}:
-        parent.mkdir(parents=True, exist_ok=True)
     worker_payload_digest = _sha256_bytes(payload_bytes)
     sealed_payload_path = payload_path.with_name(f"{payload_path.stem}.{worker_payload_digest.removeprefix('sha256:')}.sealed{payload_path.suffix}")
-    _write_bytes_atomically_once(sealed_payload_path, payload_bytes, mode=0o444)
     metadata = {
         **metadata,
         "worker_payload_byte_count": len(payload_bytes),
@@ -4849,8 +5148,7 @@ def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace)
         "worker_payload_path": str(sealed_payload_path),
         "worker_payload_staging_path": str(payload_path),
     }
-    _write_bytes_once(artifact_path, content)
-    _write_text_once(metadata_path, json.dumps(metadata, indent=2, sort_keys=True) + "\n")
+    metadata_bytes = (json.dumps(metadata, indent=2, sort_keys=True) + "\n").encode()
     evidence = metadata.get("evidence")
     if not isinstance(evidence, dict):
         msg = "compiler metadata lacks evidence"
@@ -4858,17 +5156,80 @@ def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace)
     evidence_status = _required_text(evidence, "status")
     journal_status = "blocked" if evidence_status in {"blocked", "not-applicable"} else "accepted"
     source = {"artifact_path": str(artifact_path), "metadata_path": str(metadata_path)}
-    event = append_journal_event(
-        args.journal, document, JournalEventRequest(args.node_id, journal_status, source=source, reason="; ".join(args.limitation or ()) or None)
-    )
-    return {
-        "artifact_path": str(artifact_path),
-        "journal_event": event,
-        "metadata_path": str(metadata_path),
-        "node_id": args.node_id,
-        "schema_version": 1,
-        "worker_payload_path": str(sealed_payload_path),
+    operation_output_path = args.output.resolve()
+    destinations = {
+        "compiled artifact": artifact_path,
+        "compiled metadata": metadata_path,
+        "operation result": operation_output_path,
+        "sealed worker payload": sealed_payload_path,
     }
+    if len(set(destinations.values())) != len(destinations):
+        aliases = ", ".join(f"{label}={path}" for label, path in destinations.items())
+        msg = f"compile-node destinations must be distinct; --output is the operation-result path: {aliases}"
+        raise ValueError(msg)
+    if operation_output_path.exists() or operation_output_path.is_symlink():
+        msg = f"compile-node operation-result --output already exists: {operation_output_path}"
+        raise ValueError(msg)
+    _preflight_compile_destination(sealed_payload_path, payload_bytes)
+    _preflight_compile_destination(artifact_path, content)
+    _preflight_compile_destination(metadata_path, metadata_bytes)
+    for parent in {artifact_path.parent, metadata_path.parent, payload_path.parent, args.journal.parent.resolve(), operation_output_path.parent}:
+        parent.mkdir(parents=True, exist_ok=True)
+
+    request = JournalEventRequest(args.node_id, journal_status, source=source, reason="; ".join(args.limitation or ()) or None)
+    lock_path = args.journal.with_name(args.journal.name + ".lock")
+    with lock_path.open("a+b") as lock_stream:
+        fcntl.flock(lock_stream.fileno(), fcntl.LOCK_EX)
+        try:
+            try:
+                journal_content = args.journal.read_bytes()
+                journal_existed = True
+            except FileNotFoundError:
+                journal_content = b""
+                journal_existed = False
+            _events, lifecycle_state, _head = _read_execution_journal_content(journal_content, path=args.journal, plan=plan, source_state=source_state)
+            _apply_journal_transition(plan, lifecycle_state, node_id=request.node_id, status=request.status)
+            normalized = metadata.get("normalized_record")
+            journal_limitations = tuple(cast("list[str]", normalized.get("limitations", []))) if isinstance(normalized, dict) else ()
+            _new_journal_reason(request, journal_limitations)
+            existing_size = len(journal_content)
+            created_paths: list[Path] = []
+            journal_append_started = False
+            completed = False
+            try:
+                for path, output_bytes in ((sealed_payload_path, payload_bytes), (artifact_path, content), (metadata_path, metadata_bytes)):
+                    if _write_bytes_atomically_once(path, output_bytes, mode=0o444):
+                        created_paths.append(path)
+                event, existing_size = _prepare_journal_event(args.journal, plan=plan, source_state=source_state, request=request, content=journal_content)
+                result = {
+                    "artifact_path": str(artifact_path),
+                    "journal_event": event,
+                    "metadata_path": str(metadata_path),
+                    "node_id": args.node_id,
+                    "schema_version": 1,
+                    "worker_payload_path": str(sealed_payload_path),
+                }
+                result_bytes = (json.dumps(result, indent=2, sort_keys=True) + "\n").encode()
+                if _write_bytes_atomically_once(operation_output_path, result_bytes, mode=0o444):
+                    created_paths.append(operation_output_path)
+                with args.journal.open("ab") as journal_stream:
+                    journal_stream.seek(0, os.SEEK_END)
+                    if journal_stream.tell() != existing_size:
+                        msg = f"execution journal changed during append: {args.journal}"
+                        raise ValueError(msg)
+                    journal_append_started = True
+                    _persist_journal_event(journal_stream, args.journal, event, existing_size=existing_size)
+                completed = True
+                return result
+            finally:
+                if not completed:
+                    try:
+                        if journal_append_started:
+                            _rollback_compile_journal(args.journal, existing_size=existing_size, remove_after_truncate=not journal_existed)
+                    finally:
+                        _remove_attempt_created_files(created_paths)
+        finally:
+            fcntl.flock(lock_stream.fileno(), fcntl.LOCK_UN)
 
 
 def _json_operation_output(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:  # noqa: PLR0911
@@ -4880,8 +5241,6 @@ def _json_operation_output(document: dict[str, Any], args: argparse.Namespace) -
         return build_synthesis_bundle(document)
     if args.operation == "routing-projection":
         return build_routing_projection_document(document, catalog_path=args.catalog, skill_roots=tuple(args.skill_root or (DEFAULT_SKILL_ROOT,)))
-    if args.operation == "materialize-dispatches":
-        return materialize_dispatches(document)
     if args.operation == "advance-after-mutation":
         return advance_after_mutation(document)
     if args.operation == "reconcile-handoffs":
@@ -4894,7 +5253,7 @@ def _json_operation_output(document: dict[str, Any], args: argparse.Namespace) -
     return finalize_proof(_finalize_document_from_files(document, args))
 
 
-def _run_operation(document: dict[str, Any], args: argparse.Namespace) -> int:
+def _run_operation(document: dict[str, Any], args: argparse.Namespace) -> int:  # noqa: C901
     if args.operation == "persist-worker-payload":
         print(_canonical_json(persist_worker_payload(document, args.payload)))
         return 0
@@ -4915,6 +5274,12 @@ def _run_operation(document: dict[str, Any], args: argparse.Namespace) -> int:
     if args.operation == "journal-append":
         event = append_journal_event(args.journal, document, _journal_request_from_args(args))
         print(_canonical_json(event))
+        return 0
+    if args.operation == "compile-node":
+        _compile_node_from_files(document, args)
+        return 0
+    if args.operation == "materialize-dispatches":
+        materialize_dispatches(document, operation_output_path=args.output)
         return 0
     output = _json_operation_output(document, args)
     output_path = args.output

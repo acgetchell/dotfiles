@@ -21,6 +21,7 @@ from review_graph_bootstrap import bootstrap_document, main as bootstrap_main
 from review_graph_plan import (
     GraphPlan,
     ValidationArtifact,
+    ValidationRequirement,
     ValidationUnit,
     expand_compact_routing,
     graph_plan_digest,
@@ -36,10 +37,12 @@ from review_graph_runtime import (
     _argument_parser,
     _git_path_status,
     _graph_plan,
+    _late_validation_quality_blockers,
     _planned_validation_digest,
     _reconciled_handoffs,
     _schema_reference,
     _validation_workspace_audit,
+    _worker_prompt,
     _workspace_content_digest,
     _write_bytes_atomically_once,
     _write_bytes_once,
@@ -67,6 +70,7 @@ RUST_ERROR_SKILL = SKILL_ROOT / "rust-error-variants" / "SKILL.md"
 VALIDATOR_SKILL = SKILL_ROOT / "review-validator" / "SKILL.md"
 VALIDATOR_CONTRACT = SKILL_ROOT / "review-validator" / "references" / "graph-dispatch.md"
 INDEPENDENT_NATIVE_EXAMPLE = SKILL_ROOT / "repository-independent-review" / "references" / "native-example.md"
+INDEPENDENT_NATIVE_POSITIVE_EXAMPLE = SKILL_ROOT / "repository-independent-review" / "references" / "native-positive-example.md"
 SCHEMA_ROOT = Path(__file__).resolve().parents[1] / "references" / "schemas"
 STATE_FIXTURE = "agents/.agents/skills/review-graph/scripts/fixtures/state.rs"
 ORDINARY_PROMPT_WORD_BUDGET = 2400
@@ -2151,6 +2155,41 @@ def _worker_input_fixture(tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any
     return document, materialize_dispatches(document)
 
 
+def _compact_audit_payload(entry: dict[str, Any], *, commands: tuple[str, ...] = ()) -> dict[str, Any]:
+    return {
+        "changes": [],
+        "command_policy_attested": True,
+        "commands_executed": list(commands),
+        "files_inspected": entry["dispatch"]["owned_paths"],
+        "findings": [],
+        "handoffs": [],
+        "limitations": [],
+        "nearby_contract_owners": [],
+        "scope_limitations": [],
+        "status": "no-findings",
+        "validation_requirements": [],
+    }
+
+
+def _compile_cli_paths(tmp_path: Path, document: dict[str, Any], dispatches: dict[str, Any]) -> tuple[Path, Path, Path]:
+    lifecycle_path = tmp_path / "lifecycle.json"
+    dispatch_path = tmp_path / "dispatches.json"
+    capture_path = tmp_path / "capture.json"
+    lifecycle_path.write_text(json.dumps({"plan": document["plan"], "source_state": document["source_state"]}), encoding="utf-8")
+    dispatch_path.write_text(json.dumps(dispatches), encoding="utf-8")
+    capture_path.write_text(
+        json.dumps(
+            {
+                "captured_worktree_fingerprint": document["source_state"][1],
+                "repository_state_fingerprint": document["source_state"][2],
+                "scope_fingerprint": document["source_state"][0],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return lifecycle_path, dispatch_path, capture_path
+
+
 def test_worker_publishes_payload_from_only_runtime_emitted_input(tmp_path: Path) -> None:
     document, dispatches = _worker_input_fixture(tmp_path)
     ready = next_ready_nodes({**document, "current_source_state": document["source_state"]}, journal_events=(), dispatch_set=dispatches)
@@ -2189,6 +2228,134 @@ subprocess.run(persistence["command"], check=True, timeout=30)
     assert not list(worker_directory.iterdir())
 
 
+def test_compile_node_destination_error_cannot_publish_evidence_or_acceptance(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    document, dispatches = _worker_input_fixture(tmp_path)
+    entry = next(item for item in dispatches["dispatches"] if item["result_contract"] == "compact-review")
+    candidate = Path(entry["worker_payload_candidate_path"])
+    candidate.write_text(json.dumps(_compact_audit_payload(entry)), encoding="utf-8")
+    persist_worker_payload(json.loads(Path(entry["worker_payload_contract_path"]).read_text(encoding="utf-8")), candidate)
+    lifecycle_path, dispatch_path, capture_path = _compile_cli_paths(tmp_path, document, dispatches)
+    journal = tmp_path / "execution.jsonl"
+
+    result = main(
+        [
+            "compile-node",
+            "--input",
+            str(lifecycle_path),
+            "--dispatches",
+            str(dispatch_path),
+            "--node-id",
+            entry["node_id"],
+            "--before-capture",
+            str(capture_path),
+            "--after-capture",
+            str(capture_path),
+            "--journal",
+            str(journal),
+            "--output",
+            entry["artifact_path"],
+        ]
+    )
+
+    assert result == 2
+    assert "operation-result path" in capsys.readouterr().err
+    assert not Path(entry["artifact_path"]).exists()
+    assert not Path(entry["metadata_path"]).exists()
+    assert not journal.exists()
+    assert not tuple(Path(entry["worker_payload_path"]).parent.glob("*.sealed.json"))
+
+
+def test_compile_node_partial_journal_failure_rolls_back_outputs_and_retries(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    document, dispatches = _worker_input_fixture(tmp_path)
+    entry = next(item for item in dispatches["dispatches"] if item["result_contract"] == "compact-review")
+    candidate = Path(entry["worker_payload_candidate_path"])
+    candidate.write_text(json.dumps(_compact_audit_payload(entry)), encoding="utf-8")
+    persist_worker_payload(json.loads(Path(entry["worker_payload_contract_path"]).read_text(encoding="utf-8")), candidate)
+    lifecycle_path, dispatch_path, capture_path = _compile_cli_paths(tmp_path, document, dispatches)
+    journal = tmp_path / "execution.jsonl"
+    output_path = tmp_path / "compile-result.json"
+    arguments = [
+        "compile-node",
+        "--input",
+        str(lifecycle_path),
+        "--dispatches",
+        str(dispatch_path),
+        "--node-id",
+        entry["node_id"],
+        "--before-capture",
+        str(capture_path),
+        "--after-capture",
+        str(capture_path),
+        "--journal",
+        str(journal),
+        "--output",
+        str(output_path),
+    ]
+
+    def fail_during_append(stream: Any, _path: Path, _event: dict[str, Any], *, existing_size: int) -> None:
+        stream.seek(existing_size)
+        stream.write(b'{"partial":')
+        stream.flush()
+        message = "simulated journal append failure"
+        raise OSError(message)
+
+    with monkeypatch.context() as patch:
+        patch.setattr("review_graph_runtime._persist_journal_event", fail_during_append)
+        assert main(arguments) == 2
+
+    assert "simulated journal append failure" in capsys.readouterr().err
+    assert not journal.exists()
+    assert not output_path.exists()
+    assert not Path(entry["artifact_path"]).exists()
+    assert not Path(entry["metadata_path"]).exists()
+    assert not tuple(Path(entry["worker_payload_path"]).parent.glob("*.sealed.json"))
+
+    assert main(arguments) == 0
+    assert output_path.is_file()
+    assert len(journal.read_text(encoding="utf-8").splitlines()) == 1
+
+
+def test_fresh_context_compile_rejects_reads_of_sibling_worker_evidence(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    document, dispatches = _worker_input_fixture(tmp_path)
+    audits = [item for item in dispatches["dispatches"] if item["result_contract"] == "compact-review"]
+    assert len(audits) >= 2
+    entry, sibling = audits[:2]
+    command = f"cat {sibling['worker_payload_path']}"
+    candidate = Path(entry["worker_payload_candidate_path"])
+    candidate.write_text(json.dumps(_compact_audit_payload(entry, commands=(command,))), encoding="utf-8")
+    persist_worker_payload(json.loads(Path(entry["worker_payload_contract_path"]).read_text(encoding="utf-8")), candidate)
+    lifecycle_path, dispatch_path, capture_path = _compile_cli_paths(tmp_path, document, dispatches)
+    journal = tmp_path / "execution.jsonl"
+
+    result = main(
+        [
+            "compile-node",
+            "--input",
+            str(lifecycle_path),
+            "--dispatches",
+            str(dispatch_path),
+            "--node-id",
+            entry["node_id"],
+            "--before-capture",
+            str(capture_path),
+            "--after-capture",
+            str(capture_path),
+            "--journal",
+            str(journal),
+            "--output",
+            str(tmp_path / "compile-result.json"),
+        ]
+    )
+
+    assert result == 2
+    assert "fresh-context review read another node" in capsys.readouterr().err
+    assert not Path(entry["artifact_path"]).exists()
+    assert not Path(entry["metadata_path"]).exists()
+    assert not journal.exists()
+
+
 @pytest.mark.parametrize("tamper", ["content", "missing", "symlink"])
 def test_ready_nodes_reject_missing_or_substituted_worker_inputs(tmp_path: Path, tamper: str) -> None:
     document, dispatches = _worker_input_fixture(tmp_path)
@@ -2220,6 +2387,126 @@ def test_worker_input_publication_is_immutable_and_replayable(tmp_path: Path) ->
     with pytest.raises(ValueError, match="refusing to overwrite non-identical immutable artifact"):
         materialize_dispatches(document)
     assert worker_input.read_bytes() == b"preexisting different input\n"
+
+
+def test_public_symbolic_source_state_materializes_from_the_plan_bound_capture(tmp_path: Path) -> None:
+    plan = _sparse_plan()
+    captured = ("captured-scope", "captured-worktree", "captured-repository")
+    plan = replace(plan, coalesced_validation_units=tuple(replace(unit, source_state=captured) for unit in plan.coalesced_validation_units))
+    example = json.loads((SKILL_ROOT / "review-graph" / "references" / "runtime-operation-examples-v1.json").read_text(encoding="utf-8"))
+    source_state = example["materialize-dispatches"]["source_state"]
+
+    materialized = materialize_dispatches(
+        {
+            "artifact_store": str(tmp_path / "proof"),
+            "authorization": "review-only",
+            "plan": _json_plan(plan),
+            "repository_root": str(SKILL_ROOT.parents[2]),
+            "source_state": source_state,
+            "state_verification_command": "capture_scope.py --mode baseline",
+        }
+    )
+
+    assert materialized["source_state"] == list(captured)
+    assert all(entry["dispatch"]["source_state"] == list(captured) for entry in materialized["dispatches"])
+
+
+def test_failed_materialization_leaves_store_empty_and_corrected_retry_succeeds(tmp_path: Path) -> None:
+    plan = _sparse_plan()
+    artifact_store = tmp_path / "proof"
+    request = {
+        "artifact_store": str(artifact_store),
+        "authorization": "review-only",
+        "plan": _json_plan(plan),
+        "repository_root": str(SKILL_ROOT.parents[2]),
+        "source_state": ["wrong-scope", "wrong-worktree", "wrong-repository"],
+        "state_verification_command": "capture_scope.py --mode baseline",
+    }
+
+    with pytest.raises(ValueError, match="validation unit source state differs"):
+        materialize_dispatches(request)
+
+    assert not artifact_store.exists()
+    corrected = materialize_dispatches({**request, "source_state": ["scope", "worktree", "repository"]})
+    assert corrected["dispatches"]
+    assert artifact_store.is_dir()
+
+
+def test_materialize_cli_output_failure_leaves_no_store_and_corrected_retry_succeeds(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    artifact_store = tmp_path / "proof"
+    request = {
+        "artifact_store": str(artifact_store),
+        "authorization": "review-only",
+        "plan": _json_plan(_sparse_plan()),
+        "repository_root": str(SKILL_ROOT.parents[2]),
+        "source_state": ["scope", "worktree", "repository"],
+        "state_verification_command": "capture_scope.py --mode baseline",
+    }
+    input_path = tmp_path / "input.json"
+    input_path.write_text(json.dumps(request), encoding="utf-8")
+
+    assert main(["materialize-dispatches", "--input", str(input_path), "--output", str(artifact_store)]) == 2
+    assert "operation-result path must be outside" in capsys.readouterr().err
+    assert not artifact_store.exists()
+
+    output_path = tmp_path / "materialized.json"
+    assert main(["materialize-dispatches", "--input", str(input_path), "--output", str(output_path)]) == 0
+    assert json.loads(output_path.read_text(encoding="utf-8"))["dispatches"]
+    assert artifact_store.is_dir()
+
+
+def test_materialize_cli_store_failure_rolls_back_new_operation_result(tmp_path: Path) -> None:
+    artifact_store = tmp_path / "proof"
+    artifact_store.mkdir()
+    sentinel = artifact_store / "preexisting.txt"
+    sentinel.write_text("preserve me\n", encoding="utf-8")
+    request = {
+        "artifact_store": str(artifact_store),
+        "authorization": "review-only",
+        "plan": _json_plan(_sparse_plan()),
+        "repository_root": str(SKILL_ROOT.parents[2]),
+        "source_state": ["scope", "worktree", "repository"],
+        "state_verification_command": "capture_scope.py --mode baseline",
+    }
+    input_path = tmp_path / "input.json"
+    output_path = tmp_path / "materialized.json"
+    input_path.write_text(json.dumps(request), encoding="utf-8")
+
+    assert main(["materialize-dispatches", "--input", str(input_path), "--output", str(output_path)]) == 2
+    assert not output_path.exists()
+    assert tuple(artifact_store.iterdir()) == (sentinel,)
+    assert sentinel.read_text(encoding="utf-8") == "preserve me\n"
+
+
+def test_late_materialization_failure_publishes_nothing_before_retry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    artifact_store = tmp_path / "proof"
+    request = {
+        "artifact_store": str(artifact_store),
+        "authorization": "review-only",
+        "plan": _json_plan(_sparse_plan()),
+        "repository_root": str(SKILL_ROOT.parents[2]),
+        "source_state": ["scope", "worktree", "repository"],
+        "state_verification_command": "capture_scope.py --mode baseline",
+    }
+    calls = 0
+
+    def fail_after_one_dispatch(contract: str, dispatch: dict[str, Any]) -> str:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            message = "simulated late materialization failure"
+            raise ValueError(message)
+        return _worker_prompt(contract, dispatch)
+
+    monkeypatch.setattr("review_graph_runtime._worker_prompt", fail_after_one_dispatch)
+    with pytest.raises(ValueError, match="simulated late materialization failure"):
+        materialize_dispatches(request)
+
+    assert not artifact_store.exists()
+    monkeypatch.undo()
+    corrected = materialize_dispatches(request)
+    assert corrected["dispatches"]
+    assert artifact_store.is_dir()
 
 
 def test_validator_prompt_exposes_nested_required_shape_and_minimal_response_compiles(tmp_path: Path) -> None:
@@ -2350,6 +2637,41 @@ def test_first_next_ready_accepts_missing_or_zero_byte_journal(tmp_path: Path, c
     assert journal_path.exists() is precreate_zero_byte_journal
     if precreate_zero_byte_journal:
         assert journal_path.read_bytes() == b""
+
+
+def test_next_ready_compact_references_worker_inputs_without_embedding_dispatches(tmp_path: Path) -> None:
+    document, dispatch_set = _worker_input_fixture(tmp_path)
+    lifecycle_path, dispatch_path, capture_path = _compile_cli_paths(tmp_path, document, dispatch_set)
+    output_path = tmp_path / "next-ready.json"
+
+    assert (
+        main(
+            [
+                "next-ready",
+                "--input",
+                str(lifecycle_path),
+                "--journal",
+                str(tmp_path / "missing.jsonl"),
+                "--dispatches",
+                str(dispatch_path),
+                "--current-capture",
+                str(capture_path),
+                "--compact",
+                "--output",
+                str(output_path),
+            ]
+        )
+        == 0
+    )
+    result = json.loads(output_path.read_text(encoding="utf-8"))
+
+    assert result["compact"] is True
+    assert result["ready_dispatches"]
+    assert {tuple(entry) for entry in result["ready_dispatches"]} == {("execution_location", "node_id", "result_contract", "worker_input_path")}
+    for entry in result["ready_dispatches"]:
+        bound = json.loads(Path(entry["worker_input_path"]).read_text(encoding="utf-8"))
+        assert entry["node_id"] == bound["node_id"]
+        assert entry["result_contract"] == bound["result_contract"]
 
 
 def test_execution_journal_rejects_blank_record_but_accepts_zero_bytes(tmp_path: Path) -> None:
@@ -2620,6 +2942,127 @@ def test_independent_native_example_compiles_verbatim_and_aggregates_contract_er
     assert "platform seams" in diagnostic
     assert "must contain Catalog ID records" in diagnostic
     assert "native state proof failed validation" in diagnostic
+
+
+def test_positive_independent_example_persists_compiles_and_journals_verbatim(tmp_path: Path) -> None:
+    git = shutil.which("git")
+    assert git is not None
+    repository = SKILL_ROOT.parents[2]
+    document = _sparse_plan_document()
+    document.update({"change_target": f"git diff -- {STATE_FIXTURE}", "concrete_change_target": True, "scope_mode": "baseline"})
+    capture = _scope_data(git, repository, "baseline", None, (STATE_FIXTURE,))
+    planning = bootstrap_document(capture, document)
+    plan = plan_from_document(planning, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)
+    source_state = cast(
+        "tuple[str, str, str]", tuple(capture[field] for field in ("scope_fingerprint", "captured_worktree_fingerprint", "repository_state_fingerprint"))
+    )
+    lifecycle = {"plan": _json_plan(plan), "source_state": list(source_state)}
+    materialized = materialize_dispatches(
+        {
+            **lifecycle,
+            "artifact_store": str(tmp_path / "proof"),
+            "authorization": "review-only",
+            "repository_root": str(repository),
+            "state_verification_command": "capture_scope.py --mode baseline",
+        }
+    )
+    entry = next(item for item in materialized["dispatches"] if item["result_contract"] == "native-independent-review")
+    candidate = Path(entry["worker_payload_candidate_path"])
+    native = INDEPENDENT_NATIVE_POSITIVE_EXAMPLE.read_bytes()
+    for symbolic, actual in zip((b"scope", b"worktree", b"repository"), source_state, strict=True):
+        native = native.replace(b"fingerprint: " + symbolic, b"fingerprint: " + actual.encode())
+    candidate.write_bytes(native)
+    persist_worker_payload(json.loads(Path(entry["worker_payload_contract_path"]).read_text(encoding="utf-8")), candidate)
+    lifecycle_path = tmp_path / "lifecycle.json"
+    dispatches_path = tmp_path / "dispatches.json"
+    capture_path = tmp_path / "capture.json"
+    journal_path = tmp_path / "execution.jsonl"
+    output_path = tmp_path / "compile-result.json"
+    lifecycle_path.write_text(json.dumps(lifecycle), encoding="utf-8")
+    dispatches_path.write_text(json.dumps(materialized), encoding="utf-8")
+    capture_path.write_text(json.dumps(capture), encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "compile-node",
+                "--input",
+                str(lifecycle_path),
+                "--dispatches",
+                str(dispatches_path),
+                "--node-id",
+                entry["node_id"],
+                "--before-capture",
+                str(capture_path),
+                "--after-capture",
+                str(capture_path),
+                "--journal",
+                str(journal_path),
+                "--output",
+                str(output_path),
+            ]
+        )
+        == 0
+    )
+    result = json.loads(output_path.read_text(encoding="utf-8"))
+    compiled = Path(result["artifact_path"]).read_bytes()
+    metadata = json.loads(Path(result["metadata_path"]).read_text(encoding="utf-8"))
+    events, state, _head = read_execution_journal(journal_path, plan=plan, source_state=source_state)
+
+    assert metadata["native_input_digest"] == "sha256:" + hashlib.sha256(native).hexdigest()
+    assert b"- ID: " in compiled
+    assert metadata["normalized_record"]["findings"][0]["severity"] == "P2"
+    assert metadata["normalized_record"]["handoffs"][0]["catalog_id"] == "rust.errors"
+    assert events[-1]["status"] == "accepted"
+    assert state[entry["node_id"]] == "accepted"
+
+
+def test_positive_independent_finding_reports_all_structural_errors_together() -> None:
+    dispatch = {
+        "adversarial_checks": [],
+        "after_state": ["scope", "worktree", "repository"],
+        "artifact_id": "artifact://independent-positive-errors",
+        "authorization": "review-only",
+        "before_state": ["scope", "worktree", "repository"],
+        "change_target": f"git diff -- {STATE_FIXTURE}",
+        "evidence_id": "review:independent-positive-errors",
+        "execution_location": "worker",
+        "execution_profile": "grouped",
+        "fresh_context": True,
+        "handoff_catalog_ids": ["rust.errors"],
+        "mode": "independent-review",
+        "node_id": "independent-positive-errors",
+        "planned_path_line_bounds": [[STATE_FIXTURE, 3]],
+        "planned_paths": [STATE_FIXTURE],
+        "reference_paths": [],
+        "requirement_ids": ["repo.independent"],
+        "selection_reason": "concrete change target",
+        "skill_id": "repository-independent-review",
+        "skill_path": str(SKILL_ROOT / "repository-independent-review" / "SKILL.md"),
+        "source_state": ["scope", "worktree", "repository"],
+        "worker_created": True,
+    }
+    documented = INDEPENDENT_NATIVE_POSITIVE_EXAMPLE.read_bytes()
+    _content, metadata = compile_independent_review({"dispatch": dispatch, "limitations": [], "status": "completed"}, documented)
+
+    assert metadata["native_input_digest"] == "sha256:" + hashlib.sha256(documented).hexdigest()
+    assert metadata["normalized_record"]["findings"][0]["severity"] == "P2"
+    assert metadata["normalized_record"]["handoffs"][0]["catalog_id"] == "rust.errors"
+    assert metadata["normalized_record"]["findings"][0]["summary"] == "The changed transition accepts an invalid state."
+
+    malformed = (
+        documented.replace(b"- Finding: unchecked state transition", b"- Finding:")
+        .replace(b"  - Severity: P2", b"  - Severity: medium")
+        .replace(b"  - Summary: The changed transition accepts an invalid state.\n", b"")
+    )
+
+    with pytest.raises(ValueError, match="contract validation") as raised:
+        compile_independent_review({"dispatch": dispatch, "limitations": [], "status": "completed"}, malformed)
+
+    diagnostic = str(raised.value)
+    assert "non-empty value on the same line" in diagnostic
+    assert "invalid severity medium" in diagnostic
+    assert "Summary is missing" in diagnostic
 
 
 @pytest.mark.parametrize("writer", ["direct", "atomic"])
@@ -3342,6 +3785,57 @@ def _late_validation_requirement() -> dict[str, Any]:
         "expected_evidence": "sdist and wheel install cleanly",
         "dependency_policy": "stop-on-failure",
     }
+
+
+def test_late_validation_quality_gate_rejects_incomplete_benchmark_and_post_remediation_evidence(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    (repository / "Cargo.toml").write_text('[[bench]]\nname = "exact"\nrequired-features = ["proptest"]\n', encoding="utf-8")
+    (repository / "justfile").write_text("bench-exact:\n    cargo bench --bench exact --features proptest\n", encoding="utf-8")
+    requirement = ValidationRequirement(
+        requirement_id="rust.bench.exact",
+        source_state=("scope", "worktree", "repository"),
+        commands=("cargo bench --bench exact",),
+        working_directories=(str(repository),),
+        environment="captured repository",
+        toolchain="stable Rust",
+        features=(),
+        platform="current platform",
+        artifact_owner="review-validator",
+        mutation_lock="validation-only",
+        expected_evidence="benchmark passes after remediation",
+    )
+
+    blockers = _late_validation_quality_blockers(requirement, repository_root=repository, authorization="review-only")
+
+    assert any("missing required features: proptest" in blocker for blocker in blockers)
+    assert any("canonical recipe just bench-exact" in blocker for blocker in blockers)
+    assert any("post-remediation evidence" in blocker for blocker in blockers)
+    canonical = replace(
+        requirement, commands=("just bench-exact",), canonical_recipe="just bench-exact", expected_evidence="benchmark records current captured behavior"
+    )
+    assert _late_validation_quality_blockers(canonical, repository_root=repository, authorization="review-only") == ()
+
+    toolchain_prefixed = replace(
+        requirement, commands=("cargo +nightly -vv --config net.retry=2 bench --bench exact",), expected_evidence="benchmark records current captured behavior"
+    )
+    toolchain_blockers = _late_validation_quality_blockers(toolchain_prefixed, repository_root=repository, authorization="review-only")
+    assert any("missing required features: proptest" in blocker for blocker in toolchain_blockers)
+    assert any("canonical recipe just bench-exact" in blocker for blocker in toolchain_blockers)
+
+    for command in ("cargo bench -F proptest --bench exact", "cargo --locked bench --all-features --bench exact"):
+        noncanonical = replace(requirement, commands=(command,), expected_evidence="benchmark records current captured behavior")
+        blockers = _late_validation_quality_blockers(noncanonical, repository_root=repository, authorization="review-only")
+        assert not any("missing required features" in blocker for blocker in blockers)
+        assert any("canonical recipe just bench-exact" in blocker for blocker in blockers)
+
+    harness_only = replace(
+        requirement,
+        commands=("cargo bench --bench exact -- --features proptest --all-features",),
+        expected_evidence="benchmark records current captured behavior",
+    )
+    harness_blockers = _late_validation_quality_blockers(harness_only, repository_root=repository, authorization="review-only")
+    assert any("missing required features: proptest" in blocker for blocker in harness_blockers)
 
 
 def _late_validation_plan() -> dict[str, Any]:
