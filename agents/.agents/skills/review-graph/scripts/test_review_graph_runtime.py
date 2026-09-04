@@ -2265,6 +2265,58 @@ def test_compile_node_destination_error_cannot_publish_evidence_or_acceptance(tm
     assert not tuple(Path(entry["worker_payload_path"]).parent.glob("*.sealed.json"))
 
 
+def test_compile_node_partial_journal_failure_rolls_back_outputs_and_retries(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    document, dispatches = _worker_input_fixture(tmp_path)
+    entry = next(item for item in dispatches["dispatches"] if item["result_contract"] == "compact-review")
+    candidate = Path(entry["worker_payload_candidate_path"])
+    candidate.write_text(json.dumps(_compact_audit_payload(entry)), encoding="utf-8")
+    persist_worker_payload(json.loads(Path(entry["worker_payload_contract_path"]).read_text(encoding="utf-8")), candidate)
+    lifecycle_path, dispatch_path, capture_path = _compile_cli_paths(tmp_path, document, dispatches)
+    journal = tmp_path / "execution.jsonl"
+    output_path = tmp_path / "compile-result.json"
+    arguments = [
+        "compile-node",
+        "--input",
+        str(lifecycle_path),
+        "--dispatches",
+        str(dispatch_path),
+        "--node-id",
+        entry["node_id"],
+        "--before-capture",
+        str(capture_path),
+        "--after-capture",
+        str(capture_path),
+        "--journal",
+        str(journal),
+        "--output",
+        str(output_path),
+    ]
+
+    def fail_during_append(stream: Any, _path: Path, _event: dict[str, Any], *, existing_size: int) -> None:
+        stream.seek(existing_size)
+        stream.write(b'{"partial":')
+        stream.flush()
+        message = "simulated journal append failure"
+        raise OSError(message)
+
+    with monkeypatch.context() as patch:
+        patch.setattr("review_graph_runtime._persist_journal_event", fail_during_append)
+        assert main(arguments) == 2
+
+    assert "simulated journal append failure" in capsys.readouterr().err
+    assert not journal.exists()
+    assert not output_path.exists()
+    assert not Path(entry["artifact_path"]).exists()
+    assert not Path(entry["metadata_path"]).exists()
+    assert not tuple(Path(entry["worker_payload_path"]).parent.glob("*.sealed.json"))
+
+    assert main(arguments) == 0
+    assert output_path.is_file()
+    assert len(journal.read_text(encoding="utf-8").splitlines()) == 1
+
+
 def test_fresh_context_compile_rejects_reads_of_sibling_worker_evidence(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     document, dispatches = _worker_input_fixture(tmp_path)
     audits = [item for item in dispatches["dispatches"] if item["result_contract"] == "compact-review"]
@@ -3776,6 +3828,14 @@ def test_late_validation_quality_gate_rejects_incomplete_benchmark_and_post_reme
         blockers = _late_validation_quality_blockers(noncanonical, repository_root=repository, authorization="review-only")
         assert not any("missing required features" in blocker for blocker in blockers)
         assert any("canonical recipe just bench-exact" in blocker for blocker in blockers)
+
+    harness_only = replace(
+        requirement,
+        commands=("cargo bench --bench exact -- --features proptest --all-features",),
+        expected_evidence="benchmark records current captured behavior",
+    )
+    harness_blockers = _late_validation_quality_blockers(harness_only, repository_root=repository, authorization="review-only")
+    assert any("missing required features: proptest" in blocker for blocker in harness_blockers)
 
 
 def _late_validation_plan() -> dict[str, Any]:

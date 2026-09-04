@@ -232,6 +232,7 @@ def _write_bytes_atomically_once(path: Path, content: bytes, *, mode: int) -> bo
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     temporary_path = Path(temporary_name)
     created = False
+    completed = False
     try:
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(content)
@@ -247,9 +248,12 @@ def _write_bytes_atomically_once(path: Path, content: bytes, *, mode: int) -> bo
                 raise ValueError(msg) from None
         if created:
             _fsync_directory(path.parent)
+        completed = True
         return created
     finally:
         temporary_path.unlink(missing_ok=True)
+        if created and not completed:
+            path.unlink(missing_ok=True)
 
 
 def _queue_materialized_write(pending: dict[Path, tuple[bytes, int]], path: Path, content: bytes, *, mode: int) -> None:
@@ -4238,6 +4242,8 @@ def _cargo_benchmark_options(arguments: list[str], subcommand_index: int) -> tup
     features: set[str] = set()
     all_features = False
     for argument_index, argument in enumerate(arguments[subcommand_index + 1 :], start=subcommand_index + 1):
+        if argument == "--":
+            break
         if argument == "--bench" and argument_index + 1 < len(arguments):
             target = arguments[argument_index + 1]
         elif argument.startswith("--bench="):
@@ -5059,6 +5065,27 @@ def _preflight_compile_destination(path: Path, content: bytes) -> None:
         raise ValueError(msg)
 
 
+def _rollback_compile_journal(path: Path, *, existing_size: int, remove_after_truncate: bool) -> None:
+    """Remove a failed append while preserving the pre-attempt journal prefix."""
+    with path.open("r+b") as stream:
+        stream.truncate(existing_size)
+        stream.flush()
+        os.fsync(stream.fileno())
+    if remove_after_truncate:
+        path.unlink()
+        _fsync_directory(path.parent)
+
+
+def _remove_attempt_created_files(paths: list[Path]) -> None:
+    """Remove only immutable files published by the current failed attempt."""
+    parents: set[Path] = set()
+    for path in reversed(paths):
+        path.unlink(missing_ok=True)
+        parents.add(path.parent)
+    for parent in parents:
+        _fsync_directory(parent)
+
+
 def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:  # noqa: C901, PLR0912, PLR0915
     plan, entry = _lifecycle_dispatch(document, args.dispatches, args.node_id)
     source_state = _state(document, "source_state")
@@ -5156,29 +5183,51 @@ def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace)
         try:
             try:
                 journal_content = args.journal.read_bytes()
+                journal_existed = True
             except FileNotFoundError:
                 journal_content = b""
+                journal_existed = False
             _events, lifecycle_state, _head = _read_execution_journal_content(journal_content, path=args.journal, plan=plan, source_state=source_state)
             _apply_journal_transition(plan, lifecycle_state, node_id=request.node_id, status=request.status)
             normalized = metadata.get("normalized_record")
             journal_limitations = tuple(cast("list[str]", normalized.get("limitations", []))) if isinstance(normalized, dict) else ()
             _new_journal_reason(request, journal_limitations)
-            _write_bytes_atomically_once(sealed_payload_path, payload_bytes, mode=0o444)
-            _write_bytes_once(artifact_path, content)
-            _write_bytes_once(metadata_path, metadata_bytes)
-            event, existing_size = _prepare_journal_event(args.journal, plan=plan, source_state=source_state, request=request, content=journal_content)
-            result = {
-                "artifact_path": str(artifact_path),
-                "journal_event": event,
-                "metadata_path": str(metadata_path),
-                "node_id": args.node_id,
-                "schema_version": 1,
-                "worker_payload_path": str(sealed_payload_path),
-            }
-            _write_text_once(operation_output_path, json.dumps(result, indent=2, sort_keys=True) + "\n")
-            with args.journal.open("ab") as journal_stream:
-                _persist_journal_event(journal_stream, args.journal, event, existing_size=existing_size)
-            return result
+            existing_size = len(journal_content)
+            created_paths: list[Path] = []
+            journal_append_started = False
+            completed = False
+            try:
+                for path, output_bytes in ((sealed_payload_path, payload_bytes), (artifact_path, content), (metadata_path, metadata_bytes)):
+                    if _write_bytes_atomically_once(path, output_bytes, mode=0o444):
+                        created_paths.append(path)
+                event, existing_size = _prepare_journal_event(args.journal, plan=plan, source_state=source_state, request=request, content=journal_content)
+                result = {
+                    "artifact_path": str(artifact_path),
+                    "journal_event": event,
+                    "metadata_path": str(metadata_path),
+                    "node_id": args.node_id,
+                    "schema_version": 1,
+                    "worker_payload_path": str(sealed_payload_path),
+                }
+                result_bytes = (json.dumps(result, indent=2, sort_keys=True) + "\n").encode()
+                if _write_bytes_atomically_once(operation_output_path, result_bytes, mode=0o444):
+                    created_paths.append(operation_output_path)
+                with args.journal.open("ab") as journal_stream:
+                    journal_stream.seek(0, os.SEEK_END)
+                    if journal_stream.tell() != existing_size:
+                        msg = f"execution journal changed during append: {args.journal}"
+                        raise ValueError(msg)
+                    journal_append_started = True
+                    _persist_journal_event(journal_stream, args.journal, event, existing_size=existing_size)
+                completed = True
+                return result
+            finally:
+                if not completed:
+                    try:
+                        if journal_append_started:
+                            _rollback_compile_journal(args.journal, existing_size=existing_size, remove_after_truncate=not journal_existed)
+                    finally:
+                        _remove_attempt_created_files(created_paths)
         finally:
             fcntl.flock(lock_stream.fileno(), fcntl.LOCK_UN)
 

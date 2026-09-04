@@ -208,8 +208,8 @@ python-ci: python-check test-python
     @echo "Python checks complete!"
 
 python-fix: _ensure-uv
-    uv run --locked ruff check {{ python_paths }} --fix
-    uv run --locked ruff format {{ python_paths }}
+    uv run --locked ruff check {{ python_primary_paths }} --fix
+    uv run --locked ruff format {{ python_primary_paths }}
 
 python-fixture-lint: _ensure-uv
     uv run --locked ruff check {{ python_fixture_paths }}

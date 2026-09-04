@@ -38,3 +38,13 @@ def test_python_fixture_lint_uses_the_complete_ruff_configuration() -> None:
 
     assert document["assignments"]["python_fixture_paths"]["value"] == "tests/semgrep"
     assert command == ["uv run --locked ruff check ", [["variable", "python_fixture_paths"]]]
+
+
+def test_python_fix_excludes_deliberately_invalid_semgrep_fixtures() -> None:
+    """The fixer must not rewrite deliberate negative-analysis fixtures."""
+    commands = just_dump()["recipes"]["python-fix"]["body"]
+
+    assert commands == [
+        ["uv run --locked ruff check ", [["variable", "python_primary_paths"]], " --fix"],
+        ["uv run --locked ruff format ", [["variable", "python_primary_paths"]]],
+    ]
