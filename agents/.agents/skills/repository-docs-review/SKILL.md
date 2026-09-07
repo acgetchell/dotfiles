@@ -90,6 +90,9 @@ Check each applicable document for:
 Distinguish intentional historical examples, versioned migration notes, and archive
 content from stale current guidance. Do not perform blind version or name replacement.
 
+When reviewing README entry points or links reused in generated documentation and
+package pages, read [README navigation](references/readme-navigation.md).
+
 ## Specialist Handoffs
 
 Keep ownership explicit and select only specialists required by the files and claims:
