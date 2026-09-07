@@ -38,10 +38,9 @@ discovery.
    approved artifact paths. Put unexecuted target cells and the boundary of any
    emulation in `limitations`.
 5. Repeat the source-state check. Complete the payload, including `exit_code`,
-   `elapsed`, and `artifact_paths` for every execution. Write its exact bytes to
-   the dispatched candidate path, invoke the runtime-owned
-   `persist-worker-payload` operation, and return those same bytes only after it
-   succeeds.
+   `elapsed`, and `artifact_paths` for every execution. Follow `worker_prompt`'s
+   publication example: serialize once, review over stdin, then persist identical
+   bytes with `--approval-identity` from the review. Return those bytes once published.
 6. The coordinator invokes the runtime-owned
    post-execution snapshot immediately afterward.
 

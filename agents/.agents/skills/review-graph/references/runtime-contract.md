@@ -101,10 +101,9 @@ instructions. Exclude coordinator conclusions, routing, and journals. Shared
 observations do not replace independent judgment. Reviews attest to commands;
 validator-command duplicates need explicit authorization and reusable evidence.
 
-Return only `ReviewPayload`. Write its exact bytes to the candidate, then execute
-`worker_payload_persistence.command` unchanged. Its complete argv includes the
-executable, script, and bound paths; it validates and atomically publishes
-`worker_payload_path`.
+Return only `ReviewPayload`. Follow `worker_prompt`'s publication example:
+serialize once, review over stdin, then persist identical bytes with
+`--approval-identity`. Approval binds the entire contract and payload.
 
 Use the materialized payload schema; planned needs reference dispatched
 validation IDs/digests.
@@ -139,7 +138,7 @@ findings, and catalog handoffs; assigns identities; appends the envelope and
 Machine Evidence; and emits journal-compatible metadata.
 
 Coalesced validators read only `review-validator/references/graph-dispatch.md`,
-publish through `persist-worker-payload`, and return identical bytes. Snapshot
+use the same reviewed persistence flow, and return identical bytes. Snapshot
 the workspace immediately before and after commands; the runtime derives
 artifact records, digest modes, command/environment identities, mappings, and
 ledger evidence. `ignored` artifacts require a tracked `.gitignore`; other

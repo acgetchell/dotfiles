@@ -20,7 +20,11 @@
     },
     "command_policy_attested": {"const": true},
     "commands_executed": {"items": {"type": "string"}, "type": "array"},
-    "files_inspected": {"items": {"type": "string"}, "type": "array"},
+    "files_inspected": {
+      "description": "Paths actually inspected by the worker (dispatch-owned for audits); these are read provenance, not artifact write targets.",
+      "items": {"type": "string"},
+      "type": "array"
+    },
     "findings": {
       "items": {
         "additionalProperties": false,
@@ -50,8 +54,13 @@
       },
       "type": "array"
     },
-    "limitations": {"items": {"type": "string"}, "type": "array"},
+    "limitations": {
+      "description": "Narrative caveats. Path mentions here do not declare omitted audit scope or artifact write targets.",
+      "items": {"type": "string"},
+      "type": "array"
+    },
     "scope_limitations": {
+      "description": "For audits only: exactly the omitted dispatch-owned paths and one reason per path. Never use for nearby context paths.",
       "items": {
         "additionalProperties": false,
         "properties": {
@@ -63,7 +72,11 @@
       },
       "type": "array"
     },
-    "nearby_contract_owners": {"items": {"type": "string"}, "type": "array"},
+    "nearby_contract_owners": {
+      "description": "Inspected read-only dependency or context provenance. Paths may be outside dispatch ownership and are neither omitted audit scope nor artifact write targets.",
+      "items": {"type": "string"},
+      "type": "array"
+    },
     "status": {"enum": ["completed", "no-findings", "blocked"]},
     "validation_requirements": {
       "items": {

@@ -77,7 +77,14 @@
     "source_state": ["scope", "worktree", "repository"]
   },
   "persist-worker-payload": {
-    "candidate_path": "/tmp/review-proof/audit.worker-payload.candidate.json",
+    "mode": "audit",
+    "node_id": "audit",
+    "owned_paths": ["src/lib.py"],
+    "result_contract": "compact-review",
+    "schema_version": 1,
+    "worker_payload_path": "/tmp/review-proof/audit.worker-payload.json"
+  },
+  "review-worker-payload-write": {
     "mode": "audit",
     "node_id": "audit",
     "owned_paths": ["src/lib.py"],
