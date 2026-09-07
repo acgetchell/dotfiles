@@ -1,6 +1,7 @@
 """Tests for compact review-graph runtime compilation."""
 
 import hashlib
+import io
 import json
 import os
 import shlex
@@ -58,9 +59,10 @@ from review_graph_runtime import (
     main,
     materialize_dispatches,
     next_ready_nodes,
-    persist_worker_payload,
+    persist_worker_payload_bytes,
     read_execution_journal,
     reconcile_handoffs,
+    review_worker_payload_write,
 )
 from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
 
@@ -2071,6 +2073,27 @@ def _assert_planned_validation_policy(audit_dispatch: dict[str, Any], validation
     }
 
 
+def _assert_materialized_worker_persistence(entry: dict[str, Any]) -> None:
+    worker_input = Path(entry["worker_input_path"])
+    assert worker_input.is_absolute()
+    assert json.loads(worker_input.read_text(encoding="utf-8")) == entry
+    assert worker_input.stat().st_mode & 0o777 == 0o444
+    persistence = entry["dispatch"]["worker_payload_persistence"]
+    command = persistence["command"]
+    assert Path(command[0]).is_absolute()
+    assert Path(command[0]).is_file()
+    assert command[1] == str(Path(__file__).resolve().with_name("review_graph_runtime.py"))
+    assert command[2:] == ["persist-worker-payload", "--input", entry["worker_payload_contract_path"], "--payload-stdin"]
+    assert persistence["input_mode"] == "stdin"
+    assert "candidate_path" not in persistence
+    assert "worker_payload_candidate_path" not in entry
+    contract = json.loads(Path(entry["worker_payload_contract_path"]).read_text(encoding="utf-8"))
+    assert "candidate_path" not in contract
+    assert persistence["review_command"] == [command[0], command[1], "review-worker-payload-write", "--input", entry["worker_payload_contract_path"]]
+    assert shlex.join(command) in entry["worker_prompt"]
+    assert shlex.join(persistence["review_command"]) in entry["worker_prompt"]
+
+
 def test_dispatch_materialization_and_ready_nodes_are_plan_derived(tmp_path: Path) -> None:
     plan = _sparse_plan()
     result = materialize_dispatches(
@@ -2108,17 +2131,7 @@ def test_dispatch_materialization_and_ready_nodes_are_plan_derived(tmp_path: Pat
     assert all("persist-worker-payload" in entry["worker_prompt"] for entry in result["dispatches"])
     assert all(Path(entry["worker_payload_contract_path"]).is_file() for entry in result["dispatches"])
     for entry in result["dispatches"]:
-        worker_input = Path(entry["worker_input_path"])
-        assert worker_input.is_absolute()
-        assert json.loads(worker_input.read_text(encoding="utf-8")) == entry
-        assert worker_input.stat().st_mode & 0o777 == 0o444
-        persistence = entry["dispatch"]["worker_payload_persistence"]
-        command = persistence["command"]
-        assert Path(command[0]).is_absolute()
-        assert Path(command[0]).is_file()
-        assert command[1] == str(Path(__file__).resolve().with_name("review_graph_runtime.py"))
-        assert command[2:] == ["persist-worker-payload", "--input", entry["worker_payload_contract_path"], "--payload", entry["worker_payload_candidate_path"]]
-        assert shlex.join(command) in entry["worker_prompt"]
+        _assert_materialized_worker_persistence(entry)
 
     lifecycle_document = {
         "current_source_state": ["scope", "worktree", "repository"],
@@ -2210,9 +2223,10 @@ payload = {
     "findings": [], "validation_requirements": [], "handoffs": [],
     "limitations": [], "scope_limitations": [], "status": "no-findings"
 }
-persistence = dispatch["worker_payload_persistence"]
-Path(persistence["candidate_path"]).write_text(json.dumps(payload))
-subprocess.run(persistence["command"], check=True, timeout=30)
+payload_bytes = (json.dumps(payload, sort_keys=True) + "\\n").encode()
+example = entry["worker_prompt"].split("```python\\n", 1)[1].split("```", 1)[0]
+exec(example)
+sys.stdout.buffer.write(payload_bytes)
 """
 
     result = subprocess.run(  # noqa: S603 - isolated protocol fixture, no review/validation commands executed.
@@ -2220,20 +2234,29 @@ subprocess.run(persistence["command"], check=True, timeout=30)
     )
 
     assert result.returncode == 0, result.stderr
-    receipt = json.loads(result.stdout)
-    assert receipt["worker_payload_path"] == entry["worker_payload_path"]
-    payload = json.loads(Path(receipt["worker_payload_path"]).read_text(encoding="utf-8"))
+    assert result.stdout.encode() == Path(entry["worker_payload_path"]).read_bytes()
+    payload = json.loads(result.stdout)
     assert payload["files_inspected"] == entry["dispatch"]["owned_paths"]
     assert payload["status"] == "no-findings"
+    assert not list(Path(entry["worker_payload_path"]).parent.glob("*.candidate.*"))
     assert not list(worker_directory.iterdir())
+
+
+def _publish_worker_bytes(entry: dict[str, Any], payload_bytes: bytes) -> dict[str, Any]:
+    """Exercise the materialized stdin protocol for compiler and lifecycle fixtures."""
+    persistence = entry["dispatch"]["worker_payload_persistence"]
+    review = subprocess.run(persistence["review_command"], input=payload_bytes, capture_output=True, check=True, timeout=30)  # noqa: S603
+    identity = json.loads(review.stdout)["approval_identity"]
+    published = subprocess.run(  # noqa: S603 - runtime-materialized commands for this test's proof store.
+        [*persistence["command"], "--approval-identity", identity], input=payload_bytes, capture_output=True, check=True, timeout=30
+    )
+    return json.loads(published.stdout)
 
 
 def test_compile_node_destination_error_cannot_publish_evidence_or_acceptance(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     document, dispatches = _worker_input_fixture(tmp_path)
     entry = next(item for item in dispatches["dispatches"] if item["result_contract"] == "compact-review")
-    candidate = Path(entry["worker_payload_candidate_path"])
-    candidate.write_text(json.dumps(_compact_audit_payload(entry)), encoding="utf-8")
-    persist_worker_payload(json.loads(Path(entry["worker_payload_contract_path"]).read_text(encoding="utf-8")), candidate)
+    _publish_worker_bytes(entry, json.dumps(_compact_audit_payload(entry)).encode())
     lifecycle_path, dispatch_path, capture_path = _compile_cli_paths(tmp_path, document, dispatches)
     journal = tmp_path / "execution.jsonl"
 
@@ -2270,9 +2293,7 @@ def test_compile_node_partial_journal_failure_rolls_back_outputs_and_retries(
 ) -> None:
     document, dispatches = _worker_input_fixture(tmp_path)
     entry = next(item for item in dispatches["dispatches"] if item["result_contract"] == "compact-review")
-    candidate = Path(entry["worker_payload_candidate_path"])
-    candidate.write_text(json.dumps(_compact_audit_payload(entry)), encoding="utf-8")
-    persist_worker_payload(json.loads(Path(entry["worker_payload_contract_path"]).read_text(encoding="utf-8")), candidate)
+    _publish_worker_bytes(entry, json.dumps(_compact_audit_payload(entry)).encode())
     lifecycle_path, dispatch_path, capture_path = _compile_cli_paths(tmp_path, document, dispatches)
     journal = tmp_path / "execution.jsonl"
     output_path = tmp_path / "compile-result.json"
@@ -2323,9 +2344,7 @@ def test_fresh_context_compile_rejects_reads_of_sibling_worker_evidence(tmp_path
     assert len(audits) >= 2
     entry, sibling = audits[:2]
     command = f"cat {sibling['worker_payload_path']}"
-    candidate = Path(entry["worker_payload_candidate_path"])
-    candidate.write_text(json.dumps(_compact_audit_payload(entry, commands=(command,))), encoding="utf-8")
-    persist_worker_payload(json.loads(Path(entry["worker_payload_contract_path"]).read_text(encoding="utf-8")), candidate)
+    _publish_worker_bytes(entry, json.dumps(_compact_audit_payload(entry, commands=(command,))).encode())
     lifecycle_path, dispatch_path, capture_path = _compile_cli_paths(tmp_path, document, dispatches)
     journal = tmp_path / "execution.jsonl"
 
@@ -2967,12 +2986,10 @@ def test_positive_independent_example_persists_compiles_and_journals_verbatim(tm
         }
     )
     entry = next(item for item in materialized["dispatches"] if item["result_contract"] == "native-independent-review")
-    candidate = Path(entry["worker_payload_candidate_path"])
     native = INDEPENDENT_NATIVE_POSITIVE_EXAMPLE.read_bytes()
     for symbolic, actual in zip((b"scope", b"worktree", b"repository"), source_state, strict=True):
         native = native.replace(b"fingerprint: " + symbolic, b"fingerprint: " + actual.encode())
-    candidate.write_bytes(native)
-    persist_worker_payload(json.loads(Path(entry["worker_payload_contract_path"]).read_text(encoding="utf-8")), candidate)
+    _publish_worker_bytes(entry, native)
     lifecycle_path = tmp_path / "lifecycle.json"
     dispatches_path = tmp_path / "dispatches.json"
     capture_path = tmp_path / "capture.json"
@@ -3105,7 +3122,7 @@ def _legacy_plan_digest(plan: GraphPlan) -> str:
 
 
 @pytest.mark.parametrize("legacy_digest", [False, True])
-def test_compile_node_survives_context_compaction_by_reading_bound_worker_payload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, legacy_digest: bool) -> None:  # noqa: PLR0915
+def test_compile_node_survives_context_compaction_by_reading_bound_worker_payload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, legacy_digest: bool) -> None:
     if legacy_digest:
         monkeypatch.setattr("review_graph_runtime.graph_plan_digest", _legacy_plan_digest)
     plan = _sparse_plan()
@@ -3146,14 +3163,12 @@ def test_compile_node_survives_context_compaction_by_reading_bound_worker_payloa
     dispatch_path = tmp_path / "dispatches.json"
     capture_path = tmp_path / "capture.json"
     payload_path = Path(entry["worker_payload_path"])
-    payload_candidate_path = Path(entry["worker_payload_candidate_path"])
     output_path = tmp_path / "compile.json"
     journal_path = tmp_path / "journal" / "execution.jsonl"
     lifecycle_path.write_text(json.dumps(lifecycle), encoding="utf-8")
     dispatch_path.write_text(json.dumps(dispatch_set), encoding="utf-8")
     capture_path.write_text(json.dumps(capture), encoding="utf-8")
-    payload_candidate_path.write_bytes(payload_bytes)
-    assert main(["persist-worker-payload", "--input", entry["worker_payload_contract_path"], "--payload", str(payload_candidate_path)]) == 0
+    _publish_worker_bytes(entry, payload_bytes)
     journal_path.parent.mkdir()
     append_journal_event(journal_path, lifecycle, JournalEventRequest(entry["node_id"], "in-flight"))
     original_journal = journal_path.read_bytes()
@@ -3200,14 +3215,13 @@ def test_compile_node_survives_context_compaction_by_reading_bound_worker_payloa
     build_synthesis_bundle({"source_state": source_state, "sources": [source]})
 
     replacement_bytes = (json.dumps({**payload, "limitations": ["late replacement"]}, indent=2) + "\n").encode()
-    payload_candidate_path.write_bytes(replacement_bytes)
-    assert main(["persist-worker-payload", "--input", entry["worker_payload_contract_path"], "--payload", str(payload_candidate_path)]) == 0
+    _publish_worker_bytes(entry, replacement_bytes)
     assert payload_path.read_bytes() == replacement_bytes
     assert sealed_payload_path.read_bytes() == payload_bytes
     build_synthesis_bundle({"source_state": source_state, "sources": [source]})
 
 
-def test_persist_worker_payload_preserves_valid_target_when_validation_or_publication_fails(
+def test_legacy_candidate_persistence_preserves_valid_target_when_validation_or_publication_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     plan = _sparse_plan()
@@ -3223,7 +3237,11 @@ def test_persist_worker_payload_preserves_valid_target_when_validation_or_public
     )
     entry = next(candidate for candidate in dispatch_set["dispatches"] if candidate["result_contract"] == "compact-review")
     target = Path(entry["worker_payload_path"])
-    candidate = Path(entry["worker_payload_candidate_path"])
+    candidate = target.with_suffix(".candidate.json")
+    legacy_contract_path = tmp_path / "legacy-contract.json"
+    legacy_contract = json.loads(Path(entry["worker_payload_contract_path"]).read_text(encoding="utf-8"))
+    legacy_contract["candidate_path"] = str(candidate)
+    legacy_contract_path.write_text(json.dumps(legacy_contract), encoding="utf-8")
     valid_payload = {
         "changes": [],
         "command_policy_attested": True,
@@ -3239,7 +3257,7 @@ def test_persist_worker_payload_preserves_valid_target_when_validation_or_public
     }
     valid_bytes = (json.dumps(valid_payload, indent=2) + "\n").encode()
     candidate.write_bytes(valid_bytes)
-    command = ["persist-worker-payload", "--input", entry["worker_payload_contract_path"], "--payload", str(candidate)]
+    command = ["persist-worker-payload", "--input", str(legacy_contract_path), "--payload", str(candidate)]
     assert main(command) == 0
     capsys.readouterr()
 
@@ -3262,13 +3280,180 @@ def test_persist_worker_payload_preserves_valid_target_when_validation_or_public
     assert candidate.is_file()
 
 
-def test_baseline_audit_rejects_changed_only_no_findings_before_publication(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_standard_input_persistence_requires_the_reviewed_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    _document, dispatches = _worker_input_fixture(tmp_path)
+    entry = next(item for item in dispatches["dispatches"] if item["result_contract"] == "compact-review")
+    payload_bytes = (json.dumps(_compact_audit_payload(entry), sort_keys=True) + "\n").encode()
+    with monkeypatch.context() as patch:
+        patch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(payload_bytes), encoding="utf-8"))
+        result = main(["persist-worker-payload", "--input", entry["worker_payload_contract_path"], "--payload-stdin"])
+
+    assert result == 2
+    assert "requires the artifact-write review approval identity" in capsys.readouterr().err
+    assert not Path(entry["worker_payload_path"]).exists()
+
+
+@pytest.mark.parametrize("approval_arguments", [{}, {"approval_identity": None}, {"approval_identity": ""}])
+def test_python_stdin_publication_requires_an_identity_before_any_write(tmp_path: Path, approval_arguments: dict[str, Any]) -> None:
+    _document, dispatches = _worker_input_fixture(tmp_path)
+    entry = next(item for item in dispatches["dispatches"] if item["result_contract"] == "compact-review")
+    contract = json.loads(Path(entry["worker_payload_contract_path"]).read_text(encoding="utf-8"))
+    payload_bytes = json.dumps(_compact_audit_payload(entry)).encode()
+    store = Path(entry["worker_payload_path"]).parent
+    before = set(store.iterdir())
+
+    with pytest.raises((TypeError, ValueError), match=r"approval[_ ]identity"):
+        cast("Any", persist_worker_payload_bytes)(contract, payload_bytes, **approval_arguments)
+
+    assert set(store.iterdir()) == before
+
+
+@pytest.mark.parametrize("changed_field", ["mode", "owned_paths", "node_id", "worker_payload_path", "schema_version", "result_contract"])
+def test_stdin_approval_rejects_changed_contract_before_replacing_target(tmp_path: Path, changed_field: str) -> None:
+    _document, dispatches = _worker_input_fixture(tmp_path)
+    entry = next(item for item in dispatches["dispatches"] if item["result_contract"] == "compact-review")
+    contract = json.loads(Path(entry["worker_payload_contract_path"]).read_text(encoding="utf-8"))
+    payload = {**_compact_audit_payload(entry), "status": "blocked", "limitations": ["fixture inspection blocked"]}
+    payload_bytes = json.dumps(payload).encode()
+    review = review_worker_payload_write(contract, payload_bytes)
+    persist_worker_payload_bytes(contract, payload_bytes, approval_identity=review["approval_identity"])
+    target = Path(entry["worker_payload_path"])
+    alternative_target = target.with_name("another-worker.json")
+    alternative_target.write_bytes(b"existing unrelated evidence")
+    changed_values = {
+        "mode": "revalidation",
+        "owned_paths": [*contract["owned_paths"], "newly-owned.rs"],
+        "node_id": "another-node",
+        "worker_payload_path": str(alternative_target),
+        "schema_version": 2,
+        "result_contract": "compact-validation",
+    }
+    changed_contract = {**contract, changed_field: changed_values[changed_field]}
+    before = {path: path.read_bytes() for path in target.parent.iterdir() if path.is_file()}
+
+    with pytest.raises((ValueError, SchemaValidationError)):
+        persist_worker_payload_bytes(changed_contract, payload_bytes, approval_identity=review["approval_identity"])
+
+    assert {path: path.read_bytes() for path in target.parent.iterdir() if path.is_file()} == before
+
+
+def test_stdin_review_binds_canonical_contract_and_rejects_legacy_candidate(tmp_path: Path) -> None:
+    _document, dispatches = _worker_input_fixture(tmp_path)
+    entry = next(item for item in dispatches["dispatches"] if item["result_contract"] == "compact-review")
+    contract = json.loads(Path(entry["worker_payload_contract_path"]).read_text(encoding="utf-8"))
+    payload_bytes = json.dumps(_compact_audit_payload(entry)).encode()
+    review = review_worker_payload_write(contract, payload_bytes)
+    reordered = dict(reversed(list(contract.items())))
+    assert review_worker_payload_write(reordered, payload_bytes) == review
+    receipt = persist_worker_payload_bytes(reordered, payload_bytes, approval_identity=review["approval_identity"])
+    assert receipt["artifact_write_review"] == review
+    canonical_contract = json.dumps(contract, sort_keys=True, separators=(",", ":"))
+    assert review["contract_digest"] == "sha256:" + hashlib.sha256(canonical_contract.encode()).hexdigest()
+    legacy_contract = {**contract, "candidate_path": str(tmp_path / "unused.candidate.json")}
+    with pytest.raises(SchemaValidationError):
+        review_worker_payload_write(legacy_contract, payload_bytes)
+
+
+def test_nearby_audit_context_persists_compiles_and_journals_with_stable_approval_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    document, dispatches = _worker_input_fixture(tmp_path)
+    entry = next(item for item in dispatches["dispatches"] if item["result_contract"] == "compact-review")
+    payload = {
+        **_compact_audit_payload(entry),
+        "limitations": ["Nearby tests were inspected as context but are outside this audit's owned paths."],
+        "nearby_contract_owners": ["tests/prelude_exports.rs", "tests/proptest_interval.rs"],
+    }
+    payload_bytes = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode()
+    persistence_command = ["persist-worker-payload", "--input", entry["worker_payload_contract_path"], "--payload-stdin"]
+    review_command = ["review-worker-payload-write", "--input", entry["worker_payload_contract_path"]]
+
+    with monkeypatch.context() as patch:
+        patch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(payload_bytes), encoding="utf-8"))
+        assert main(review_command) == 0
+
+    write_review = json.loads(capsys.readouterr().out)
+    assert (write_review["decision"], write_review["payload_input"]) == ("valid-bound-artifact-write", "stdin")
+    assert write_review["payload_digest"] == "sha256:" + hashlib.sha256(payload_bytes).hexdigest()
+    assert write_review["artifact_write_targets"] == [entry["worker_payload_path"]]
+    assert write_review["audit_path_roles"] == {
+        "dispatch_owned_paths": entry["dispatch"]["owned_paths"],
+        "inspected_dispatch_owned_paths": entry["dispatch"]["owned_paths"],
+        "nearby_context_paths": ["tests/prelude_exports.rs", "tests/proptest_interval.rs"],
+        "omitted_dispatch_owned_paths": [],
+        "scope_limitation_paths": [],
+    }
+    assert write_review["payload_field_semantics"]["nearby_contract_owners"] == "inspected-context-only"
+    assert not list(Path(entry["worker_payload_path"]).parent.glob("*.candidate.*"))
+    assert not Path(entry["worker_payload_path"]).exists()
+
+    def require_approval(_source: Path, _target: Path) -> Path:
+        message = "simulated artifact approval required"
+        raise PermissionError(message)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "replace", require_approval)
+        patch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(payload_bytes), encoding="utf-8"))
+        assert main([*persistence_command, "--approval-identity", write_review["approval_identity"]]) == 2
+
+    diagnostic = json.loads(capsys.readouterr().err)
+    assert diagnostic["error"] == "artifact-write-blocked"
+    assert diagnostic["artifact_write_review"] == write_review
+    assert not Path(entry["worker_payload_path"]).exists()
+
+    changed_bytes = (json.dumps({**payload, "limitations": ["changed after approval"]}, sort_keys=True) + "\n").encode()
+    with monkeypatch.context() as patch:
+        patch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(changed_bytes), encoding="utf-8"))
+        assert main([*persistence_command, "--approval-identity", write_review["approval_identity"]]) == 2
+    assert "differs from the explicitly approved artifact write" in capsys.readouterr().err
+    assert not Path(entry["worker_payload_path"]).exists()
+
+    with monkeypatch.context() as patch:
+        patch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(payload_bytes), encoding="utf-8"))
+        assert main([*persistence_command, "--approval-identity", write_review["approval_identity"]]) == 0
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["artifact_write_review"] == write_review
+    assert Path(receipt["worker_payload_path"]).read_bytes() == payload_bytes
+
+    lifecycle_path, dispatch_path, capture_path = _compile_cli_paths(tmp_path, document, dispatches)
+    journal_path = tmp_path / "execution.jsonl"
+    operation_output_path = tmp_path / "compile-result.json"
+    assert (
+        main(
+            [
+                "compile-node",
+                "--input",
+                str(lifecycle_path),
+                "--dispatches",
+                str(dispatch_path),
+                "--node-id",
+                entry["node_id"],
+                "--before-capture",
+                str(capture_path),
+                "--after-capture",
+                str(capture_path),
+                "--journal",
+                str(journal_path),
+                "--output",
+                str(operation_output_path),
+            ]
+        )
+        == 0
+    )
+    events, lifecycle_state, _head = read_execution_journal(
+        journal_path, plan=_graph_plan(document["plan"]), source_state=cast("tuple[str, str, str]", tuple(document["source_state"]))
+    )
+    assert len(events) == 1
+    assert lifecycle_state[entry["node_id"]] == "accepted"
+    metadata = json.loads(Path(entry["metadata_path"]).read_text(encoding="utf-8"))
+    assert metadata["normalized_record"]["nearby_contract_owners"] == payload["nearby_contract_owners"]
+    assert metadata["normalized_record"]["scope_limitations"] == []
+
+
+def test_baseline_audit_rejects_changed_only_no_findings_before_publication(tmp_path: Path) -> None:
     target = tmp_path / "audit.worker-payload.json"
-    candidate = tmp_path / "audit.worker-payload.candidate.json"
-    contract_path = tmp_path / "audit.worker-payload-contract.json"
     owned_paths = ["README.md", "REFERENCES.md"]
     contract = {
-        "candidate_path": str(candidate),
         "mode": "audit",
         "node_id": "audit-docs",
         "owned_paths": owned_paths,
@@ -3289,17 +3474,25 @@ def test_baseline_audit_rejects_changed_only_no_findings_before_publication(tmp_
         "status": "no-findings",
         "validation_requirements": [],
     }
-    contract_path.write_text(json.dumps(contract), encoding="utf-8")
-    candidate.write_text(json.dumps(payload), encoding="utf-8")
-
-    assert main(["persist-worker-payload", "--input", str(contract_path), "--payload", str(candidate)]) == 2
-    assert "requires inspection of every owned path" in capsys.readouterr().err
+    with pytest.raises(ValueError, match="requires inspection of every owned path"):
+        review_worker_payload_write(contract, json.dumps(payload).encode())
     assert not target.exists()
-    assert candidate.exists()
+
+    invalid_nearby_limitation = {
+        **payload,
+        "files_inspected": owned_paths,
+        "nearby_contract_owners": ["tests/context.rs"],
+        "scope_limitations": [{"path": "tests/context.rs", "reason": "nearby context is not dispatch-owned"}],
+        "status": "completed",
+    }
+    with pytest.raises(ValueError, match=r"must name omitted owned paths: tests/context\.rs"):
+        review_worker_payload_write(contract, json.dumps(invalid_nearby_limitation).encode())
+    assert not target.exists()
 
     accepted = {**payload, "scope_limitations": [{"path": "REFERENCES.md", "reason": "upstream bibliography was unavailable"}], "status": "completed"}
-    candidate.write_text(json.dumps(accepted), encoding="utf-8")
-    assert main(["persist-worker-payload", "--input", str(contract_path), "--payload", str(candidate)]) == 0
+    accepted_bytes = json.dumps(accepted).encode()
+    review = review_worker_payload_write(contract, accepted_bytes)
+    persist_worker_payload_bytes(contract, accepted_bytes, approval_identity=review["approval_identity"])
     assert target.exists()
 
 
@@ -4044,9 +4237,7 @@ def test_bundle_only_synthesis_persists_and_compiles_without_reading_source(tmp_
         "limitations": [],
         "scope_limitations": [],
     }
-    candidate = Path(entry["worker_payload_candidate_path"])
-    candidate.write_text(json.dumps(payload), encoding="utf-8")
-    persist_worker_payload(json.loads(Path(entry["worker_payload_contract_path"]).read_text()), candidate)
+    _publish_worker_bytes(entry, json.dumps(payload).encode())
     dispatch = {**entry["dispatch"], "before_state": materialized["source_state"], "after_state": materialized["source_state"]}
     content, metadata = compile_review({"dispatch": dispatch, "payload": json.loads(Path(entry["worker_payload_path"]).read_text())})
     assert metadata["normalized_record"]["files_inspected"] == []

@@ -60,10 +60,10 @@ validation or synthesis.
 
 ## Execute Review Nodes
 
-Dispatch each selected leaf with its exact skill and owned paths. The worker
-writes only the `ReviewPayload` to the dispatch-bound candidate path, invokes
-the runtime-owned `persist-worker-payload` operation to validate and atomically
-publish it, and returns those same bytes. It does not author
+Dispatch selected leaves with exact skills and owned paths. Workers stream
+`ReviewPayload` bytes through dispatch-bound review and persistence
+commands; the runtime validates before writing, binds approval retries, and
+atomically publishes. They return the same bytes and do not author
 fingerprints, digests, evidence IDs, execution metadata, canonical Markdown,
 or machine-evidence JSON. Materialize exact dispatch bases from the accepted
 plan with `review_graph_runtime.py materialize-dispatches`; do not reconstruct
@@ -104,7 +104,7 @@ retains their per-requirement provenance.
 Run each coalesced unit once through `review-validator`. Validator workers also
 use `fork_turns: "none"`, read only its compact graph-dispatch reference, and
 publish a schema-valid `ValidationPayload` without artifact records or digests
-through `persist-worker-payload` before returning it. Invoke
+through the same reviewed persistence flow before returning it. Invoke
 `snapshot-workspace` immediately before and after execution, then compile the
 node from its bound payload path with both runtime-owned snapshots. Cache/build
 manifests bind metadata for every immediate entry. Accept only when both gates pass.

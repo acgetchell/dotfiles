@@ -175,6 +175,15 @@ class JournalEventRequest:
     reason: str | None = None
 
 
+class WorkerPayloadWriteError(OSError):
+    """Preserve the validated payload identity when artifact publication fails."""
+
+    def __init__(self, message: str, artifact_write_review: dict[str, Any]) -> None:
+        """Attach the deterministic safety review to the publication failure."""
+        super().__init__(message)
+        self.artifact_write_review = artifact_write_review
+
+
 def _canonical_json(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
@@ -2922,13 +2931,40 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
         msg = "worker dispatch lacks its runtime-owned payload persistence contract"
         raise ValueError(msg)
     persistence_input = _required_text(persistence, "input_path")
-    persistence_candidate = _required_text(persistence, "candidate_path")
     persistence_command = _text_list(persistence, "command", required=True)
-    persistence_text = (
-        f" Before returning, write the exact result bytes to temporary sibling {persistence_candidate}, then invoke the runtime-owned "
-        f"persistence command unchanged: {shlex.join(persistence_command)}. Its bound input is {persistence_input} and candidate is {persistence_candidate}. "
-        f"Only after it atomically publishes {worker_payload_path} may you return those same bytes."
-    )
+    review_command = _text_list(persistence, "review_command")
+    if persistence.get("input_mode") == "stdin" and review_command:
+        persistence_text = (
+            " Before returning, hold the exact result bytes in memory. Stream them on standard input to the runtime-owned "
+            f"safety-review command unchanged: {shlex.join(review_command)}. It validates the bound contract at {persistence_input} before any artifact write "
+            "and returns an approval_identity. Then stream the identical bytes to the persistence command "
+            f"{shlex.join(persistence_command)} with --approval-identity <reviewed identity>. "
+            f"Only {worker_payload_path} is an artifact write target; path strings "
+            "inside the payload are evidence. If publication is blocked and the user approves that identity, retry identical bytes and the same command; never "
+            f"rewrite evidence to obtain approval. Only after the runtime atomically publishes {worker_payload_path} may you return those same bytes. "
+            "Serialize payload_bytes once and retain them for both calls and any retry. Python example (dispatch is the supplied dispatch object):\n"
+            "```python\n"
+            "import json\n"
+            "import subprocess\n"
+            "p = dispatch['worker_payload_persistence']\n"
+            "review = subprocess.run(p['review_command'], input=payload_bytes, capture_output=True, check=True)\n"
+            "identity = json.loads(review.stdout)['approval_identity']\n"
+            "subprocess.run([*p['command'], '--approval-identity', identity], input=payload_bytes, capture_output=True, check=True)\n"
+            "```\n"
+        )
+    else:
+        persistence_candidate = _required_text(persistence, "candidate_path")
+        persistence_text = (
+            f" Before returning, write the exact result bytes to temporary sibling {persistence_candidate}, then invoke the runtime-owned "
+            f"persistence command unchanged: {shlex.join(persistence_command)}. "
+            f"Its bound input is {persistence_input} and candidate is {persistence_candidate}. "
+            f"Only {persistence_candidate} and {worker_payload_path} are artifact write targets; path strings inside the payload are evidence. "
+            "The persistence receipt or a publication-block diagnostic supplies an approval_identity bound to the exact bytes and both paths. "
+            "If publication is blocked and the user approves that identity, preserve the candidate bytes and retry the same command with "
+            "--approval-identity <approved identity>; "
+            "never rewrite evidence to obtain approval. "
+            f"Only after it atomically publishes {worker_payload_path} may you return those same bytes."
+        )
     if contract == "native-independent-review":
         return (
             "Perform only the dispatched repository-independent-review in fresh context. Return the six canonical native sections "
@@ -2939,15 +2975,22 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
     validation_text = (
         " Omit artifacts: the runtime captures workspace status and artifact digests before and after execution." if contract == "compact-validation" else ""
     )
+    audit_scope_text = (
+        " For audit payloads, files_inspected names dispatch-owned reads; nearby_contract_owners names inspected read-only dependency/context provenance and "
+        "may be outside dispatch ownership; scope_limitations is reserved exclusively for omitted dispatch-owned paths and must equal owned_paths minus "
+        "files_inspected. Narrative limitations do not create omitted scope or artifact write targets."
+        if dispatch.get("mode") == "audit"
+        else ""
+    )
     return (
         f"Return only the canonical {contract} payload using field names from {schema_text}. "
         "Every field shown in payload_schema.required_shape is required whenever its parent object is present. "
         "Do not author fingerprints, evidence IDs, artifact IDs, or digests. "
-        f"Command policy: {command_policy}{validation_text}{persistence_text}{shared_text}"
+        f"Command policy: {command_policy}{validation_text}{audit_scope_text}{persistence_text}{shared_text}"
     )
 
 
-def _validate_worker_payload_bytes(contract_document: dict[str, Any], payload_bytes: bytes) -> None:
+def _validate_worker_payload_bytes(contract_document: dict[str, Any], payload_bytes: bytes) -> dict[str, Any] | None:
     """Reject incomplete worker output before it can replace a persisted payload."""
     contract = _required_text(contract_document, "result_contract")
     if contract in {"compact-review", "compact-validation"}:
@@ -2962,18 +3005,123 @@ def _validate_worker_payload_bytes(contract_document: dict[str, Any], payload_by
             if blockers:
                 msg = "worker payload failed owned-scope validation: " + "; ".join(blockers)
                 raise ValueError(msg)
-        return
+        return payload
     if contract == "native-independent-review":
         _independent_input_sections(payload_bytes)
-        return
+        return None
     msg = f"unsupported worker payload result contract: {contract}"
     raise ValueError(msg)
 
 
-def persist_worker_payload(contract_document: dict[str, Any], candidate_path: Path) -> dict[str, Any]:
-    """Validate and atomically publish one dispatch-bound worker payload."""
+def review_worker_payload_write(contract_document: dict[str, Any], payload_bytes: bytes, *, candidate_is_write_target: bool = False) -> dict[str, Any]:
+    """Validate bytes and bind their publication to the complete persistence contract."""
+    definition = "legacyWorkerPayloadContract" if candidate_is_write_target else "stdinWorkerPayloadContract"
+    require_schema_definition(contract_document, _RUNTIME_OPERATION_INPUT_SCHEMA, definition)
     node_id = _required_text(contract_document, "node_id")
     result_contract = _required_text(contract_document, "result_contract")
+    target = Path(_required_text(contract_document, "worker_payload_path")).resolve()
+    target_path = str(target)
+    payload = _validate_worker_payload_bytes(contract_document, payload_bytes)
+    payload_digest = _sha256_bytes(payload_bytes)
+    identity_record: dict[str, object] = {
+        "contract_digest": _sha256_bytes(_canonical_json(contract_document).encode()),
+        "node_id": node_id,
+        "payload_byte_count": len(payload_bytes),
+        "payload_digest": payload_digest,
+        "payload_input": "candidate-path" if candidate_is_write_target else "stdin",
+        "result_contract": result_contract,
+        "worker_payload_path": target_path,
+    }
+    write_targets = [target_path]
+    if candidate_is_write_target:
+        candidate = Path(_required_text(contract_document, "candidate_path")).resolve()
+        if candidate == target or candidate.parent != target.parent:
+            msg = "worker payload candidate binding must be a distinct sibling of the materialized target"
+            raise ValueError(msg)
+        candidate_path = str(candidate)
+        identity_record["candidate_path"] = candidate_path
+        write_targets.insert(0, candidate_path)
+    review: dict[str, Any] = {
+        "approval_identity": _sha256_bytes(_canonical_json(identity_record).encode()),
+        "artifact_write_targets": write_targets,
+        "decision": "valid-bound-artifact-write",
+        **identity_record,
+    }
+    if result_contract == "compact-review" and contract_document.get("mode") == "audit" and payload is not None:
+        owned_paths = _text_list(contract_document, "owned_paths", required=True)
+        inspected_paths = _text_list(payload, "files_inspected")
+        inspected = set(inspected_paths)
+        review["audit_path_roles"] = {
+            "dispatch_owned_paths": list(owned_paths),
+            "inspected_dispatch_owned_paths": list(inspected_paths),
+            "nearby_context_paths": list(_text_list(payload, "nearby_contract_owners")),
+            "omitted_dispatch_owned_paths": [path for path in owned_paths if path not in inspected],
+            "scope_limitation_paths": [path for path, _reason in _scope_limitation_records(payload)],
+        }
+        review["payload_field_semantics"] = {
+            "limitations": "narrative-only",
+            "nearby_contract_owners": "inspected-context-only",
+            "scope_limitations": "omitted-dispatch-owned-only",
+        }
+    return review
+
+
+def _approved_worker_payload_write(
+    contract_document: dict[str, Any], payload_bytes: bytes, approval_identity: str | None, *, candidate_is_write_target: bool = True
+) -> dict[str, Any]:
+    artifact_write_review = review_worker_payload_write(contract_document, payload_bytes, candidate_is_write_target=candidate_is_write_target)
+    if approval_identity is not None:
+        _sha256_digest(approval_identity, "worker payload approval identity")
+        if approval_identity != artifact_write_review["approval_identity"]:
+            msg = "worker payload differs from the explicitly approved artifact write"
+            raise ValueError(msg)
+    return artifact_write_review
+
+
+def _worker_payload_receipt(contract_document: dict[str, Any], payload_bytes: bytes, artifact_write_review: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "node_id": _required_text(contract_document, "node_id"),
+        "result_contract": _required_text(contract_document, "result_contract"),
+        "schema_version": 1,
+        "worker_payload_byte_count": len(payload_bytes),
+        "worker_payload_digest": _sha256_bytes(payload_bytes),
+        "worker_payload_path": str(Path(_required_text(contract_document, "worker_payload_path")).resolve()),
+        "artifact_write_review": artifact_write_review,
+    }
+
+
+def persist_worker_payload_bytes(contract_document: dict[str, Any], payload_bytes: bytes, *, approval_identity: str) -> dict[str, Any]:
+    """Validate and atomically publish payload bytes received without a staging write."""
+    _sha256_digest(approval_identity, "worker payload approval identity")
+    target_path = Path(_required_text(contract_document, "worker_payload_path")).resolve()
+    if not target_path.parent.is_dir():
+        msg = f"worker payload target directory does not exist: {target_path.parent}"
+        raise ValueError(msg)
+    artifact_write_review = _approved_worker_payload_write(contract_document, payload_bytes, approval_identity, candidate_is_write_target=False)
+    temporary_path: Path | None = None
+    try:
+        descriptor, temporary_name = tempfile.mkstemp(prefix=f".{target_path.name}.", suffix=".tmp", dir=target_path.parent)
+        temporary_path = Path(temporary_name)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(payload_bytes)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary_path.replace(target_path)
+        _fsync_directory(target_path.parent)
+        if target_path.read_bytes() != payload_bytes:
+            msg = f"atomically published worker payload bytes differ from the validated input: {target_path}"
+            raise ValueError(msg)
+    except OSError as error:
+        msg = f"worker payload artifact publication failed: {error}"
+        raise WorkerPayloadWriteError(msg, artifact_write_review) from error
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+    return _worker_payload_receipt(contract_document, payload_bytes, artifact_write_review)
+
+
+def persist_worker_payload(contract_document: dict[str, Any], candidate_path: Path, *, approval_identity: str | None = None) -> dict[str, Any]:
+    """Validate and atomically publish one dispatch-bound worker payload."""
     target_path = Path(_required_text(contract_document, "worker_payload_path")).resolve()
     expected_candidate = Path(_required_text(contract_document, "candidate_path")).resolve()
     candidate = candidate_path.resolve()
@@ -2992,21 +3140,18 @@ def persist_worker_payload(contract_document: dict[str, Any], candidate_path: Pa
 
     with candidate.open("rb+") as stream:
         payload_bytes = stream.read()
-        _validate_worker_payload_bytes(contract_document, payload_bytes)
+        artifact_write_review = _approved_worker_payload_write(contract_document, payload_bytes, approval_identity)
         stream.flush()
         os.fsync(stream.fileno())
-    candidate.replace(target_path)
+    try:
+        candidate.replace(target_path)
+    except OSError as error:
+        msg = f"worker payload artifact publication failed: {error}"
+        raise WorkerPayloadWriteError(msg, artifact_write_review) from error
     if target_path.read_bytes() != payload_bytes:
         msg = f"atomically published worker payload bytes differ from the validated candidate: {target_path}"
         raise ValueError(msg)
-    return {
-        "node_id": node_id,
-        "result_contract": result_contract,
-        "schema_version": 1,
-        "worker_payload_byte_count": len(payload_bytes),
-        "worker_payload_digest": _sha256_bytes(payload_bytes),
-        "worker_payload_path": str(target_path),
-    }
+    return _worker_payload_receipt(contract_document, payload_bytes, artifact_write_review)
 
 
 def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
@@ -3110,16 +3255,21 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         metadata_path = artifact_store / f"{node.node_id}.evidence.json"
         worker_payload_suffix = "md" if node.mode == "independent-review" else "json"
         worker_payload_path = artifact_store / f"{node.node_id}.worker-payload.{worker_payload_suffix}"
-        worker_payload_candidate_path = artifact_store / f"{node.node_id}.worker-payload.candidate.{worker_payload_suffix}"
         worker_payload_contract_path = artifact_store / f"{node.node_id}.worker-payload-contract.json"
-        worker_payload_persistence_command = [
+        worker_payload_command_prefix = [
             str(Path(sys.executable).resolve()),
             str(Path(__file__).resolve()),
             "persist-worker-payload",
             "--input",
             str(worker_payload_contract_path),
-            "--payload",
-            str(worker_payload_candidate_path),
+            "--payload-stdin",
+        ]
+        worker_payload_review_command = [
+            str(Path(sys.executable).resolve()),
+            str(Path(__file__).resolve()),
+            "review-worker-payload-write",
+            "--input",
+            str(worker_payload_contract_path),
         ]
         instruction_paths = _applicable_instruction_paths(repository_root_path.resolve(), node.coverage, node.instruction_paths)
         authorized_duplicates = tuple(sorted(set(raw_duplicate_authorizations.get(node.node_id, ()))))
@@ -3153,10 +3303,11 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             "state_verification_command": state_command,
             "worker_payload_path": str(worker_payload_path),
             "worker_payload_persistence": {
-                "candidate_path": str(worker_payload_candidate_path),
-                "command": worker_payload_persistence_command,
+                "command": worker_payload_command_prefix,
+                "input_mode": "stdin",
                 "input_path": str(worker_payload_contract_path),
                 "operation": "persist-worker-payload",
+                "review_command": worker_payload_review_command,
             },
             "worker_created": location == "worker",
         }
@@ -3206,7 +3357,6 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
                 common["payload_schema"] = review_schema
                 contract = "compact-review"
         persistence_contract = {
-            "candidate_path": str(worker_payload_candidate_path),
             "mode": node.mode,
             "node_id": node.node_id,
             "owned_paths": list(node.coverage),
@@ -3227,7 +3377,6 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             "node_id": node.node_id,
             "result_contract": contract,
             "worker_input_path": str(worker_input_path),
-            "worker_payload_candidate_path": str(worker_payload_candidate_path),
             "worker_payload_contract_path": str(worker_payload_contract_path),
             "worker_payload_path": str(worker_payload_path),
             "worker_prompt": _worker_prompt(contract, common),
@@ -4170,7 +4319,11 @@ def _fallback_to_coordinator_locked(document: dict[str, Any], args: argparse.Nam
     if original["dispatch"]["execution_location"] != "worker":
         msg = f"fallback node is not assigned to a worker: {node_id}"
         raise ValueError(msg)
-    if any(Path(original[field]).exists() for field in ("artifact_path", "metadata_path", "worker_payload_path", "worker_payload_candidate_path")):
+    if any(
+        Path(original[field]).exists()
+        for field in ("artifact_path", "metadata_path", "worker_payload_path", "worker_payload_candidate_path")
+        if field in original
+    ):
         msg = f"fallback node already has execution output: {node_id}"
         raise ValueError(msg)
     identity = _sha256_bytes(_canonical_json({"dispatch_set_digest": dispatch_set["dispatch_set_digest"], "node_id": node_id, "journal_head": head}).encode())
@@ -4809,7 +4962,16 @@ def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     )
     persist_parser = _runtime_subparser(subparsers, "persist-worker-payload", "validate and atomically publish one materialized worker payload")
     persist_parser.add_argument("--input", type=Path, required=True)
-    persist_parser.add_argument("--payload", type=Path, required=True)
+    payload_source = persist_parser.add_mutually_exclusive_group(required=True)
+    payload_source.add_argument("--payload", type=Path, help="legacy materialized candidate path")
+    payload_source.add_argument("--payload-stdin", action="store_true", help="read candidate bytes from standard input before any artifact write")
+    persist_parser.add_argument(
+        "--approval-identity", help="bind an explicitly approved retry to the exact validated payload bytes, input mode, and materialized target"
+    )
+    review_write_parser = _runtime_subparser(
+        subparsers, "review-worker-payload-write", "validate standard-input worker payload bytes and emit their artifact-write review without publishing"
+    )
+    review_write_parser.add_argument("--input", type=Path, required=True)
     synthesis_parser = _runtime_subparser(subparsers, "synthesis-bundle", "build a compact synthesis bundle")
     synthesis_parser.add_argument("--input", type=Path, required=True)
     synthesis_parser.add_argument("--output", type=Path, required=True)
@@ -5253,10 +5415,25 @@ def _json_operation_output(document: dict[str, Any], args: argparse.Namespace) -
     return finalize_proof(_finalize_document_from_files(document, args))
 
 
-def _run_operation(document: dict[str, Any], args: argparse.Namespace) -> int:  # noqa: C901
-    if args.operation == "persist-worker-payload":
-        print(_canonical_json(persist_worker_payload(document, args.payload)))
+def _run_worker_payload_operation(document: dict[str, Any], args: argparse.Namespace) -> int:
+    if args.operation == "review-worker-payload-write":
+        payload_bytes = sys.stdin.buffer.read()
+        print(_canonical_json(review_worker_payload_write(document, payload_bytes, candidate_is_write_target=False)))
         return 0
+    if args.payload_stdin:
+        if args.approval_identity is None:
+            msg = "persist-worker-payload --payload-stdin requires the artifact-write review approval identity"
+            raise ValueError(msg)
+        payload_bytes = sys.stdin.buffer.read()
+        print(_canonical_json(persist_worker_payload_bytes(document, payload_bytes, approval_identity=args.approval_identity)))
+        return 0
+    print(_canonical_json(persist_worker_payload(document, args.payload, approval_identity=args.approval_identity)))
+    return 0
+
+
+def _run_operation(document: dict[str, Any], args: argparse.Namespace) -> int:  # noqa: C901
+    if args.operation in {"persist-worker-payload", "review-worker-payload-write"}:
+        return _run_worker_payload_operation(document, args)
     if args.operation in {"compile-independent-review", "compile-review", "compile-validation"}:
         if args.operation in {"compile-review", "compile-validation"}:
             payload = document.get("payload")
@@ -5312,7 +5489,10 @@ def main(argv: list[str] | None = None) -> int:
         require_schema_definition(operation_document, _RUNTIME_OPERATION_INPUT_SCHEMA, args.operation)
         return _run_operation(operation_document, args)
     except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as error:
-        if isinstance(error, SchemaValidationError):
+        if isinstance(error, WorkerPayloadWriteError):
+            output = {"artifact_write_review": error.artifact_write_review, "error": "artifact-write-blocked", "message": str(error)}
+            print(_canonical_json(output), file=sys.stderr)
+        elif isinstance(error, SchemaValidationError):
             attempt = document.get("handoff_attempt", 1) if isinstance(document, dict) else 1
             retry_allowed = isinstance(attempt, int) and not isinstance(attempt, bool) and attempt == 1
             output = {**error.as_dict(), "handoff_attempt": attempt, "maximum_handoff_attempts": 2, "retry_allowed": retry_allowed}

@@ -142,6 +142,22 @@
       "type": "object"
     },
     "persist-worker-payload": {
+      "oneOf": [{"$ref": "#/$defs/stdinWorkerPayloadContract"}, {"$ref": "#/$defs/legacyWorkerPayloadContract"}]
+    },
+    "stdinWorkerPayloadContract": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {"enum": ["audit", "fix", "independent-review", "revalidation", "synthesis", "validation"]},
+        "node_id": {"minLength": 1, "type": "string"},
+        "owned_paths": {"$ref": "#/$defs/stringArray"},
+        "result_contract": {"enum": ["compact-review", "compact-validation", "native-independent-review"]},
+        "schema_version": {"const": 1},
+        "worker_payload_path": {"minLength": 1, "type": "string"}
+      },
+      "required": ["mode", "node_id", "owned_paths", "result_contract", "schema_version", "worker_payload_path"],
+      "type": "object"
+    },
+    "legacyWorkerPayloadContract": {
       "additionalProperties": false,
       "properties": {
         "candidate_path": {"minLength": 1, "type": "string"},
@@ -155,6 +171,7 @@
       "required": ["candidate_path", "mode", "node_id", "owned_paths", "result_contract", "schema_version", "worker_payload_path"],
       "type": "object"
     },
+    "review-worker-payload-write": {"$ref": "#/$defs/stdinWorkerPayloadContract"},
     "reconcile-handoffs": {
       "additionalProperties": false,
       "properties": {
