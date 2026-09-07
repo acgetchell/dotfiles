@@ -4,10 +4,13 @@
 import argparse
 import re
 import sys
+from collections.abc import Hashable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import yaml
+from yaml.constructor import ConstructorError
+from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -17,8 +20,50 @@ MAX_SKILL_NAME_LENGTH = 64
 MIN_SHORT_DESCRIPTION_LENGTH = 25
 MAX_SHORT_DESCRIPTION_LENGTH = 64
 ALLOWED_FRONTMATTER_KEYS = frozenset({"name", "description", "license", "allowed-tools", "metadata"})
-FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---", re.DOTALL)
+FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---(?:\n|\Z)", re.DOTALL)
 SKILL_NAME_RE = re.compile(r"^[a-z0-9-]+$")
+_YAML_MERGE_KEY = object()
+
+
+def construct_scalar_mapping_key(node: ScalarNode, loader: yaml.SafeLoader) -> Hashable:
+    """Construct a key identity without flattening away explicit duplicates."""
+    if node.tag == "tag:yaml.org,2002:merge":
+        # A merge directive is distinct from a literal quoted '<<' key.
+        key = _YAML_MERGE_KEY
+    elif node.tag == "tag:yaml.org,2002:value":
+        # SafeLoader normalizes this mapping-context tag to a string.
+        key = node.value
+    else:
+        key = loader.construct_object(node, deep=True)
+    if not isinstance(key, Hashable):
+        raise ConstructorError(None, None, "found unhashable key", node.start_mark)
+    return key
+
+
+def find_duplicate_mapping_key(node: Node | None, loader: yaml.SafeLoader) -> str | None:
+    """Return the first repeated scalar mapping key in a YAML node tree."""
+    if node is None:
+        return None
+    pending = [node]
+    visited: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in visited:
+            continue
+        visited.add(id(current))
+        if isinstance(current, MappingNode):
+            seen: set[object] = set()
+            for key_node, value_node in current.value:
+                if isinstance(key_node, ScalarNode):
+                    key_value = cast("str", key_node.value)
+                    key_identity = construct_scalar_mapping_key(key_node, loader)
+                    if key_identity in seen:
+                        return key_value
+                    seen.add(key_identity)
+                pending.extend((key_node, value_node))
+        elif isinstance(current, SequenceNode):
+            pending.extend(current.value)
+    return None
 
 
 def load_frontmatter(skill_path: Path | str) -> tuple[dict[str, object] | None, str]:
@@ -49,6 +94,13 @@ def read_frontmatter_text(skill_path: Path | str) -> tuple[str | None, str]:
 def parse_frontmatter(frontmatter_text: str) -> tuple[dict[str, object] | None, str]:
     """Parse and validate the raw YAML frontmatter shape."""
     try:
+        loader = yaml.SafeLoader(frontmatter_text)
+        try:
+            duplicate_key = find_duplicate_mapping_key(loader.get_single_node(), loader)
+        finally:
+            loader.dispose()
+        if duplicate_key is not None:
+            return None, f"Duplicate key in frontmatter: {duplicate_key}"
         loaded_frontmatter: Any = yaml.safe_load(frontmatter_text)
     except yaml.YAMLError as exc:
         return None, f"Invalid YAML in frontmatter: {exc}"

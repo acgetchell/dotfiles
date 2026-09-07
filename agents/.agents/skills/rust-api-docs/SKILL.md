@@ -74,8 +74,11 @@ Flag:
 
 - bare type names that should be linked
 - broken intra-doc links
-- raw URLs to docs.rs when an intra-doc link is available
+- raw URLs to docs.rs in Rust doc comments when an intra-doc link is available
 - linkified prose that obscures readability with backticks where plain words would do
+
+Check links against the selected feature set so optional items do not break
+default-feature documentation.
 
 ### 4. Crate- and module-level docs
 
@@ -91,6 +94,9 @@ Flag:
 - missing crate-level docs on a published library
 - modules whose purpose is unclear from the docs
 - feature-gated APIs whose feature requirement is invisible in the rendered docs
+
+For published crates with shared README and rustdoc learning paths, read
+[published navigation](references/published-navigation.md).
 
 ### 5. API-supporting private helper docs
 

@@ -3,12 +3,12 @@
 
 from typing import TYPE_CHECKING
 
+import pytest
+
 import skill_validate
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    import pytest
 
 
 def write_skill(skill_dir: Path, frontmatter: str, *, include_openai_metadata: bool = True) -> None:
@@ -44,6 +44,127 @@ def test_validate_skill_rejects_missing_skill_file(tmp_path: Path) -> None:
 
     assert not valid
     assert message == "SKILL.md not found"
+
+
+def test_validate_skill_rejects_malformed_closing_delimiter(tmp_path: Path) -> None:
+    """The frontmatter closing delimiter must occupy its complete line."""
+    skill_dir = tmp_path / "example-skill"
+    write_skill(skill_dir, 'name: example-skill\ndescription: "Use for tests."')
+    (skill_dir / "SKILL.md").write_text('---\nname: example-skill\ndescription: "Use for tests."\n---garbage\n', encoding="utf-8")
+
+    valid, message = skill_validate.validate_skill(skill_dir)
+
+    assert not valid
+    assert message == "Invalid frontmatter format"
+
+
+def test_validate_skill_rejects_duplicate_frontmatter_key(tmp_path: Path) -> None:
+    """Repeated YAML keys must not be resolved with last-key-wins semantics."""
+    skill_dir = tmp_path / "example-skill"
+    write_skill(skill_dir, 'name: ignored\nname: example-skill\ndescription: "Use for tests."')
+
+    valid, message = skill_validate.validate_skill(skill_dir)
+
+    assert not valid
+    assert message == "Duplicate key in frontmatter: name"
+
+
+def test_validate_skill_rejects_equivalent_nested_frontmatter_keys(tmp_path: Path) -> None:
+    """Constructed YAML keys that compare equally must be rejected at any depth."""
+    skill_dir = tmp_path / "example-skill"
+    write_skill(skill_dir, 'name: example-skill\ndescription: "Use for tests."\nmetadata:\n  nested:\n    yes: first\n    true: second')
+
+    valid, message = skill_validate.validate_skill(skill_dir)
+
+    assert not valid
+    assert message == "Duplicate key in frontmatter: true"
+
+
+@pytest.mark.parametrize(
+    ("metadata", "expected"),
+    [
+        ("{<<: {owner: inherited}, revision: 1}", {"owner": "inherited", "revision": 1}),
+        ("{owner: explicit, <<: {owner: inherited}}", {"owner": "explicit"}),
+        ("{<<: [{owner: first}, {owner: second, revision: 1}]}", {"owner": "first", "revision": 1}),
+        ('{<<: {owner: inherited}, "<<": literal}', {"owner": "inherited", "<<": "literal"}),
+        ("{=: literal}", {"=": "literal"}),
+    ],
+)
+def test_parse_frontmatter_preserves_mapping_key_semantics(metadata: str, expected: dict[str, object]) -> None:
+    """Merges, explicit overrides, and mapping-context tags retain YAML semantics."""
+    frontmatter, message = skill_validate.parse_frontmatter(f"name: example-skill\ndescription: Use for tests.\nmetadata: {metadata}")
+
+    assert message == ""
+    assert frontmatter is not None
+    assert frontmatter["metadata"] == expected
+
+
+@pytest.mark.parametrize(
+    ("metadata", "duplicate"),
+    [
+        ("{<<: {owner: first, owner: second}}", "owner"),
+        ("{<<: [{owner: first}, {revision: 1, revision: 2}]}", "revision"),
+        ("{<<: {owner: inherited}, owner: first, owner: second}", "owner"),
+        ("{<<: {owner: first}, <<: {revision: 1}}", "<<"),
+        ('{=: first, "=": second}', "="),
+        ("[{owner: first, owner: second}]", "owner"),
+        ("!!pairs [{? {owner: first, owner: second}: value}]", "owner"),
+        ("!!omap [{? {owner: first, owner: second}: value}]", "owner"),
+    ],
+)
+def test_parse_frontmatter_rejects_explicit_duplicates(metadata: str, duplicate: str) -> None:
+    """Merge handling must not hide explicit duplicates in source mappings."""
+    frontmatter, message = skill_validate.parse_frontmatter(f"name: example-skill\ndescription: Use for tests.\nmetadata: {metadata}")
+
+    assert frontmatter is None
+    assert message == f"Duplicate key in frontmatter: {duplicate}"
+
+
+def test_parse_frontmatter_accepts_recursive_aliases() -> None:
+    """The duplicate scan terminates while preserving recursive YAML values."""
+    frontmatter, message = skill_validate.parse_frontmatter("name: example-skill\ndescription: Use for tests.\nmetadata: &metadata {self: *metadata}")
+
+    assert message == ""
+    assert frontmatter is not None
+    metadata = frontmatter["metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["self"] is metadata
+
+
+@pytest.mark.parametrize("key", ["!!map invalid", "!!seq invalid", "!!set invalid", "[unhashable]"])
+def test_parse_frontmatter_rejects_malformed_keys(key: str) -> None:
+    """Invalid constructed keys return a validation error rather than an exception."""
+    frontmatter, message = skill_validate.parse_frontmatter(f"name: example-skill\ndescription: Use for tests.\nmetadata: {{{key}: value}}")
+
+    assert frontmatter is None
+    assert message.startswith("Invalid YAML in frontmatter:")
+
+
+def test_main_accepts_merged_frontmatter(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Valid merged metadata retains successful CLI output and exit status."""
+    skill_dir = tmp_path / "example-skill"
+    write_skill(skill_dir, "name: example-skill\ndescription: Use for tests.\nmetadata: {<<: {owner: inherited}, owner: explicit}")
+
+    code = skill_validate.main([str(skill_dir)])
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert captured.out == "Skill is valid!\n"
+    assert captured.err == ""
+
+
+def test_main_reports_malformed_tagged_key(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Malformed tagged keys produce a concise CLI failure without a traceback."""
+    skill_dir = tmp_path / "example-skill"
+    write_skill(skill_dir, "name: example-skill\ndescription: Use for tests.\nmetadata: {!!map invalid: value}")
+
+    code = skill_validate.main([str(skill_dir)])
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert captured.out == ""
+    assert captured.err.startswith("Invalid YAML in frontmatter:")
+    assert "Traceback" not in captured.err
 
 
 def test_validate_skill_rejects_missing_openai_metadata(tmp_path: Path) -> None:
