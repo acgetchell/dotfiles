@@ -102,6 +102,14 @@ scheduling isolated execution.
 
 ## Worker Budget And Epochs
 
+Coverage partitions do not remove specialist requirements. A delta audit retains
+the original owned surface in the plan; runtime-bound `audit_delta_reviews`
+combines exact reused unit coverage with fresh inspection of affected paths.
+See [runtime-contract.md](runtime-contract.md#mutation-handoffs-and-proof) for
+partition dependencies, findings provenance, and external staging continuation.
+External metadata transitions preserve original source identity and actual
+observed captures separately, without creating an agent repair epoch.
+
 Adaptive grouped execution does not require a lifetime worker budget. Schedule
 the complete dependency graph and use workers opportunistically without
 changing selected coverage.

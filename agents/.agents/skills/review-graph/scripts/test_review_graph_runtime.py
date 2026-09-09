@@ -333,6 +333,44 @@ def _dispatch(*, mode: str = "audit") -> dict[str, object]:
     }
 
 
+def _typed_synthesis_payload(dispatch: dict[str, Any], payload: dict[str, Any], plan: GraphPlan | None = None) -> dict[str, Any]:
+    if dispatch.get("mode") != "synthesis":
+        return payload
+    requirements = (
+        {f"{'validation' if node.mode == 'validation' else 'review'}:{node.node_id}": list(node.requirement_ids) for node in plan.actual_worker_nodes}
+        if plan
+        else {}
+    )
+    reused = {key for _requirement, key in plan.exact_reused_review_evidence} if plan else set()
+    platforms = {f"validation:{unit.node_id}": unit.platform for unit in plan.coalesced_validation_units} if plan else {}
+    if plan:
+        for requirement, evidence_id in plan.exact_reused_review_evidence:
+            requirements.setdefault(evidence_id, []).append(requirement)
+    return {
+        "changes": [],
+        **payload,
+        "readiness_verdict": "ready",
+        "verdict_reasons": ["All required evidence reconciles."],
+        "predecessor_coverage": [
+            {"evidence_id": key, "requirement_ids": requirements.get(key, []), "disposition": "reused" if key in reused else "accepted"}
+            for key in dispatch["predecessor_evidence_ids"]
+        ],
+        "routing_closure": {"complete": True, "unresolved_handoff_ids": [], "user_excluded_catalog_ids": []},
+        "validation_reconciliation": [
+            {
+                "evidence_id": key,
+                "requirement_ids": requirements.get(key, []),
+                "result": "passed",
+                "platform": platforms.get(key, "current host"),
+                "execution_mode": "native",
+            }
+            for key in dispatch["predecessor_evidence_ids"]
+            if key.startswith("validation:")
+        ],
+        "cross_surface_risks": [],
+    }
+
+
 def test_compile_review_builds_verified_artifact_from_compact_payload() -> None:
     content, metadata = compile_review(
         {
@@ -839,7 +877,7 @@ def _mutation_with_audit_source(
         "status": "no-findings",
         "validation_requirements": [],
     }
-    content, metadata = compile_review({"dispatch": dispatch, "payload": payload})
+    content, metadata = compile_review({"dispatch": dispatch, "payload": _typed_synthesis_payload(dispatch, payload)})
     artifact_path = Path(entry["artifact_path"])
     metadata_path = Path(entry["metadata_path"])
     artifact_path.write_bytes(content)
@@ -1005,7 +1043,7 @@ def _compile_repair_fixture_entry(entry: dict[str, Any], lifecycle: dict[str, An
             "status": "no-findings",
             "validation_requirements": [],
         }
-        content, metadata = compile_review({"dispatch": dispatch, "payload": payload})
+        content, metadata = compile_review({"dispatch": dispatch, "payload": _typed_synthesis_payload(dispatch, payload, _graph_plan(lifecycle["plan"]))})
     Path(entry["artifact_path"]).write_bytes(content)
     Path(entry["metadata_path"]).write_text(json.dumps(metadata), encoding="utf-8")
     source: dict[str, str] = {"artifact_path": entry["artifact_path"], "metadata_path": entry["metadata_path"]}
@@ -3646,7 +3684,7 @@ none
                 "validation_requirements": [],
             }
             require_schema(payload, SCHEMA_ROOT / "review-payload-v1.schema.json")
-            content, metadata = compile_review({"dispatch": dispatch, "payload": payload})
+            content, metadata = compile_review({"dispatch": dispatch, "payload": _typed_synthesis_payload(dispatch, payload, plan)})
             kind = "review"
         artifact_path = Path(entry["artifact_path"])
         metadata_path = Path(entry["metadata_path"])
@@ -3776,6 +3814,7 @@ def _compile_materialized_evidence(  # noqa: PLR0913
     skip_node_ids: tuple[str, ...] = (),
     late_requirements: list[dict[str, Any]] | None = None,
     reference_planned_validation: bool = False,
+    audit_findings: list[dict[str, Any]] | None = None,
 ) -> tuple[GraphPlan, list[dict[str, str]]]:
     plan = plan or _sparse_plan()
     materialized = materialize_dispatches(
@@ -3865,7 +3904,9 @@ def _compile_materialized_evidence(  # noqa: PLR0913
                 "status": "no-findings",
                 "validation_requirements": validation_requirements,
             }
-            content, metadata = compile_review({"dispatch": dispatch, "payload": payload})
+            if audit_findings and dispatch["mode"] == "audit":
+                payload.update({"status": "completed", "findings": audit_findings})
+            content, metadata = compile_review({"dispatch": dispatch, "payload": _typed_synthesis_payload(dispatch, payload, plan)})
             kind = "review"
         artifact_path = Path(entry["artifact_path"])
         metadata_path = Path(entry["metadata_path"])
@@ -3873,6 +3914,29 @@ def _compile_materialized_evidence(  # noqa: PLR0913
         metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
         sources.append({"artifact_path": str(artifact_path), "kind": kind, "metadata_path": str(metadata_path)})
     return plan, sources
+
+
+def test_diagnostic_synthesis_cannot_hide_predecessor_findings_from_final_proof(tmp_path: Path) -> None:
+    finding = {
+        "severity": "P1",
+        "location": f"{STATE_FIXTURE}:1",
+        "summary": "An invalid transition remains",
+        "evidence": "The transition loses its required state.",
+        "remediation": "Preserve the state invariant.",
+    }
+    plan, sources = _compile_materialized_evidence(tmp_path, audit_findings=[finding])
+    final = finalize_proof(
+        {
+            "plan": _json_plan(plan),
+            "sources": sources,
+            "source_state": ["scope", "worktree", "repository"],
+            "current_source_state": ["scope", "worktree", "repository"],
+        }
+    )
+    assert final["status"] == "incomplete"
+    assert final["repository_validation_status"] == "passed"
+    assert final["repository_readiness"] == "blocked"
+    assert any("preserve every source finding" in blocker for blocker in final["blockers"])
 
 
 def _source_by_node(sources: list[dict[str, str]]) -> dict[str, dict[str, str]]:
@@ -4237,6 +4301,7 @@ def test_bundle_only_synthesis_persists_and_compiles_without_reading_source(tmp_
         "limitations": [],
         "scope_limitations": [],
     }
+    payload = _typed_synthesis_payload(entry["dispatch"], payload)
     _publish_worker_bytes(entry, json.dumps(payload).encode())
     dispatch = {**entry["dispatch"], "before_state": materialized["source_state"], "after_state": materialized["source_state"]}
     content, metadata = compile_review({"dispatch": dispatch, "payload": json.loads(Path(entry["worker_payload_path"]).read_text())})
@@ -4277,6 +4342,7 @@ def test_plan_digest_keeps_existing_journals_compatible_without_optional_reuse_f
     plan = _sparse_plan()
     legacy = _json_plan(plan)
     legacy.pop("validation_exclusions")
+    legacy.pop("audit_delta_reviews")
     legacy.pop("audit_reuse_transitions")
     legacy.pop("reuse_source_snapshots")
     expected = "sha256:" + hashlib.sha256(json.dumps(legacy, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
@@ -4289,6 +4355,7 @@ def test_plan_digest_retains_nonempty_reuse_fields(tmp_path: Path) -> None:
     result = advance_after_mutation(request)
     plan = _graph_plan(json.loads(json.dumps(result["new_plan"])))
     document = _json_plan(plan)
+    document.pop("audit_delta_reviews")
     document.pop("validation_exclusions")
     expected = "sha256:" + hashlib.sha256(json.dumps(document, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 

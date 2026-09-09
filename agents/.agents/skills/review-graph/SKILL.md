@@ -61,7 +61,7 @@ validation or synthesis.
 ## Execute Review Nodes
 
 Dispatch selected leaves with exact skills and owned paths. Workers stream
-`ReviewPayload` bytes through dispatch-bound review and persistence
+`ReviewPayload` audit bytes or `SynthesisPayload` synthesis bytes through dispatch-bound review and persistence
 commands; the runtime validates before writing, binds approval retries, and
 atomically publishes. They return the same bytes and do not author
 fingerprints, digests, evidence IDs, execution metadata, canonical Markdown,
@@ -126,10 +126,15 @@ runtime-managed `--output-dir` generations. Reconcile accepted handoffs before
 expansion; only genuinely new triggers reroute. After an authorized repair use
 `advance-after-mutation` to record the serialized repair epoch, recapture once,
 move stale nodes to `awaiting-replan`, and materialize the replacement graph.
+For external staging with unchanged
+content, use `resume-after-external-metadata` and its returned continuation;
+preserve both Git captures and the user's index. See the runtime contract for
+partition dependencies, Git-sensitive revalidation, and source provenance.
 Run `finalize-proof` with the signed dispatch set and journal after every
 applicable review and validation requirement has accepted non-stale evidence.
 It derives the mappings, manifest, and `RepositoryReviewProof`; report complete
-only when its verifier returns `complete`.
+only when its verifier returns `complete`. Report repository readiness from
+typed synthesis separately from proof completeness and validation success.
 
 The default user report is compact: findings, changes, validation, blockers,
 selected skills, proof status, final repository state, and artifact-manifest

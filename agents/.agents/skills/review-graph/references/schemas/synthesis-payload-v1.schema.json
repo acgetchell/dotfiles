@@ -1,0 +1,439 @@
+{
+  "$id": "https://openai.com/codex/review-graph/synthesis-payload-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "changes": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "contract_preserved": {
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "finding_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "what_changed": {
+            "type": "string"
+          },
+          "why": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "finding_ids",
+          "files",
+          "what_changed",
+          "why",
+          "contract_preserved"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "command_policy_attested": {
+      "const": true
+    },
+    "commands_executed": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "files_inspected": {
+      "description": "Paths actually inspected by the worker (dispatch-owned for audits); these are read provenance, not artifact write targets.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "findings": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "type": "string"
+          },
+          "location": {
+            "type": "string"
+          },
+          "remediation": {
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "P0",
+              "P1",
+              "P2",
+              "P3"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string",
+            "minLength": 1
+          },
+          "disposition": {
+            "enum": [
+              "fixed",
+              "remaining",
+              "accepted-risk",
+              "blocked"
+            ]
+          },
+          "source_findings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "evidence_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "finding_id": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "evidence_id",
+                "finding_id"
+              ]
+            }
+          }
+        },
+        "required": [
+          "severity",
+          "location",
+          "summary",
+          "evidence",
+          "remediation",
+          "owner",
+          "disposition",
+          "source_findings"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "handoffs": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "catalog_id": {
+            "type": "string"
+          },
+          "observed_trigger": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "scope": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "catalog_id",
+          "observed_trigger",
+          "reason",
+          "scope"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "limitations": {
+      "description": "Narrative caveats. Path mentions here do not declare omitted audit scope or artifact write targets.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "scope_limitations": {
+      "description": "For audits only: exactly the omitted dispatch-owned paths and one reason per path. Never use for nearby context paths.",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "reason": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "nearby_contract_owners": {
+      "description": "Inspected read-only dependency or context provenance. Paths may be outside dispatch ownership and are neither omitted audit scope nor artifact write targets.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "status": {
+      "enum": [
+        "completed",
+        "no-findings",
+        "blocked"
+      ]
+    },
+    "validation_requirements": {
+      "items": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "commands": {
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "dependency_policy": {
+                "enum": [
+                  "stop-on-failure",
+                  "continue-independent"
+                ]
+              },
+              "environment": {
+                "type": "string"
+              },
+              "expected_evidence": {
+                "type": "string"
+              },
+              "owner": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "requirement_id": {
+                "type": "string"
+              },
+              "working_directory": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "requirement_id",
+              "owner",
+              "reason",
+              "commands",
+              "working_directory",
+              "environment",
+              "expected_evidence",
+              "dependency_policy"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "expected_evidence": {
+                "type": "string"
+              },
+              "owner": {
+                "type": "string"
+              },
+              "planned_validation_digest": {
+                "pattern": "^sha256:[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "requirement_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "requirement_id",
+              "planned_validation_digest",
+              "owner",
+              "reason",
+              "expected_evidence"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "type": "array"
+    },
+    "readiness_verdict": {
+      "enum": [
+        "ready",
+        "not-ready",
+        "blocked"
+      ]
+    },
+    "verdict_reasons": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    },
+    "predecessor_coverage": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "evidence_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "requirement_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "disposition": {
+            "enum": [
+              "accepted",
+              "reused",
+              "blocked"
+            ]
+          }
+        },
+        "required": [
+          "evidence_id",
+          "requirement_ids",
+          "disposition"
+        ]
+      }
+    },
+    "routing_closure": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "complete": {
+          "type": "boolean"
+        },
+        "unresolved_handoff_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "user_excluded_catalog_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "complete",
+        "unresolved_handoff_ids",
+        "user_excluded_catalog_ids"
+      ]
+    },
+    "validation_reconciliation": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "evidence_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "requirement_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "result": {
+            "enum": [
+              "passed",
+              "failed",
+              "blocked",
+              "reused",
+              "not-applicable"
+            ]
+          },
+          "platform": {
+            "type": "string",
+            "minLength": 1
+          },
+          "execution_mode": {
+            "enum": [
+              "native",
+              "emulated",
+              "unexecuted"
+            ]
+          }
+        },
+        "required": [
+          "evidence_id",
+          "requirement_ids",
+          "result",
+          "platform",
+          "execution_mode"
+        ]
+      }
+    },
+    "cross_surface_risks": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "required": [
+    "status",
+    "files_inspected",
+    "nearby_contract_owners",
+    "findings",
+    "validation_requirements",
+    "handoffs",
+    "changes",
+    "limitations",
+    "scope_limitations",
+    "commands_executed",
+    "command_policy_attested",
+    "readiness_verdict",
+    "verdict_reasons",
+    "predecessor_coverage",
+    "routing_closure",
+    "validation_reconciliation",
+    "cross_surface_risks"
+  ],
+  "title": "Review Graph SynthesisPayload v1",
+  "type": "object"
+}

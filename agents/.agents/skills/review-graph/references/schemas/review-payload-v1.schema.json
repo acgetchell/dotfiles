@@ -3,6 +3,54 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
+    "coverage_units": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "unit_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "owned_paths": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1
+          },
+          "dependency_paths": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "dependency_uncertainty": {
+            "type": "string"
+          },
+          "finding_indices": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "required": [
+          "unit_id",
+          "owned_paths",
+          "dependency_paths",
+          "dependency_uncertainty",
+          "finding_indices"
+        ]
+      }
+    },
+    "git_sensitive": {
+      "type": "boolean"
+    },
     "changes": {
       "items": {
         "additionalProperties": false,
