@@ -50,18 +50,26 @@ an unresolved applicability handoff. Never infer that omitted work passed.
 
 ## Result Contract
 
-Return:
+Return the dispatched
+[SynthesisPayload](../review-graph/references/schemas/synthesis-payload-v1.schema.json),
+using these dedicated fields:
 
-- `Predecessor Coverage`: every requirement, node/report, and disposition
-- `Routing Closure`: consulted routers, exhaustive-ledger status, exclusions,
+- `predecessor_coverage`: every accepted evidence ID, requirement, and disposition
+- `routing_closure`: exhaustive-ledger status, exclusions,
   reuse, and unresolved handoffs
-- `Canonical Findings`: severity, owner, evidence, duplicates, and disposition
-- `Validation Reconciliation`: each requirement, actual executor platform,
+- `findings`: severity, owner, evidence, disposition, and `source_findings`
+  references retaining every predecessor finding, including disagreements
+- `validation_reconciliation`: each requirement, actual executor platform,
   native or emulated mode, unexecuted cells, and its accepted validator or exact
   reuse evidence
-- `Cross-Surface Risks`: conflicts, shared-file ownership, contradictory native
+- `cross_surface_risks`: conflicts, shared-file ownership, contradictory native
   CI, and residual gaps
-- `Repository Verdict`: `ready`, `not-ready`, or `blocked`, with exact reasons
+- `readiness_verdict`: `ready`, `not-ready`, or `blocked`, with exact reasons in
+  `verdict_reasons`
+
+Use `not-ready` when actionable findings remain, even with successful validators
+and a complete graph proof. Use `blocked` for incomplete required evidence or
+routing. Never encode these required fields only as narrative limitations.
 
 Do not create subagents or recursively invoke `review-graph`.
 Do not request or load complete predecessor artifacts; the proof verifier owns

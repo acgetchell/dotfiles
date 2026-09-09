@@ -122,10 +122,12 @@ and current native evidence is reconciled.
 
 In orchestrated mode, synthesize specialist outcomes, remove duplicate findings, identify cross-cutting blockers, and name residual risk. In standalone mode, lead with findings ordered by severity and list focused skills or checklist sections used. Always report validation performed, reused ledger evidence, and meaningful limitations.
 
-In a `review-graph` synthesis node, return table-ready fields for `Findings`,
-`Exact Blockers`, `Validator Results`, `Reused Ledger Evidence`, and
-`Readiness Verdict`. Use the dedicated `Readiness Verdict` field for one of:
-
-- **PASS**: no actionable production-readiness issue remains in scope.
-- **NEEDS IMPROVEMENT**: only non-blocking weaknesses or deferred strengthening remain.
-- **FAIL**: a correctness, security, compatibility, data-loss, or release blocker remains.
+In a `review-graph` synthesis node, use the dispatched
+[SynthesisPayload schema](../review-graph/references/schemas/synthesis-payload-v1.schema.json).
+Return `readiness_verdict`: `ready` when required evidence reconciles and no
+actionable finding remains, `not-ready` when findings remain, or `blocked` when
+required evidence or routing is incomplete. Put exact reasons in
+`verdict_reasons`; preserve finding ownership, dispositions, and source-finding
+references, predecessor coverage, routing closure, validation results, and
+cross-surface risks in their dedicated fields. A completed review and passing
+validators do not imply repository readiness.

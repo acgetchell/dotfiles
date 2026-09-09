@@ -10,7 +10,7 @@ python_primary_paths := "agents/.agents/skills scripts"
 python_paths := python_primary_paths + " " + python_fixture_paths
 dprint_version := "0.57.4"
 just_version := "1.58.0"
-rumdl_version := "0.2.68"
+rumdl_version := "0.2.69"
 uv_version := "0.12.10"
 zizmor_version := "1.30.0"
 

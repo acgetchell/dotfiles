@@ -110,6 +110,51 @@ class AuditInputIdentity:
 
 
 @dataclass(frozen=True)
+class ExternalMetadataTransition:
+    """Observed external staging, retaining both complete captures unchanged."""
+
+    before: ReviewSourceSnapshot
+    after: ReviewSourceSnapshot
+
+    def verify(self) -> None:
+        """Permit only index changes with identical worktree, scope, and Git base."""
+        self.before.verify()
+        self.after.verify()
+        if self.before.capture_mode not in {"baseline", "worktree"}:
+            msg = "external metadata resume requires baseline or worktree scope; staged and branch targets require replanning"
+            raise ValueError(msg)
+        before, after = asdict(self.before), asdict(self.after)
+        for field in ("index_fingerprint", "repository_state_fingerprint"):
+            before.pop(field)
+            after.pop(field)
+        if before != after or self.before.index_fingerprint == self.after.index_fingerprint:
+            msg = "external metadata transition must change only the index, preserving all content, modes, scope, instructions, HEAD, and branch"
+            raise ValueError(msg)
+
+
+def metadata_transition(raw: dict[str, Any]) -> ExternalMetadataTransition:
+    """Parse and verify an externally observed metadata transition."""
+    if not isinstance(raw, dict) or any(not isinstance(raw.get(field), dict) for field in ("before", "after")):
+        msg = "external metadata transition requires before and after snapshot objects"
+        raise ValueError(msg)
+    result = ExternalMetadataTransition(source_snapshot(raw["before"]), source_snapshot(raw["after"]))
+    result.verify()
+    return result
+
+
+def metadata_states(origin: tuple[str, str, str], transitions: tuple[ExternalMetadataTransition, ...]) -> tuple[tuple[str, str, str], ...]:
+    """Follow a verified chain without relabeling any historical source triple."""
+    states = [origin]
+    for transition in transitions:
+        transition.verify()
+        if transition.before.source_state != states[-1]:
+            msg = "external metadata transitions do not form a chain from the reviewed source"
+            raise ValueError(msg)
+        states.append(transition.after.source_state)
+    return tuple(states)
+
+
+@dataclass(frozen=True)
 class AuditReuseTransition:
     """A non-executable claim retaining the original artifact and source state."""
 
@@ -120,13 +165,16 @@ class AuditReuseTransition:
     artifact_path: str
     metadata_path: str
     instruction_digests: tuple[tuple[str, str], ...]
+    metadata_transitions: tuple[ExternalMetadataTransition, ...] = ()
 
 
 def verify_reuse_inputs(origin: ReviewSourceSnapshot, target: ReviewSourceSnapshot, inputs: AuditInputIdentity, transition: AuditReuseTransition) -> None:
     """Prove unchanged review inputs across two independently bound captures."""
     origin.verify()
     target.verify()
-    if origin.source_state != transition.source_state or target.source_state != transition.target_state or origin.boundary != target.boundary:
+    metadata_states(origin.source_state, transition.metadata_transitions)
+    boundary = transition.metadata_transitions[-1].after.boundary if transition.metadata_transitions else origin.boundary
+    if origin.source_state != transition.source_state or target.source_state != transition.target_state or boundary != target.boundary:
         msg = "audit reuse changes source identity, capture boundary, or Git state"
         raise ValueError(msg)
     if not inputs.owned_paths or set(inputs.inspected_paths) != set(inputs.owned_paths):

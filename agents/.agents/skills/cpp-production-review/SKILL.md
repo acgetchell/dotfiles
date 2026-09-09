@@ -106,6 +106,14 @@ For every finding, provide file and line evidence, the failure scenario, why it 
 
 ## Final Report
 
+In graph synthesis mode, return the dispatched
+[SynthesisPayload](../review-graph/references/schemas/synthesis-payload-v1.schema.json):
+typed `readiness_verdict` (`ready`, `not-ready`, `blocked`) and `verdict_reasons`,
+canonical findings with owner/disposition/source references, predecessor
+coverage, routing closure, validation reconciliation, and cross-surface risks.
+Remaining actionable findings mean `not-ready`; missing required evidence
+means `blocked`. Keep readiness separate from graph completion and validator success.
+
 Lead with unresolved P0/P1 findings. Include:
 
 - release-readiness verdict

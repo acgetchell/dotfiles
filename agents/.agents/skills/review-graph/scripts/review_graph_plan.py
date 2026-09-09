@@ -16,7 +16,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from capture_scope import _scope_data
-from review_graph_reuse import AuditInputIdentity, AuditReuseTransition, ReviewSourceSnapshot, verify_reuse_inputs
+from review_graph_reuse import AuditInputIdentity, AuditReuseTransition, ExternalMetadataTransition, ReviewSourceSnapshot, metadata_states, verify_reuse_inputs
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -525,6 +525,7 @@ class GraphPlan:
     audit_reuse_transitions: tuple[AuditReuseTransition, ...] = ()
     reuse_source_snapshots: tuple[ReviewSourceSnapshot, ...] = ()
     validation_exclusions: tuple[ValidationExclusion, ...] = ()
+    audit_delta_reviews: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -534,6 +535,11 @@ class FingerprintEvidence:
     expected: tuple[str, str, str]
     before: tuple[str, str, str]
     after: tuple[str, str, str]
+    metadata_transitions: tuple[ExternalMetadataTransition, ...] = ()
+
+    def matches(self, observed: tuple[str, str, str]) -> bool:
+        """Match an observed capture through an explicit content-equivalence proof."""
+        return observed in metadata_states(self.expected, self.metadata_transitions)
 
 
 @dataclass(frozen=True)
@@ -558,6 +564,7 @@ class ReviewEvidenceExpectation:
     planned_paths: tuple[str, ...] = ()
     planned_path_line_bounds: tuple[tuple[str, int], ...] = ()
     audit_input_identity: AuditInputIdentity | None = None
+    coverage_reuse: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -2311,6 +2318,8 @@ def _identifier_tuple_blockers(values: Sequence[str], *, label: str) -> tuple[st
 def graph_plan_digest(plan: GraphPlan) -> str:
     """Hash a plan without empty optional fields absent from legacy identities."""
     document = asdict(plan)
+    if not plan.audit_delta_reviews:
+        document.pop("audit_delta_reviews")
     if not plan.validation_exclusions:
         document.pop("validation_exclusions")
     if not plan.audit_reuse_transitions:
@@ -2327,6 +2336,10 @@ def graph_plan_digest_matches(plan: GraphPlan, digest: str) -> bool:
     legacy = asdict(plan)
     if not plan.validation_exclusions:
         legacy.pop("validation_exclusions")
+    if digest == _sha256_json(legacy):
+        return True
+    if not plan.audit_delta_reviews:
+        legacy.pop("audit_delta_reviews")
     return digest == _sha256_json(legacy)
 
 
@@ -2722,6 +2735,9 @@ def _fix_change_blockers(state_verification: str, changes: str, expectation: Rev
 
 def _native_state_verification_blockers(body: str, fingerprints: FingerprintEvidence, *, status: str, changed_as_reported: bool = False) -> tuple[str, ...]:
     blockers: list[str] = []
+    if fingerprints.metadata_transitions:
+        transitions = json.dumps([asdict(item) for item in fingerprints.metadata_transitions], sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        blockers.extend(_native_values_blockers(body, section="State Verification", label="External metadata transitions", expected=(transitions,)))
     for ordinal, label in enumerate(("Observed scope fingerprint", "Observed worktree fingerprint", "Observed repository state fingerprint")):
         blockers.extend(
             _native_values_blockers(
@@ -2772,6 +2788,9 @@ def _ordinary_review_native_blockers(  # noqa: C901, PLR0912
         )
     )
     scope = sections["## Scope Inspected"]
+    if expectation.coverage_reuse is not None:
+        serialized_reuse = json.dumps(expectation.coverage_reuse, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        blockers.extend(_native_values_blockers(scope, section="Scope Inspected", label="Coverage reuse", expected=(serialized_reuse,)))
     if expectation.audit_input_identity is not None:
         serialized_inputs = json.dumps(asdict(expectation.audit_input_identity), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
         blockers.extend(_native_values_blockers(scope, section="Scope Inspected", label="Audit input identity", expected=(serialized_inputs,)))
@@ -2856,6 +2875,11 @@ def _independent_review_native_blockers(  # noqa: C901, PLR0912, PLR0915
         )
     )
     envelope = sections["## Review Graph Envelope"]
+    if evidence.fingerprints.metadata_transitions:
+        transitions = json.dumps(
+            [asdict(item) for item in evidence.fingerprints.metadata_transitions], sort_keys=True, separators=(",", ":"), ensure_ascii=True
+        )
+        blockers.extend(_native_values_blockers(envelope, section="Review Graph Envelope", label="External metadata transitions", expected=(transitions,)))
     blockers.extend(_native_nonempty_section_blockers(envelope, section="Review Graph Envelope"))
     for label, expected in (
         ("Node ID", evidence.node_id),
@@ -3690,9 +3714,13 @@ def assess_review_evidence(expectation: ReviewEvidenceExpectation, evidence: Rev
     satisfies = evidence.status in {"completed", "no-findings"}
     if satisfies:
         expected_after = expectation.expected_after_state or expectation.source_state
-        if evidence.fingerprints.before != expectation.source_state:
+        if not evidence.fingerprints.matches(evidence.fingerprints.before):
             blockers.append("review evidence before fingerprints do not match the captured source state")
-        if evidence.fingerprints.after != expected_after:
+        if not (
+            evidence.fingerprints.matches(evidence.fingerprints.after)
+            if expected_after == expectation.source_state
+            else evidence.fingerprints.after == expected_after
+        ):
             blockers.append("review evidence after fingerprints do not match the expected source state")
         if evidence.git_mutated is not False:
             blockers.append("accepted review evidence mutated Git state")
@@ -3772,7 +3800,7 @@ def assess_validation_evidence(  # noqa: C901, PLR0912, PLR0915
 
     state_checked_status = evidence.status in {"passed", "failed", "reused", "not-applicable"}
     if state_checked_status:
-        if evidence.fingerprints.before != expectation.source_state or evidence.fingerprints.after != expectation.source_state:
+        if not evidence.fingerprints.matches(evidence.fingerprints.before) or not evidence.fingerprints.matches(evidence.fingerprints.after):
             blockers.append("validation evidence did not preserve the captured source state")
         if evidence.source_mutated is not False or evidence.git_mutated is not False:
             blockers.append("validation evidence mutated source or Git state")

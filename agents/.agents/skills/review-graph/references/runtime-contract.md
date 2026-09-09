@@ -9,6 +9,7 @@ Public contracts:
 
 - `schemas/planning-input-v1.schema.json`
 - `schemas/review-payload-v1.schema.json`
+- `schemas/synthesis-payload-v1.schema.json`
 - `schemas/validation-payload-v2.schema.json`
 - `schemas/runtime-operation-inputs-v1.schema.json`
 - `runtime-operation-examples-v1.json`
@@ -101,7 +102,7 @@ instructions. Exclude coordinator conclusions, routing, and journals. Shared
 observations do not replace independent judgment. Reviews attest to commands;
 validator-command duplicates need explicit authorization and reusable evidence.
 
-Return only `ReviewPayload`. Follow `worker_prompt`'s publication example:
+Return `ReviewPayload` for audits or `SynthesisPayload` for synthesis. Follow `worker_prompt`'s publication example:
 serialize once, review over stdin, then persist identical bytes with
 `--approval-identity`. Approval binds the entire contract and payload.
 
@@ -119,6 +120,14 @@ A completed audit may omit an owned path only with exactly one path-specific
 persistence and compilation both enforce this.
 Bundle-only synthesis allows empty `files_inspected`, but requires predecessor
 evidence. Never invent source reads.
+Its dedicated schema requires `readiness_verdict` (`ready`, `not-ready`, or
+`blocked`), `verdict_reasons`, `predecessor_coverage`, `routing_closure`,
+`validation_reconciliation`, and `cross_surface_risks`. Each canonical finding
+has an `owner`, `disposition` (`fixed`, `remaining`, `accepted-risk`, `blocked`),
+and `source_findings` references to supplied evidence/finding IDs. These are
+references to existing identities, not worker-created IDs. `compile-node`
+reconciles these fields with the accepted predecessor bundle. Remaining
+findings or failed/unexecuted validation cannot produce `ready`.
 The compiler rejects validator-owned
 commands and non-catalog handoffs. One schema mismatch permits one retry using
 field diagnostics; a second mismatch blocks the node. For authorized fixes,
@@ -158,32 +167,11 @@ exact reuse, requirement/validator mappings, and handoff reconciliation in
 
 ## Mutation, Handoffs, And Proof
 
-Accepted late validation requirements block synthesis/proof until exactly planned
-or explicitly user-excluded. Run
-`reconcile-validation-requirements --input <request.json> --journal <journal>
---dispatches <dispatches.json> --current-capture <capture.json> --output <result.json>`.
-Supply `plan` and `source_state` to inspect discoveries. Expand with
-`validation_requirements` (planning-schema objects) and `artifact_store`, or
-`user_exclusions` bound to returned origin, requirement ID/digest, and reason.
-Follow returned lifecycle/journal/dispatch paths. Source state and accepted
-audits/CI remain; synthesis inputs refresh. Wait for active workers before expansion.
-Details: [planning-contract.md](planning-contract.md#late-validation-expansion).
-
-Run `reconcile-handoffs` before expansion. Selected, exactly reused, or user-excluded
-catalog entries resolve handoffs; only `new_routing_triggers` expand routing.
-Final proof classification uses typed catalog mappings reparsed from accepted
-evidence, never caller-provided resolved IDs.
-
-After authorized repairs, run `advance-after-mutation` with the immediately
-preceding `previous_capture`, `new_capture`, and their exact `changed_paths`
-content delta. Invalidation follows owners and downstream dependencies. Supply
-accepted `sources` for verified unchanged-input audit reuse; validators,
-independent reviews, syntheses, and unproven audits rerun. Follow returned
-`lifecycle_input_path`, `dispatches_path`, `journal_path`, and `capture_path`;
-old artifacts remain unchanged. `preserved_evidence` contains only proven reuse.
-Per-node `reuse_decisions` explain disposition and reason code, distinguishing
-`coverage-limitations` from `unclassified-limitations`. Untyped caveats prevent
-reuse, never inferred informational exemptions.
+For repairs, external staging, or late validation/routing changes, read
+[state-transitions.md](state-transitions.md). It defines `advance-after-mutation`,
+`resume-after-external-metadata`, coverage partitions, and requirement
+reconciliation. Follow runtime-returned continuation paths; preserve original
+artifacts and both captures.
 
 Persist all capture, plan, payload, compiled evidence, journal, synthesis,
 invalidation, manifest, and proof artifacts outside the reviewed repository.
@@ -194,3 +182,6 @@ Blocked events without evidence produce an incomplete proof with their reason,
 not nonexistent-artifact reads. Report `repository_validation_status`
 separately from `graph_proof_status`; structural independent-evidence
 acceptance does not imply semantic agreement or adjudicated recall.
+Report `repository_readiness` separately as well: graph proof may be complete
+and validation passed while canonical findings still make the repository
+`not-ready`.
