@@ -22,15 +22,16 @@ def justfile_text(version: str = "1.2.3") -> str:
     return "".join(f'{pin} := "{version}"\n' for pin in update_tool_pins.PIN_TO_TOOL)
 
 
-def test_reconcile_pins_updates_cargo_and_uv_versions_atomically(tmp_path: Path) -> None:
+@pytest.mark.parametrize(("package", "pin"), [("rumdl", "rumdl_version"), ("cargo-update", "cargo_update_version")])
+def test_reconcile_pins_updates_cargo_and_uv_versions_atomically(tmp_path: Path, package: str, pin: str) -> None:
     justfile = tmp_path / "justfile"
     justfile.write_text(justfile_text(), encoding="utf-8")
 
-    changes = update_tool_pins.reconcile_pins(justfile, cargo_output(override=("rumdl", "2.0.0")), "uv 3.0.0")
+    changes = update_tool_pins.reconcile_pins(justfile, cargo_output(override=(package, "2.0.0")), "uv 3.0.0")
 
-    assert changes == {"rumdl_version": ("1.2.3", "2.0.0"), "uv_version": ("1.2.3", "3.0.0")}
+    assert changes == {pin: ("1.2.3", "2.0.0"), "uv_version": ("1.2.3", "3.0.0")}
     updated = justfile.read_text(encoding="utf-8")
-    assert 'rumdl_version := "2.0.0"' in updated
+    assert f'{pin} := "2.0.0"' in updated
     assert 'uv_version := "3.0.0"' in updated
     assert list(tmp_path.glob(".justfile.*")) == []
 

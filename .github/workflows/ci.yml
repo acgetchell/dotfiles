@@ -90,6 +90,9 @@ jobs:
       - name: Sync Python tooling
         run: uv sync --locked --group dev
 
+      - name: Install Stow for integration tests
+        run: brew install stow
+
       - name: Install zizmor
         uses: taiki-e/cache-cargo-install-action@9ee83daaa7b96a6fab930949ecf1122bba04a389 # v3.0.8
         with:

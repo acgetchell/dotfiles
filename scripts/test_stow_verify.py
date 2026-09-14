@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Tests for stow_verify.py."""
 
+import os
+import shutil
+import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING
+
+import pytest
 
 import stow_verify
-
-if TYPE_CHECKING:
-    import pytest
 
 
 def make_env(tmp_path: Path) -> tuple[Path, Path]:
@@ -59,13 +60,13 @@ def test_valid_layout_has_no_failures(tmp_path: Path) -> None:
     assert all_failures(home, dotfiles) == []
 
 
-def test_no_folding_skill_tree_has_no_failures(tmp_path: Path) -> None:
-    """File-level links created with --no-folding pass."""
+def test_no_folding_skill_tree_fails_codex_discovery_check(tmp_path: Path) -> None:
+    """Valid file-level links are insufficient for Codex skill discovery."""
     home, dotfiles = make_env(tmp_path)
     source = dotfiles / "agents" / ".agents" / "skills" / "skill-a"
     use_no_folding_tree(home, source)
 
-    assert all_failures(home, dotfiles) == []
+    assert any("Codex will skip skill-a" in failure for failure in all_failures(home, dotfiles))
 
 
 def test_relative_symlinks_resolve_into_repository(tmp_path: Path) -> None:
@@ -77,6 +78,85 @@ def test_relative_symlinks_resolve_into_repository(tmp_path: Path) -> None:
     report = stow_verify.check_package_files(home, dotfiles)
 
     assert report.failures == []
+
+
+def test_stow_and_verifier_ignore_generated_python_bytecode(tmp_path: Path) -> None:
+    """Running Python before or after Stow must not require bytecode links."""
+    home, dotfiles = make_env(tmp_path)
+    source = dotfiles / "agents" / ".agents" / "skills" / "skill-a"
+    (home / ".agents" / "skills" / "skill-a").unlink()
+    repository = Path(__file__).resolve().parents[1]
+    shutil.copy2(repository / "agents" / ".stow-local-ignore", dotfiles / "agents")
+    cache = source / "scripts" / "__pycache__"
+    cache.mkdir(parents=True)
+    (cache / "tool.cpython-314.pyc").write_bytes(b"bytecode")
+    (source / "scripts" / "legacy.pyc").write_bytes(b"bytecode")
+    script = source / "scripts" / "tool.py"
+    script.write_text("pass\n", encoding="utf-8")
+    stow = shutil.which("stow")
+    assert stow is not None
+    subprocess.run(  # noqa: S603 - resolved Stow executable and isolated test directories.
+        [stow, "--no-folding", "-d", str(dotfiles), "-t", str(home), "agents"], check=True, capture_output=True, text=True
+    )
+    target = home / ".agents" / "skills" / "skill-a" / "scripts"
+    assert not (target / "__pycache__").exists()
+    assert not (target / "legacy.pyc").exists()
+    assert (target / "tool.py").is_symlink()
+    (cache / "later.pyc").write_bytes(b"bytecode")
+    assert all_failures(home, dotfiles) == ["SKILL.md is a file symlink and Codex will skip skill-a (run: just stow-restow agents)"]
+    (target / "tool.py").unlink()
+    assert any("tool.py" in failure for failure in all_failures(home, dotfiles))
+
+
+@pytest.mark.parametrize("leftover", ["bytecode", "user-file", "cache-user-file", "symlink"])
+def test_restow_recipe_migrates_file_links_to_discoverable_directory_links(tmp_path: Path, leftover: str) -> None:
+    """Restow fixes legacy links and preserves unrelated user skills."""
+    home, dotfiles = make_env(tmp_path)
+    source = dotfiles / "agents" / ".agents" / "skills" / "skill-a"
+    use_no_folding_tree(home, source)
+    legacy_manifest = home / ".agents" / "skills" / "skill-a" / "SKILL.md"
+    legacy_manifest.unlink()
+    legacy_manifest.symlink_to(os.path.relpath(source / "SKILL.md", legacy_manifest.parent))
+    cache = legacy_manifest.parent / "__pycache__"
+    cache.mkdir()
+    (cache / "old.pyc").write_bytes(b"bytecode")
+    (legacy_manifest.parent / "old.pyo").write_bytes(b"bytecode")
+    extra = legacy_manifest.parent / "notes.txt"
+    if leftover == "cache-user-file":
+        extra = cache / "notes.txt"
+    if leftover in {"user-file", "cache-user-file"}:
+        extra.write_text("preserve", encoding="utf-8")
+    elif leftover == "symlink":
+        extra.symlink_to(home / "missing")
+    personal = home / ".agents" / "skills" / "personal" / "SKILL.md"
+    personal.parent.mkdir()
+    personal.write_text("personal skill\n", encoding="utf-8")
+    repository = Path(__file__).resolve().parents[1]
+    shutil.copy2(repository / "justfile", dotfiles / "justfile")
+    (dotfiles / "bin").mkdir()
+    shutil.copy2(repository / "bin" / "restow-agents.sh", dotfiles / "bin")
+    just = shutil.which("just")
+    assert just is not None
+    for _ in range(2):
+        result = subprocess.run(  # noqa: S603 - resolved Just executable and isolated test home.
+            [just, "stow-restow", "agents"], check=False, capture_output=True, text=True, cwd=dotfiles, env={**os.environ, "HOME": str(home)}
+        )
+        if leftover != "bytecode":
+            assert result.returncode != 0
+            assert "manual review" in result.stderr
+            if leftover == "symlink":
+                assert extra.is_symlink()
+            else:
+                assert extra.read_text(encoding="utf-8") == "preserve"
+            assert personal.read_text(encoding="utf-8") == "personal skill\n"
+            return
+        assert result.returncode == 0, result.stderr
+    manifest = home / ".agents" / "skills" / "skill-a" / "SKILL.md"
+    assert manifest.is_file()
+    assert not manifest.is_symlink()
+    assert manifest.resolve() == source / "SKILL.md"
+    assert personal.read_text(encoding="utf-8") == "personal skill\n"
+    assert all_failures(home, dotfiles) == []
 
 
 def test_missing_stowed_file_fails(tmp_path: Path) -> None:

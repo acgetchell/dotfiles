@@ -8,7 +8,13 @@ import sys
 import tempfile
 from pathlib import Path
 
-CARGO_PIN_TO_PACKAGE = {"dprint_version": "dprint", "just_version": "just", "rumdl_version": "rumdl", "zizmor_version": "zizmor"}
+CARGO_PIN_TO_PACKAGE = {
+    "cargo_update_version": "cargo-update",
+    "dprint_version": "dprint",
+    "just_version": "just",
+    "rumdl_version": "rumdl",
+    "zizmor_version": "zizmor",
+}
 PIN_TO_TOOL = {**CARGO_PIN_TO_PACKAGE, "uv_version": "uv"}
 MANAGED_CARGO_PACKAGES = frozenset(CARGO_PIN_TO_PACKAGE.values())
 PACKAGE_HEADER = re.compile(r"^(?P<package>[A-Za-z0-9_-]+) v(?P<version>[^\s:]+):$", re.MULTILINE)

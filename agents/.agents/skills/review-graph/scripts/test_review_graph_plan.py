@@ -1960,7 +1960,8 @@ def test_isolated_completion_rejects_retained_isolation_failure() -> None:
     assert result.blockers == ("isolation failures occurred: worker creation failed",)
 
 
-@pytest.mark.parametrize("profile", ["adaptive", "", cast("str", [])])
+# Deliberately violate the type contract to exercise runtime rejection.
+@pytest.mark.parametrize("profile", ["adaptive", "", cast("str", cast("object", []))])
 def test_completion_rejects_nonexact_execution_profile(profile: str) -> None:
     result = assess_completion(replace(_complete_evidence(execution_profile="grouped", isolation_failures=()), execution_profile=profile))
 

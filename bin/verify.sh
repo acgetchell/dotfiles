@@ -21,9 +21,17 @@ else
   fail "brew bundle check (run: brew bundle install --file=$DOTFILES_DIR/Brewfile)"
 fi
 
+echo "==> Oh My Zsh"
+if [[ -f "$HOME/.oh-my-zsh/oh-my-zsh.sh" ]]; then
+  pass "Oh My Zsh"
+else
+  fail "Oh My Zsh missing (run bin/bootstrap.sh)"
+fi
+
 echo "==> CLI tools (not Homebrew-managed)"
 NON_BREW_TOOLS=(
   cargo   # rustup toolchain
+  cargo-install-update # cargo-update package, required by just update
   rustc   # rustup toolchain
   just    # cargo-installed (bin/bootstrap.sh)
   rumdl   # cargo-installed (bin/bootstrap.sh)
@@ -57,6 +65,7 @@ BREW_BIN_PAIRS=(
   "ansible:ansible"
   "azure-cli:az"
   "cmake:cmake"
+  "coderabbit:coderabbit"
   "docker-desktop:docker"
   "dotnet:dotnet"
   "gh:gh"
@@ -107,8 +116,8 @@ done
 
 echo "==> Pinned tool versions"
 if command -v just >/dev/null 2>&1; then
-  for tool in dprint just rumdl uv zizmor; do
-    pin_name="${tool}_version"
+  for tool in cargo-update dprint just rumdl uv zizmor; do
+    pin_name="${tool//-/_}_version"
     if ! expected_version="$(just --justfile "$DOTFILES_DIR/justfile" --evaluate "$pin_name")"; then
       fail "could not resolve $pin_name from $DOTFILES_DIR/justfile"
       continue
@@ -118,8 +127,12 @@ if command -v just >/dev/null 2>&1; then
       continue
     fi
     actual_version=""
-    if command -v "$tool" >/dev/null 2>&1; then
-      actual_version="$("$tool" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+    executable="$tool"
+    if [[ "$tool" == cargo-update ]]; then
+      executable=cargo-install-update
+    fi
+    if command -v "$executable" >/dev/null 2>&1; then
+      actual_version="$("$executable" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
     fi
     if [[ "$actual_version" == "$expected_version" ]]; then
       pass "$tool $actual_version"
