@@ -114,7 +114,7 @@ def parse_frontmatter(frontmatter_text: str) -> tuple[dict[str, object] | None, 
         keys = ", ".join(repr(key) for key in non_string_keys)
         return None, f"Frontmatter keys must be strings: {keys}"
 
-    return cast("dict[str, object]", frontmatter), ""
+    return {key: value for key, value in frontmatter.items() if isinstance(key, str)}, ""
 
 
 def validate_frontmatter(frontmatter: dict[str, object]) -> tuple[bool, str]:

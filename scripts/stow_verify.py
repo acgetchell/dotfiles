@@ -111,12 +111,18 @@ def check_stowed_skill(link: Path, source: Path, report: Report) -> bool:
     if not link.is_dir():
         report.fail(f"skill not stowed: {source.name} (run: just stow-apply agents)")
         return False
+    if link.resolve() == source.resolve():
+        # An ancestor such as ~/.agents/skills may itself be a directory link.
+        return True
 
     all_stowed = True
     for source_file in sorted(source.rglob("*")):
+        relative = source_file.relative_to(source)
+        if "__pycache__" in relative.parts or source_file.suffix in {".pyc", ".pyo"}:
+            continue
         if source_file.is_dir() and not source_file.is_symlink():
             continue
-        target_file = link / source_file.relative_to(source)
+        target_file = link / relative
         all_stowed = check_stowed_skill_file(target_file, source_file, report) and all_stowed
     return all_stowed
 
@@ -143,6 +149,9 @@ def check_skills(home: Path, dotfiles_dir: Path) -> Report:
     for entry in sorted(repo_skills_dir.iterdir()):
         if not entry.is_dir():
             continue
+        if (skills_dir / entry.name / "SKILL.md").is_symlink():
+            report.fail(f"SKILL.md is a file symlink and Codex will skip {entry.name} (run: just stow-restow agents)")
+            all_stowed = False
         all_stowed = check_stowed_skill(skills_dir / entry.name, entry, report) and all_stowed
 
     if all_stowed:

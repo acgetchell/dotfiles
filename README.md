@@ -44,9 +44,10 @@ git clone https://github.com/acgetchell/dotfiles.git ~/projects/dotfiles
 
 1. installs Homebrew if missing;
 2. runs `brew bundle install --file=Brewfile`;
-3. stows `git`, `zsh`, and `agents`;
-4. installs pinned cargo tools such as `dprint`, `just`, `rumdl`, and `zizmor`;
-5. runs `bin/verify.sh`.
+3. installs Oh My Zsh if missing, preserving existing shell configuration;
+4. stows `git`, `zsh`, and `agents`;
+5. installs pinned Cargo tools: `cargo-update`, `dprint`, `just`, `rumdl`, and `zizmor`;
+6. runs `bin/verify.sh`.
 
 After bootstrap, the equivalent discoverable setup entry point is:
 
@@ -57,11 +58,11 @@ just setup
 
 `just setup` runs `bin/bootstrap.sh` with `DOTFILES_DIR` pointed at the current checkout, then syncs the uv-managed developer tools.
 
-The repository's exact host-tool pins for `dprint`, `just`, `rumdl`, `uv`, and
+The repository's exact host-tool pins for `cargo-update`, `dprint`, `just`, `rumdl`, `uv`, and
 `zizmor` live in `justfile`. Bootstrap and CI use
 `bin/resolve-just-version.sh` only for the pre-`just` bootstrap step; after
 `just` is available, consumers resolve pins with
-`just --evaluate <tool>_version`.
+`just --evaluate <tool>_version` (use `cargo_update_version` for `cargo-update`).
 
 ## Day-to-day stow commands
 
@@ -95,12 +96,13 @@ just stow-verify
 
 Use `--adopt` only when intentionally moving an existing `$HOME` file into dotfiles. Always inspect the resulting package file changes before committing.
 
-The `just` stow recipes always pass `--no-folding`, `-d "$PWD"`, and
-`-t "$HOME"`. Keeping intermediate directories real allows independently
-managed Stow packages to contribute disjoint files below the same target
-directory. If running raw `stow`, pass these options explicitly; otherwise
-Stow can fold a whole directory into one repository or target the parent of the
-current directory.
+The `just` stow recipes always pass `-d "$PWD"` and `-t "$HOME"`.
+The `git` and `zsh` packages also use `--no-folding`. The `agents` package
+allows directory folding because Codex discovers symlinked skill folders but
+skips individual `SKILL.md` symlinks. Run `just stow-restow agents` to migrate
+an older installation that used file-level links. `just stow-verify` flags
+that incompatible layout. If running raw `stow`, use the same package-specific
+options and explicit source and target directories.
 
 For new package-owned files such as Codex skills, create the file under the package, run `just stow-check <package>`, then run `just stow-apply <package>` when the dry run looks right. `stow-check` is the only simulation-mode recipe; `stow-apply` and `stow-apply-all` stow missing or new links, while `stow-restow` and `stow-restow-all` perform full unlink/link refreshes. Mutating recipes print the Stow link operations they perform. `just stow-all` remains as an alias for `just stow-apply-all`. Stow recipes do not stage, commit, or print source-control status.
 
@@ -111,7 +113,7 @@ After applying or restowing packages, `just stow-verify` (backed by `scripts/sto
 `Brewfile` is intentionally foundational: core CLI tools, developer casks, and apps expected on every machine.
 Homebrew owns `pkgx`, `rustup`, and the `justfile`-pinned `uv`; Cargo owns the
 `justfile`-pinned, directly invokable `dprint`, `just`, `rumdl`, and `zizmor`
-binaries.
+binaries, plus `cargo-update`, which provides `cargo-install-update`.
 Repository-scoped build tools, formatters, linters, and occasional maintenance
 tools should be supplied ephemerally through pkgx or the repository's
 language-specific environment rather than added here.
@@ -140,10 +142,10 @@ brew bundle dump --file=~/projects/dotfiles/Brewfile.local --force --describe
 `just brew-cleanup-preview` never passes Homebrew's destructive `--force` flag. Homebrew returns status 1 when the preview finds cleanup candidates; the recipe treats that documented result as a successful preview while preserving actual errors. `just brew-cleanup` asks for confirmation before passing `--force` and applying that cleanup.
 
 `just update` upgrades only dependencies declared by the Brewfile and uv lock plus
-the Cargo-installed `dprint`, `just`, `rumdl`, and `zizmor` tools owned by
+the Cargo-installed `cargo-update`, `dprint`, `just`, `rumdl`, and `zizmor` tools owned by
 `bootstrap.sh`. It then atomically reconciles their `justfile` pins, including
 the Homebrew-managed `uv` version. The Cargo tool update requires
-`cargo-install-update` from the `cargo-update` package.
+`cargo-install-update` from the `cargo-update` package, installed by bootstrap and checked by `bin/verify.sh`.
 
 `bin/verify.sh` derives its cask and CLI checks from the Brewfile, so removing an entry there never causes a stale verify failure. It also surfaces `brew missing` output as warnings; some casks (e.g. `mactex`) declare Homebrew dependencies they actually bundle themselves, so those lines are informational rather than fatal.
 

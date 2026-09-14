@@ -8,10 +8,11 @@ export UV_CACHE_DIR := env_var_or_default("UV_CACHE_DIR", ".uv-cache")
 python_fixture_paths := "tests/semgrep"
 python_primary_paths := "agents/.agents/skills scripts"
 python_paths := python_primary_paths + " " + python_fixture_paths
+cargo_update_version := "22.1.1"
 dprint_version := "0.57.4"
 just_version := "1.58.0"
 rumdl_version := "0.2.69"
-uv_version := "0.12.10"
+uv_version := "0.12.13"
 zizmor_version := "1.30.0"
 
 _ensure-actionlint:
@@ -352,7 +353,7 @@ update-cargo-tools: _ensure-brew
 
     if ! command -v cargo-install-update >/dev/null 2>&1; then
         echo "'cargo-install-update' not found. Install it with:"
-        echo "   cargo install --locked cargo-update"
+        echo "   Run bin/bootstrap.sh or cargo install --locked cargo-update --version {{ cargo_update_version }}"
         exit 1
     fi
 
@@ -363,7 +364,7 @@ update-cargo-tools: _ensure-brew
     fi
     "$uv_executable" run --locked --no-sync python scripts/update_tool_pins.py --check-uv-version --uv-executable "$uv_executable"
 
-    packages=(dprint just rumdl zizmor)
+    packages=(cargo-update dprint just rumdl zizmor)
     cargo install-update --locked "${packages[@]}"
     "$uv_executable" run --locked python scripts/update_tool_pins.py --justfile justfile --uv-executable "$uv_executable"
 
@@ -390,7 +391,7 @@ update-dependencies: _ensure-brew
     "$uv_executable" sync --locked --group dev
 
 shell-check:
-    bash -n bin/bootstrap.sh bin/macos-defaults.sh bin/resolve-just-version.sh bin/verify.sh
+    bash -n bin/bootstrap.sh bin/macos-defaults.sh bin/resolve-just-version.sh bin/restow-agents.sh bin/verify.sh
 
 skill-check skill: _ensure-uv
     uv run --locked python scripts/skill_validate.py "{{ skill }}"
@@ -401,7 +402,11 @@ stow-adopt package:
     package='{{ package }}'
     case "$package" in git|zsh|agents) ;; *) echo "Unsupported stow package: $package" >&2; exit 2 ;; esac
     [ -d "$package" ] || { echo "Unknown stow package: $package" >&2; exit 2; }
-    stow --no-folding -d "$PWD" -t "$HOME" --adopt -v -R "$package"
+    stow_options=(-d "$PWD" -t "$HOME")
+    if [[ "$package" != agents ]]; then
+        stow_options+=(--no-folding)
+    fi
+    stow "${stow_options[@]}" --adopt -v -R "$package"
     just stow-check "$package"
 
 stow-all:
@@ -413,7 +418,11 @@ stow-apply package:
     package='{{ package }}'
     case "$package" in git|zsh|agents) ;; *) echo "Unsupported stow package: $package" >&2; exit 2 ;; esac
     [ -d "$package" ] || { echo "Unknown stow package: $package" >&2; exit 2; }
-    stow --no-folding -d "$PWD" -t "$HOME" -v -S "$package"
+    stow_options=(-d "$PWD" -t "$HOME")
+    if [[ "$package" != agents ]]; then
+        stow_options+=(--no-folding)
+    fi
+    stow "${stow_options[@]}" -v -S "$package"
 
 stow-apply-all:
     #!/usr/bin/env bash
@@ -428,7 +437,11 @@ stow-check package:
     package='{{ package }}'
     case "$package" in git|zsh|agents) ;; *) echo "Unsupported stow package: $package" >&2; exit 2 ;; esac
     [ -d "$package" ] || { echo "Unknown stow package: $package" >&2; exit 2; }
-    stow --no-folding -d "$PWD" -t "$HOME" -n -v -S "$package"
+    stow_options=(-d "$PWD" -t "$HOME")
+    if [[ "$package" != agents ]]; then
+        stow_options+=(--no-folding)
+    fi
+    stow "${stow_options[@]}" -n -v -S "$package"
 
 stow-delete package:
     #!/usr/bin/env bash
@@ -436,7 +449,11 @@ stow-delete package:
     package='{{ package }}'
     case "$package" in git|zsh|agents) ;; *) echo "Unsupported stow package: $package" >&2; exit 2 ;; esac
     [ -d "$package" ] || { echo "Unknown stow package: $package" >&2; exit 2; }
-    stow --no-folding -d "$PWD" -t "$HOME" -v -D "$package"
+    stow_options=(-d "$PWD" -t "$HOME")
+    if [[ "$package" != agents ]]; then
+        stow_options+=(--no-folding)
+    fi
+    stow "${stow_options[@]}" -v -D "$package"
 
 stow-restow package:
     #!/usr/bin/env bash
@@ -444,7 +461,15 @@ stow-restow package:
     package='{{ package }}'
     case "$package" in git|zsh|agents) ;; *) echo "Unsupported stow package: $package" >&2; exit 2 ;; esac
     [ -d "$package" ] || { echo "Unknown stow package: $package" >&2; exit 2; }
-    stow --no-folding -d "$PWD" -t "$HOME" -v -R "$package"
+    stow_options=(-d "$PWD" -t "$HOME")
+    if [[ "$package" != agents ]]; then
+        stow_options+=(--no-folding)
+    fi
+    if [[ "$package" == agents ]]; then
+        bash "$PWD/bin/restow-agents.sh" "$PWD"
+        exit 0
+    fi
+    stow "${stow_options[@]}" -v -R "$package"
 
 stow-restow-all:
     #!/usr/bin/env bash

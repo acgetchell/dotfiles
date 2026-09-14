@@ -1,0 +1,21 @@
+# Keep Stow's default ignores when adding package-specific generated files.
+RCS
+.+,v
+CVS
+\.\#.+
+\.cvsignore
+\.svn
+_darcs
+\.hg
+\.git
+\.gitignore
+\.gitmodules
+.+~
+\#.*\#
+^/README.*
+^/LICENSE.*
+^/COPYING
+
+# Python execution artifacts are local to each checkout.
+__pycache__
+.+\.py[co]
