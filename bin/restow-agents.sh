@@ -3,10 +3,31 @@
 set -euo pipefail
 
 DOTFILES_DIR="${1:?dotfiles directory required}"
+DOTFILES_DIR="$(cd "$DOTFILES_DIR" && pwd -P)"
+restore_links() {
+  status=$?
+  trap - EXIT
+  if [[ "$status" -ne 0 ]]; then
+    echo "==> Restoring managed skill links after failed migration" >&2
+    if ! stow -d "$DOTFILES_DIR" -t "$HOME" -S agents; then
+      echo "==> Could not restore all links; resolve Stow conflicts and rerun just stow-apply agents." >&2
+    fi
+  fi
+  exit "$status"
+}
 stow -d "$DOTFILES_DIR" -t "$HOME" -D agents
+trap restore_links EXIT
 for source in "$DOTFILES_DIR/agents/.agents/skills/"*; do
   target="$HOME/.agents/skills/${source##*/}"
   if [[ -d "$source" && -d "$target" && ! -L "$target" ]]; then
+    # Unlink only bytecode symlinks resolving inside this repository.
+    while IFS= read -r -d '' artifact; do
+      if resolved="$(realpath "$artifact" 2>/dev/null)"; then
+        case "$resolved" in
+        "$DOTFILES_DIR"/*) rm "$artifact" ;;
+        esac
+      fi
+    done < <(find "$target" -type l \( -name '*.pyc' -o -name '*.pyo' \) -print0)
     # Do not follow symlinks or remove unknown files, even inside __pycache__.
     find "$target" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
     find "$target" -depth -type d -empty -delete
@@ -26,3 +47,4 @@ for source in "$DOTFILES_DIR/agents/.agents/skills/"*; do
     exit 1
   fi
 done
+trap - EXIT

@@ -108,7 +108,24 @@ def test_stow_and_verifier_ignore_generated_python_bytecode(tmp_path: Path) -> N
     assert any("tool.py" in failure for failure in all_failures(home, dotfiles))
 
 
-@pytest.mark.parametrize("leftover", ["bytecode", "user-file", "cache-user-file", "symlink"])
+def prepare_leftover(target: Path, cache: Path, dotfiles: Path, leftover: str) -> Path:
+    extra = target / "notes.txt"
+    if leftover == "cache-user-file":
+        extra = cache / "notes.txt"
+    if leftover in {"user-file", "cache-user-file"}:
+        extra.write_text("preserve", encoding="utf-8")
+    elif leftover == "external-bytecode":
+        external = dotfiles.with_name(dotfiles.name + "-external")
+        external.mkdir()
+        (external / "outside.pyc").write_bytes(b"preserve")
+        extra = cache / "outside.pyc"
+        extra.symlink_to(external / "outside.pyc")
+    elif leftover == "symlink":
+        extra.symlink_to(target / "missing")
+    return extra
+
+
+@pytest.mark.parametrize("leftover", ["bytecode", "user-file", "cache-user-file", "symlink", "external-bytecode"])
 def test_restow_recipe_migrates_file_links_to_discoverable_directory_links(tmp_path: Path, leftover: str) -> None:
     """Restow fixes legacy links and preserves unrelated user skills."""
     home, dotfiles = make_env(tmp_path)
@@ -121,13 +138,7 @@ def test_restow_recipe_migrates_file_links_to_discoverable_directory_links(tmp_p
     cache.mkdir()
     (cache / "old.pyc").write_bytes(b"bytecode")
     (legacy_manifest.parent / "old.pyo").write_bytes(b"bytecode")
-    extra = legacy_manifest.parent / "notes.txt"
-    if leftover == "cache-user-file":
-        extra = cache / "notes.txt"
-    if leftover in {"user-file", "cache-user-file"}:
-        extra.write_text("preserve", encoding="utf-8")
-    elif leftover == "symlink":
-        extra.symlink_to(home / "missing")
+    extra = prepare_leftover(legacy_manifest.parent, cache, dotfiles, leftover)
     personal = home / ".agents" / "skills" / "personal" / "SKILL.md"
     personal.parent.mkdir()
     personal.write_text("personal skill\n", encoding="utf-8")
@@ -144,15 +155,19 @@ def test_restow_recipe_migrates_file_links_to_discoverable_directory_links(tmp_p
         if leftover != "bytecode":
             assert result.returncode != 0
             assert "manual review" in result.stderr
-            if leftover == "symlink":
+            if leftover in {"symlink", "external-bytecode"}:
                 assert extra.is_symlink()
             else:
                 assert extra.read_text(encoding="utf-8") == "preserve"
             assert personal.read_text(encoding="utf-8") == "personal skill\n"
-            return
+            assert legacy_manifest.is_file()
+            assert legacy_manifest.resolve() == source / "SKILL.md"
+            continue
         assert result.returncode == 0, result.stderr
     manifest = home / ".agents" / "skills" / "skill-a" / "SKILL.md"
     assert manifest.is_file()
+    if leftover != "bytecode":
+        return
     assert not manifest.is_symlink()
     assert manifest.resolve() == source / "SKILL.md"
     assert personal.read_text(encoding="utf-8") == "personal skill\n"
@@ -364,3 +379,36 @@ def test_main_returns_one_and_reports_failures(tmp_path: Path, capsys: pytest.Ca
     assert code == 1
     assert ".zshrc missing" in captured.out
     assert "FAILURES detected" in captured.err
+
+
+@pytest.mark.parametrize("suffix", [".pyc", ".pyo"])
+def test_restow_removes_legacy_repository_bytecode_symlinks(tmp_path: Path, suffix: str) -> None:
+    """Clean ignored legacy links without touching their repository targets."""
+    root = tmp_path / "paths with spaces"
+    home, dotfiles = make_env(root)
+    source = dotfiles / "agents" / ".agents" / "skills" / "skill-a"
+    use_no_folding_tree(home, source)
+    manifest = home / ".agents" / "skills" / "skill-a" / "SKILL.md"
+    manifest.unlink()
+    manifest.symlink_to(os.path.relpath(source / "SKILL.md", manifest.parent))
+    repository = Path(__file__).resolve().parents[1]
+    shutil.copy2(repository / "agents" / ".stow-local-ignore", dotfiles / "agents")
+    cache = source / "__pycache__"
+    cache.mkdir()
+    artifact = cache / f"legacy file{suffix}"
+    artifact.write_bytes(b"repository bytecode")
+    target_cache = manifest.parent / "__pycache__"
+    target_cache.mkdir()
+    (target_cache / artifact.name).symlink_to(os.path.relpath(artifact, target_cache))
+    for _ in range(2):
+        result = subprocess.run(  # noqa: S603 - fixed repository helper and isolated fixture.
+            ["/bin/bash", str(repository / "bin" / "restow-agents.sh"), str(dotfiles)],
+            check=False,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "HOME": str(home)},
+        )
+        assert result.returncode == 0, result.stderr
+        assert manifest.is_file()
+        assert not manifest.is_symlink()
+        assert artifact.read_bytes() == b"repository bytecode"
