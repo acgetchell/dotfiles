@@ -11,9 +11,9 @@ python_paths := python_primary_paths + " " + python_fixture_paths
 cargo_update_version := "22.1.1"
 dprint_version := "0.57.4"
 just_version := "1.58.0"
-rumdl_version := "0.2.69"
+rumdl_version := "0.2.73"
 uv_version := "0.12.13"
-zizmor_version := "1.30.0"
+zizmor_version := "1.30.1"
 
 _ensure-actionlint:
     #!/usr/bin/env bash
