@@ -82,6 +82,7 @@ from review_graph_plan import (
     repository_review_proof_expectation,
     review_source_state_blockers,
     validation_evidence_expectation,
+    validation_execution_result_blockers,
     validation_requirements_from_document,
 )
 from review_graph_reuse import (
@@ -3114,6 +3115,17 @@ def _validate_worker_payload_bytes(contract_document: dict[str, Any], payload_by
             if blockers:
                 msg = "worker payload failed owned-scope validation: " + "; ".join(blockers)
                 raise ValueError(msg)
+        else:
+            blockers = tuple(
+                blocker
+                for index, execution in enumerate(payload["executions"])
+                for blocker in validation_execution_result_blockers(
+                    result=execution["result"], exit_code=execution["exit_code"], elapsed=execution["elapsed"], label=f"$.executions[{index}]"
+                )
+            )
+            if blockers:
+                msg = "worker payload failed execution-result validation: " + "; ".join(blockers)
+                raise ValueError(msg)
         return payload
     if contract == "native-independent-review":
         _independent_input_sections(payload_bytes)
@@ -5088,7 +5100,7 @@ def finalize_proof(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, P
         preblockers.append("duplicate evidence sources: " + ", ".join(sorted(duplicate_evidence)))
 
     node_candidates: dict[str, list[str]] = {}
-    satisfying_ids: set[str] = set()
+    eligible_ids: set[str] = set()
     planned_by_id = {node.node_id: node for node in plan.actual_worker_nodes}
     exact_reuse_ids = {evidence_id for _requirement_id, evidence_id in expectation.exact_reused_review_evidence}
     for evidence_id, (kind, record_expectation, evidence, _content, _normalized) in loaded.items():
@@ -5104,11 +5116,12 @@ def finalize_proof(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, P
                 msg = f"validation source has mismatched typed evidence: {evidence_id}"
                 raise TypeError(msg)
             assessment = assess_validation_evidence(record_expectation, evidence)
-        if assessment.satisfies_requirements:
-            satisfying_ids.add(evidence_id)
+        # Proof completeness records a verified failed execution without calling it a pass.
+        if assessment.satisfies_requirements or (kind == "validation" and assessment.feasible and evidence.status == "failed"):
+            eligible_ids.add(evidence_id)
             planned_node = planned_by_id.get(evidence.node_id)
             if planned_node is None and evidence_id not in exact_reuse_ids:
-                preblockers.append(f"current satisfying evidence maps to an unplanned node: {evidence_id} -> {evidence.node_id}")
+                preblockers.append(f"current proof-eligible evidence maps to an unplanned node: {evidence_id} -> {evidence.node_id}")
                 continue
             if planned_node is not None and record_expectation.requirement_ids != planned_node.requirement_ids:
                 preblockers.append(f"evidence requirement IDs do not match planned node {evidence.node_id}: {evidence_id}")
@@ -5126,10 +5139,10 @@ def finalize_proof(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, P
         if len(candidates) == 1:
             node_evidence[node.node_id] = candidates[0]
         elif len(candidates) > 1:
-            preblockers.append(f"multiple current satisfying evidence records map to node {node.node_id}: " + ", ".join(sorted(candidates)))
+            preblockers.append(f"multiple current proof-eligible evidence records map to node {node.node_id}: " + ", ".join(sorted(candidates)))
 
     reused_mapping = dict(expectation.exact_reused_review_evidence)
-    missing_reuse = tuple(sorted(evidence_id for evidence_id in reused_mapping.values() if evidence_id not in satisfying_ids))
+    missing_reuse = tuple(sorted(evidence_id for evidence_id in reused_mapping.values() if evidence_id not in eligible_ids))
     if missing_reuse:
         preblockers.append("exact routed reuse lacks current satisfying evidence: " + ", ".join(missing_reuse))
 
@@ -5151,7 +5164,7 @@ def finalize_proof(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, P
         sorted(
             {
                 *(evidence_id for node_id, evidence_id in planned_node_evidence if node_id in review_node_ids),
-                *(evidence_id for _requirement_id, evidence_id in expectation.exact_reused_review_evidence if evidence_id in satisfying_ids),
+                *(evidence_id for _requirement_id, evidence_id in expectation.exact_reused_review_evidence if evidence_id in eligible_ids),
             }
         )
     )

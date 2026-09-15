@@ -8,7 +8,7 @@ description: "Plan and execute repository validation against a captured source s
 Produce validation evidence, never review findings or fixes. Select the mode
 before loading references:
 
-- For a `review-graph` dispatch, read only
+- For a `review-graph` dispatch, start with
   [references/graph-dispatch.md](references/graph-dispatch.md) and return its
   compact `ValidationPayload`. The graph compiler creates and verifies the
   native artifact and evidence envelope.

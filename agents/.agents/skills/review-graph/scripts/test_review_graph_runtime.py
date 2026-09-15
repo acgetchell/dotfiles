@@ -3555,7 +3555,130 @@ def test_compile_review_rechecks_owned_audit_scope() -> None:
         compile_review({"dispatch": dispatch, "payload": payload})
 
 
-def test_compact_branch_runs_from_bootstrap_through_journal_and_final_proof(tmp_path: Path) -> None:  # noqa: PLR0915
+_MISSING_ELAPSED = object()
+
+
+def _execution_payload(entry: dict[str, Any], result: str, exit_code: object, elapsed: object) -> dict[str, Any]:
+    unit = entry["dispatch"]["validation_unit"]
+    return {
+        "status": "blocked" if result == "not-run" else result,
+        "executions": [
+            {
+                "artifact_paths": [],
+                "command": unit["commands"][0],
+                "elapsed": elapsed,
+                "evidence": "fixture command result or reason execution could not start",
+                "executor": entry["node_id"],
+                "exit_code": exit_code,
+                "result": result,
+                "working_directory": unit["working_directories"][0],
+            }
+        ],
+        "limitations": ["fixture execution unavailable"] if result in {"blocked", "not-run"} else [],
+    }
+
+
+@pytest.mark.parametrize(
+    ("result", "exit_code", "elapsed"),
+    [
+        ("passed", 0, "0s"),
+        ("passed", "0", 0.125),
+        ("passed", 0, 1e-7),
+        ("passed", 0, "250ms"),
+        ("passed", 0, "1.5m"),
+        ("passed", 0, "0.25h"),
+        ("passed", 0, " 3.2e1 s "),
+        ("failed", 1, "3s"),
+        ("failed", -9, 1),
+        ("blocked", None, None),
+        ("blocked", "none", "none"),
+        ("blocked", 2, "1s"),
+        ("not-run", None, None),
+        ("not-run", "none", "none"),
+    ],
+)
+def test_validation_execution_fields_survive_publication_and_compilation(tmp_path: Path, result: str, exit_code: object, elapsed: object) -> None:
+    document, dispatches = _worker_input_fixture(tmp_path)
+    entry = next(item for item in dispatches["dispatches"] if item["result_contract"] == "compact-validation")
+    contract = json.loads(Path(entry["worker_payload_contract_path"]).read_bytes())
+    payload = _execution_payload(entry, result, exit_code, elapsed)
+    payload_bytes = json.dumps(payload).encode()
+    approval = review_worker_payload_write(contract, payload_bytes)
+    persist_worker_payload_bytes(contract, payload_bytes, approval_identity=approval["approval_identity"])
+    dispatch = {**entry["dispatch"], "before_state": document["source_state"], "after_state": document["source_state"]}
+
+    content, metadata = compile_validation({"dispatch": dispatch, "payload": json.loads(Path(entry["worker_payload_path"]).read_bytes())})
+
+    assert metadata["evidence"]["status"] == payload["status"]
+    assert metadata["normalized_record"]["executions"] == payload["executions"]
+    assert f"  - Result: {result}".encode() in content
+
+
+@pytest.mark.parametrize(
+    ("result", "exit_code", "elapsed", "field"),
+    [
+        ("passed", 0, None, "elapsed"),
+        ("passed", 0, "none", "elapsed"),
+        ("passed", 0, "", "elapsed"),
+        ("passed", 0, "  ", "elapsed"),
+        ("passed", 0, "missing-field", "elapsed"),
+        ("passed", 0, _MISSING_ELAPSED, "elapsed"),
+        ("passed", 0, -1, "elapsed"),
+        ("passed", 0, float("nan"), "elapsed"),
+        ("passed", 0, float("inf"), "elapsed"),
+        ("passed", 0, "1e309s", "elapsed"),
+        ("passed", 0, "1e308h", "elapsed"),
+        ("passed", 0, "1.2.3s", "elapsed"),
+        ("passed", 0, "3s extra", "elapsed"),
+        ("passed", 0, "3\ns", "elapsed"),
+        ("passed", 0, "\n3s", "elapsed"),
+        ("failed", 1, None, "elapsed"),
+        ("failed", 1, "none", "elapsed"),
+        ("failed", 1, "missing-field", "elapsed"),
+        ("failed", 1, _MISSING_ELAPSED, "elapsed"),
+        ("failed", 1, "-1s", "elapsed"),
+        ("failed", 1, "NaN", "elapsed"),
+        ("failed", 1, "inf", "elapsed"),
+        ("blocked", None, "-1s", "elapsed"),
+        ("blocked", None, "", "elapsed"),
+        ("passed", 1, "1s", "exit_code"),
+        ("passed", None, "1s", "exit_code"),
+        ("failed", 0, "1s", "exit_code"),
+        ("failed", "none", "1s", "exit_code"),
+        ("blocked", 0, None, "exit_code"),
+        ("not-run", 1, None, "exit_code"),
+        ("not-run", None, "1s", "elapsed"),
+    ],
+)
+def test_invalid_execution_fields_get_no_approval_and_preserve_persisted_evidence(
+    tmp_path: Path, result: str, exit_code: object, elapsed: object, field: str
+) -> None:
+    document, dispatches = _worker_input_fixture(tmp_path)
+    entry = next(item for item in dispatches["dispatches"] if item["result_contract"] == "compact-validation")
+    contract = json.loads(Path(entry["worker_payload_contract_path"]).read_bytes())
+    valid_bytes = json.dumps(_execution_payload(entry, "passed", 0, "1s")).encode()
+    approval = review_worker_payload_write(contract, valid_bytes)
+    persist_worker_payload_bytes(contract, valid_bytes, approval_identity=approval["approval_identity"])
+    payload = _execution_payload(entry, result, exit_code, elapsed)
+    if elapsed is _MISSING_ELAPSED:
+        del payload["executions"][0]["elapsed"]
+    payload_bytes = json.dumps(payload).encode()
+    target = Path(entry["worker_payload_path"])
+    before = {path: path.read_bytes() for path in target.parent.iterdir() if path.is_file()}
+
+    with pytest.raises(ValueError, match=rf"\$\.executions\[0\].{field}"):
+        review_worker_payload_write(contract, payload_bytes)
+    with pytest.raises(ValueError, match=rf"\$\.executions\[0\].{field}"):
+        persist_worker_payload_bytes(contract, payload_bytes, approval_identity=approval["approval_identity"])
+    assert {path: path.read_bytes() for path in target.parent.iterdir() if path.is_file()} == before
+
+    dispatch = {**entry["dispatch"], "before_state": document["source_state"], "after_state": document["source_state"]}
+    with pytest.raises(ValueError, match="compiled validation artifact failed verification"):
+        compile_validation({"dispatch": dispatch, "payload": payload})
+
+
+@pytest.mark.parametrize("validation_status", ["passed", "failed"])
+def test_compact_branch_runs_from_bootstrap_through_journal_and_final_proof(tmp_path: Path, validation_status: str) -> None:  # noqa: PLR0915
     git = shutil.which("git")
     assert git is not None
     repository = tmp_path / "repository"
@@ -3609,19 +3732,24 @@ def test_compact_branch_runs_from_bootstrap_through_journal_and_final_proof(tmp_
                         "artifact_paths": [],
                         "command": command,
                         "elapsed": "0s",
-                        "evidence": "command exited successfully",
+                        "evidence": "command exited successfully" if validation_status == "passed" else "compiler reports an undeclared dependency",
                         "executor": dispatch["node_id"],
-                        "exit_code": 0,
-                        "result": "passed",
+                        "exit_code": 0 if validation_status == "passed" else 1,
+                        "result": validation_status,
                         "working_directory": working_directory,
                     }
                     for command, working_directory in zip(unit["commands"], unit["working_directories"], strict=True)
                 ],
                 "limitations": [],
-                "status": "passed",
+                "status": validation_status,
             }
             require_schema(payload, SCHEMA_ROOT / "validation-payload-v2.schema.json")
-            content, metadata = compile_validation({"dispatch": dispatch, "payload": payload})
+            contract = json.loads(Path(entry["worker_payload_contract_path"]).read_text(encoding="utf-8"))
+            payload_bytes = json.dumps(payload).encode()
+            approval = review_worker_payload_write(contract, payload_bytes)
+            persist_worker_payload_bytes(contract, payload_bytes, approval_identity=approval["approval_identity"])
+            persisted = json.loads(Path(entry["worker_payload_path"]).read_bytes())
+            content, metadata = compile_validation({"dispatch": dispatch, "payload": persisted})
             kind = "validation"
         elif entry["result_contract"] == "native-independent-review":
             checks = "\n".join(f"- Inspected: {check}" for check in dispatch["adversarial_checks"])
@@ -3683,8 +3811,46 @@ none
                 "status": "no-findings",
                 "validation_requirements": [],
             }
+            if validation_status == "failed" and dispatch["mode"] == "audit":
+                payload["status"] = "completed"
+                payload["findings"] = [
+                    {
+                        "severity": "P1",
+                        "location": "state.rs:1",
+                        "summary": "The changed code references an undeclared dependency.",
+                        "evidence": "The compile check reports an unresolved dependency reference.",
+                        "remediation": "Declare the dependency required by the changed code.",
+                    }
+                ]
             require_schema(payload, SCHEMA_ROOT / "review-payload-v1.schema.json")
-            content, metadata = compile_review({"dispatch": dispatch, "payload": _typed_synthesis_payload(dispatch, payload, plan)})
+            payload = _typed_synthesis_payload(dispatch, payload, plan)
+            if dispatch["mode"] == "synthesis" and validation_status == "failed":
+                records = [json.loads(Path(source["metadata_path"]).read_bytes())["normalized_record"] for source in sources_by_node.values()]
+                source_findings = [
+                    {"evidence_id": record["evidence_id"], "finding_id": finding["finding_id"]}
+                    for record in records
+                    if record["evidence_id"] in dispatch["predecessor_evidence_ids"]
+                    for finding in record["findings"]
+                ]
+                assert source_findings
+                payload["status"] = "completed"
+                payload["findings"] = [
+                    {
+                        "severity": "P1",
+                        "location": "state.rs:1",
+                        "summary": "The dependency defect remains unresolved.",
+                        "evidence": "The owning review and failed compile agree on the missing dependency.",
+                        "remediation": "Declare the dependency required by the changed code.",
+                        "owner": "rust-invariant-state-transitions",
+                        "disposition": "remaining",
+                        "source_findings": source_findings,
+                    }
+                ]
+                payload["readiness_verdict"] = "not-ready"
+                payload["verdict_reasons"] = ["The required compile failed because a dependency is undeclared."]
+                for validation in payload["validation_reconciliation"]:
+                    validation["result"] = "failed"
+            content, metadata = compile_review({"dispatch": dispatch, "payload": payload})
             kind = "review"
         artifact_path = Path(entry["artifact_path"])
         metadata_path = Path(entry["metadata_path"])
@@ -3726,10 +3892,28 @@ none
 
     assert any(record["mode"] == "independent-review" for record in bundle["records"])
     assert ready["complete"] is True
-    assert final["repository_validation_status"] == "passed"
+    validator_events = [event for event in events if event["evidence"]["evidence_id"].startswith("validation:")]
+    assert validator_events
+    assert all(event["status"] == "accepted" and event["evidence"]["evidence_status"] == validation_status for event in validator_events)
+    assert final["repository_validation_status"] == validation_status
     assert final["graph_proof_status"] == "complete"
+    assert final["repository_readiness"] == ("ready" if validation_status == "passed" else "not-ready")
+    for unit in plan.coalesced_validation_units:
+        evidence_id = f"validation:{unit.node_id}"
+        assert final["proof"]["planned_node_evidence"].count((unit.node_id, evidence_id)) == 1
+        assert final["proof"]["accepted_validation_evidence_ids"].count(evidence_id) == 1
+        for requirement_id in unit.requirement_ids:
+            assert final["proof"]["validation_requirement_evidence"].count((requirement_id, evidence_id)) == 1
     assert finalize_result == 0
-    assert json.loads(final_path.read_text(encoding="utf-8"))["graph_proof_status"] == "complete"
+    journal_proof = json.loads(final_path.read_text(encoding="utf-8"))
+    assert journal_proof["graph_proof_status"] == "complete"
+    assert journal_proof["repository_validation_status"] == validation_status
+    assert journal_proof["repository_readiness"] == final["repository_readiness"]
+
+    stale_id = validator_events[0]["evidence"]["evidence_id"]
+    stale = finalize_proof({**lifecycle, "current_source_state": list(source_state), "sources": sources, "stale_evidence_ids": [stale_id]})
+    assert stale["graph_proof_status"] == "incomplete"
+    assert stale_id not in stale["proof"]["accepted_validation_evidence_ids"]
 
 
 def test_journal_and_next_ready_cli_use_persisted_artifacts(tmp_path: Path) -> None:

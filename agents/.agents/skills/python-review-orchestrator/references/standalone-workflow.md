@@ -11,13 +11,14 @@ orchestration outside `review-graph` routing mode.
   to current worktree changes.
 - When asked to fix issues, implement safe actionable fixes as each pass finds
   them.
-- Use focused validators while iterating. Run full CI only when repository
-  policy or cross-layer risk requires it.
+- Use focused validators while iterating. Run full CI when explicitly requested
+  by the user or required by repository policy or cross-layer risk.
 - Maintain one cross-skill validation ledger keyed by source/environment state,
   built artifact and installation-target identity, Python/platform/dependency
   configuration, instrumentation, and exact test selection. Use a wheel,
   sdist, installed tree, or entry-point digest when applicable. Reuse
-  still-valid evidence instead of replaying it through broader recipes.
+  still-valid evidence; record justified overlap when a required full gate
+  repeats focused regression checks, without counting independent coverage twice.
 
 ## Establish Scope And Routing
 
@@ -126,8 +127,13 @@ For each selected specialist:
 4. Record findings or an explicit no-finding result.
 5. Implement minimal fixes when authorized.
 6. Run the smallest risk-covering validator only when equivalent evidence is
-   not already valid in the shared ledger.
+   not already valid in the shared ledger. Check a regression promptly before
+   and after its fix even when a required final gate includes it.
 7. Fix validator failures before continuing or document a genuine blocker.
+
+After the fix loops, complete any required full gate on the final source state.
+Follow [full CI routing](check-routing.md#escalate-to-full-ci) for requirements
+known in advance or added after focused checks; overlap alone is not a blocker.
 
 Do not claim orchestration from one undifferentiated pass. Preserve ownership
 and evidence per selected skill.
@@ -135,6 +141,6 @@ and evidence per selected skill.
 ## Final Summary
 
 Lead with unresolved blockers. Include files changed, selected skills and
-references, meaningful skips, fixes and reconciliations, the non-overlapping
-validation ledger, untested configurations or external limitations, and git
+references, meaningful skips, fixes and reconciliations, the validation ledger
+with any justified overlap, untested configurations or external limitations, and git
 state. Return table-ready evidence when a parent requests it.

@@ -80,8 +80,12 @@ Body rules:
 Footer rules:
 
 - use `BREAKING CHANGE:` for semver-breaking behavior
-- include issue references only when visible in the staged changes or requested by the user
-- include `Co-Authored-By: Oz <oz-agent@warp.dev>` when the agent is actually committing or the current workflow requires attribution
+- carry forward issue identifiers established by the task conversation, staged diff, or verified repository metadata; an issue number does not need to appear in changed files, and must never be invented
+- when the staged commit fully resolves a known issue, automatically add a closing footer such as `Closes #123`; no separate request for the footer is needed. Assess completion against the issue requirements already available in context, reading the issue when that context is insufficient
+- for partial or related work, use a non-closing reference such as `Refs #123` rather than claiming resolution
+- keep issue-closing footers separate from pull-request references in the subject; one does not substitute for the other
+- omit `Co-Authored-By` trailers by default, including when an agent runs `git commit`; add one only when the user explicitly requests it and provides or confirms the actual contributor's name and email
+- never hard-code or infer a co-author identity from this skill, the tool being used, or the act of committing
 
 ## Keep a Changelog mapping
 
@@ -97,7 +101,7 @@ When no repo-specific mapping exists, use:
 - `security` or `fix` with a security scope for `Security`
 - `docs`, `test`, `build`, `ci`, `chore`, or `style` only when the change is intentionally not user-facing or the repo maps those types into the changelog
 
-If staged changes mix unrelated Keep a Changelog categories, recommend splitting the commit. If the user still wants one commit, choose the dominant semver-relevant type and describe secondary changes in the body.
+The user's preferred workflow is one commit message covering the full staged diff, even when it spans multiple concerns or Keep a Changelog categories. Do not recommend splitting commits or return multiple messages unless the user explicitly asks. Choose the dominant semver-relevant type, preserve any breaking-change markers, and describe meaningful secondary changes in the body.
 
 ## Content guidance
 
@@ -119,17 +123,16 @@ Avoid:
 - describing tests added to validate the change in feat/fix/perf/refactor/etc. commits; treat new tests as expected verification scaffolding rather than changelog content
 - adding validation summaries because a repository template asks for them, unless the user explicitly requests that text
 
-Exception: when the commit is genuinely test-only (e.g., `test:` type or a tests-only scope), the message should describe the new tests because the tests are the change.
+Exception: describe tests when they are the change, either in a test-only commit or as an independent coverage improvement within a mixed commit. Continue omitting tests that merely verify another change already described in the message.
 
 ## Output format
 
-Return the recommended commit message first, in a plain text code block so the user can copy it.
+Return one recommended commit message first, in a plain text code block so the user can copy it.
 
 Then include a short rationale only if useful:
 
 - detected repo convention
 - chosen type/scope
 - changelog category it should produce
-- any split-commit recommendation
 
 If the user asks for only the message, output only the commit message.
