@@ -3981,6 +3981,23 @@ def test_evidence_bundle_reverifies_every_claimed_accepted_evidence() -> None:
     assert "accepted review evidence is missing from the bundle: review:missing" in fabricated.blockers
 
 
+@pytest.mark.parametrize("status", ["failed", "blocked"])
+def test_validation_proof_accepts_completed_failures_but_rejects_blocked_execution(status: str) -> None:
+    expectation, proof, review_records, validation_records, _, _ = _evidence_bundle_fixture()
+    validation_records = tuple((record_expectation, replace(evidence, status=status)) for record_expectation, evidence in validation_records)
+    proof, manifest, verifier, review_records, validation_records = _artifact_verification(proof, review_records, validation_records)
+
+    result = assess_evidence_bundle(
+        expectation, proof, review_records=review_records, validation_records=validation_records, artifact_manifest=manifest, trusted_verifier=verifier
+    )
+
+    assert result.feasible is (status == "failed")
+    for record_expectation, evidence in validation_records:
+        assessment = assess_validation_evidence(record_expectation, evidence)
+        assert assessment.feasible
+        assert not assessment.satisfies_requirements
+
+
 def test_final_synthesis_evidence_must_have_the_repository_synthesis_identity() -> None:
     expectation, proof, review_records, validation_records, manifest, verifier = _evidence_bundle_fixture()
 

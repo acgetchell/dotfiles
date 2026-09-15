@@ -65,19 +65,28 @@ When annotations or invariant models change, run ty through uv. Use Ruff through
 
 ## Escalate To Full CI
 
-Run full CI when repository policy requires it, changes span several Python layers without a narrower combined validator, public behavior and packaging changed together, scientific results have broad impact, or final synthesis identifies uncovered cross-cutting risk. Do not run it solely because orchestration is ending.
+Run full CI when the user explicitly requests it, repository policy requires it, changes span several Python layers without a narrower combined validator, public behavior and packaging changed together, scientific results have broad impact, or final synthesis identifies uncovered cross-cutting risk. Do not run it solely because orchestration is ending.
 
-Decide whether repository policy or known cross-layer scope requires the full
-gate before executing the first test, and inspect the gate's composition then.
-If it contains tests already passing for the current
-source/environment/configuration state, choose the full gate as the single
-test selection from the outset or run only its uncovered validators. Do not
-nest a named pytest case, its containing module or suite, and full CI. If a
-mandatory indivisible gate is discovered late and offers no reliable
-exclusion, report the command-surface blocker and route it to
-`project-tooling-review`; do not silently replay tests or count them twice. A
-relevant edit invalidates earlier evidence; a desire for a broader summary
-does not.
+Inspect a known required gate's composition before choosing validators. Use
+focused red/green regression checks for prompt feedback during a fix, then run
+the required full gate on the final source state even when it repeats those
+tests. Record the overlapping selections and the reason in the shared ledger;
+repeated executions are not independent coverage evidence.
+
+- **Full gate known before review:** if the user requires `just ci` and review
+  exposes a regression, reproduce it with the narrow test, fix it, and rerun
+  that test immediately. Complete `just ci` after the fixes and record the
+  overlap as focused fix feedback followed by the required final gate.
+- **Full gate requested after focused checks:** run the newly requested gate,
+  including an indivisible gate with overlapping tests. Record the user's
+  request as the reason for overlap; no additional approval or command-surface
+  blocker is needed merely because focused evidence already exists.
+
+Avoid gratuitous case-to-module-to-suite reruns. When no full gate is required,
+reuse current evidence and run only uncovered validators. A relevant edit
+invalidates earlier evidence; a desire for a broader summary does not. Reserve
+command-surface blockers and `project-tooling-review` routing for validation
+that is genuinely unavailable or unsatisfiable, not unavoidable overlap.
 
 ## Handoff Evidence
 

@@ -74,6 +74,12 @@ Report `repository_validation_status` independently from
 `graph_proof_status`; a command failure and an orchestration-proof gap are
 different outcomes.
 
+A current, verified failed validator remains mapped exactly once to its planned
+node and required validation IDs. An otherwise complete graph can report
+`graph_proof_status: complete`, `repository_validation_status: failed`, and a
+synthesis-derived `repository_readiness: not-ready`. Required blocked, missing,
+stale, or invalid evidence still prevents proof completion.
+
 When native CI for the reviewed source state becomes available and contradicts
 earlier local or emulated evidence, report the native failure and the resulting
 portability gap until a corrected revision has current native evidence. Do not

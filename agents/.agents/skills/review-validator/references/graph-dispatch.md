@@ -37,10 +37,9 @@ discovery.
    concise output evidence, actual platform and native/emulated mode, and
    approved artifact paths. Put unexecuted target cells and the boundary of any
    emulation in `limitations`.
-5. Repeat the source-state check. Complete the payload, including `exit_code`,
-   `elapsed`, and `artifact_paths` for every execution. Follow `worker_prompt`'s
-   publication example: serialize once, review over stdin, then persist identical
-   bytes with `--approval-identity` from the review. Return those bytes once published.
+5. Repeat the source-state check. Follow `worker_prompt`: serialize the complete
+   payload once, review over stdin, persist identical bytes with the returned
+   `--approval-identity`, then return those bytes.
 6. The coordinator invokes the runtime-owned
    post-execution snapshot immediately afterward.
 
@@ -53,9 +52,12 @@ different platform.
 Do not review code, diagnose findings, edit, install substitute toolchains,
 change dependencies, re-plan, or create another worker.
 
+Before asynchronous execution, read [execution timing](execution-timing.md) for
+measurement and recovery.
+
 ## ValidationPayload
 
-Return one JSON object and no compatibility Markdown:
+Return one JSON object:
 
 ```json
 {
@@ -76,10 +78,12 @@ Return one JSON object and no compatibility Markdown:
 }
 ```
 
-Use `null` or `"none"` for unavailable exit codes as appropriate. A blocked
-payload requires a concrete limitation. `reused` and `not-applicable` contain
-no execution records. Each execution may reference only dispatched artifact
-paths; the runtime resolves those paths to compiler-owned artifact records.
+`passed` requires exit `0`; `failed` requires a nonzero integer. Both require
+finite, nonnegative elapsed seconds, optionally with units. `not-run` requires `null` or
+`"none"` for both fields. `blocked` allows unavailable timing and a nonzero or
+unavailable exit code, with a concrete limitation. `reused` and `not-applicable`
+contain no executions. Reference only dispatched artifact paths; the runtime
+resolves their identities.
 
 The coordinator invokes `compile-node` for the validation node, which reads the
 dispatch-bound persisted payload and the runtime-owned before and after snapshots.

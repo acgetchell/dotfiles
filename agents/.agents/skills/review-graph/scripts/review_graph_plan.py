@@ -4,6 +4,7 @@ import argparse
 import fnmatch
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -3195,6 +3196,39 @@ def _validation_requirements_expected_body(expectation: ValidationEvidenceExpect
     return "\n".join(records)
 
 
+def _valid_elapsed_duration(value: object) -> bool:
+    """Parse finite, nonnegative seconds or a single duration with explicit units."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return False
+    duration = re.fullmatch(r"\+?([0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:([eE][+-]?[0-9]+))?[ \t]*(ms|s|m|h)?", str(value).strip(" \t"))
+    if duration is None:
+        return False
+    magnitude = float(duration[1] + (duration[2] or ""))
+    seconds = magnitude * {"ms": 0.001, "s": 1, "m": 60, "h": 3600}[duration[3] or "s"]
+    return math.isfinite(seconds) and seconds >= 0
+
+
+def validation_execution_result_blockers(*, result: str, exit_code: object, elapsed: object, label: str) -> tuple[str, ...]:
+    """Apply the same result-dependent fields to compact and native executions."""
+    blockers: list[str] = []
+    exit_text = "none" if exit_code is None else str(exit_code)
+    elapsed_text = "none" if elapsed is None else str(elapsed).strip(" \t")
+    nonzero_exit = re.fullmatch(r"-?\d+", exit_text) is not None and int(exit_text) != 0
+    if result == "passed" and exit_text != "0":
+        blockers.append(f"{label}.exit_code: passed execution requires exit code 0")
+    if result == "failed" and not nonzero_exit:
+        blockers.append(f"{label}.exit_code: failed execution requires a nonzero exit code")
+    if result == "blocked" and exit_text != "none" and not nonzero_exit:
+        blockers.append(f"{label}.exit_code: blocked execution requires a nonzero exit code or none")
+    if result == "not-run" and exit_text != "none":
+        blockers.append(f"{label}.exit_code: not-run execution requires exit code none")
+    if (result in {"passed", "failed"} or (result == "blocked" and elapsed_text != "none")) and not _valid_elapsed_duration(elapsed):
+        blockers.append(f"{label}.elapsed: requires finite, nonnegative seconds or a duration with units ms, s, m, or h")
+    if result == "not-run" and elapsed_text != "none":
+        blockers.append(f"{label}.elapsed: not-run execution requires elapsed none")
+    return tuple(blockers)
+
+
 def _validation_native_sections_blockers(  # noqa: C901, PLR0912, PLR0915
     sections: Mapping[str, str], expectation: ValidationEvidenceExpectation, evidence: ValidationEvidence
 ) -> tuple[str, ...]:
@@ -3282,21 +3316,12 @@ def _validation_native_sections_blockers(  # noqa: C901, PLR0912, PLR0915
             blockers.append("native validation result Execution result is missing or invalid")
         else:
             execution_results.append(result)
-            exit_code = fields.get("Exit code")
-            elapsed = fields.get("Elapsed")
             execution_evidence = fields.get("Evidence")
-            if result == "passed" and exit_code != "0":
-                blockers.append(f"native validation result passed Execution {execution_id} requires exit code 0")
-            if result == "failed" and (exit_code is None or re.fullmatch(r"-?\d+", exit_code) is None or int(exit_code) == 0):
-                blockers.append(f"native validation result failed Execution {execution_id} requires a nonzero exit code")
-            if result == "blocked" and exit_code is not None and exit_code != "none" and (re.fullmatch(r"-?\d+", exit_code) is None or int(exit_code) == 0):
-                blockers.append(f"native validation result blocked Execution {execution_id} has an invalid exit code")
-            if result == "not-run" and exit_code != "none":
-                blockers.append(f"native validation result not-run Execution {execution_id} requires exit code none")
-            if result in {"passed", "failed"} and (elapsed is None or elapsed == "none"):
-                blockers.append(f"native validation result executed command {execution_id} requires concrete elapsed time")
-            if result == "not-run" and elapsed != "none":
-                blockers.append(f"native validation result not-run Execution {execution_id} requires elapsed none")
+            blockers.extend(
+                validation_execution_result_blockers(
+                    result=result, exit_code=fields.get("Exit code"), elapsed=fields.get("Elapsed"), label=f"native validation result Execution {execution_id}"
+                )
+            )
             if execution_evidence is None or execution_evidence == "none":
                 blockers.append(f"native validation result Execution {execution_id} requires concrete evidence")
             blockers.extend(_validation_execution_artifact_reference_blockers(fields.get("Log or artifact"), reported_artifacts, execution_id=execution_id))
@@ -4108,7 +4133,8 @@ def _validation_bundle_blockers(
         expectation, evidence = record
         assessment = assess_validation_evidence(expectation, evidence)
         blockers.extend(f"{evidence_id}: {blocker}" for blocker in assessment.blockers)
-        if not assessment.satisfies_requirements:
+        # A verified failure completes execution evidence, but does not pass validation.
+        if not (assessment.satisfies_requirements or (assessment.feasible and evidence.status == "failed")):
             blockers.append(f"accepted validation evidence does not satisfy its requirements: {evidence_id}")
         if expectation.source_state != proof.source_state:
             blockers.append(f"accepted validation evidence has a different source state: {evidence_id}")
