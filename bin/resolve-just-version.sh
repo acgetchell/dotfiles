@@ -28,7 +28,8 @@ while IFS= read -r line; do
   fi
 done < "$justfile_path"
 
-if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+cargo_version_pattern='[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?'
+if [[ ! "$version" =~ ^${cargo_version_pattern}$ ]]; then
   echo "Invalid or missing just_version in $justfile_path: ${version:-missing}" >&2
   exit 1
 fi

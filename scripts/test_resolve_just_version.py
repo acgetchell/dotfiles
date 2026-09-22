@@ -31,7 +31,12 @@ def test_repository_pin_matches_just_evaluation() -> None:
 
 @pytest.mark.parametrize(
     ("declaration", "expected"),
-    [('just_version := "1.58.0"', "1.58.0"), ("  just_version  :=  '2.3.4'  # bootstrap pin", "2.3.4"), ("just_version := 5.6.7", "5.6.7")],
+    [
+        ('just_version := "1.58.0"', "1.58.0"),
+        ("  just_version  :=  '2.3.4'  # bootstrap pin", "2.3.4"),
+        ("just_version := 5.6.7", "5.6.7"),
+        ('just_version := "2.0.0-rc.1+build.2"', "2.0.0-rc.1+build.2"),
+    ],
 )
 def test_supported_declaration_forms(tmp_path: Path, declaration: str, expected: str) -> None:
     candidate = tmp_path / "justfile"

@@ -10,6 +10,19 @@ authors = [{ name = "Adam Getchell", email = "adam@adamgetchell.org" }]
 [tool.uv]
 package = false
 
+[tool.research-repo-tools.deps.tools]
+cargo_update_version = "cargo-update"
+dprint_version = "dprint"
+just_version = "just"
+rumdl_version = "rumdl"
+uv_version = "uv"
+zizmor_version = "zizmor"
+
+[tool.research-repo-tools.semgrep]
+config = "semgrep.yaml"
+fixtures = "tests/semgrep"
+namespace = "dotfiles."
+
 [tool.ruff]
 line-length = 160
 src = [
@@ -129,12 +142,9 @@ max-complexity = 10
 
 [tool.ruff.lint.isort]
 known-first-party = [
-  "clear_outputs",
   "notebook_check",
-  "semgrep_fixture_config",
   "skill_validate",
   "stow_verify",
-  "update_tool_pins",
   "validate_reference_dois",
 ]
 force-single-line = false
@@ -179,13 +189,15 @@ python_functions = ["test_*"]
 
 [dependency-groups]
 dev = [
-  "actionlint-py==1.7.12.24",
-  "nbclient>=0.11.0",
-  "nbformat>=5.10.4",
+  { include-group = "tooling" },
+  "actionlint-py==1.7.12.25",
   "PyYAML>=6.0",
   "pytest==9.1.1",
-  "ruff==0.16.6",
-  "semgrep==1.176.1",
-  "ty==0.0.78",
+  "ruff==0.16.8",
+  "semgrep==1.177.0",
+  "ty==0.0.83",
   "yamllint==1.38.0",
+]
+tooling = [
+    "research-repo-tools==0.1.4",
 ]

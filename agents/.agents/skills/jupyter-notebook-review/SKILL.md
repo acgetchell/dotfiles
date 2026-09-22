@@ -13,7 +13,7 @@ Review notebooks as reproducible computational artifacts rather than scratchpads
 2. Inspect structure with `scripts/notebook_check.py --summary NOTEBOOK.ipynb` before reading raw JSON.
 3. Read code cells through the summary helper or `jq`; avoid loading large outputs into context.
 4. Review fresh-kernel order, paths, inputs, outputs, secrets, environments, and generated artifacts.
-5. Edit with `nbformat` or the bundled helpers rather than large JSON string substitutions.
+5. Edit with the consumer's notebook tools or `nbformat`, preserving existing IDs.
 6. Run structured lint after changes. Execute only when runtime behavior or a generated artifact is in scope.
 7. Give every code, markdown, and raw cell a unique, stable, descriptive ID following repository rules or lowercase kebab-case.
 8. Clear outputs and execution counts unless the repository intentionally tracks rendered results.
@@ -75,14 +75,25 @@ Ensure human-facing output is intentional and machine-consumed data remains pars
 
 ## Validation
 
-Use repository commands first. Otherwise use bundled scripts:
+Use the consumer's repository commands first. Shared notebook structure checks,
+native Ruff/ty lint, output cleanup, and execution belong to `research-repo-tools`.
+Read [the shared notebook workflow](references/shared-notebooks.md) when configuring
+those commands or migrating a consumer. It defines dependencies, strict structure
+requirements, and the separate execution artifacts.
 
 - `scripts/notebook_check.py --summary NOTEBOOK.ipynb` for a compact inventory
-- `scripts/notebook_check.py --lint NOTEBOOK.ipynb` for JSON, cell IDs, compilation, notebook AST checks, Ruff, formatting, and ty checks
-- `scripts/notebook_check.py --execute NOTEBOOK.ipynb --repo-root PATH` for in-memory execution without writing outputs to the source
-- `scripts/clear_outputs.py NOTEBOOK.ipynb` to clear outputs and counts in place
+- `scripts/notebook_check.py --advice NOTEBOOK.ipynb` for descriptive-ID and Python review advice
+- Add `--strict` to fail on advisory warnings; plain-AST skips for IPython syntax are informational.
 
-Run helpers with `uv run` or the active project environment. Execute a notebook only when dependencies, cost, side effects, and requested scope make execution appropriate. Never treat successful execution as proof of scientific correctness or portability.
+The standard-library helper tolerates IDs awaiting repair; it does not certify
+notebook validity. Its remaining inspection/advice code and tests will be retired
+through [dotfiles #78](https://github.com/acgetchell/dotfiles/issues/78) after shared
+replacements ship in v0.1.5.
+
+Run the helper with `uv run` or the active project environment. Execute a notebook
+only when dependencies, cost, side effects, and requested scope make execution
+appropriate. Never treat successful execution as proof of scientific correctness
+or portability.
 
 ## Output
 

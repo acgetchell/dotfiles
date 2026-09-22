@@ -10,7 +10,8 @@ Provide separate commands for environment setup, interactive launch, lint, and d
 
 ## Headless Execution
 
-- Use `nbconvert`, `nbclient`, or a repository executor without modifying source notebooks.
+- Prefer the consumer's shared `research-repo-tools notebooks execute` recipe;
+  follow [the shared workflow](shared-notebooks.md) for its locked environment and artifacts.
 - Configure a noninteractive plotting backend when needed.
 - Write executed notebooks and artifacts under `target/`, `$SCRATCH`, or another documented output root.
 - Make cache and output roots configurable when home-directory storage is unavailable or slow.

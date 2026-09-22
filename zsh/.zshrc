@@ -147,7 +147,7 @@ fi
 # Example aliases
 # alias zshconfig="mate ~/.zshrc"
 # alias ohmyzsh="mate ~/.oh-my-zsh"
-alias cup='cargo install-update -a'
+alias cup='cargo install-update -a --locked'
 alias cupl='cargo install-update -a -l'
 # ---- 1Password SSH agent (optional) ----
 # eval "$(op ssh-agent --config)"

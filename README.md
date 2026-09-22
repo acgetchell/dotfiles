@@ -19,7 +19,7 @@ dotfiles/
 │   ├── macos-defaults.sh   # captured macOS preferences (defaults write)
 │   └── verify.sh           # health check / sanity check
 ├── scripts/
-│   ├── semgrep_fixture_config.py
+│   ├── skill_validate.py   # Codex skill metadata checks
 │   └── stow_verify.py      # stow symlink integrity checker
 ├── tests/
 │   └── semgrep/            # Semgrep rule fixtures
@@ -131,7 +131,7 @@ just brew-cleanup-preview
 # Uninstall the previewed formulae/casks and perform Homebrew cache cleanup
 just brew-cleanup
 
-# Upgrade the Brewfile, uv lock/environment, and repository-owned Cargo tools
+# Upgrade the Brewfile, Python pins/environment, and all installed Cargo tools
 just update
 
 # Snapshot the current machine for review, without committing it
@@ -141,11 +141,33 @@ brew bundle dump --file=~/projects/dotfiles/Brewfile.local --force --describe
 `Brewfile.local` is gitignored. Use it to audit one-off apps before deciding whether they belong in the committed foundational `Brewfile`.
 `just brew-cleanup-preview` never passes Homebrew's destructive `--force` flag. Homebrew returns status 1 when the preview finds cleanup candidates; the recipe treats that documented result as a successful preview while preserving actual errors. `just brew-cleanup` asks for confirmation before passing `--force` and applying that cleanup.
 
-`just update` upgrades only dependencies declared by the Brewfile and uv lock plus
-the Cargo-installed `cargo-update`, `dprint`, `just`, `rumdl`, and `zizmor` tools owned by
-`bootstrap.sh`. It then atomically reconciles their `justfile` pins, including
-the Homebrew-managed `uv` version. The Cargo tool update requires
+`just update` upgrades the Brewfile dependencies, advances exact direct Python development-tool
+pins in `pyproject.toml`, and refreshes the complete `uv.lock` and development environment.
+`just update-python-dependencies` runs the Python portion independently.
+The locked `research-repo-tools` package supplies pin updates, uv preflight, and tool-pin
+reconciliation. Its exact pin lives in the included `tooling` group and changes only through
+an explicit package upgrade; ranges, markers, and other included-group constraints remain intact.
+It also runs `cargo install-update -a --locked`, updating all Cargo-installed tools with
+their published lockfiles, including tools such as `cargo-nextest` that require `--locked`.
+The `cup` shell alias runs the same Cargo command; `just update-cargo-tools` additionally
+reconciles the repository-owned `justfile` pins (`cargo-update`, `dprint`, `just`, `rumdl`,
+`zizmor`, and Homebrew-managed `uv`). The Cargo tool update requires
 `cargo-install-update` from the `cargo-update` package, installed by bootstrap and checked by `bin/verify.sh`.
+The owned pin mapping lives in `[tool.research-repo-tools.deps.tools]` in `pyproject.toml`.
+Cargo pins use the shared package's SemVer contract, including prerelease/build suffixes;
+the bootstrap and version checks preserve those suffixes. The uv pin remains stable `X.Y.Z`.
+The shared launcher selects Homebrew uv before resolving or updating pins. Bootstrap remains
+self-contained shell code; `just setup` installs the locked Python environment afterward.
+Updates stop on failure, but successful package-manager steps remain applied; rerun after
+resolving the failure to finish synchronization and pin reconciliation.
+
+The same locked package owns the Semgrep fixture runner and CodeRabbit wrapper.
+`just semgrep-test` reads `[tool.research-repo-tools.semgrep]`; the repository keeps its
+rules and real fixtures while generic runner tests live upstream.
+The Jupyter review skill delegates notebook validation, native Ruff/ty lint, cleanup,
+and execution to shared commands in each consumer's locked notebook environment.
+Its remaining helper supplies compact inspection and advisory policy pending
+[v0.1.5 adoption and retirement in #78](https://github.com/acgetchell/dotfiles/issues/78).
 
 `bin/verify.sh` derives its cask and CLI checks from the Brewfile, so removing an entry there never causes a stale verify failure. It also surfaces `brew missing` output as warnings; some casks (e.g. `mactex`) declare Homebrew dependencies they actually bundle themselves, so those lines are informational rather than fatal.
 

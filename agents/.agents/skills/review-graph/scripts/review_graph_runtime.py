@@ -3256,25 +3256,24 @@ def persist_worker_payload_bytes(contract_document: dict[str, Any], payload_byte
         msg = f"worker payload target directory does not exist: {target_path.parent}"
         raise ValueError(msg)
     artifact_write_review = _approved_worker_payload_write(contract_document, payload_bytes, approval_identity, candidate_is_write_target=False)
-    temporary_path: Path | None = None
     try:
         descriptor, temporary_name = tempfile.mkstemp(prefix=f".{target_path.name}.", suffix=".tmp", dir=target_path.parent)
         temporary_path = Path(temporary_name)
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(payload_bytes)
-            stream.flush()
-            os.fsync(stream.fileno())
-        temporary_path.replace(target_path)
-        _fsync_directory(target_path.parent)
-        if target_path.read_bytes() != payload_bytes:
-            msg = f"atomically published worker payload bytes differ from the validated input: {target_path}"
-            raise ValueError(msg)
+        try:
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(payload_bytes)
+                stream.flush()
+                os.fsync(stream.fileno())
+            temporary_path.replace(target_path)
+            _fsync_directory(target_path.parent)
+            if target_path.read_bytes() != payload_bytes:
+                msg = f"atomically published worker payload bytes differ from the validated input: {target_path}"
+                raise ValueError(msg)
+        finally:
+            temporary_path.unlink(missing_ok=True)
     except OSError as error:
         msg = f"worker payload artifact publication failed: {error}"
         raise WorkerPayloadWriteError(msg, artifact_write_review) from error
-    finally:
-        if temporary_path is not None:
-            temporary_path.unlink(missing_ok=True)
     return _worker_payload_receipt(contract_document, payload_bytes, artifact_write_review)
 
 

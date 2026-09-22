@@ -9,6 +9,7 @@ python_fixture_paths := "tests/semgrep"
 python_primary_paths := "agents/.agents/skills scripts"
 python_paths := python_primary_paths + " " + python_fixture_paths
 cargo_update_version := "22.1.1"
+cargo_version_pattern := '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?'
 dprint_version := "0.57.4"
 just_version := "1.58.0"
 rumdl_version := "0.2.75"
@@ -26,20 +27,12 @@ _ensure-brew:
     set -euo pipefail
     command -v brew >/dev/null || { echo "'brew' not found. See https://brew.sh"; exit 1; }
 
-_ensure-coderabbit:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    command -v coderabbit >/dev/null || {
-        echo "CodeRabbit CLI is required. Install it from https://docs.coderabbit.ai/cli and authenticate with 'coderabbit auth login'." >&2
-        exit 1
-    }
-
 _ensure-dprint:
     #!/usr/bin/env bash
     set -euo pipefail
     installed_version=""
     if command -v dprint >/dev/null; then
-        installed_version="$(dprint --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+        installed_version="$(dprint --version 2>/dev/null | grep -oE '{{ cargo_version_pattern }}' | head -1 || true)"
     fi
     if [[ "$installed_version" != "{{ dprint_version }}" ]]; then
         echo "'dprint' {{ dprint_version }} not found. Run bin/bootstrap.sh or install:"
@@ -51,7 +44,7 @@ _ensure-just:
     #!/usr/bin/env bash
     set -euo pipefail
     resolved="$(command -v just 2>/dev/null || true)"
-    actual="$(just --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+    actual="$(just --version 2>/dev/null | grep -oE '{{ cargo_version_pattern }}' | head -1 || true)"
     if [[ "$actual" != "{{ just_version }}" ]]; then
         echo "'just' resolves to '${resolved:-missing}' at version '${actual:-missing}', expected '{{ just_version }}'." >&2
         echo "   Install with: cargo install --locked just --version {{ just_version }}" >&2
@@ -62,7 +55,7 @@ _ensure-rumdl:
     #!/usr/bin/env bash
     set -euo pipefail
     resolved="$(command -v rumdl 2>/dev/null || true)"
-    actual="$(rumdl --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+    actual="$(rumdl --version 2>/dev/null | grep -oE '{{ cargo_version_pattern }}' | head -1 || true)"
     if [[ "$actual" != "{{ rumdl_version }}" ]]; then
         echo "'rumdl' resolves to '${resolved:-missing}' at version '${actual:-missing}', expected '{{ rumdl_version }}'." >&2
         echo "   Install with: cargo install --locked rumdl --version {{ rumdl_version }}" >&2
@@ -85,32 +78,13 @@ _ensure-zizmor:
     set -euo pipefail
     installed_version=""
     if command -v zizmor >/dev/null; then
-        installed_version="$(zizmor --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+        installed_version="$(zizmor --version 2>/dev/null | grep -oE '{{ cargo_version_pattern }}' | head -1 || true)"
     fi
     if [[ "$installed_version" != "{{ zizmor_version }}" ]]; then
         echo "'zizmor' {{ zizmor_version }} not found. Run bin/bootstrap.sh or install:"
         echo "   cargo install --locked zizmor --version {{ zizmor_version }}"
         exit 1
     fi
-
-[private]
-_review scope base: _ensure-coderabbit
-    #!/usr/bin/env bash
-    set -euo pipefail
-    args=(review --agent --include-untracked --config AGENTS.md .coderabbit.yaml)
-    case {{ quote(scope) }} in
-        branch)
-            base={{ quote(base) }}
-            if ! git rev-parse --verify --end-of-options "${base}^{commit}" >/dev/null 2>&1; then
-                echo "Cannot resolve review base '$base'. Choose an existing local commit or reference." >&2
-                exit 2
-            fi
-            args+=(--base="$base")
-            ;;
-        uncommitted) args+=(--uncommitted) ;;
-        *) echo "Unsupported review scope: "{{ quote(scope) }} >&2; exit 2 ;;
-    esac
-    exec coderabbit "${args[@]}"
 
 action-lint: _ensure-actionlint
     #!/usr/bin/env bash
@@ -251,10 +225,12 @@ python-typecheck: _ensure-uv
     uv run --locked ty check {{ python_paths }} --error all
 
 # Review committed and local changes with CodeRabbit; the base defaults to main.
-review base="main": (_review "branch" base)
+review base="main": _ensure-uv
+    uv run --locked --only-group tooling --inexact research-repo-tools review branch --base={{ quote(base) }}
 
 # Review only staged, unstaged, and non-ignored untracked changes with CodeRabbit.
-review-uncommitted: (_review "uncommitted" "")
+review-uncommitted: _ensure-uv
+    uv run --locked --only-group tooling --inexact research-repo-tools review uncommitted
 
 # Harden semgrep execution for CI/sandboxes:
 # use explicit temporary cache/log paths, disable version checks and metrics,
@@ -306,12 +282,6 @@ semgrep-test: _ensure-brew _ensure-uv
         echo "Selected uv executable is unavailable at $uv_executable." >&2
         exit 1
     fi
-    state_root="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-semgrep-state.XXXXXX")"
-    cleanup() {
-        rm -rf "$state_root"
-    }
-    trap cleanup EXIT
-
     if [ -f /etc/ssl/cert.pem ]; then
         export SSL_CERT_FILE="/etc/ssl/cert.pem"
     elif [ -f /etc/ssl/certs/ca-certificates.crt ]; then
@@ -320,51 +290,16 @@ semgrep-test: _ensure-brew _ensure-uv
         unset SSL_CERT_FILE
     fi
 
-    config_root="$state_root/configs"
-    mkdir -p "$config_root"
-    hidden_fixtures=()
-    ordinary_fixture_count=0
-    while IFS= read -r -d '' fixture; do
-        rel="${fixture#tests/semgrep/}"
-        if [[ "$rel" == .* ]]; then
-            hidden_fixtures+=("$fixture")
-            continue
-        fi
-        config_path="$config_root/${rel}.yaml"
-        mkdir -p "$(dirname "$config_path")"
-        "$uv_executable" run --locked python scripts/semgrep_fixture_config.py "$fixture" "$PWD/semgrep.yaml" "$config_path"
-        ((ordinary_fixture_count += 1))
-    done < <(find tests/semgrep -type f ! -name '*.fixed' -print0)
-
-    run_fixture_suite() {
-        local config_path="$1"
-        local target="$2"
-        local state_dir
-        state_dir="$(mktemp -d "$state_root/suite.XXXXXX")"
-        SEMGREP_VERSION_CACHE_PATH="$state_dir/version-cache" \
-            SEMGREP_LOG_FILE="$state_dir/semgrep.log" \
-            SEMGREP_SEND_METRICS=off \
-            OTEL_SDK_DISABLED=true \
-            SEMGREP_SETTINGS_FILE="$state_dir/settings.yml" \
-            "$uv_executable" run --locked semgrep scan --disable-version-check --metrics off --test --strict --config "$config_path" "$target"
-    }
-
-    if ((ordinary_fixture_count)); then
-        run_fixture_suite "$config_root" tests/semgrep
-    fi
-
-    for fixture in "${hidden_fixtures[@]}"; do
-        hidden_state_dir="$(mktemp -d "$state_root/hidden.XXXXXX")"
-        config_path="$hidden_state_dir/config.yaml"
-        "$uv_executable" run --locked python scripts/semgrep_fixture_config.py "$fixture" "$PWD/semgrep.yaml" "$config_path"
-        run_fixture_suite "$config_path" "$fixture"
-    done
+    "$uv_executable" run --locked research-repo-tools semgrep check-fixtures
 
 setup:
     DOTFILES_DIR="$PWD" bin/bootstrap.sh
     just python-sync
 
-_preflight-stable-uv: _ensure-brew
+_preflight-stable-uv: (_shared-deps "check-uv")
+
+# Select Homebrew uv for both the launcher and the shared command's subprocesses.
+_shared-deps action: _ensure-brew
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -373,14 +308,14 @@ _preflight-stable-uv: _ensure-brew
         echo "Homebrew-managed uv is unavailable at $uv_executable." >&2
         exit 1
     fi
-    "$uv_executable" run --locked --no-sync python scripts/update_tool_pins.py --check-uv-version --uv-executable "$uv_executable"
+    PATH="$(dirname "$uv_executable"):$PATH" "$uv_executable" run --locked --only-group tooling --inexact research-repo-tools deps {{ quote(action) }}
 
-# Update the Homebrew bundle, uv lock, and repository-owned Cargo tools.
-update: _preflight-stable-uv update-dependencies update-cargo-tools
+# Update Homebrew, Python pins/environment, and all installed Cargo tools.
+update: update-dependencies update-cargo-tools
     @echo "Repository dependencies and tools updated."
 
-# Update the Cargo CLI tools installed by bootstrap.sh and reconcile their pins.
-update-cargo-tools: _ensure-brew
+# Update all installed Cargo CLI tools and reconcile repository-owned pins.
+update-cargo-tools: _preflight-stable-uv
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -390,36 +325,25 @@ update-cargo-tools: _ensure-brew
         exit 1
     fi
 
-    uv_executable="$(brew --prefix uv)/bin/uv"
-    if [[ ! -x "$uv_executable" ]]; then
-        echo "Homebrew-managed uv is unavailable at $uv_executable." >&2
-        exit 1
-    fi
-    "$uv_executable" run --locked --no-sync python scripts/update_tool_pins.py --check-uv-version --uv-executable "$uv_executable"
-
-    packages=(cargo-update dprint just rumdl zizmor)
-    cargo install-update --locked "${packages[@]}"
-    "$uv_executable" run --locked python scripts/update_tool_pins.py --justfile justfile --uv-executable "$uv_executable"
+    cargo install-update -a --locked
+    just _shared-deps update-tools
 
 # Upgrade Brewfile dependencies and the complete uv development environment.
-update-dependencies: _ensure-brew
+update-dependencies: _preflight-stable-uv
+    brew bundle upgrade --file="$PWD/Brewfile"
+    just update-python-dependencies
+
+# Advance direct dev pins, refresh the full lock, and explicitly synchronize dev.
+update-python-dependencies: _preflight-stable-uv
     #!/usr/bin/env bash
     set -euo pipefail
 
+    just _shared-deps update-python
     uv_executable="$(brew --prefix uv)/bin/uv"
     if [[ ! -x "$uv_executable" ]]; then
         echo "Homebrew-managed uv is unavailable at $uv_executable." >&2
         exit 1
     fi
-    "$uv_executable" run --locked --no-sync python scripts/update_tool_pins.py --check-uv-version --uv-executable "$uv_executable"
-
-    brew bundle upgrade --file="$PWD/Brewfile"
-    uv_executable="$(brew --prefix uv)/bin/uv"
-    if [[ ! -x "$uv_executable" ]]; then
-        echo "Homebrew-managed uv is unavailable at $uv_executable." >&2
-        exit 1
-    fi
-    "$uv_executable" run --locked --no-sync python scripts/update_tool_pins.py --check-uv-version --uv-executable "$uv_executable"
     "$uv_executable" lock --upgrade
     "$uv_executable" sync --locked --group dev
 

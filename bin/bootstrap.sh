@@ -68,13 +68,14 @@ done
 
 # 5. Cargo-installed tools
 if command -v cargo >/dev/null 2>&1; then
+  cargo_version_pattern='[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?'
   install_cargo_tool() {
     local tool="$1"
     local version="$2"
     local executable="${3:-$tool}"
     local installed_version=""
     if command -v "$executable" >/dev/null 2>&1; then
-      installed_version="$("$executable" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+      installed_version="$("$executable" --version 2>/dev/null | grep -oE "$cargo_version_pattern" | head -1 || true)"
     fi
     if [[ "$installed_version" != "$version" ]]; then
       echo "==> Installing $tool $version"
@@ -88,7 +89,7 @@ if command -v cargo >/dev/null 2>&1; then
   for tool in cargo-update dprint rumdl zizmor; do
     pin_name="${tool//-/_}_version"
     version="$(just --justfile "$DOTFILES_DIR/justfile" --evaluate "$pin_name")"
-    if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    if [[ ! "$version" =~ ^${cargo_version_pattern}$ ]]; then
       echo "==> Invalid $pin_name in $DOTFILES_DIR/justfile: $version" >&2
       exit 1
     fi
