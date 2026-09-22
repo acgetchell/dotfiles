@@ -1,22 +1,19 @@
-"""Inspect, lint, and optionally execute Jupyter notebooks."""
+"""Inspect notebooks and report skill-specific review advice.
+
+Shared validation, lint, cleanup, and execution belong to research-repo-tools.
+Retire this remaining inspection/advice helper through dotfiles issue #78 after
+research-repo-tools v0.1.5 supplies the capabilities in upstream issues #39/#40.
+"""
 
 import argparse
 import ast
 import json
-import os
 import re
-import shutil
-import subprocess
 import sys
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast, override
 
-RUFF_EXTEND_IGNORE = "INP001"
-RUFF_LOCATION_RE = re.compile(r"\s*-->\s+.+?:(?P<line>\d+):(?P<column>\d+)")
-TY_LOCATION_RE = re.compile(r"^.+?:(?P<line>\d+):(?P<column>\d+): (?P<message>.+)$")
-CELL_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 GENERATED_CELL_ID_RE = re.compile(
     r"^(?:(?i:[a-f0-9]{8}|[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})|"
     r"(?:cell|code|markdown|raw|section|step)-?[0-9]+)$"
@@ -30,26 +27,6 @@ class Diagnostic:
     severity: str
     cell: int
     message: str
-
-
-@dataclass(frozen=True, slots=True)
-class CodeSnapshot:
-    """Notebook code extracted into a Python-like source string."""
-
-    source: str
-    line_to_cell: dict[int, int]
-
-
-@dataclass(frozen=True, slots=True)
-class LintOptions:
-    """Options that control notebook linting."""
-
-    allow_outputs: bool = False
-    strict: bool = False
-    run_ruff: bool = True
-    run_format: bool = True
-    run_ty: bool = True
-    project_root: Path | None = None
 
 
 def cell_source(cell: dict[str, Any]) -> str:
@@ -114,24 +91,13 @@ def code_cells(notebook: dict[str, Any]) -> list[tuple[int, dict[str, Any], str]
     return cells
 
 
-def cell_id_diagnostics(notebook: dict[str, Any]) -> list[Diagnostic]:
-    """Return diagnostics for stable, unique nbformat cell identifiers."""
-    diagnostics: list[Diagnostic] = []
-    first_cell_by_id: dict[str, int] = {}
-    for index, cell in enumerate(notebook.get("cells", []), start=1):
-        cell_id = cell.get("id")
-        if not isinstance(cell_id, str) or not cell_id:
-            diagnostics.append(Diagnostic("error", index, "missing cell id; add a stable descriptive identifier"))
-            continue
-        if CELL_ID_RE.fullmatch(cell_id) is None:
-            diagnostics.append(Diagnostic("error", index, f"cell id {cell_id!r} must be 1-64 ASCII letters, digits, underscores, or hyphens"))
-            continue
-        first_cell = first_cell_by_id.setdefault(cell_id, index)
-        if first_cell != index:
-            diagnostics.append(Diagnostic("error", index, f"cell id {cell_id!r} duplicates cell {first_cell}"))
-        if GENERATED_CELL_ID_RE.fullmatch(cell_id) is not None:
-            diagnostics.append(Diagnostic("warning", index, f"cell id {cell_id!r} looks generated or positional; name the cell's purpose"))
-    return diagnostics
+def cell_id_advice(notebook: dict[str, Any]) -> list[Diagnostic]:
+    """Suggest descriptive IDs; structural ID validation is owned upstream."""
+    return [
+        Diagnostic("warning", index, f"cell id {cell_id!r} looks generated or positional; name the cell's purpose")
+        for index, cell in enumerate(notebook["cells"], start=1)
+        if isinstance(cell_id := cell.get("id"), str) and GENERATED_CELL_ID_RE.fullmatch(cell_id) is not None
+    ]
 
 
 def summarize(path: Path) -> None:
@@ -262,239 +228,50 @@ def has_wait_timeout(node: ast.Call) -> bool:
     return has_keyword(node, "timeout")
 
 
-def extract_code(notebook: dict[str, Any]) -> CodeSnapshot:
-    """Extract code cells into one source string and retain line-to-cell mapping."""
-    chunks: list[str] = []
-    line_to_cell: dict[int, int] = {}
-    current_line = 1
-    cells = code_cells(notebook)
-    for cell_position, (index, _cell, source) in enumerate(cells):
-        chunks.append(f"# %% notebook cell {index}\n")
-        line_to_cell[current_line] = index
-        current_line += 1
-        source_lines = source.splitlines(keepends=True)
-        if not source_lines:
-            chunks.append("\n")
-            line_to_cell[current_line] = index
-            current_line += 1
-        for source_line in source_lines:
-            chunks.append(source_line)
-            line_to_cell[current_line] = index
-            current_line += 1
-        if source_lines and not source_lines[-1].endswith(("\n", "\r")):
-            chunks.append("\n")
-            line_to_cell[current_line] = index
-            current_line += 1
-        if cell_position < len(cells) - 1:
-            chunks.append("\n")
-            line_to_cell[current_line] = index
-            current_line += 1
-    return CodeSnapshot(source="".join(chunks), line_to_cell=line_to_cell)
-
-
-def ruff_lint_diagnostics(path: Path, notebook: dict[str, Any]) -> list[Diagnostic]:
-    """Run Ruff lint checks on extracted notebook code when Ruff is available."""
-    snapshot = extract_code(notebook)
-    command = ["ruff", "check", "--stdin-filename", f"{path.stem}_notebook.py", "--extend-ignore", RUFF_EXTEND_IGNORE, "-"]
-    try:
-        result = subprocess.run(  # noqa: S603 - command is fixed and receives notebook code through stdin.
-            command, input=snapshot.source, text=True, capture_output=True, timeout=30, check=False
-        )
-    except subprocess.TimeoutExpired as error:
-        return [Diagnostic("error", 0, f"ruff timed out after {error.timeout} seconds")]
-
-    output = "\n".join(part for part in (result.stdout, result.stderr) if part)
-    if result.returncode == 0:
-        return []
-    if result.returncode != 1:
-        return [Diagnostic("error", 0, f"ruff failed with exit code {result.returncode}:\n{output}")]
-
+def code_cell_advice(path: Path, notebook: dict[str, Any]) -> list[Diagnostic]:
+    """Apply plain-Python review heuristics without competing with native lint."""
     diagnostics: list[Diagnostic] = []
-    for block in output.split("\n\n"):
-        lines = [line for line in block.splitlines() if line.strip()]
-        if not lines or lines[0].startswith("Found "):
-            continue
-        cell = 0
-        for line in lines:
-            match = RUFF_LOCATION_RE.match(line)
-            if match is not None:
-                cell = snapshot.line_to_cell.get(int(match.group("line")), 0)
-                break
-        diagnostics.append(Diagnostic("error", cell, f"ruff check: {lines[0]}"))
-    return diagnostics
-
-
-def ruff_format_diagnostics(path: Path, notebook: dict[str, Any]) -> list[Diagnostic]:
-    """Run Ruff format check on extracted notebook code when Ruff is available."""
-    snapshot = extract_code(notebook)
-    command = ["ruff", "format", "--check", "--stdin-filename", f"{path.stem}_notebook.py", "-"]
-    try:
-        result = subprocess.run(  # noqa: S603 - command is fixed and receives notebook code through stdin.
-            command, input=snapshot.source, text=True, capture_output=True, timeout=30, check=False
-        )
-    except subprocess.TimeoutExpired as error:
-        return [Diagnostic("error", 0, f"ruff format timed out after {error.timeout} seconds")]
-
-    output = "\n".join(part for part in (result.stdout, result.stderr) if part).strip()
-    if result.returncode == 0:
-        return []
-    if result.returncode != 1:
-        return [Diagnostic("error", 0, f"ruff format failed with exit code {result.returncode}:\n{output}")]
-    return [Diagnostic("error", 0, f"ruff format: extracted notebook code is not formatted\n{output}")]
-
-
-def ty_diagnostics(path: Path, notebook: dict[str, Any], project_root: Path) -> list[Diagnostic]:
-    """Run ty on extracted notebook code when ty is available."""
-    snapshot = extract_code(notebook)
-    with tempfile.TemporaryDirectory(prefix="notebook-check-") as temporary_directory:
-        extracted_path = Path(temporary_directory) / f"{path.stem}_notebook.py"
-        extracted_path.write_text(snapshot.source, encoding="utf-8")
-        command = ["ty", "check", "--project", str(project_root), "--output-format", "concise", str(extracted_path)]
-        try:
-            result = subprocess.run(  # noqa: S603 - command is fixed and operates on generated notebook code.
-                command, text=True, capture_output=True, timeout=30, check=False
-            )
-        except subprocess.TimeoutExpired as error:
-            return [Diagnostic("error", 0, f"ty timed out after {error.timeout} seconds")]
-
-    output = "\n".join(part for part in (result.stdout, result.stderr) if part)
-    if result.returncode == 0:
-        return []
-    if result.returncode not in {1, 2}:
-        return [Diagnostic("error", 0, f"ty failed with exit code {result.returncode}:\n{output}")]
-
-    diagnostics: list[Diagnostic] = []
-    for line in output.splitlines():
-        if not line.strip() or line.startswith("Found ") or line == "All checks passed!":
-            continue
-        match = TY_LOCATION_RE.match(line)
-        if match is None:
-            diagnostics.append(Diagnostic("error", 0, f"ty: {line}"))
-            continue
-        cell = snapshot.line_to_cell.get(int(match.group("line")), 0)
-        diagnostics.append(Diagnostic("error", cell, f"ty: {match.group('message')}"))
-    return diagnostics
-
-
-def code_cell_diagnostics(path: Path, notebook: dict[str, Any], options: LintOptions) -> list[Diagnostic]:
-    """Return diagnostics from AST parsing and notebook output hygiene."""
-    diagnostics: list[Diagnostic] = []
-    for index, cell, source in code_cells(notebook):
+    for index, _cell, source in code_cells(notebook):
         try:
             tree = ast.parse(source, filename=f"{path}:cell-{index}")
-        except SyntaxError as error:
-            diagnostics.append(Diagnostic("error", index, f"syntax error: {error}"))
+        except SyntaxError:
+            diagnostics.append(Diagnostic("info", index, "plain-Python advice skipped; use shared notebook lint for syntax and IPython magics"))
             continue
         visitor = NotebookVisitor(index)
         visitor.visit(tree)
         diagnostics.extend(visitor.diagnostics)
-        outputs = cell.get("outputs", [])
-        if outputs and not options.allow_outputs:
-            diagnostics.append(Diagnostic("error", index, f"has {len(outputs)} output block(s); clear outputs before committing"))
-        if cell.get("execution_count") is not None and not options.allow_outputs:
-            diagnostics.append(Diagnostic("error", index, f"execution_count={cell.get('execution_count')}; clear execution counts"))
     return diagnostics
 
 
-def external_tool_diagnostics(path: Path, notebook: dict[str, Any], options: LintOptions) -> list[Diagnostic]:
-    """Return diagnostics from Ruff and ty checks over extracted notebook code."""
-    diagnostics: list[Diagnostic] = []
-    if options.run_ruff or options.run_format:
-        if shutil.which("ruff") is None:
-            diagnostics.append(Diagnostic("error", 0, "ruff is required for notebook linting; run through `uv run` or install Ruff"))
-        else:
-            if options.run_ruff:
-                diagnostics.extend(ruff_lint_diagnostics(path, notebook))
-            if options.run_format:
-                diagnostics.extend(ruff_format_diagnostics(path, notebook))
-    if options.run_ty:
-        if shutil.which("ty") is None:
-            diagnostics.append(Diagnostic("error", 0, "ty is required for notebook linting; run through `uv run` or install ty"))
-        else:
-            diagnostics.extend(ty_diagnostics(path, notebook, options.project_root or Path.cwd()))
-    return diagnostics
-
-
-def lint(path: Path, options: LintOptions) -> int:
-    """Validate notebook JSON, compile code cells, and run Python lint checks."""
+def advise(path: Path, *, strict: bool = False) -> int:
+    """Report the skill's additional review policy without linting or executing."""
     notebook = load_notebook(path)
-    diagnostics = [*cell_id_diagnostics(notebook), *code_cell_diagnostics(path, notebook, options), *external_tool_diagnostics(path, notebook, options)]
-
+    diagnostics = [*cell_id_advice(notebook), *code_cell_advice(path, notebook)]
     for diagnostic in diagnostics:
         stream = sys.stderr if diagnostic.severity == "error" else sys.stdout
-        location = f"cell {diagnostic.cell}" if diagnostic.cell > 0 else "notebook"
-        print(f"{path}: {location}: {diagnostic.severity}: {diagnostic.message}", file=stream)
-
-    if any(diagnostic.severity == "error" for diagnostic in diagnostics):
-        return 1
-    if options.strict and diagnostics:
-        return 1
-    return 0
-
-
-def execute(path: Path, notebook: dict[str, Any], repo_root: Path, timeout: int) -> int:
-    """Execute a notebook in memory without modifying it on disk."""
-    try:
-        import nbclient  # noqa: PLC0415 - optional dependency used only by --execute.
-        import nbformat  # noqa: PLC0415 - optional dependency used only by --execute.
-    except ImportError as exc:
-        print(f"--execute requires nbclient and nbformat; run through `uv run` or install them: {exc}", file=sys.stderr)
-        return 1
-
-    os.environ.setdefault("MPLBACKEND", "Agg")
-    try:
-        executable_notebook = nbformat.from_dict(notebook)
-        nbformat.validate(executable_notebook)
-    except nbformat.ValidationError as error:
-        msg = f"{path}: notebook schema validation failed"
-        raise ValueError(msg) from error
-    client = nbclient.NotebookClient(executable_notebook, timeout=timeout, kernel_name="python3", resources={"metadata": {"path": str(repo_root)}})
-    client.execute()
-    print(f"OK executed {path}")
-    return 0
+        print(f"{path}: cell {diagnostic.cell}: {diagnostic.severity}: {diagnostic.message}", file=stream)
+    return int(any(item.severity == "error" or (strict and item.severity == "warning") for item in diagnostics))
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    """Parse command-line arguments."""
+    """Parse inspection and advisory arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--summary", action="store_true", help="print a compact cell inventory")
-    mode.add_argument(
-        "--lint", action="store_true", help="validate JSON, compile code cells, run Ruff and ty when available, and report common notebook issues"
-    )
-    mode.add_argument("--execute", action="store_true", help="execute the notebook in memory")
+    mode.add_argument("--summary", action="store_true", help="print a compact cell inventory, including IDs awaiting repair")
+    mode.add_argument("--advice", action="store_true", help="report skill-specific review advice; run shared notebook lint separately")
     parser.add_argument("notebook", type=Path)
-    parser.add_argument("--allow-outputs", action="store_true", help="do not fail lint when code cells contain outputs or execution counts")
-    parser.add_argument("--strict", action="store_true", help="treat warning diagnostics as lint failures")
-    parser.add_argument("--no-ruff", action="store_true", help="skip Ruff lint checks for extracted notebook code")
-    parser.add_argument("--no-format", action="store_true", help="skip Ruff format checks for extracted notebook code")
-    parser.add_argument("--no-ty", action="store_true", help="skip ty checks for extracted notebook code")
-    parser.add_argument("--repo-root", type=Path, default=Path.cwd(), help="working directory for execution")
-    parser.add_argument("--timeout", type=int, default=120, help="per-cell execution timeout in seconds")
+    parser.add_argument("--strict", action="store_true", help="treat advisory warnings as failures")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run the requested notebook check."""
+    """Run the requested inspection or advisory pass."""
     args = parse_args(sys.argv[1:] if argv is None else argv)
     try:
         if args.summary:
             summarize(args.notebook)
             return 0
-        if args.lint:
-            return lint(
-                args.notebook,
-                LintOptions(
-                    allow_outputs=args.allow_outputs,
-                    strict=args.strict,
-                    run_ruff=not args.no_ruff,
-                    run_format=not args.no_format,
-                    run_ty=not args.no_ty,
-                    project_root=args.repo_root,
-                ),
-            )
-        notebook = load_notebook(args.notebook)
-        return execute(args.notebook, notebook, args.repo_root, args.timeout)
+        return advise(args.notebook, strict=args.strict)
     except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as error:
         print(f"notebook_check: {error}", file=sys.stderr)
         return 2

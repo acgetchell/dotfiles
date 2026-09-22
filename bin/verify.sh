@@ -116,13 +116,18 @@ done
 
 echo "==> Pinned tool versions"
 if command -v just >/dev/null 2>&1; then
+  cargo_version_pattern="$(just --justfile "$DOTFILES_DIR/justfile" --evaluate cargo_version_pattern)"
   for tool in cargo-update dprint just rumdl uv zizmor; do
     pin_name="${tool//-/_}_version"
     if ! expected_version="$(just --justfile "$DOTFILES_DIR/justfile" --evaluate "$pin_name")"; then
       fail "could not resolve $pin_name from $DOTFILES_DIR/justfile"
       continue
     fi
-    if [[ ! "$expected_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    version_pattern="$cargo_version_pattern"
+    if [[ "$tool" == uv ]]; then
+      version_pattern='[0-9]+\.[0-9]+\.[0-9]+'
+    fi
+    if [[ ! "$expected_version" =~ ^${version_pattern}$ ]]; then
       fail "invalid $pin_name in $DOTFILES_DIR/justfile: ${expected_version:-missing}"
       continue
     fi
@@ -132,7 +137,7 @@ if command -v just >/dev/null 2>&1; then
       executable=cargo-install-update
     fi
     if command -v "$executable" >/dev/null 2>&1; then
-      actual_version="$("$executable" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+      actual_version="$("$executable" --version 2>/dev/null | grep -oE "$version_pattern" | head -1 || true)"
     fi
     if [[ "$actual_version" == "$expected_version" ]]; then
       pass "$tool $actual_version"

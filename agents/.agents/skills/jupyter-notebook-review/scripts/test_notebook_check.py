@@ -1,14 +1,10 @@
-#!/usr/bin/env python3
-"""Tests for the Jupyter notebook review skill helper."""
+"""Tests for retained skill inspection and advisory policy, tracked in #78."""
 
 import importlib.util
 import json
 import sys
 from pathlib import Path
-from typing import Any
-from unittest.mock import patch
 
-import nbclient
 import pytest
 
 SCRIPT = Path(__file__).with_name("notebook_check.py")
@@ -21,198 +17,99 @@ sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
 
 
-def notebook_with_ids(*cell_ids: Any) -> dict[str, Any]:
-    """Return a minimal notebook-shaped mapping with the requested cell IDs."""
-    cells = []
-    for cell_id in cell_ids:
-        cell = {"cell_type": "markdown", "metadata": {}, "source": []}
-        if cell_id is not None:
-            cell["id"] = cell_id
-        cells.append(cell)
-    return {"cells": cells, "metadata": {}, "nbformat": 4, "nbformat_minor": 5}
+def write_notebook(path: Path, *, source: str = "value = 1\n", cell_id: str | None = "define-value") -> bytes:
+    """Supply a notebook awaiting review without a notebook runtime dependency."""
+    cell = {"cell_type": "code", "metadata": {}, "source": source, "outputs": [], "execution_count": None}
+    if cell_id is not None:
+        cell["id"] = cell_id
+    payload = json.dumps({"cells": [cell], "metadata": {}, "nbformat": 4, "nbformat_minor": 5}).encode()
+    path.write_bytes(payload)
+    return payload
 
 
-def test_cell_id_diagnostics_accepts_unique_nbformat_ids() -> None:
-    """Valid descriptive IDs should pass without diagnostics."""
-    assert MODULE.cell_id_diagnostics(notebook_with_ids("setup-code", "Render_Plot", "load_data")) == []
+def test_summary_inspects_missing_ids_without_repairing_source(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    notebook = tmp_path / "awaiting-repair.ipynb"
+    original = write_notebook(notebook, cell_id=None)
+
+    assert MODULE.main(["--summary", str(notebook)]) == 0
+
+    output = capsys.readouterr()
+    assert "cell 001 code" in output.out
+    assert "id=<missing>" in output.out
+    assert "value = 1" in output.out
+    assert not output.err
+    assert notebook.read_bytes() == original
 
 
-def test_cell_id_diagnostics_rejects_missing_malformed_and_duplicate_ids() -> None:
-    """Presence, nbformat shape, and uniqueness are hard requirements."""
-    diagnostics = MODULE.cell_id_diagnostics(notebook_with_ids(None, "", 123, "bad id", "load-data", "load-data", "a" * 64, "a" * 65))
+@pytest.mark.parametrize("cell_id", ["cell-1", "abcdef12", "ABCDEF12", "123e4567-e89b-42d3-a456-426614174000"])
+def test_descriptive_id_advice_is_optional_or_strict(tmp_path: Path, capsys: pytest.CaptureFixture[str], cell_id: str) -> None:
+    notebook = tmp_path / "generated-id.ipynb"
+    original = write_notebook(notebook, cell_id=cell_id)
 
-    assert [(item.severity, item.cell) for item in diagnostics] == [("error", 1), ("error", 2), ("error", 3), ("error", 4), ("error", 6), ("error", 8)]
+    assert MODULE.main(["--advice", str(notebook)]) == 0
+    assert MODULE.main(["--advice", "--strict", str(notebook)]) == 1
 
-
-def test_cell_id_diagnostics_warns_on_generated_and_positional_ids() -> None:
-    """Generated and positional IDs should prompt descriptive replacements."""
-    diagnostics = MODULE.cell_id_diagnostics(
-        notebook_with_ids("abcdef12", "123e4567-e89b-42d3-a456-426614174000", "ABCDEF12", "123E4567-e89B-42d3-A456-426614174000", "cell-3", "load-data")
-    )
-
-    assert [(item.severity, item.cell) for item in diagnostics] == [("warning", 1), ("warning", 2), ("warning", 3), ("warning", 4), ("warning", 5)]
+    assert "looks generated or positional" in capsys.readouterr().out
+    assert notebook.read_bytes() == original
 
 
-def test_lint_enforces_cell_id_diagnostics(tmp_path: Path) -> None:
-    """Cell ID errors should fail lint, while warnings fail only in strict mode."""
-    notebook_path = tmp_path / "example.ipynb"
-    options = MODULE.LintOptions(run_ruff=False, run_format=False, run_ty=False)
+def test_advice_keeps_dataframe_and_subprocess_policy(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    notebook = tmp_path / "policy.ipynb"
+    write_notebook(notebook, source='import pandas\nimport subprocess\nsubprocess.run(["program"])\n')
 
-    notebook_path.write_text(json.dumps(notebook_with_ids(None)), encoding="utf-8")
-    assert MODULE.lint(notebook_path, options) == 1
+    assert MODULE.main(["--advice", str(notebook)]) == 0
 
-    notebook_path.write_text(json.dumps(notebook_with_ids("cell-1")), encoding="utf-8")
-    assert MODULE.lint(notebook_path, options) == 0
-    assert MODULE.lint(notebook_path, MODULE.LintOptions(strict=True, run_ruff=False, run_format=False, run_ty=False)) == 1
+    output = capsys.readouterr().out
+    assert "prefer Polars" in output
+    assert "subprocess.run lacks timeout" in output
 
 
-def test_summary_displays_cell_ids(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """Summary output should expose stable IDs for notebook review."""
-    notebook_path = tmp_path / "example.ipynb"
-    notebook_path.write_text(json.dumps(notebook_with_ids("setup-code")), encoding="utf-8")
+def test_advice_reports_shell_execution_as_an_error(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    notebook = tmp_path / "shell.ipynb"
+    write_notebook(notebook, source='import subprocess\nsubprocess.run("program", shell=True, timeout=10)\n')
 
-    MODULE.summarize(notebook_path)
-
-    assert "id=setup-code" in capsys.readouterr().out
+    assert MODULE.main(["--advice", str(notebook)]) == 1
+    assert "cell 1: error: subprocess.run uses shell=True" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("metadata", [None, [], "invalid"])
-def test_load_notebook_rejects_non_object_cell_metadata(tmp_path: Path, metadata: Any) -> None:
-    """Each cell metadata field must be a JSON object."""
-    notebook_path = tmp_path / "invalid-metadata.ipynb"
-    notebook = notebook_with_ids("setup-code")
-    notebook["cells"][0]["metadata"] = metadata
-    notebook_path.write_text(json.dumps(notebook), encoding="utf-8")
+def test_plain_python_advice_defers_magic_syntax_to_shared_lint(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    notebook = tmp_path / "magic.ipynb"
+    original = write_notebook(notebook, source="%time value = 1\n")
 
-    with pytest.raises(TypeError, match=r"cell 1 metadata must be a JSON object") as error:
-        MODULE.load_notebook(notebook_path)
+    assert MODULE.main(["--advice", "--strict", str(notebook)]) == 0
 
-    assert str(notebook_path) in str(error.value)
-    assert f"cell 1 metadata must be a JSON object, got {type(metadata).__name__}" in str(error.value)
+    assert "plain-Python advice skipped" in capsys.readouterr().out
+    assert notebook.read_bytes() == original
 
 
-@pytest.mark.parametrize(("metadata", "present"), [(None, False), ([], True)])
-def test_load_notebook_rejects_missing_or_non_object_metadata(tmp_path: Path, metadata: object, present: bool) -> None:
-    """Top-level notebook metadata must be present and object-shaped."""
-    notebook_path = tmp_path / "invalid-notebook-metadata.ipynb"
-    notebook = notebook_with_ids("setup-code")
-    if present:
-        notebook["metadata"] = metadata
-    else:
-        notebook.pop("metadata")
-    notebook_path.write_text(json.dumps(notebook), encoding="utf-8")
+def test_advice_never_executes_source(tmp_path: Path) -> None:
+    notebook = tmp_path / "read-only.ipynb"
+    marker = tmp_path / "should-not-exist"
+    original = write_notebook(notebook, source=f"from pathlib import Path\nPath({str(marker)!r}).touch()\n")
 
-    with pytest.raises(TypeError, match=r"metadata must be a JSON object") as error:
-        MODULE.load_notebook(notebook_path)
+    assert MODULE.main(["--advice", "--strict", str(notebook)]) == 0
 
-    assert str(notebook_path) in str(error.value)
-    assert f"metadata must be a JSON object, got {type(metadata).__name__}" in str(error.value)
+    assert not marker.exists()
+    assert notebook.read_bytes() == original
 
 
-@pytest.mark.parametrize("nbformat", [4.0, True])
-def test_load_notebook_rejects_non_integer_nbformat_four(tmp_path: Path, nbformat: Any) -> None:
-    """Numeric equality must not admit floats or Booleans as nbformat 4."""
-    notebook_path = tmp_path / "invalid-nbformat.ipynb"
-    notebook = notebook_with_ids("setup-code")
-    notebook["nbformat"] = nbformat
-    notebook_path.write_text(json.dumps(notebook), encoding="utf-8")
+@pytest.mark.parametrize("payload", ["[]", '{"metadata":{},"nbformat":4,"cells":[null]}'])
+def test_inspection_rejects_unreadable_cell_containers(tmp_path: Path, capsys: pytest.CaptureFixture[str], payload: str) -> None:
+    notebook = tmp_path / "malformed.ipynb"
+    notebook.write_text(payload, encoding="utf-8")
 
-    with pytest.raises(ValueError, match=r"expected nbformat to be the JSON integer 4") as error:
-        MODULE.load_notebook(notebook_path)
+    assert MODULE.main(["--summary", str(notebook)]) == 2
 
-    assert str(notebook_path) in str(error.value)
-    assert f"expected nbformat to be the JSON integer 4, got {nbformat!r}" in str(error.value)
+    output = capsys.readouterr()
+    assert "notebook_check:" in output.err
+    assert "Traceback" not in output.err
+    assert not output.out
 
 
-@pytest.mark.parametrize(
-    ("notebook", "message"),
-    [
-        ([], "notebook root must be a JSON object, got list"),
-        ({"metadata": {}, "nbformat": 4}, "cells must be a JSON array, got NoneType"),
-        ({"metadata": {}, "nbformat": 4, "cells": [None]}, "cell 1 must be a JSON object, got NoneType"),
-        (
-            {"metadata": {}, "nbformat": 4, "cells": [{"cell_type": "markdown", "metadata": {}, "source": ["valid", 1]}]},
-            "cell 1 cell source list items must all be strings",
-        ),
-    ],
-)
-def test_load_notebook_rejects_malformed_container_shapes(tmp_path: Path, notebook: object, message: str) -> None:
-    """Malformed JSON containers should fail at the notebook boundary."""
-    notebook_path = tmp_path / "malformed.ipynb"
-    notebook_path.write_text(json.dumps(notebook), encoding="utf-8")
+def test_old_execution_mode_cannot_silently_become_advice(tmp_path: Path) -> None:
+    notebook = tmp_path / "example.ipynb"
+    write_notebook(notebook)
 
-    with pytest.raises(TypeError, match=message) as error:
-        MODULE.load_notebook(notebook_path)
-
-    assert str(notebook_path) in str(error.value)
-
-
-def test_main_reports_malformed_notebook_without_traceback(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """Malformed notebook input should produce a concise CLI diagnostic."""
-    notebook_path = tmp_path / "malformed.ipynb"
-    notebook_path.write_text("[]", encoding="utf-8")
-
-    assert MODULE.main(["--summary", str(notebook_path)]) == 2
-
-    stderr = capsys.readouterr().err
-    assert "notebook root must be a JSON object" in stderr
-    assert "Traceback" not in stderr
-
-
-def test_execute_rejects_malformed_notebook_without_traceback(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """Execute mode should validate notebook JSON before loading dependencies."""
-    notebook_path = tmp_path / "malformed.ipynb"
-    notebook_path.write_text("[]", encoding="utf-8")
-
-    assert MODULE.main(["--execute", str(notebook_path)]) == 2
-
-    stderr = capsys.readouterr().err
-    assert "notebook root must be a JSON object" in stderr
-    assert "Traceback" not in stderr
-
-
-def test_execute_rejects_schema_invalid_notebook_before_client_creation(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Execute mode should report schema errors without constructing a client."""
-    notebook_path = tmp_path / "invalid-schema.ipynb"
-    sensitive_value = "synthetic-sensitive-value-7b3f39"
-    notebook = notebook_with_ids("invalid-cell")
-    notebook["cells"][0]["source"] = [sensitive_value]
-    notebook["cells"][0].pop("cell_type")
-    notebook_path.write_text(json.dumps(notebook), encoding="utf-8")
-
-    def unexpected_client(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("NotebookClient must not be created for an invalid notebook schema")
-
-    monkeypatch.setattr(nbclient, "NotebookClient", unexpected_client)
-
-    assert MODULE.main(["--execute", str(notebook_path)]) == 2
-
-    stderr = capsys.readouterr().err
-    assert "notebook schema validation failed" in stderr
-    assert sensitive_value not in stderr
-    assert "Traceback" not in stderr
-
-
-def test_execute_reads_validated_notebook_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute mode should reuse the mapping loaded and validated by main."""
-    notebook_path = tmp_path / "valid.ipynb"
-    notebook_path.write_text(json.dumps(notebook_with_ids("overview")), encoding="utf-8")
-    executed_notebooks: list[object] = []
-
-    class RecordingNotebookClient:
-        def __init__(self, notebook: object, **_kwargs: object) -> None:
-            self.notebook = notebook
-
-        def execute(self) -> None:
-            executed_notebooks.append(self.notebook)
-
-    monkeypatch.setattr(nbclient, "NotebookClient", RecordingNotebookClient)
-    original_open = Path.open
-    with patch.object(Path, "open", autospec=True, side_effect=original_open) as open_mock:
-        assert MODULE.main(["--execute", str(notebook_path)]) == 0
-
-    notebook_reads = [call for call in open_mock.call_args_list if call.args and call.args[0] == notebook_path]
-    assert len(notebook_reads) == 1
-    assert len(executed_notebooks) == 1
+    with pytest.raises(SystemExit) as error:
+        MODULE.main(["--execute", str(notebook)])
+    assert error.value.code == 2

@@ -2298,6 +2298,15 @@ def _nonempty_text(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
+def _runtime_isinstance(value: object, expected: type) -> bool:
+    """Check evidence fields without trusting unenforced dataclass annotations."""
+    return isinstance(value, expected)
+
+
+def _has_three_fingerprints(values: Sequence[object]) -> bool:
+    return len(values) == 3 and all(_nonempty_text(value) for value in values)
+
+
 def _duplicate_values(values: Sequence[str]) -> tuple[str, ...]:
     seen: set[str] = set()
     duplicates: set[str] = set()
@@ -3627,7 +3636,7 @@ def create_artifact_manifest(*, manifest_id: str, verifier_id: str, artifacts: S
 def assess_review_evidence(expectation: ReviewEvidenceExpectation, evidence: ReviewEvidence) -> EvidenceAssessment:  # noqa: C901, PLR0912, PLR0915
     """Accept the same persisted proof envelope for worker or coordinator review."""
     blockers: list[str] = []
-    if not isinstance(evidence.schema_version, int) or isinstance(evidence.schema_version, bool) or evidence.schema_version != EVIDENCE_SCHEMA_VERSION:
+    if not _runtime_isinstance(evidence.schema_version, int) or isinstance(evidence.schema_version, bool) or evidence.schema_version != EVIDENCE_SCHEMA_VERSION:
         blockers.append(f"review evidence schema must be exactly {EVIDENCE_SCHEMA_VERSION}")
     for value, label in (
         (evidence.evidence_id, "evidence ID"),
@@ -3654,7 +3663,7 @@ def assess_review_evidence(expectation: ReviewEvidenceExpectation, evidence: Rev
     blockers.extend(_identifier_tuple_blockers(evidence.finding_ids, label="review evidence finding IDs"))
     blockers.extend(_identifier_tuple_blockers(evidence.validation_requirement_ids, label="review evidence validation requirement IDs"))
     blockers.extend(_identifier_tuple_blockers(evidence.handoff_ids, label="review evidence handoff IDs"))
-    if any(not isinstance(discovery, RoutingDiscovery) for discovery in evidence.routing_discoveries):
+    if any(not _runtime_isinstance(discovery, RoutingDiscovery) for discovery in evidence.routing_discoveries):
         blockers.append("review evidence routing discoveries must be typed")
     else:
         discovery_ids = tuple(discovery.handoff_id for discovery in evidence.routing_discoveries)
@@ -3712,7 +3721,7 @@ def assess_review_evidence(expectation: ReviewEvidenceExpectation, evidence: Rev
         ):
             blockers.append("independent-review evidence expectation has no bounded change target")
         if tuple(path for path, _ in expectation.planned_path_line_bounds) != expectation.planned_paths or any(
-            not isinstance(bound, int) or isinstance(bound, bool) or bound < 0 for _, bound in expectation.planned_path_line_bounds
+            not _runtime_isinstance(bound, int) or isinstance(bound, bool) or bound < 0 for _, bound in expectation.planned_path_line_bounds
         ):
             blockers.append("independent-review evidence expectation line bounds do not match its planned paths")
     elif expectation.mode == "fix":
@@ -3766,7 +3775,7 @@ def assess_validation_evidence(  # noqa: C901, PLR0912, PLR0915
 ) -> EvidenceAssessment:
     """Accept a persisted review-validator result without transferring trust blindly."""
     blockers: list[str] = []
-    if not isinstance(evidence.schema_version, int) or isinstance(evidence.schema_version, bool) or evidence.schema_version != EVIDENCE_SCHEMA_VERSION:
+    if not _runtime_isinstance(evidence.schema_version, int) or isinstance(evidence.schema_version, bool) or evidence.schema_version != EVIDENCE_SCHEMA_VERSION:
         blockers.append(f"validation evidence schema must be exactly {EVIDENCE_SCHEMA_VERSION}")
     for value, label in (
         (evidence.evidence_id, "evidence ID"),
@@ -3931,7 +3940,7 @@ def assess_repository_review_proof(  # noqa: C901, PLR0912
     blockers: list[str] = []
     if not isinstance(expectation, RepositoryReviewProofExpectation):
         return Assessment(feasible=False, blockers=("repository review proof requires a typed planner-derived expectation",))
-    if not isinstance(proof.schema_version, int) or isinstance(proof.schema_version, bool) or proof.schema_version != EVIDENCE_SCHEMA_VERSION:
+    if not _runtime_isinstance(proof.schema_version, int) or isinstance(proof.schema_version, bool) or proof.schema_version != EVIDENCE_SCHEMA_VERSION:
         blockers.append(f"repository review proof schema must be exactly {EVIDENCE_SCHEMA_VERSION}")
     for value, label in (
         (proof.proof_id, "proof ID"),
@@ -3943,7 +3952,7 @@ def assess_repository_review_proof(  # noqa: C901, PLR0912
     ):
         if not _nonempty_text(value):
             blockers.append(f"repository review proof has no {label}")
-    if len(proof.source_state) != 3 or any(not _nonempty_text(value) for value in proof.source_state):
+    if not _has_three_fingerprints(proof.source_state):
         blockers.append("repository review proof must name three source fingerprints")
     for actual, expected, label in (
         (proof.plan_digest, expectation.plan_digest, "plan digest"),
@@ -3957,7 +3966,7 @@ def assess_repository_review_proof(  # noqa: C901, PLR0912
     blockers.extend(_identifier_tuple_blockers(proof.stale_evidence_ids, label="stale evidence IDs"))
     blockers.extend(_identifier_tuple_blockers(proof.resolved_handoff_ids, label="resolved handoff IDs"))
     blockers.extend(_identifier_tuple_blockers(proof.unresolved_handoff_ids, label="unresolved handoff IDs"))
-    if any(not isinstance(discovery, RoutingDiscovery) for discovery in proof.routing_discoveries):
+    if any(not _runtime_isinstance(discovery, RoutingDiscovery) for discovery in proof.routing_discoveries):
         blockers.append("repository review proof routing discoveries must be typed")
     else:
         blockers.extend(
@@ -4293,19 +4302,19 @@ def _artifact_manifest_blockers(  # noqa: C901, PLR0912, PLR0915
         blockers.append(f"artifact verifier uses an unsupported digest algorithm: {trusted_verifier.digest_algorithm}")
     if proof.verifier_id != trusted_verifier.verifier_id:
         blockers.append(f"repository review proof names an unknown verifier: {proof.verifier_id}")
-    if any(not isinstance(artifact, ArtifactPayload) for artifact in trusted_verifier.artifacts):
+    if any(not _runtime_isinstance(artifact, ArtifactPayload) for artifact in trusted_verifier.artifacts):
         blockers.append("artifact verifier contains an untyped payload")
         return tuple(blockers)
     verifier_artifact_ids = tuple(artifact.artifact_id for artifact in trusted_verifier.artifacts)
     blockers.extend(_identifier_tuple_blockers(verifier_artifact_ids, label="artifact verifier artifact IDs"))
-    if any(not isinstance(artifact.content, bytes) for artifact in trusted_verifier.artifacts):
+    if any(not _runtime_isinstance(artifact.content, bytes) for artifact in trusted_verifier.artifacts):
         blockers.append("artifact verifier payload content must be bytes")
         return tuple(blockers)
     verifier_artifacts = {artifact.artifact_id: artifact.content for artifact in trusted_verifier.artifacts}
     if not isinstance(manifest, ArtifactManifest):
         blockers.append("artifact verification requires a typed manifest")
         return tuple(blockers)
-    if not isinstance(manifest.schema_version, int) or isinstance(manifest.schema_version, bool) or manifest.schema_version != EVIDENCE_SCHEMA_VERSION:
+    if not _runtime_isinstance(manifest.schema_version, int) or isinstance(manifest.schema_version, bool) or manifest.schema_version != EVIDENCE_SCHEMA_VERSION:
         blockers.append(f"artifact manifest schema must be exactly {EVIDENCE_SCHEMA_VERSION}")
     if manifest.manifest_id != proof.artifact_manifest_id:
         blockers.append("artifact manifest ID does not match the repository review proof")
@@ -4313,7 +4322,7 @@ def _artifact_manifest_blockers(  # noqa: C901, PLR0912, PLR0915
         blockers.append("artifact manifest verifier does not match the trusted verifier")
     if any(not _nonempty_text(value) for value in (manifest.manifest_id, manifest.verifier_id, manifest.manifest_digest)):
         blockers.append("artifact manifest identity and digest must be non-empty strings")
-    if any(not isinstance(entry, ArtifactManifestEntry) for entry in manifest.entries):
+    if any(not _runtime_isinstance(entry, ArtifactManifestEntry) for entry in manifest.entries):
         blockers.append("artifact manifest contains an untyped entry")
         return tuple(blockers)
 
@@ -4486,7 +4495,7 @@ def assess_completion(evidence: CompletionEvidence) -> Assessment:  # noqa: C901
     blockers: list[str] = []
     expectation = evidence.repository_review_expectation
     proof = evidence.repository_review_proof
-    bound = isinstance(expectation, RepositoryReviewProofExpectation) and isinstance(proof, RepositoryReviewProof)
+    bound = _runtime_isinstance(expectation, RepositoryReviewProofExpectation) and _runtime_isinstance(proof, RepositoryReviewProof)
     records_typed = (
         isinstance(evidence.review_records, tuple)
         and all(
@@ -4630,7 +4639,7 @@ def _migration_trial_blockers(trial: MigrationTrial) -> tuple[str, ...]:
         blockers.append(f"{trial.trial_id} has no runtime trial artifact")
     elif trial.runtime_artifact_verified is not True or not isinstance(trial.runtime_artifact_verifier, str) or not trial.runtime_artifact_verifier.strip():
         blockers.append(f"{trial.trial_id} runtime trial artifact was not independently verified")
-    if not isinstance(trial.workers_created, int) or isinstance(trial.workers_created, bool):
+    if not _runtime_isinstance(trial.workers_created, int) or isinstance(trial.workers_created, bool):
         blockers.append(f"{trial.trial_id} has an invalid runtime worker count")
     elif trial.workers_created < 1:
         blockers.append(f"{trial.trial_id} created no runtime workers")
@@ -4808,7 +4817,7 @@ def _malformed_execution_profile_assessment(
     input_blockers.extend(
         f"{field} must be a non-boolean integer"
         for field, value in (("worker budget total", budget.total), ("worker budget recovery/finalization reserve", budget.recovery_finalization_reserve))
-        if not isinstance(value, int) or isinstance(value, bool)
+        if not _runtime_isinstance(value, int) or isinstance(value, bool)
     )
     if not input_blockers:
         return None
@@ -4825,7 +4834,7 @@ def _malformed_execution_profile_assessment(
         ),
         isolated_requested=isolated_requested is True or strict_isolated_only,
         isolated_only=strict_isolated_only,
-        configured_worker_budget=(budget.total if isinstance(budget.total, int) and not isinstance(budget.total, bool) else None),
+        configured_worker_budget=(budget.total if _runtime_isinstance(budget.total, int) and not isinstance(budget.total, bool) else None),
     )
 
 

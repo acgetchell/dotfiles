@@ -2346,6 +2346,16 @@ def test_review_evidence_v2_rejects_legacy_v1_envelopes() -> None:
     assert "review evidence schema must be exactly 2" in result.blockers
 
 
+@pytest.mark.parametrize("schema", ["2", 2.0, True])
+def test_review_evidence_rejects_schema_types_despite_dataclass_annotations(schema: object) -> None:
+    expectation, evidence = _review_evidence()
+
+    result = assess_review_evidence(expectation, replace(evidence, schema_version=cast("int", schema)))
+
+    assert not result.feasible
+    assert "review evidence schema must be exactly 2" in result.blockers
+
+
 def test_isolated_review_rejects_coordinator_evidence() -> None:
     expectation, evidence = _review_evidence(profile="isolated")
 

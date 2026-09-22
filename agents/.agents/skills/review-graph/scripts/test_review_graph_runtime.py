@@ -3349,6 +3349,26 @@ def test_python_stdin_publication_requires_an_identity_before_any_write(tmp_path
     assert set(store.iterdir()) == before
 
 
+def test_stdin_publication_reports_temporary_file_creation_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _document, dispatches = _worker_input_fixture(tmp_path)
+    entry = next(item for item in dispatches["dispatches"] if item["result_contract"] == "compact-review")
+    contract = json.loads(Path(entry["worker_payload_contract_path"]).read_text(encoding="utf-8"))
+    payload_bytes = json.dumps(_compact_audit_payload(entry)).encode()
+    approval = review_worker_payload_write(contract, payload_bytes)
+    target = Path(entry["worker_payload_path"])
+    before = set(target.parent.iterdir())
+
+    def fail_create(*_args: object, **_kwargs: object) -> tuple[int, str]:
+        msg = "temporary storage unavailable"
+        raise OSError(msg)
+
+    monkeypatch.setattr("review_graph_runtime.tempfile.mkstemp", fail_create)
+    with pytest.raises(OSError, match="worker payload artifact publication failed: temporary storage unavailable"):
+        persist_worker_payload_bytes(contract, payload_bytes, approval_identity=approval["approval_identity"])
+    assert not target.exists()
+    assert set(target.parent.iterdir()) == before
+
+
 @pytest.mark.parametrize("changed_field", ["mode", "owned_paths", "node_id", "worker_payload_path", "schema_version", "result_contract"])
 def test_stdin_approval_rejects_changed_contract_before_replacing_target(tmp_path: Path, changed_field: str) -> None:
     _document, dispatches = _worker_input_fixture(tmp_path)
