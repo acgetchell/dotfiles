@@ -1,4 +1,30 @@
 {
+  "preflight-validation": {
+    "plan": {},
+    "repository_root": "/tmp/repository",
+    "cache_paths": [".uv-cache"],
+    "command_policy": [{"command": "just ci", "disposition": "blocked", "reason": "nested test fixtures mutate Git, which this task forbids"}]
+  },
+  "recover-validation-launch": {
+    "artifact_store": "/tmp/review-recovery",
+    "plan": {},
+    "source_state": ["scope", "worktree", "repository"],
+    "node_id": "validation-001",
+    "failure_kind": "cache-access",
+    "checks_started": false,
+    "reason": "uv could not open its cache before pytest started",
+    "remedy": "Use the accessible repository-local cache",
+    "environment": "current host; UV_CACHE_DIR=.uv-cache",
+    "permission_change": "none"
+  },
+  "publish-worker-payload": {
+    "mode": "audit",
+    "node_id": "audit-001",
+    "owned_paths": ["src/lib.py"],
+    "result_contract": "compact-review",
+    "schema_version": 1,
+    "worker_payload_path": "/tmp/review/audit-001.worker-payload.json"
+  },
   "resume-after-external-metadata": {
     "artifact_store": "/tmp/review-resume",
     "dispatches_path": "/tmp/review/dispatches.json",

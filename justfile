@@ -11,8 +11,8 @@ python_paths := python_primary_paths + " " + python_fixture_paths
 cargo_update_version := "22.1.1"
 dprint_version := "0.57.4"
 just_version := "1.58.0"
-rumdl_version := "0.2.73"
-uv_version := "0.12.13"
+rumdl_version := "0.2.75"
+uv_version := "0.12.17"
 zizmor_version := "1.30.1"
 
 _ensure-actionlint:
@@ -25,6 +25,14 @@ _ensure-brew:
     #!/usr/bin/env bash
     set -euo pipefail
     command -v brew >/dev/null || { echo "'brew' not found. See https://brew.sh"; exit 1; }
+
+_ensure-coderabbit:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v coderabbit >/dev/null || {
+        echo "CodeRabbit CLI is required. Install it from https://docs.coderabbit.ai/cli and authenticate with 'coderabbit auth login'." >&2
+        exit 1
+    }
 
 _ensure-dprint:
     #!/usr/bin/env bash
@@ -84,6 +92,25 @@ _ensure-zizmor:
         echo "   cargo install --locked zizmor --version {{ zizmor_version }}"
         exit 1
     fi
+
+[private]
+_review scope base: _ensure-coderabbit
+    #!/usr/bin/env bash
+    set -euo pipefail
+    args=(review --agent --include-untracked --config AGENTS.md .coderabbit.yaml)
+    case {{ quote(scope) }} in
+        branch)
+            base={{ quote(base) }}
+            if ! git rev-parse --verify --end-of-options "${base}^{commit}" >/dev/null 2>&1; then
+                echo "Cannot resolve review base '$base'. Choose an existing local commit or reference." >&2
+                exit 2
+            fi
+            args+=(--base="$base")
+            ;;
+        uncommitted) args+=(--uncommitted) ;;
+        *) echo "Unsupported review scope: "{{ quote(scope) }} >&2; exit 2 ;;
+    esac
+    exec coderabbit "${args[@]}"
 
 action-lint: _ensure-actionlint
     #!/usr/bin/env bash
@@ -222,6 +249,12 @@ python-sync: _ensure-uv
 
 python-typecheck: _ensure-uv
     uv run --locked ty check {{ python_paths }} --error all
+
+# Review committed and local changes with CodeRabbit; the base defaults to main.
+review base="main": (_review "branch" base)
+
+# Review only staged, unstaged, and non-ignored untracked changes with CodeRabbit.
+review-uncommitted: (_review "uncommitted" "")
 
 # Harden semgrep execution for CI/sandboxes:
 # use explicit temporary cache/log paths, disable version checks and metrics,

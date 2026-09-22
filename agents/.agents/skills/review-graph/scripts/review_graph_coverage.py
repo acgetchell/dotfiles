@@ -20,8 +20,9 @@ def validate_coverage_units(payload: dict[str, Any], owned_paths: tuple[str, ...
     if sorted(findings) != list(range(1, len(payload["findings"]) + 1)):
         msg = "coverage units must assign every finding exactly once using one-based indices"
         raise ValueError(msg)
-    if not set(payload["nearby_contract_owners"]) <= dependencies:
-        msg = "coverage units must account for every inspected nearby dependency"
+    missing_dependencies = sorted(set(payload["nearby_contract_owners"]) - dependencies)
+    if missing_dependencies:
+        msg = "coverage units must account for every inspected nearby dependency; missing: " + ", ".join(missing_dependencies)
         raise ValueError(msg)
 
 

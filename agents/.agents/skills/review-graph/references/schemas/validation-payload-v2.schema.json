@@ -10,6 +10,7 @@
           "artifact_digest": {"pattern": "^sha256:[0-9a-f]{64}$", "type": "string"},
           "artifact_digest_mode": {
             "enum": [
+              "absent-v1",
               "bounded-directory-metadata-v1",
               "bounded-directory-metadata-v2",
               "bounded-directory-metadata-v3",

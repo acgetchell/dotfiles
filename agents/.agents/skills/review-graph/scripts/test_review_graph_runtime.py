@@ -2128,8 +2128,8 @@ def _assert_materialized_worker_persistence(entry: dict[str, Any]) -> None:
     contract = json.loads(Path(entry["worker_payload_contract_path"]).read_text(encoding="utf-8"))
     assert "candidate_path" not in contract
     assert persistence["review_command"] == [command[0], command[1], "review-worker-payload-write", "--input", entry["worker_payload_contract_path"]]
-    assert shlex.join(command) in entry["worker_prompt"]
-    assert shlex.join(persistence["review_command"]) in entry["worker_prompt"]
+    assert persistence["publish_command"] == [command[0], command[1], "publish-worker-payload", "--input", entry["worker_payload_contract_path"]]
+    assert "worker_payload_persistence.publish_command" in entry["worker_prompt"]
 
 
 def test_dispatch_materialization_and_ready_nodes_are_plan_derived(tmp_path: Path) -> None:
@@ -2166,7 +2166,7 @@ def test_dispatch_materialization_and_ready_nodes_are_plan_derived(tmp_path: Pat
     _assert_planned_validation_policy(audit_dispatch, validation_dispatch)
     assert str(SKILL_ROOT.parents[2] / "AGENTS.md") in audit_dispatch["instruction_paths"]
     assert all(entry["worker_prompt"] for entry in result["dispatches"])
-    assert all("persist-worker-payload" in entry["worker_prompt"] for entry in result["dispatches"])
+    assert all("worker_payload_persistence.publish_command" in entry["worker_prompt"] for entry in result["dispatches"])
     assert all(Path(entry["worker_payload_contract_path"]).is_file() for entry in result["dispatches"])
     for entry in result["dispatches"]:
         _assert_materialized_worker_persistence(entry)
@@ -2262,8 +2262,7 @@ payload = {
     "limitations": [], "scope_limitations": [], "status": "no-findings"
 }
 payload_bytes = (json.dumps(payload, sort_keys=True) + "\\n").encode()
-example = entry["worker_prompt"].split("```python\\n", 1)[1].split("```", 1)[0]
-exec(example)
+subprocess.run(dispatch["worker_payload_persistence"]["publish_command"], input=payload_bytes, capture_output=True, check=True)
 sys.stdout.buffer.write(payload_bytes)
 """
 
@@ -2602,7 +2601,7 @@ def test_validator_prompt_exposes_nested_required_shape_and_minimal_response_com
     dispatch.update({"after_state": ["scope", "worktree", "repository"], "before_state": ["scope", "worktree", "repository"]})
 
     assert set(execution_shape) == {"artifact_paths", "command", "elapsed", "evidence", "executor", "exit_code", "result", "working_directory"}
-    assert '"artifact_paths":["string"]' in entry["worker_prompt"]
+    assert "dispatch.payload_schema" in entry["worker_prompt"]
     require_schema(payload, SCHEMA_ROOT / "validation-payload-v2.schema.json")
     content, metadata = compile_validation({"dispatch": dispatch, "payload": payload})
     assert content.startswith(b"# Validation Result\n")
@@ -2685,7 +2684,9 @@ def test_first_next_ready_accepts_missing_or_zero_byte_journal(tmp_path: Path, c
     response = capsys.readouterr()
     assert response.err == ""
     receipt = json.loads(response.out)
-    assert receipt == {"output_generation": 0, "output_path": str(output_directory / "next-ready.000000.json")}
+    assert receipt["output_generation"] == 0
+    assert Path(receipt["output_path"]).parent == output_directory
+    assert Path(receipt["output_path"]).name.startswith("next-ready.000000.")
     ready = json.loads(Path(receipt["output_path"]).read_text(encoding="utf-8"))
     assert ready["ready_dispatches"]
     for entry in ready["ready_dispatches"]:
@@ -3154,6 +3155,8 @@ def test_create_once_writers_reject_nonregular_targets(tmp_path: Path, writer: s
 
 def _legacy_plan_digest(plan: GraphPlan) -> str:
     document = asdict(plan)
+    if not plan.validation_recoveries:
+        document.pop("validation_recoveries")
     if not plan.validation_exclusions:
         document.pop("validation_exclusions")
     return "sha256:" + hashlib.sha256(json.dumps(document, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
@@ -3985,7 +3988,7 @@ def test_journal_and_next_ready_cli_use_persisted_artifacts(tmp_path: Path) -> N
         )
         == 0
     )
-    generated = json.loads((tmp_path / "next-ready.000001.json").read_text(encoding="utf-8"))
+    generated = json.loads(next(tmp_path.glob("next-ready.000001.*.json")).read_text(encoding="utf-8"))
     assert generated["output_generation"] == 1
 
 
@@ -4525,6 +4528,7 @@ def test_synthesis_bundle_binds_compact_routing_and_validation_closure(tmp_path:
 def test_plan_digest_keeps_existing_journals_compatible_without_optional_reuse_fields() -> None:
     plan = _sparse_plan()
     legacy = _json_plan(plan)
+    legacy.pop("validation_recoveries")
     legacy.pop("validation_exclusions")
     legacy.pop("audit_delta_reviews")
     legacy.pop("audit_reuse_transitions")
@@ -4539,6 +4543,7 @@ def test_plan_digest_retains_nonempty_reuse_fields(tmp_path: Path) -> None:
     result = advance_after_mutation(request)
     plan = _graph_plan(json.loads(json.dumps(result["new_plan"])))
     document = _json_plan(plan)
+    document.pop("validation_recoveries")
     document.pop("audit_delta_reviews")
     document.pop("validation_exclusions")
     expected = "sha256:" + hashlib.sha256(json.dumps(document, sort_keys=True, separators=(",", ":")).encode()).hexdigest()

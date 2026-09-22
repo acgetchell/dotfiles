@@ -95,6 +95,11 @@ epochs after the initial review barrier.
 
 ## Validate Once
 
+Before worker fanout, run the runtime's `preflight-validation` for command policy
+(including nested fixtures), executor caches, hosted obligations, and concrete
+output paths. Resolve launch blockers or retain explicit blocked evidence.
+See [runtime contract](references/runtime-contract.md#materialize-and-schedule).
+
 Collect exact validation requirements from accepted compact payloads. Coalesce
 only identical source, command or recipe, working-directory, environment,
 toolchain, feature, platform, artifact, and mutation-lock identities.
@@ -111,6 +116,10 @@ manifests bind metadata for every immediate entry. Accept only when both gates p
 Never replay equivalent checks. A validator failure is owner evidence, not
 itself a finding. The compiler rejects unexpected outputs;
 source-adjacent build intermediates require an isolated working tree.
+For a proven failure before checks start, `recover-validation-launch` permits
+one attempt after an explicit remedy, preserving accepted work and the failure.
+Follow its returned continuation configuration; see
+[state transitions](references/state-transitions.md).
 
 ## Synthesize From A Compact Bundle
 

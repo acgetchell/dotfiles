@@ -13,6 +13,32 @@ Follow returned lifecycle/journal/dispatch paths. Source state and accepted
 audits/CI remain; synthesis inputs refresh. Wait for active workers before expansion.
 Details: [planning-contract.md](planning-contract.md#late-validation-expansion).
 
+For infrastructure failures before checks start, run `recover-validation-launch`
+with the same four path flags as reconciliation. Supply `plan`, `source_state`,
+`artifact_store`, validator `node_id`, `failure_kind` (`cache-access`,
+`command-launch`, or `executor-permission`), `checks_started: false`, concrete
+`reason` and `remedy`, replacement `environment`, and `permission_change` (`none`
+when unchanged). Use observed launch diagnostics to justify the classification;
+short elapsed time alone is insufficient. At least the environment or permission
+must change. Environment text records the binding; the executor must actually
+apply the stated remedy before running commands.
+
+Recovery requires compiled blocked evidence, unchanged source/workspace, and
+quiescent execution without active or source-mutated nodes. Unrelated blocked
+nodes retain their dispatches, reasons, and available evidence; each eligible
+validator can recover separately. Recovery rejects executed passed/failed checks,
+planning blockers, and a second recovery of the same node/source. The revised
+plan preserves accepted audits and successful validators, snapshots the prior
+journal and dispatches, and binds the original failure, metadata, and sealed payload by
+digest. Synthesis exposes this history through `validation_recoveries`.
+Late validation expansion works after the replacement validator finishes.
+Follow `continuation_path`: it names the lifecycle, journal, dispatches, current
+capture, and next-ready output directory together. Never mix old and new paths.
+Keep historical artifacts available; altered or missing evidence blocks reuse.
+History and continuation files publish atomically, with the continuation
+manifest last. An interrupted publication can retry the identical request
+without leaving partial final files or overwriting existing evidence.
+
 Run `reconcile-handoffs` before expansion. Selected, exactly reused, or user-excluded
 catalog entries resolve handoffs; only `new_routing_triggers` expand routing.
 Final proof classification uses typed catalog mappings reparsed from accepted

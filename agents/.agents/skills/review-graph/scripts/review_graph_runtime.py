@@ -865,6 +865,17 @@ def _compiled_audit_inputs(dispatch: dict[str, Any], payload: dict[str, Any]) ->
     )
 
 
+def _validate_review_coverage_partitions(dispatch: dict[str, Any], payload: dict[str, Any]) -> None:
+    """Apply the same partition contract before publication and compilation."""
+    if not payload.get("coverage_units"):
+        return
+    if dispatch.get("mode") != "audit" or dispatch.get("coverage_reuse") is not None:
+        msg = "coverage partitions apply only to complete fresh audits"
+        raise ValueError(msg)
+    require_schema(payload, _REVIEW_PAYLOAD_SCHEMA)
+    validate_coverage_units(payload, _text_list(dispatch, "owned_paths"))
+
+
 def compile_review(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  # noqa: C901, PLR0912, PLR0915
     """Compile one compact semantic payload into the legacy verified artifact."""
     dispatch = document.get("dispatch")
@@ -889,12 +900,7 @@ def compile_review(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  #
         }:
             msg = "delta review must reconcile original validation requirements and routing handoffs"
             raise ValueError(msg)
-    if payload.get("coverage_units"):
-        if mode != "audit" or coverage_reuse is not None:
-            msg = "coverage partitions apply only to complete fresh audits"
-            raise ValueError(msg)
-        require_schema(payload, _REVIEW_PAYLOAD_SCHEMA)
-        validate_coverage_units(payload, _text_list(dispatch, "owned_paths"))
+    _validate_review_coverage_partitions(dispatch, payload)
     status = _required_text(payload, "status")
     if status not in _REVIEW_STATUSES:
         msg = f"invalid review status {status}"
@@ -1823,11 +1829,9 @@ def _validation_artifacts_body(  # noqa: C901
             msg = f"trusted workspace_after snapshot lacks validation artifact {approved.path}"
             raise ValueError(msg)
         observed_status, observed_digest, exists, observed_digest_mode = observed
-        if not exists:
-            if raw is not None:
-                msg = f"validation payload claims an artifact absent from the trusted snapshot: {approved.path}"
-                raise ValueError(msg)
-            continue
+        if not exists and raw is not None:
+            msg = f"validation payload claims an artifact absent from the trusted snapshot: {approved.path}"
+            raise ValueError(msg)
         path = approved.path
         kind = approved.kind
         repository_status = approved.repository_status
@@ -2525,6 +2529,7 @@ def _graph_plan(raw: dict[str, Any]) -> GraphPlan:
         ),
         reuse_source_snapshots=tuple(source_snapshot(item) for item in _records(raw, "reuse_source_snapshots")),
         audit_delta_reviews=_records(raw, "audit_delta_reviews"),
+        validation_recoveries=_records(raw, "validation_recoveries"),
         validation_exclusions=tuple(
             ValidationExclusion(
                 originating_evidence_id=_required_text(item, "originating_evidence_id"),
@@ -2679,14 +2684,26 @@ def _validation_reconciliation(plan: GraphPlan, records: list[dict[str, Any]]) -
             origin = _required_text(record, "evidence_id")
             planned = units.get(requirement_id)
             unit = planned[0] if planned is not None else None
+            original = next(
+                (
+                    item
+                    for item in plan.validation_recoveries
+                    if unit is not None and item["node_id"] == unit.node_id and tuple(item["source_state"]) == unit.source_state
+                ),
+                None,
+            )
+            prior = replace(unit, environment=original["previous_environment"]) if unit is not None and original is not None else None
+            compatible_digests = {planned[1]} if planned is not None else set()
+            if prior is not None:
+                compatible_digests.add(_planned_validation_digest(prior))
             exclusion = exclusions.get((origin, requirement_id, digest))
             if "planned_validation_digest" in requirement:
-                matches = planned is not None and requirement["planned_validation_digest"] == planned[1] and unit is not None and unit.required
+                matches = requirement["planned_validation_digest"] in compatible_digests and unit is not None and unit.required
             else:
                 matches = unit is not None and (
                     unit.commands == _text_list(requirement, "commands")
                     and unit.working_directories == (requirement["working_directory"],) * len(unit.commands)
-                    and unit.environment == requirement["environment"]
+                    and requirement["environment"] in {unit.environment, prior.environment if prior is not None else unit.environment}
                     and unit.dependency_policy == requirement["dependency_policy"]
                     and unit.required
                 )
@@ -2728,6 +2745,7 @@ def _synthesis_plan_context(plan: GraphPlan, records: list[dict[str, Any]]) -> d
         "validation_evidence_mapping": [asdict(item) for item in plan.validation_evidence_mapping],
         "validation_environments": {unit.node_id: json.loads(_validation_environment_identity(unit)) for unit in plan.coalesced_validation_units},
         "validation_exclusions": [asdict(item) for item in plan.validation_exclusions],
+        "validation_recoveries": list(plan.validation_recoveries),
         "validation_reconciliation": _validation_reconciliation(plan, records),
         "handoff_reconciliation": {"handoffs": handoffs, "unresolved_handoff_ids": list(unresolved), "blockers": list(blockers)},
     }
@@ -2960,9 +2978,7 @@ def _independent_adversarial_checks(paths: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(checks)
 
 
-def _inspection_groups(  # noqa: C901
-    plan: GraphPlan, source_state: tuple[str, str, str], artifact_store: Path, repository_root: Path
-) -> dict[str, dict[str, object]]:
+def _inspection_groups(plan: GraphPlan, source_state: tuple[str, str, str], artifact_store: Path, repository_root: Path) -> dict[str, dict[str, object]]:  # noqa: C901
     audit_nodes = [node for node in plan.actual_worker_nodes if node.mode == "audit" and node.coverage]
     remaining = {node.node_id: node for node in audit_nodes}
     groups: list[tuple[tuple[str, ...], list[str]]] = []
@@ -2984,12 +3000,18 @@ def _inspection_groups(  # noqa: C901
         if len(node_ids) < 2:
             continue
         observations: list[dict[str, object]] = []
+        excerpts: list[dict[str, object]] = []
+        remaining_bytes = 65536
         for path in paths:
             candidate = (repository_root / path).resolve()
             if not candidate.is_relative_to(repository_root) or not candidate.is_file():
                 observations = []
                 break
             content = candidate.read_bytes()
+            limit = min(16384, remaining_bytes)
+            excerpt = content[:limit].decode("utf-8", errors="ignore")
+            remaining_bytes -= len(content[:limit])
+            excerpts.append({"path": path, "content_digest": _sha256_bytes(content), "text": excerpt, "complete": excerpt.encode() == content})
             observations.append(
                 {
                     "byte_count": len(content),
@@ -3012,6 +3034,7 @@ def _inspection_groups(  # noqa: C901
             "producer_node_id": min(node_ids),
             "reuse_policy": "trusted read-only observations may be reused; semantic findings and payloads remain node-specific",
             "source_state": list(source_state),
+            "source_packet": {"source_state": list(source_state), "scope": "structural source only; no reviewer conclusions", "excerpts": excerpts},
         }
         for node_id in node_ids:
             output[node_id] = record
@@ -3020,8 +3043,12 @@ def _inspection_groups(  # noqa: C901
 
 def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
     schema = dispatch.get("payload_schema")
-    schema_text = _canonical_json(schema) if isinstance(schema, dict) else "native independent-review Markdown contract"
-    command_policy = _canonical_json(dispatch.get("command_policy", {}))
+    schema_text = (
+        "dispatch.payload_schema (open its path only when more schema detail is needed)"
+        if isinstance(schema, dict)
+        else "native independent-review Markdown contract"
+    )
+    command_policy = "obey dispatch.command_policy"
     shared = dispatch.get("shared_inspection_evidence")
     shared_text = (
         " Treat shared_inspection_evidence as trusted read-only structural observation only; derive semantic conclusions independently."
@@ -3036,7 +3063,14 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
     persistence_input = _required_text(persistence, "input_path")
     persistence_command = _text_list(persistence, "command", required=True)
     review_command = _text_list(persistence, "review_command")
-    if persistence.get("input_mode") == "stdin" and review_command:
+    if persistence.get("publish_command"):
+        persistence_text = (
+            " Serialize result bytes once. Stream them to dispatch.worker_payload_persistence.publish_command; "
+            "it validates, reviews, and atomically publishes the identical bytes. "
+            "Return only after its receipt. Keep the bytes for any approved retry with --approval-identity; do not rewrite evidence to obtain approval. "
+            "Only the bound worker_payload_path is a write target; paths within evidence are not write targets."
+        )
+    elif persistence.get("input_mode") == "stdin" and review_command:
         persistence_text = (
             " Before returning, hold the exact result bytes in memory. Stream them on standard input to the runtime-owned "
             f"safety-review command unchanged: {shlex.join(review_command)}. It validates the bound contract at {persistence_input} before any artifact write "
@@ -3083,7 +3117,9 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
         "may be outside dispatch ownership; scope_limitations is reserved exclusively for omitted dispatch-owned paths and must equal owned_paths minus "
         "files_inspected and runtime-proved reused paths. When coverage_reuse is present, inspect only recheck units, preserve their prior findings and "
         "reconcile original validation needs/handoffs; do not claim fresh reads of reused paths. For broad fresh audits, use optional coverage_units when "
-        "you can partition contracts with explicit dependencies and uncertainty. Mark git_sensitive when judgments depend on Git metadata. "
+        "you can partition contracts with explicit dependencies and uncertainty: partition every owned path and every finding exactly once "
+        "using one-based finding_indices, give each unit a unique unit_id, and account for every nearby_contract_owners path in dependency_paths. "
+        "Mark git_sensitive when judgments depend on Git metadata. "
         "Narrative limitations do not create omitted scope or artifact write targets."
         if dispatch.get("mode") == "audit"
         else ""
@@ -3111,6 +3147,7 @@ def _validate_worker_payload_bytes(contract_document: dict[str, Any], payload_by
         schema = _review_payload_schema(contract_document) if contract == "compact-review" else _VALIDATION_PAYLOAD_SCHEMA
         require_schema(payload, schema)
         if contract == "compact-review":
+            _validate_review_coverage_partitions(contract_document, payload)
             blockers = _review_scope_coverage_blockers(contract_document, payload, status=_required_text(payload, "status"))
             if blockers:
                 msg = "worker payload failed owned-scope validation: " + "; ".join(blockers)
@@ -3284,6 +3321,7 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         msg = "materialize-dispatches requires a plan object"
         raise TypeError(msg)
     plan = _graph_plan(raw_plan)
+    _verify_validation_recoveries(plan)
     if not plan.dispatch_allowed:
         msg = "cannot materialize dispatches from a blocked graph plan"
         raise ValueError(msg)
@@ -3345,6 +3383,11 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         _inspection_groups(plan, source_state, artifact_store, repository_root_path.resolve()) if inspection_profile == "shared-read-only" else {}
     )
     for record in {str(record["artifact_path"]): record for record in inspection_groups.values()}.values():
+        packet_bytes = (_canonical_json(record.pop("source_packet")) + "\n").encode()
+        packet_path = Path(cast("str", record["artifact_path"])).with_suffix(".source.json")
+        _queue_materialized_write(pending_writes, packet_path, packet_bytes, mode=0o444)
+        record["source_packet_path"] = str(packet_path)
+        record["source_packet_digest"] = _sha256_bytes(packet_bytes)
         _queue_materialized_write(
             pending_writes, Path(cast("str", record["artifact_path"])), (json.dumps(record, indent=2, sort_keys=True) + "\n").encode(), mode=0o444
         )
@@ -3430,6 +3473,13 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
                 "input_path": str(worker_payload_contract_path),
                 "operation": "persist-worker-payload",
                 "review_command": worker_payload_review_command,
+                "publish_command": [
+                    str(Path(sys.executable).resolve()),
+                    str(Path(__file__).resolve()),
+                    "publish-worker-payload",
+                    "--input",
+                    str(worker_payload_contract_path),
+                ],
             },
             "worker_created": location == "worker",
         }
@@ -3451,6 +3501,11 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
                 msg = f"validation unit source state differs from dispatch state: {node.node_id}"
                 raise ValueError(msg)
             common["validation_unit"] = json.loads(_canonical_json(asdict(unit)))
+            recovery = next(
+                (item for item in plan.validation_recoveries if item["node_id"] == node.node_id and tuple(item["source_state"]) == source_state), None
+            )
+            if recovery is not None:
+                common["launch_recovery"] = {key: recovery[key] for key in ("failure_kind", "reason", "remedy", "environment", "permission_change")}
             common["payload_schema"] = validation_schema
             common["workspace_policy"] = {
                 "allowed_artifacts": [asdict(artifact) for artifact in unit.allowed_artifacts],
@@ -3514,6 +3569,13 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         _queue_materialized_write(pending_writes, worker_input_path, (json.dumps(entry, indent=2, sort_keys=True) + "\n").encode(), mode=0o444)
         dispatches.append(entry)
     output: dict[str, Any] = {"dispatches": dispatches, "plan_digest": _plan_digest(plan), "schema_version": 1, "source_state": list(source_state)}
+    output["telemetry"] = {
+        "worker_input_bytes": sum(len((json.dumps(entry, indent=2, sort_keys=True) + "\n").encode()) for entry in dispatches),
+        "worker_prompt_bytes": sum(len(entry["worker_prompt"].encode()) for entry in dispatches),
+        "shared_source_packets": len({str(record["artifact_path"]) for record in inspection_groups.values()}),
+        "publication_invocations_per_worker": 1,
+        "nodes": len(dispatches),
+    }
     output["dispatch_set_digest"] = _sha256_bytes(_canonical_json(output).encode())
     if operation_output_path is None:
         _publish_materialized_writes(artifact_store, pending_writes)
@@ -4517,7 +4579,8 @@ def append_journal_event(path: Path, document: dict[str, Any], request: JournalE
             fcntl.flock(lock_stream.fileno(), fcntl.LOCK_UN)
 
 
-def _dispatches_by_node(dispatch_set: dict[str, Any], *, plan: GraphPlan, source_state: tuple[str, str, str]) -> dict[str, dict[str, Any]]:
+def _dispatches_by_node(dispatch_set: dict[str, Any], *, plan: GraphPlan, source_state: tuple[str, str, str]) -> dict[str, dict[str, Any]]:  # noqa: C901
+    _verify_validation_recoveries(plan)
     if _required_int(dispatch_set, "schema_version") != 1:
         msg = "dispatch set has an unsupported schema version"
         raise ValueError(msg)
@@ -4542,6 +4605,12 @@ def _dispatches_by_node(dispatch_set: dict[str, Any], *, plan: GraphPlan, source
             expected_input = (json.dumps(entry, indent=2, sort_keys=True) + "\n").encode()
             if _read_regular_file_no_follow(worker_input) != expected_input:
                 msg = f"worker input differs from its materialized dispatch: {node_id} ({worker_input})"
+                raise ValueError(msg)
+        shared = dispatch.get("shared_inspection_evidence")
+        if isinstance(shared, dict) and "source_packet_path" in shared:
+            packet = _read_regular_file_no_follow(Path(_required_text(shared, "source_packet_path")))
+            if _sha256_bytes(packet) != _required_text(shared, "source_packet_digest"):
+                msg = f"shared source packet differs from its materialized identity: {node_id}"
                 raise ValueError(msg)
         entries[node_id] = entry
     expected_node_ids = {node.node_id for node in plan.actual_worker_nodes}
@@ -4794,9 +4863,7 @@ def _cargo_benchmark_identity(command: str) -> tuple[str, set[str], bool] | None
     return (target, features, all_features) if target else None
 
 
-def _late_validation_quality_blockers(  # noqa: C901
-    requirement: ValidationRequirement, *, repository_root: Path, authorization: str
-) -> tuple[str, ...]:
+def _late_validation_quality_blockers(requirement: ValidationRequirement, *, repository_root: Path, authorization: str) -> tuple[str, ...]:  # noqa: C901
     """Reject audit-authored proof obligations that cannot validate the captured epoch."""
     blockers: list[str] = []
     recipe_names = _just_recipe_names(repository_root)
@@ -4930,8 +4997,38 @@ def reconcile_validation_requirements(document: dict[str, Any], args: argparse.N
     expanded = _expanded_validation_plan(document, plan, records, Path(sample["repository_root"]), authorization=_required_text(sample, "authorization"))
     if expanded == plan:
         return {"schema_version": 1, "status": "resolved", **reconciliation}
-    store = Path(_required_text(document, "artifact_store")).resolve() / f"validation-expansion-{_plan_digest(expanded)[7:23]}"
-    retained = {node.node_id: entries[node.node_id] for node in plan.actual_worker_nodes if node.node_id in sources and node.mode != "synthesis"}
+    return _publish_validation_continuation(document, args, plan, expanded, entries, sources, records, head, status="expanded", journal_events=events)
+
+
+def _publish_validation_continuation(  # noqa: PLR0913, PLR0917
+    document: dict[str, Any],
+    args: argparse.Namespace,
+    plan: GraphPlan,
+    expanded: GraphPlan,
+    entries: dict[str, dict[str, Any]],
+    sources: dict[str, dict[str, Any]],
+    records: list[dict[str, Any]],
+    head: str | None,
+    *,
+    status: str,
+    journal_events: tuple[dict[str, Any], ...],
+    replaced_node_id: str | None = None,
+) -> dict[str, Any]:
+    """Publish a continuation, preserving verified acceptance and unrelated blocks."""
+    source_state = _state(document, "source_state")
+    first_entry = next(iter(entries.values()), None)
+    if first_entry is None:
+        msg = "validation continuation requires an existing dispatch"
+        raise ValueError(msg)
+    sample = first_entry["dispatch"]
+    store = Path(_required_text(document, "artifact_store")).resolve() / f"validation-{status}-{_plan_digest(expanded)[7:23]}"
+    state, _head = _fold_execution_journal(plan, source_state, journal_events)
+    latest = {event["node_id"]: event for event in journal_events}
+    retained = {
+        node.node_id: entries[node.node_id]
+        for node in plan.actual_worker_nodes
+        if state.get(node.node_id) in {"accepted", "blocked"} and node.node_id != replaced_node_id and node.mode != "synthesis"
+    }
     dispatches = materialize_dispatches(
         {
             "artifact_store": str(store / "artifacts"),
@@ -4944,44 +5041,220 @@ def reconcile_validation_requirements(document: dict[str, Any], args: argparse.N
         preserved_entries=retained,
     )
     lifecycle = {"plan": json.loads(_canonical_json(asdict(expanded))), "source_state": list(source_state)}
-    # Rebind verified acceptance to the new plan, preserving every original artifact.
+    # Rebind verified states to the new plan, preserving every original artifact.
     # Publish this journal once; never append to or rewrite the historical journal.
     migrated: list[dict[str, Any]] = []
     migrated_state: dict[str, str] = {}
     for node in expanded.actual_worker_nodes:
         if node.node_id not in retained:
             continue
-        evidence, _limitations = _verified_journal_evidence(sources[node.node_id], plan=expanded, node=node, source_state=source_state)
-        affected = _apply_journal_transition(expanded, migrated_state, node_id=node.node_id, status="accepted")
+        previous = latest[node.node_id]
+        evidence = None
+        if previous["evidence"] is not None:
+            evidence, _limitations = _verified_journal_evidence(sources[node.node_id], plan=expanded, node=node, source_state=source_state)
+        affected = _apply_journal_transition(expanded, migrated_state, node_id=node.node_id, status=previous["status"])
         event: dict[str, Any] = {
             "affected_node_ids": list(affected),
             "evidence": evidence,
             "node_id": node.node_id,
             "plan_digest": _plan_digest(expanded),
             "previous_event_digest": migrated[-1]["event_digest"] if migrated else None,
-            "reason": None,
+            "reason": previous["reason"],
             "schema_version": 1,
             "sequence": len(migrated) + 1,
             "source_state": list(source_state),
-            "status": "accepted",
+            "status": previous["status"],
         }
         event["event_digest"] = _sha256_bytes(_canonical_json(event).encode())
         migrated.append(event)
-    paths = {"dispatches_path": store / "dispatches.json", "lifecycle_input_path": store / "lifecycle.json", "journal_path": store / "execution.jsonl"}
-    _write_text_once(paths["dispatches_path"], json.dumps(dispatches, indent=2, sort_keys=True) + "\n")
-    _write_text_once(paths["lifecycle_input_path"], json.dumps(lifecycle, indent=2, sort_keys=True) + "\n")
-    _write_text_once(paths["journal_path"], "".join(_canonical_json(event) + "\n" for event in migrated))
+    paths = {
+        "dispatches_path": store / "dispatches.json",
+        "lifecycle_input_path": store / "lifecycle.json",
+        "journal_path": store / "execution.jsonl",
+        "current_capture_path": store / "capture.json",
+    }
+    continuation = {**{key: str(path) for key, path in paths.items()}, "next_ready_output_dir": str(store / "ready")}
+    # Publish the manifest last: partial progress is retryable, never a complete continuation.
+    outputs = {
+        paths["dispatches_path"]: (json.dumps(dispatches, indent=2, sort_keys=True) + "\n").encode(),
+        paths["lifecycle_input_path"]: (json.dumps(lifecycle, indent=2, sort_keys=True) + "\n").encode(),
+        paths["journal_path"]: "".join(_canonical_json(event) + "\n" for event in migrated).encode(),
+        paths["current_capture_path"]: _read_regular_file_no_follow(args.current_capture),
+        store / "continuation.json": (json.dumps(continuation, indent=2, sort_keys=True) + "\n").encode(),
+    }
+    for path, content in outputs.items():
+        _write_bytes_atomically_once(path, content, mode=0o600 if path == paths["journal_path"] else 0o444)
     return {
         "schema_version": 1,
-        "status": "expanded",
+        "status": status,
         "source_state": list(source_state),
         "lifecycle_input": lifecycle,
         **{key: str(path) for key, path in paths.items()},
+        "continuation": continuation,
+        "continuation_path": str(store / "continuation.json"),
         "retained_node_ids": sorted(retained),
         "superseded_synthesis_node_ids": [node.node_id for node in plan.actual_worker_nodes if node.mode == "synthesis"],
         "lineage": {"previous_plan_digest": _plan_digest(plan), "previous_journal_head": head, "previous_journal_path": str(args.journal.resolve())},
         "validation_reconciliation": _validation_reconciliation(expanded, records),
     }
+
+
+def _verify_validation_recoveries(plan: GraphPlan) -> None:
+    """Keep every launch-failure attempt available and bound to its revision."""
+    seen: set[tuple[str, tuple[str, ...]]] = set()
+    for recovery in plan.validation_recoveries:
+        identity = (_required_text(recovery, "node_id"), _text_list(recovery, "source_state", required=True))
+        if identity in seen:
+            msg = "validation launch recovery budget exhausted for this node and source state"
+            raise ValueError(msg)
+        seen.add(identity)
+        for artifact in _records(recovery, "preserved_files"):
+            content = _read_regular_file_no_follow(Path(_required_text(artifact, "path")))
+            if _sha256_bytes(content) != _required_text(artifact, "digest"):
+                msg = "preserved validation recovery evidence changed"
+                raise ValueError(msg)
+
+
+def preflight_validation(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901
+    """Inspect launch prerequisites without running recipes or changing the plan."""
+    require_schema_definition(document, _RUNTIME_OPERATION_INPUT_SCHEMA, "preflight-validation")
+    plan = _graph_plan(document["plan"])
+    repository_root = Path(_required_text(document, "repository_root")).resolve()
+    policy = {item["command"]: item for item in _records(document, "command_policy")}
+    if len(policy) != len(document["command_policy"]):
+        msg = "preflight command policy contains duplicate commands"
+        raise ValueError(msg)
+    cache_checks: list[dict[str, Any]] = []
+    for raw in _text_list(document, "cache_paths"):
+        path = _workspace_path(raw, repository_root)
+        ancestor = path
+        try:
+            while not ancestor.exists() and ancestor.parent != ancestor:
+                ancestor = ancestor.parent
+            # Test traversal in this process, not just mode bits; sandbox denial
+            # can differ from os.access. Never create or delete a cache entry.
+            with os.scandir(ancestor) as entries:
+                next(entries, None)
+            accessible = os.access(ancestor, os.R_OK | os.W_OK | os.X_OK)
+            reason = "read/traversal succeeded; write mode available" if accessible else "cache parent is not writable/traversable"
+        except OSError as error:
+            accessible, reason = False, str(error)
+        cache_checks.append({"path": str(path), "accessible": accessible, "evidence": reason})
+    units: list[dict[str, Any]] = []
+    for unit in plan.coalesced_validation_units:
+        blockers = [unit.planning_blocker] if unit.planning_blocker else []
+        if not unit.commands:
+            blockers.append("no local command; retain the hosted or unexecutable obligation as blocked")
+        for command in unit.commands:
+            decision = policy.get(command)
+            if decision is None or decision["disposition"] != "allowed":
+                blockers.append(f"command policy: {command}: {decision['reason'] if decision else 'not reviewed, including nested recipes and fixtures'}")
+        for path in unit.expected_workspace_effects:
+            status = _git_path_status(repository_root, _workspace_path(path, repository_root))
+            if status not in {"ignored", "outside-repository"}:
+                blockers.append(f"expected_workspace_effects must name concrete ignored/output paths, not prose or source files: {path} ({status})")
+        if any(not item["accessible"] for item in cache_checks):
+            blockers.append("declared executor cache is inaccessible; remedy it before dispatch")
+        units.append(
+            {
+                "node_id": unit.node_id,
+                "blockers": blockers,
+                "status": "blocked" if blockers else "ready",
+                "expected_outputs": [artifact.path for artifact in unit.allowed_artifacts],
+            }
+        )
+    return {
+        "schema_version": 1,
+        "plan_digest": _plan_digest(plan),
+        "status": "blocked" if any(unit["blockers"] for unit in units) else "ready",
+        "units": units,
+        "cache_checks": cache_checks,
+        "limits": (
+            "Read-only prerequisite observations; do not certify command execution or sandbox write permission. "
+            "Capture blocked evidence and continue independent audits when authorized."
+        ),
+    }
+
+
+def recover_validation_launch(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:  # noqa: C901, PLR0915
+    """Replace one proven unstarted validator after an explicit executor remedy."""
+    require_schema_definition(document, _RUNTIME_OPERATION_INPUT_SCHEMA, "recover-validation-launch")
+    plan = _graph_plan(document["plan"])
+    source_state = _state(document, "source_state")
+    if _capture_source_state(args.current_capture) != source_state:
+        msg = "validation recovery requires unchanged source state"
+        raise ValueError(msg)
+    events, state, head = read_execution_journal(args.journal, plan=plan, source_state=source_state)
+    entries = _dispatches_by_node(_read_json_object(args.dispatches), plan=plan, source_state=source_state)
+    node_id = _required_text(document, "node_id")
+    unit = next((item for item in plan.coalesced_validation_units if item.node_id == node_id), None)
+    if unit is None or state.get(node_id) != "blocked" or not unit.commands or unit.planning_blocker:
+        msg = "recovery requires a blocked executable validator, not a planning or check failure"
+        raise ValueError(msg)
+    if any(status in {"in-flight", "awaiting-replan"} for status in state.values()):
+        msg = "validation recovery requires quiescent execution without active or source-mutated nodes"
+        raise ValueError(msg)
+    if any(item["node_id"] == node_id and tuple(item["source_state"]) == source_state for item in plan.validation_recoveries):
+        msg = "validation launch recovery budget exhausted for this node and source state"
+        raise ValueError(msg)
+    environment = _required_text(document, "environment")
+    permission_change = _required_text(document, "permission_change")
+    if environment == unit.environment and permission_change == "none":
+        msg = "recovery requires a recorded environment or permission change"
+        raise ValueError(msg)
+    sources, records = _accepted_journal_sources(plan, source_state, events, entries, include_blocked=True)
+    failed_source = sources.get(node_id)
+    if failed_source is None:
+        msg = "recovery requires compiled, journal-bound launch-failure evidence"
+        raise ValueError(msg)
+    _kind, _expectation, evidence, _content, normalized = _load_evidence_source(failed_source, require_normalized=True)
+    if evidence.status != "blocked" or normalized is None or any(item.get("result") in {"passed", "failed"} for item in normalized.get("executions", [])):
+        msg = "checks already started; preserve their results as owner evidence"
+        raise ValueError(msg)
+    metadata = _read_json_object(Path(failed_source["metadata_path"]))
+    if metadata.get("workspace_audit", {}).get("changed_paths"):
+        msg = "launch recovery requires an unchanged validation workspace"
+        raise ValueError(msg)
+    recovery = {key: document[key] for key in ("node_id", "failure_kind", "checks_started", "reason", "remedy", "environment", "permission_change")}
+    recovery.update(
+        {
+            "source_state": list(source_state),
+            "previous_environment": unit.environment,
+            "previous_plan_digest": _plan_digest(plan),
+            "previous_journal_head": head,
+        }
+    )
+    identity = _sha256_bytes(_canonical_json(recovery).encode())[7:23]
+    history = Path(_required_text(document, "artifact_store")).resolve() / f"launch-history-{identity}"
+    history.mkdir(parents=True, exist_ok=True)
+    preserved: list[dict[str, str]] = []
+    # Snapshot the journal: future appends must not invalidate historical evidence.
+    snapshots = {
+        "lifecycle.json": _canonical_json({"plan": asdict(plan), "source_state": source_state}).encode(),
+        "execution.jsonl": _read_regular_file_no_follow(args.journal),
+        "dispatches.json": _read_regular_file_no_follow(args.dispatches),
+    }
+    for name, content in snapshots.items():
+        path = history / name
+        _write_bytes_atomically_once(path, content, mode=0o444)
+        preserved.append({"path": str(path), "digest": _sha256_bytes(content)})
+    for path_text in [failed_source["artifact_path"], failed_source["metadata_path"], metadata.get("worker_payload_path")]:
+        if path_text is not None:
+            path = Path(path_text).resolve()
+            preserved.append({"path": str(path), "digest": _sha256_bytes(_read_regular_file_no_follow(path))})
+    recovery["preserved_files"] = preserved
+    expanded = replace(
+        plan,
+        validation_recoveries=(*plan.validation_recoveries, recovery),
+        coalesced_validation_units=tuple(
+            replace(item, environment=environment) if item.node_id == node_id else item for item in plan.coalesced_validation_units
+        ),
+    )
+    retained_sources = {key: value for key, value in sources.items() if key != node_id}
+    retained_records = [record for record in records if record.get("node_id") != node_id]
+    return _publish_validation_continuation(
+        document, args, plan, expanded, entries, retained_sources, retained_records, head, status="recovered", journal_events=events, replaced_node_id=node_id
+    )
 
 
 def _reconciled_handoffs(
@@ -5068,6 +5341,7 @@ def finalize_proof(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, P
         msg = "finalize-proof requires a plan object"
         raise TypeError(msg)
     plan = _graph_plan(raw_plan)
+    _verify_validation_recoveries(plan)
     source_state = _state(document, "source_state")
     current_source_state = _state(document, "current_source_state")
     if current_source_state != _current_metadata_state(document):
@@ -5274,6 +5548,7 @@ def finalize_proof(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, P
         "artifact_manifest": asdict(manifest),
         "blockers": list(blockers),
         "graph_proof_status": graph_proof_status,
+        "validation_recoveries": list(plan.validation_recoveries),
         "handoff_reconciliation": handoff_reconciliation,
         "independent_review_metrics": {
             "accepted_evidence_count": len(accepted_independent),
@@ -5358,6 +5633,9 @@ def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
         subparsers, "review-worker-payload-write", "validate standard-input worker payload bytes and emit their artifact-write review without publishing"
     )
     review_write_parser.add_argument("--input", type=Path, required=True)
+    publish_parser = _runtime_subparser(subparsers, "publish-worker-payload", "review and publish identical standard-input bytes in one invocation")
+    publish_parser.add_argument("--input", type=Path, required=True)
+    publish_parser.add_argument("--approval-identity")
     synthesis_parser = _runtime_subparser(subparsers, "synthesis-bundle", "build a compact synthesis bundle")
     synthesis_parser.add_argument("--input", type=Path, required=True)
     synthesis_parser.add_argument("--output", type=Path, required=True)
@@ -5369,6 +5647,9 @@ def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     dispatch_parser = _runtime_subparser(subparsers, "materialize-dispatches", "derive exact dispatch bases from a graph plan")
     dispatch_parser.add_argument("--input", type=Path, required=True)
     dispatch_parser.add_argument("--output", type=Path, required=True, help="operation-result JSON path; must be outside the artifact store")
+    preflight_parser = _runtime_subparser(subparsers, "preflight-validation", "inspect command policy, caches and validation obligations before fanout")
+    preflight_parser.add_argument("--input", type=Path, required=True)
+    preflight_parser.add_argument("--output", type=Path, required=True)
     snapshot_parser = _runtime_subparser(subparsers, "snapshot-workspace", "capture runtime-owned validation workspace evidence")
     snapshot_parser.add_argument("--input", type=Path, required=True)
     snapshot_parser.add_argument("--dispatches", type=Path, required=True)
@@ -5387,6 +5668,12 @@ def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     validation_parser.add_argument("--dispatches", type=Path, required=True)
     validation_parser.add_argument("--current-capture", type=Path, required=True)
     validation_parser.add_argument("--output", type=Path, required=True)
+    recovery_parser = _runtime_subparser(subparsers, "recover-validation-launch", "retry one proven unstarted validator after an executor remedy")
+    recovery_parser.add_argument("--input", type=Path, required=True)
+    recovery_parser.add_argument("--journal", type=Path, required=True)
+    recovery_parser.add_argument("--dispatches", type=Path, required=True)
+    recovery_parser.add_argument("--current-capture", type=Path, required=True)
+    recovery_parser.add_argument("--output", type=Path, required=True)
     fallback_parser = _runtime_subparser(subparsers, "fallback-to-coordinator", "transition one unstarted adaptive node without rebinding accepted evidence")
     fallback_parser.add_argument("--input", type=Path, required=True)
     fallback_parser.add_argument("--journal", type=Path, required=True)
@@ -5800,7 +6087,9 @@ def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace)
             fcntl.flock(lock_stream.fileno(), fcntl.LOCK_UN)
 
 
-def _json_operation_output(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:  # noqa: PLR0911
+def _json_operation_output(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:  # noqa: C901, PLR0911
+    if args.operation == "preflight-validation":
+        return preflight_validation(document)
     if args.operation == "compile-node":
         return _compile_node_from_files(document, args)
     if args.operation == "snapshot-workspace":
@@ -5815,8 +6104,12 @@ def _json_operation_output(document: dict[str, Any], args: argparse.Namespace) -
         return resume_after_external_metadata(document)
     if args.operation == "reconcile-handoffs":
         return reconcile_handoffs(document)
-    if args.operation in {"reconcile-validation-requirements", "fallback-to-coordinator"}:
-        operation = {"reconcile-validation-requirements": reconcile_validation_requirements, "fallback-to-coordinator": fallback_to_coordinator}[args.operation]
+    if args.operation in {"reconcile-validation-requirements", "fallback-to-coordinator", "recover-validation-launch"}:
+        operation = {
+            "reconcile-validation-requirements": reconcile_validation_requirements,
+            "fallback-to-coordinator": fallback_to_coordinator,
+            "recover-validation-launch": recover_validation_launch,
+        }[args.operation]
         return operation(document, args)
     if args.operation == "next-ready":
         return _next_ready_from_files(document, args)
@@ -5824,6 +6117,12 @@ def _json_operation_output(document: dict[str, Any], args: argparse.Namespace) -
 
 
 def _run_worker_payload_operation(document: dict[str, Any], args: argparse.Namespace) -> int:
+    if args.operation == "publish-worker-payload":
+        payload_bytes = sys.stdin.buffer.read()
+        review = review_worker_payload_write(document, payload_bytes)
+        identity = args.approval_identity or review["approval_identity"]
+        print(_canonical_json(persist_worker_payload_bytes(document, payload_bytes, approval_identity=identity)))
+        return 0
     if args.operation == "review-worker-payload-write":
         payload_bytes = sys.stdin.buffer.read()
         print(_canonical_json(review_worker_payload_write(document, payload_bytes, candidate_is_write_target=False)))
@@ -5839,8 +6138,8 @@ def _run_worker_payload_operation(document: dict[str, Any], args: argparse.Names
     return 0
 
 
-def _run_operation(document: dict[str, Any], args: argparse.Namespace) -> int:  # noqa: C901
-    if args.operation in {"persist-worker-payload", "review-worker-payload-write"}:
+def _run_operation(document: dict[str, Any], args: argparse.Namespace) -> int:  # noqa: C901, PLR0912
+    if args.operation in {"persist-worker-payload", "review-worker-payload-write", "publish-worker-payload"}:
         return _run_worker_payload_operation(document, args)
     if args.operation in {"compile-independent-review", "compile-review", "compile-validation"}:
         if args.operation in {"compile-review", "compile-validation"}:
@@ -5875,10 +6174,15 @@ def _run_operation(document: dict[str, Any], args: argparse.Namespace) -> int:  
             msg = f"next-ready output path is not a directory: {output_directory}"
             raise ValueError(msg)
         generation = _required_int(cast("dict[str, Any]", output["journal"]), "event_count")
-        output_path = output_directory / f"next-ready.{generation:06d}.json"
+        identity = _sha256_bytes(_canonical_json(output).encode()).removeprefix("sha256:")[:16]
+        output_path = output_directory / f"next-ready.{generation:06d}.{identity}.json"
         output["output_generation"] = generation
         output["output_path"] = str(output_path)
-    _write_text_once(output_path, json.dumps(output, indent=2, sort_keys=True) + "\n")
+    output_text = json.dumps(output, indent=2, sort_keys=True) + "\n"
+    if args.operation in {"recover-validation-launch", "reconcile-validation-requirements"}:
+        _write_bytes_atomically_once(output_path, output_text.encode(), mode=0o644)
+    else:
+        _write_text_once(output_path, output_text)
     if args.operation == "next-ready" and args.output_dir is not None:
         print(_canonical_json({"output_generation": output["output_generation"], "output_path": str(output_path)}))
     return 2 if args.operation == "finalize-proof" and output["status"] != "complete" else 0

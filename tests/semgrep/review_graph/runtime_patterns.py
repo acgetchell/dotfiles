@@ -1,5 +1,10 @@
 """Semgrep fixtures for review-graph compiler boundary policies."""
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
 
 def compile_independent_review_unsafe(records: list[str]) -> str:
     """Show an unsafe one-argument lookup at a production boundary."""
@@ -52,3 +57,46 @@ def optional_attestation_safe(value: object) -> bool:
     """Use identity checks for an optional strict boolean."""
     # ok: dotfiles.review-graph.boolean-membership-is-not-type-check
     return value is None or value is True
+
+
+def _write_bytes_once(path: Path, content: bytes) -> None:
+    """Stand in for the direct create-once byte writer."""
+
+
+def _write_text_once(path: Path, content: str) -> None:
+    """Stand in for the direct create-once text writer."""
+
+
+def _write_bytes_atomically_once(path: Path, content: bytes, *, mode: int) -> bool:
+    """Stand in for the atomic create-once publisher."""
+    return True
+
+
+def recover_validation_launch(path: Path, content: bytes) -> None:
+    """Pair interrupted-history risks with the approved publication primitive."""
+    # ruleid: dotfiles.review-graph.recovery-publication-must-be-atomic
+    _write_bytes_once(path, content)
+    # ruleid: dotfiles.review-graph.recovery-publication-must-be-atomic
+    _write_text_once(path, content.decode("utf-8"))
+    # ok: dotfiles.review-graph.recovery-publication-must-be-atomic
+    _write_bytes_atomically_once(path, content, mode=0o444)
+
+
+def _publish_validation_continuation(path: Path, content: bytes) -> None:
+    """Cover both wrapper writers and direct final-path writes."""
+    # ruleid: dotfiles.review-graph.recovery-publication-must-be-atomic
+    _write_bytes_once(path, content)
+    # ruleid: dotfiles.review-graph.recovery-publication-must-be-atomic
+    _write_text_once(path, content.decode("utf-8"))
+    # ruleid: dotfiles.review-graph.recovery-publication-must-be-atomic
+    path.write_bytes(content)
+    # ruleid: dotfiles.review-graph.recovery-publication-must-be-atomic
+    path.write_text(content.decode("utf-8"), encoding="utf-8")
+    # ok: dotfiles.review-graph.recovery-publication-must-be-atomic
+    _write_bytes_atomically_once(path, content, mode=0o600)
+
+
+def unrelated_writer(path: Path, content: bytes) -> None:
+    """Keep the rule scoped to recovery and continuation publication."""
+    # ok: dotfiles.review-graph.recovery-publication-must-be-atomic
+    _write_bytes_once(path, content)
