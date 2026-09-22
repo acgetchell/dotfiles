@@ -347,6 +347,31 @@ rules:
           regex: "^compile_(?:review|independent_review|validation)$"
       - pattern: '{..., "record_type": $RECORD_TYPE, ...}'
 
+  - id: dotfiles.review-graph.recovery-publication-must-be-atomic
+    languages:
+      - python
+    severity: WARNING
+    message: "Publish recovery history and continuation files with _write_bytes_atomically_once so interrupted writes remain retryable."
+    metadata:
+      category: correctness
+      rationale: "A partial final file poisons create-once recovery artifacts and prevents an identical retry."
+    paths:
+      include:
+        - "/agents/.agents/skills/review-graph/scripts/review_graph_runtime.py"
+        - "/tests/semgrep/review_graph/**/*.py"
+    patterns:
+      - pattern-inside: |
+          def $PUBLISHER(...):
+            ...
+      - metavariable-regex:
+          metavariable: $PUBLISHER
+          regex: "^(?:recover_validation_launch|_publish_validation_continuation)$"
+      - pattern-either:
+          - pattern: _write_bytes_once(...)
+          - pattern: _write_text_once(...)
+          - pattern: $PATH.write_bytes(...)
+          - pattern: $PATH.write_text(...)
+
   - id: dotfiles.review-graph.boolean-membership-is-not-type-check
     languages:
       - python

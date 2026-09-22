@@ -527,6 +527,7 @@ class GraphPlan:
     reuse_source_snapshots: tuple[ReviewSourceSnapshot, ...] = ()
     validation_exclusions: tuple[ValidationExclusion, ...] = ()
     audit_delta_reviews: tuple[dict[str, Any], ...] = ()
+    validation_recoveries: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1976,7 +1977,7 @@ def _validation_nodes(
             priority="required-validation" if unit.required else "supporting-quality",
             required=unit.required,
             requirement_ids=unit.requirement_ids,
-            coverage=(unit.canonical_recipe or " + ".join(unit.commands),),
+            coverage=(unit.canonical_recipe or " + ".join(unit.commands),) if unit.canonical_recipe or unit.commands else (),
             static_references=tuple(path for path, _ in reference_digests),
             skill_digest=skill_digest,
             reference_digests=reference_digests,
@@ -2319,6 +2320,8 @@ def _identifier_tuple_blockers(values: Sequence[str], *, label: str) -> tuple[st
 def graph_plan_digest(plan: GraphPlan) -> str:
     """Hash a plan without empty optional fields absent from legacy identities."""
     document = asdict(plan)
+    if not plan.validation_recoveries:
+        document.pop("validation_recoveries")
     if not plan.audit_delta_reviews:
         document.pop("audit_delta_reviews")
     if not plan.validation_exclusions:
@@ -2335,6 +2338,8 @@ def graph_plan_digest_matches(plan: GraphPlan, digest: str) -> bool:
     if digest == graph_plan_digest(plan):
         return True
     legacy = asdict(plan)
+    if not plan.validation_recoveries:
+        legacy.pop("validation_recoveries")
     if not plan.validation_exclusions:
         legacy.pop("validation_exclusions")
     if digest == _sha256_json(legacy):
@@ -3008,8 +3013,10 @@ def _validation_artifact_blockers(  # noqa: C901
         artifact_digest_mode = None if artifact_digest_mode == "none" else artifact_digest_mode
         if artifact_digest is None or _SHA256_DIGEST_RE.fullmatch(artifact_digest) is None:
             blockers.append(f"native validation result artifact {path} requires a lowercase SHA-256 digest")
-        if artifact_digest_mode not in VALIDATION_ARTIFACT_DIGEST_MODES:
+        if artifact_digest_mode not in VALIDATION_ARTIFACT_DIGEST_MODES | {"absent-v1"}:
             blockers.append(f"native validation result artifact {path} requires a recognized digest mode")
+        if artifact_digest_mode == "absent-v1" and artifact_digest != "sha256:" + hashlib.sha256(b"absent").hexdigest():
+            blockers.append(f"native validation result artifact {path} has an invalid absence digest")
         if artifact_id is not None and (not _nonempty_text(artifact_id) or len(artifact_id) > MAX_NATIVE_IDENTIFIER_LENGTH):
             blockers.append(f"native validation result artifact {path} has an invalid artifact ID")
         if fields.get("Kind") != approved.kind or fields.get("Repository status") != approved.repository_status:

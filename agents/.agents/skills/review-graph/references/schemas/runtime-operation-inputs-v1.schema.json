@@ -3,6 +3,42 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Review Graph Runtime Operation Inputs v1",
   "$defs": {
+    "preflight-validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan", "repository_root", "command_policy", "cache_paths"],
+      "properties": {
+        "plan": {"type": "object"},
+        "repository_root": {"type": "string", "minLength": 1},
+        "cache_paths": {"$ref": "#/$defs/stringArray"},
+        "command_policy": {"type": "array", "items": {
+          "type": "object", "additionalProperties": false,
+          "required": ["command", "disposition", "reason"],
+          "properties": {
+            "command": {"type": "string", "minLength": 1},
+            "disposition": {"enum": ["allowed", "blocked"]},
+            "reason": {"type": "string", "minLength": 1}
+          }
+        }}
+      }
+    },
+    "recover-validation-launch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_store", "plan", "source_state", "node_id", "failure_kind", "checks_started", "reason", "remedy", "environment", "permission_change"],
+      "properties": {
+        "artifact_store": {"type": "string", "minLength": 1},
+        "plan": {"type": "object"},
+        "source_state": {"$ref": "#/$defs/sourceState"},
+        "node_id": {"type": "string", "minLength": 1},
+        "failure_kind": {"enum": ["cache-access", "command-launch", "executor-permission"]},
+        "checks_started": {"const": false},
+        "reason": {"type": "string", "minLength": 1},
+        "remedy": {"type": "string", "minLength": 1},
+        "environment": {"type": "string", "minLength": 1},
+        "permission_change": {"type": "string", "minLength": 1}
+      }
+    },
     "resume-after-external-metadata": {
       "type": "object",
       "additionalProperties": false,
@@ -249,6 +285,7 @@
       "type": "object"
     },
     "review-worker-payload-write": {"$ref": "#/$defs/stdinWorkerPayloadContract"},
+    "publish-worker-payload": {"$ref": "#/$defs/stdinWorkerPayloadContract"},
     "reconcile-handoffs": {
       "additionalProperties": false,
       "properties": {

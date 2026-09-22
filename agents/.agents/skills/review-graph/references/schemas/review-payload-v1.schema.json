@@ -4,6 +4,7 @@
   "additionalProperties": false,
   "properties": {
     "coverage_units": {
+      "description": "Optional for complete fresh audits only: unique unit IDs partition every dispatch-owned path and every finding exactly once, using one-based finding indices; dependency_paths across units must account for every nearby_contract_owners path.",
       "type": "array",
       "items": {
         "type": "object",

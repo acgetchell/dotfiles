@@ -1,0 +1,4 @@
+interface:
+  display_name: "TypeSafe"
+  short_description: "Build typed AI decisions with TypeSafe."
+  default_prompt: "Use $typesafe-ai to design and implement a TypeSafe workflow using the current API documentation and relevant cookbooks."

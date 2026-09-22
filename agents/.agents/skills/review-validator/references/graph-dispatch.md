@@ -1,8 +1,7 @@
 # Compact Graph Validation Dispatch
 
-Use this mode only for an exact `review-graph` validation unit. The graph owns
-planning, coalescing, executor placement, evidence compilation, and proof
-acceptance. Execute the supplied commands without discovery or broadening.
+Execute only the exact `review-graph` unit. The graph owns planning, coalescing,
+placement, compilation, and proof acceptance; never discover or broaden work.
 
 ## Required Dispatch
 
@@ -21,8 +20,7 @@ Require:
 - recursive required payload shape and the exact worker payload path
 - dependency policy and elapsed bounds
 
-Return `blocked` for any missing field. Do not fall through to standalone
-discovery.
+Missing fields mean `blocked`, never standalone discovery.
 
 ## Execution
 
@@ -38,12 +36,16 @@ discovery.
    approved artifact paths. Put unexecuted target cells and the boundary of any
    emulation in `limitations`.
 5. Repeat the source-state check. Follow `worker_prompt`: serialize the complete
-   payload once, review over stdin, persist identical bytes with the returned
-   `--approval-identity`, then return those bytes.
+   payload once and stream it to `worker_payload_persistence.publish_command`,
+   which reviews and publishes identical bytes. Return after its bound receipt.
 6. The coordinator invokes the runtime-owned
    post-execution snapshot immediately afterward.
 
 Do not report artifact digests, snapshots, fingerprints, or compiler identities.
+When checks never started, leave `executions` empty and explain the observed
+blocker in `limitations`. Never create placeholder outputs; runtime snapshots
+record absence. Only the coordinator authorizes bounded launch recovery;
+executed results remain owner evidence.
 
 A successful command proves only the dispatched execution environment. Do not
 describe a local aggregate run or focused emulation as native evidence for a
@@ -85,18 +87,7 @@ unavailable exit code, with a concrete limitation. `reused` and `not-applicable`
 contain no executions. Reference only dispatched artifact paths; the runtime
 resolves their identities.
 
-The coordinator invokes `compile-node` for the validation node, which reads the
-dispatch-bound persisted payload and the runtime-owned before and after snapshots.
-For low-level compiler diagnosis only, it may invoke:
-
-```sh
-uv run --locked python ../review-graph/scripts/review_graph_runtime.py \
-  compile-validation \
-  --input <dispatch-and-payload.json> \
-  --artifact <compiled-validation.md> \
-  --metadata <compiled-validation-evidence.json>
-```
-
-The compiler inserts command/environment digests, fingerprints, requirement
-mappings, ledger export, canonical machine evidence, and artifact identities,
-then runs the existing native and envelope acceptance gates.
+The coordinator invokes `compile-node` with the persisted payload and runtime
+snapshots. The compiler derives all identities, mappings, ledger export, and
+canonical evidence, then checks native and envelope acceptance. For low-level
+`compile-validation` diagnosis, consult the runtime's `--help` and operation examples.

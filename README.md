@@ -215,6 +215,53 @@ Expected symlink shape:
 ~/.agents/skills/*        -> ../../projects/dotfiles/agents/.agents/skills/*
 ```
 
+## CodeRabbit review
+
+Install and authenticate the CodeRabbit CLI separately, then run:
+
+```sh
+# Review committed branch changes and local edits against main (the default).
+just review main
+
+# Review only staged, unstaged, and non-ignored untracked files.
+just review-uncommitted
+```
+
+Both recipes emit structured findings and pass `AGENTS.md` and `.coderabbit.yaml`
+as review instructions. `just review <base>` requires a locally available commit
+or reference; choose the intended comparison base explicitly when it differs
+from `main`. CodeRabbit reviews are opt-in and are separate from `just ci`.
+
+## Shared agent skills
+
+Keep reusable skills in `agents/.agents/skills/<skill-name>/`. Stow exposes
+them at `~/.agents/skills/`, which Codex discovers across repositories,
+including symlinked skill directories. See the
+[Codex skill documentation](https://developers.openai.com/codex/skills).
+Other agents can use the same `SKILL.md` format; discovery locations vary by
+agent, so configure or link its skill directory to the shared skill folder.
+
+### TypeSafe
+
+The [TypeSafe skill](agents/.agents/skills/typesafe-ai/SKILL.md) is vendored from
+[typesafe-ai/skills at revision `65a39f3`](https://github.com/typesafe-ai/skills/tree/65a39f393687675ce170e6094757de20370365b9/skills/typesafe-ai).
+Its `SKILL.md` and MIT `LICENSE` are unchanged; `agents/openai.yaml` adds
+Codex UI metadata. The instructions are agent-neutral and consult live
+TypeSafe documentation for current API details.
+
+Run `just stow-check agents` and `just stow-apply agents` to install it.
+Invoke it with `$typesafe-ai` in Codex, or ask an agent that has loaded it to
+"use the TypeSafe skill". If it does not appear, restart the agent. API use
+requires a separately configured `TYPESAFE_API_KEY`; keep credentials out of
+this public repository. Installing the skill does not make API calls.
+
+To update, review and replace the complete upstream `skills/typesafe-ai/`
+directory, including any references and its license, while preserving the
+local `agents/openai.yaml`. Update the pinned revision above, then run
+`just skill-check agents/.agents/skills/typesafe-ai` and `just markdown-check`.
+Use this manual-copy method consistently to avoid duplicate installations;
+see [TypeSafe's installation guide](https://docs.typesafe.ai/agent-skill#installation).
+
 ## Codex config
 
 Codex rewrites `~/.codex/config.toml` with app runtime state, local absolute
