@@ -37,7 +37,8 @@ Missing fields mean `blocked`, never standalone discovery.
    emulation in `limitations`.
 5. Repeat the source-state check. Follow `worker_prompt`: serialize the complete
    payload once and stream it to `worker_payload_persistence.publish_command`,
-   which reviews and publishes identical bytes. Return after its bound receipt.
+   which reviews and publishes identical bytes. Return its bound receipt without
+   echoing the payload.
 6. The coordinator invokes the runtime-owned
    post-execution snapshot immediately afterward.
 
@@ -59,7 +60,7 @@ measurement and recovery.
 
 ## ValidationPayload
 
-Return one JSON object:
+Publish one JSON object:
 
 ```json
 {

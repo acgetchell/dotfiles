@@ -3,6 +3,7 @@
     "plan": {},
     "repository_root": "/tmp/repository",
     "cache_paths": [".uv-cache"],
+    "execution_prerequisites": [{"node_id": "validation-001", "executables": ["just", "uv"], "native_available": true, "reason": "current native host"}],
     "command_policy": [{"command": "just ci", "disposition": "blocked", "reason": "nested test fixtures mutate Git, which this task forbids"}]
   },
   "recover-validation-launch": {

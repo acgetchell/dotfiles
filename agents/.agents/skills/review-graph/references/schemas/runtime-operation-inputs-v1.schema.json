@@ -11,6 +11,16 @@
         "plan": {"type": "object"},
         "repository_root": {"type": "string", "minLength": 1},
         "cache_paths": {"$ref": "#/$defs/stringArray"},
+        "execution_prerequisites": {"type": "array", "items": {
+          "type": "object", "additionalProperties": false,
+          "required": ["node_id", "executables", "native_available", "reason"],
+          "properties": {
+            "node_id": {"type": "string", "minLength": 1},
+            "executables": {"$ref": "#/$defs/stringArray"},
+            "native_available": {"type": "boolean"},
+            "reason": {"type": "string", "minLength": 1}
+          }
+        }},
         "command_policy": {"type": "array", "items": {
           "type": "object", "additionalProperties": false,
           "required": ["command", "disposition", "reason"],
@@ -227,6 +237,7 @@
         "duplicate_command_authorizations": {"additionalProperties": {"$ref": "#/$defs/stringArray"}, "type": "object"},
         "execution_locations": {"additionalProperties": {"enum": ["worker", "coordinator"]}, "type": "object"},
         "inspection_profile": {"enum": ["independent-source", "shared-read-only"]},
+        "concurrent_worker_limit": {"type": "integer", "minimum": 1},
         "plan": {"type": "object"},
         "repository_root": {"minLength": 1, "type": "string"},
         "routing_catalog_path": {"minLength": 1, "type": "string"},

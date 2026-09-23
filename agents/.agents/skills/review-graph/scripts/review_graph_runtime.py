@@ -20,6 +20,7 @@ from typing import Any, cast
 
 from review_graph_bootstrap import bootstrap_document
 from review_graph_coverage import combined_findings, coverage_decisions, reused_paths, validate_coverage_units
+from review_graph_metrics import projected_waves, source_demand
 from review_graph_plan import (
     _COMPACT_ROUTING_OVERRIDE_FIELDS,
     DEFAULT_ROUTING_CATALOG,
@@ -3067,7 +3068,8 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
         persistence_text = (
             " Serialize result bytes once. Stream them to dispatch.worker_payload_persistence.publish_command; "
             "it validates, reviews, and atomically publishes the identical bytes. "
-            "Return only after its receipt. Keep the bytes for any approved retry with --approval-identity; do not rewrite evidence to obtain approval. "
+            "Return only its receipt, not a second copy of the payload. Keep the bytes for any approved retry with --approval-identity; "
+            "do not rewrite evidence to obtain approval. "
             "Only the bound worker_payload_path is a write target; paths within evidence are not write targets."
         )
     elif persistence.get("input_mode") == "stdin" and review_command:
@@ -3104,7 +3106,7 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
         )
     if contract == "native-independent-review":
         return (
-            "Perform only the dispatched repository-independent-review in fresh context. Return the six canonical native sections "
+            "Perform only the dispatched repository-independent-review in fresh context. Publish the six canonical native sections "
             "Scope Inspected, Findings, No-Finding Evidence, Routing Handoffs, Fingerprint Proof, and Git State; do not append graph IDs, "
             "an envelope, or Machine Evidence because compile-independent-review owns those identities. "
             f"Command policy: {command_policy}{persistence_text}{shared_text}"
@@ -3125,7 +3127,7 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
         else ""
     )
     return (
-        f"Return only the canonical {contract} payload using field names from {schema_text}. "
+        f"Publish the canonical {contract} payload using field names from {schema_text}. "
         "Every field shown in payload_schema.required_shape is required whenever its parent object is present. "
         "Do not author fingerprints, evidence IDs, artifact IDs, or digests. Copy supplied evidence/finding IDs only into schema-defined reference fields. "
         f"Command policy: {command_policy}{validation_text}{audit_scope_text}{persistence_text}{shared_text}"
@@ -3387,9 +3389,9 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         _queue_materialized_write(pending_writes, packet_path, packet_bytes, mode=0o444)
         record["source_packet_path"] = str(packet_path)
         record["source_packet_digest"] = _sha256_bytes(packet_bytes)
-        _queue_materialized_write(
-            pending_writes, Path(cast("str", record["artifact_path"])), (json.dumps(record, indent=2, sort_keys=True) + "\n").encode(), mode=0o444
-        )
+        observation_bytes = (json.dumps(record, indent=2, sort_keys=True) + "\n").encode()
+        _queue_materialized_write(pending_writes, Path(cast("str", record["artifact_path"])), observation_bytes, mode=0o444)
+        record["artifact_digest"] = _sha256_bytes(observation_bytes)
     raw_duplicate_authorizations = document.get("duplicate_command_authorizations", {})
     if not isinstance(raw_duplicate_authorizations, dict) or any(
         not isinstance(node_id, str)
@@ -3490,7 +3492,12 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             _verify_delta_context(deltas[0], common)
             common["coverage_reuse"] = deltas[0]
         if node.node_id in inspection_groups:
-            common["shared_inspection_evidence"] = inspection_groups[node.node_id]
+            # Keep shared observations in one immutable artifact, not every wrapper.
+            common["shared_inspection_evidence"] = {
+                key: value
+                for key, value in inspection_groups[node.node_id].items()
+                if key not in {"observations", "member_node_ids", "paths", "producer_node_id"}
+            }
         if node.mode == "validation":
             unit = validation_units.get(node.node_id)
             if unit is None:
@@ -3574,6 +3581,19 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         "shared_source_packets": len({str(record["artifact_path"]) for record in inspection_groups.values()}),
         "publication_invocations_per_worker": 1,
         "nodes": len(dispatches),
+        "nodes_by_mode": dict(Counter(node.mode for node in plan.actual_worker_nodes)),
+        "source_demand": source_demand([asdict(node) for node in plan.actual_worker_nodes], repository_root_path.resolve()),
+        "concurrent_worker_limit": document.get("concurrent_worker_limit"),
+        "projected_waves": (
+            projected_waves([asdict(node) for node in plan.actual_worker_nodes], document["concurrent_worker_limit"])
+            if "concurrent_worker_limit" in document
+            else None
+        ),
+        "observed_worker_reads": None,
+        "observed_review_seconds": None,
+        "measurement_scope": (
+            "Serialized context and planned demand; waves assume equal durations and serialize validation/fixes. Unknown observations remain null."
+        ),
     }
     output["dispatch_set_digest"] = _sha256_bytes(_canonical_json(output).encode())
     if operation_output_path is None:
@@ -5114,14 +5134,65 @@ def _verify_validation_recoveries(plan: GraphPlan) -> None:
                 raise ValueError(msg)
 
 
+def _preflight_executor(unit: ValidationUnit, prerequisite: dict[str, Any] | None, repository_root: Path) -> list[str]:
+    if not unit.commands:
+        return []
+    blockers: list[str] = []
+    if prerequisite is None:
+        blockers.append("executor/native availability has not been inspected for this unit")
+    else:
+        if not prerequisite["native_available"]:
+            blockers.append("native environment unavailable: " + prerequisite["reason"])
+        # Explicit executables avoid pretending that shell parsing finds nested tools.
+        blockers.extend(f"executor executable unavailable: {executable}" for executable in prerequisite["executables"] if shutil.which(executable) is None)
+    blockers.extend(
+        f"executor working directory unavailable: {directory}"
+        for directory in unit.working_directories
+        if not _workspace_path(directory, repository_root).is_dir()
+    )
+    return blockers
+
+
+def _preflight_outputs(unit: ValidationUnit, repository_root: Path) -> tuple[list[dict[str, Any]], list[str]]:
+    observations: list[dict[str, Any]] = []
+    blockers: list[str] = []
+    approved = {artifact.path: artifact for artifact in unit.allowed_artifacts}
+    for path in dict.fromkeys((*unit.expected_workspace_effects, *approved)):
+        resolved = _workspace_path(path, repository_root)
+        try:
+            status = _git_path_status(repository_root, resolved)
+            exists = resolved.exists() or resolved.is_symlink()
+        except OSError as error:
+            blockers.append(f"cannot inspect output {path}: {error}")
+            continue
+        observations.append(
+            {"path": path, "exists": exists, "repository_status": status, "required": path in approved and approved[path].artifact_digest is not None}
+        )
+        if status not in {"ignored", "outside-repository"}:
+            blockers.append(f"expected_workspace_effects must name concrete ignored/output paths, not prose or source files: {path} ({status})")
+        if path in approved and status != approved[path].repository_status:
+            blockers.append(f"permitted output status differs from plan: {path}")
+    return observations, blockers
+
+
 def preflight_validation(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901
     """Inspect launch prerequisites without running recipes or changing the plan."""
     require_schema_definition(document, _RUNTIME_OPERATION_INPUT_SCHEMA, "preflight-validation")
     plan = _graph_plan(document["plan"])
-    repository_root = Path(_required_text(document, "repository_root")).resolve()
+    repository_root = Path(_required_text(document, "repository_root"))
+    if not repository_root.is_absolute() or not repository_root.is_dir():
+        msg = "preflight repository_root must be an existing absolute directory"
+        raise ValueError(msg)
+    repository_root = repository_root.resolve()
     policy = {item["command"]: item for item in _records(document, "command_policy")}
     if len(policy) != len(document["command_policy"]):
         msg = "preflight command policy contains duplicate commands"
+        raise ValueError(msg)
+    prerequisites = {item["node_id"]: item for item in _records(document, "execution_prerequisites")}
+    if len(prerequisites) != len(document.get("execution_prerequisites", [])) or set(prerequisites) - {
+        unit.node_id for unit in plan.coalesced_validation_units
+    }:
+        msg = "execution_prerequisites must name unique planned validation nodes"
         raise ValueError(msg)
     cache_checks: list[dict[str, Any]] = []
     for raw in _text_list(document, "cache_paths"):
@@ -5148,18 +5219,20 @@ def preflight_validation(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C
             decision = policy.get(command)
             if decision is None or decision["disposition"] != "allowed":
                 blockers.append(f"command policy: {command}: {decision['reason'] if decision else 'not reviewed, including nested recipes and fixtures'}")
-        for path in unit.expected_workspace_effects:
-            status = _git_path_status(repository_root, _workspace_path(path, repository_root))
-            if status not in {"ignored", "outside-repository"}:
-                blockers.append(f"expected_workspace_effects must name concrete ignored/output paths, not prose or source files: {path} ({status})")
+        blockers.extend(_preflight_executor(unit, prerequisites.get(unit.node_id), repository_root))
+        outputs, output_blockers = _preflight_outputs(unit, repository_root)
         if any(not item["accessible"] for item in cache_checks):
             blockers.append("declared executor cache is inaccessible; remedy it before dispatch")
         units.append(
             {
                 "node_id": unit.node_id,
-                "blockers": blockers,
-                "status": "blocked" if blockers else "ready",
+                "blockers": [*blockers, *output_blockers],
+                "status": "blocked" if blockers or output_blockers else "ready",
                 "expected_outputs": [artifact.path for artifact in unit.allowed_artifacts],
+                "output_observations": outputs,
+                "configuration_errors": output_blockers,
+                "execution_blockers": blockers,
+                "repository_findings": [],
             }
         )
     return {
@@ -6115,12 +6188,16 @@ def _json_operation_output(document: dict[str, Any], args: argparse.Namespace) -
     return finalize_proof(_finalize_document_from_files(document, args))
 
 
+def publish_worker_payload_bytes(document: dict[str, Any], payload_bytes: bytes, *, approval_identity: str | None = None) -> dict[str, Any]:
+    """Review and publish identical bound bytes in one supported transaction."""
+    review = review_worker_payload_write(document, payload_bytes)
+    return persist_worker_payload_bytes(document, payload_bytes, approval_identity=approval_identity or review["approval_identity"])
+
+
 def _run_worker_payload_operation(document: dict[str, Any], args: argparse.Namespace) -> int:
     if args.operation == "publish-worker-payload":
         payload_bytes = sys.stdin.buffer.read()
-        review = review_worker_payload_write(document, payload_bytes)
-        identity = args.approval_identity or review["approval_identity"]
-        print(_canonical_json(persist_worker_payload_bytes(document, payload_bytes, approval_identity=identity)))
+        print(_canonical_json(publish_worker_payload_bytes(document, payload_bytes, approval_identity=args.approval_identity)))
         return 0
     if args.operation == "review-worker-payload-write":
         payload_bytes = sys.stdin.buffer.read()

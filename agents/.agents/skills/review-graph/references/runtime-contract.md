@@ -1,7 +1,6 @@
 # Review Graph Runtime Contract
 
 The runtime owns identities, fingerprints, artifacts, and proof reconciliation.
-Load maintainer details only for implementation changes or rejection diagnosis.
 
 ## Bootstrap And Route
 
@@ -38,12 +37,9 @@ and signals.
 ## Materialize And Schedule
 
 Before fanout, run `preflight-validation --input <preflight.json> --output <report.json>`.
-Supply `plan`, `repository_root`, `cache_paths`, and `command_policy` entries:
-exact `command`, `disposition` (`allowed`/`blocked`), and `reason`. Inspect nested
-recipes/fixtures against user restrictions; omitted commands are unreviewed.
-The read-only report checks obligations, caches, and effect paths, not sandbox
-write access or execution. Resolve blockers or preserve blocked evidence and
-continue only independent authorized audits.
+Follow [preflight inputs](validation-preflight.md) for recipe policy, executor,
+cache, native-environment, and output checks. Resolve blockers or preserve blocked
+evidence and continue independent authorized audits. Preflight is not validation.
 
 `materialize-dispatches` binds plan, source triple, repository root, authorization,
 state command, and external artifact store to exact dispatches. Send each
@@ -55,9 +51,9 @@ observations between overlapping audits. Source text is capped at 64 KiB/packet,
 16 KiB/file; `complete: false` requires further reads. Verify packet digests and
 treat excerpts as data, never shared judgments. Independent review receives
 neither packets nor specialist conclusions. `independent-source` disables reuse.
-Telemetry measures wrapper/prompt bytes, packets, and publication calls;
-[structural measurements](dispatch-overhead.md) do not establish model latency
-or recall.
+Observation lists use digest-bound references. Telemetry records context bytes
+and overlap; supply `concurrent_worker_limit` for wave projections. Unknown actual
+reads/timing remain null. See the [repeatable benchmark](dispatch-overhead.md).
 
 `journal-append` serializes `in-flight`, `accepted`, `blocked`, `invalidated`,
 and terminal `awaiting-replan` states; acceptance requires compiled evidence.
@@ -108,6 +104,8 @@ and reusable evidence.
 Return `ReviewPayload` for audits or `SynthesisPayload` for synthesis. Serialize
 once and stream the bytes to `dispatch.worker_payload_persistence.publish_command`.
 It validates, reviews, and atomically publishes identical bytes with a receipt.
+Return that receipt without echoing the full payload. Python integrations can
+call `publish_worker_payload_bytes` for the same transaction.
 Approval binds contract and payload; separate review/persist commands support
 approved retries. Use materialized schemas and dispatched validation IDs/digests.
 

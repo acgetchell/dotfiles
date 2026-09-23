@@ -2818,15 +2818,18 @@ def test_exact_overlap_leaves_share_only_trusted_read_only_observations(tmp_path
 
     assert producer == consumer
     assert producer["observation_digest"].startswith("sha256:")
-    assert producer["observations"] == [
+    observations = json.loads(Path(producer["artifact_path"]).read_bytes())["observations"]
+    assert "observations" not in producer
+    assert producer["artifact_digest"] == "sha256:" + hashlib.sha256(Path(producer["artifact_path"]).read_bytes()).hexdigest()
+    assert observations == [
         {
             "byte_count": (SKILL_ROOT.parents[2] / STATE_FIXTURE).stat().st_size,
-            "content_digest": producer["observations"][0]["content_digest"],
+            "content_digest": observations[0]["content_digest"],
             "line_count": 3,
             "path": STATE_FIXTURE,
         }
     ]
-    assert producer["observations"][0]["content_digest"].startswith("sha256:")
+    assert observations[0]["content_digest"].startswith("sha256:")
     assert Path(producer["artifact_path"]).is_file()
 
     independent = materialize_dispatches(

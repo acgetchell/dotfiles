@@ -63,7 +63,8 @@ validation or synthesis.
 Dispatch selected leaves with exact skills and owned paths. Workers stream
 `ReviewPayload` audit bytes or `SynthesisPayload` synthesis bytes through dispatch-bound review and persistence
 commands; the runtime validates before writing, binds approval retries, and
-atomically publishes. They return the same bytes and do not author
+atomically publishes. They return the publication receipt; `compile-node` reads
+the bound bytes without a second conversational copy. Workers do not author
 fingerprints, digests, evidence IDs, execution metadata, canonical Markdown,
 or machine-evidence JSON. Materialize exact dispatch bases from the accepted
 plan with `review_graph_runtime.py materialize-dispatches`; do not reconstruct
