@@ -894,7 +894,9 @@ def _validate_audit_caveats(dispatch: dict[str, Any], payload: dict[str, Any]) -
     require_schema(payload, _REVIEW_PAYLOAD_SCHEMA)
     facts = payload.get("execution_facts", [])
     policy = dispatch.get("command_policy")
-    planned_commands = set(_text_list(policy, "prohibited_commands")) if isinstance(policy, dict) else set()
+    planned_commands = (
+        set(_text_list(policy, "prohibited_commands")) | set(_text_list(policy, "validator_owned_commands")) if isinstance(policy, dict) else set()
+    )
     if "validators-not-executed" in facts and planned_commands.intersection(payload["commands_executed"]):
         msg = "validators-not-executed contradicts the planned validator command ledger"
         raise ValueError(msg)
@@ -904,6 +906,8 @@ def _validate_audit_caveats(dispatch: dict[str, Any], payload: dict[str, Any]) -
     if "git-not-mutated" in facts and dispatch.get("git_mutated", False):
         msg = "git-not-mutated contradicts the dispatch mutation record"
         raise ValueError(msg)
+    for caveat in (*_records(payload, "unresolved_uncertainties"), *_records(payload, "validation_limits")):
+        _required_text(caveat, "reason")
     requirements = {record["requirement_id"] for record in payload["validation_requirements"]}
     if any(limit["requirement_id"] not in requirements for limit in payload.get("validation_limits", [])):
         msg = "validation_limits must reference explicit validation_requirements"

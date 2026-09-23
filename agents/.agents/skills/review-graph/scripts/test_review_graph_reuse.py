@@ -344,3 +344,66 @@ def test_execution_fact_contradicting_capture_or_mutation_is_rejected(tmp_path: 
         dispatch["git_mutated"] = True
     with pytest.raises(ValueError, match="contradicts"):
         runtime.compile_review({"dispatch": dispatch, "payload": {**_payload(dispatch["owned_paths"]), "execution_facts": [fact]}})
+
+
+def test_authorized_validator_execution_still_contradicts_nonexecution_fact(tmp_path: Path) -> None:
+    document, entries = _worker_input_fixture(tmp_path)
+    original = next(item for item in entries["dispatches"] if item["dispatch"].get("mode") == "audit")
+    command = original["dispatch"]["command_policy"]["validator_owned_commands"][0]
+    authorized = runtime.materialize_dispatches(
+        {**document, "artifact_store": str(tmp_path / "authorized"), "duplicate_command_authorizations": {original["node_id"]: [command]}}
+    )
+    entry = next(item for item in authorized["dispatches"] if item["node_id"] == original["node_id"])
+    assert command not in entry["dispatch"]["command_policy"]["prohibited_commands"]
+    contract = json.loads(Path(entry["worker_payload_contract_path"]).read_bytes())
+    dispatch = {**entry["dispatch"], "before_state": document["source_state"], "after_state": document["source_state"]}
+    payload = {**_payload(dispatch["owned_paths"]), "commands_executed": [command]}
+    assert runtime.review_worker_payload_write(contract, json.dumps(payload).encode())["decision"] == "valid-bound-artifact-write"
+    _content, metadata = runtime.compile_review({"dispatch": dispatch, "payload": payload})
+    assert metadata["normalized_record"]["commands_executed"] == [command]
+    payload["execution_facts"] = ["validators-not-executed"]
+    with pytest.raises(ValueError, match="planned validator command ledger"):
+        runtime.publish_worker_payload_bytes(contract, json.dumps(payload).encode())
+    with pytest.raises(ValueError, match="planned validator command ledger"):
+        runtime.compile_review({"dispatch": dispatch, "payload": payload})
+    assert not Path(entry["worker_payload_path"]).exists()
+
+
+@pytest.mark.parametrize(
+    ("field", "status"), [("unresolved_uncertainties", "semantic"), *(("validation_limits", status) for status in ("delegated", "unavailable", "failed"))]
+)
+def test_multiline_audit_reason_is_rejected_at_every_boundary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str, status: str) -> None:
+    document, entries = _worker_input_fixture(tmp_path)
+    entry = next(item for item in entries["dispatches"] if item["dispatch"].get("mode") == "audit")
+    payload = _payload(entry["dispatch"]["owned_paths"])
+    reason = "Evidence is incomplete\nAdditional explanation"
+    if field == "unresolved_uncertainties":
+        payload[field] = [{"kind": status, "reason": reason}]
+    else:
+        planned = entry["dispatch"]["command_policy"]["planned_validation_units"][0]
+        requirement = planned["requirement_ids"][0]
+        payload["validation_requirements"] = [
+            {
+                "requirement_id": requirement,
+                "planned_validation_digest": planned["planned_validation_digest"],
+                "owner": "review-validator",
+                "reason": "Platform checks",
+                "expected_evidence": "Checks pass",
+            }
+        ]
+        payload[field] = [{"requirement_id": requirement, "environment": "current host", "status": status, "reason": reason}]
+    contract = json.loads(Path(entry["worker_payload_contract_path"]).read_bytes())
+    dispatch = {**entry["dispatch"], "before_state": document["source_state"], "after_state": document["source_state"]}
+    # Model evidence accepted by the previous compiler before this boundary check.
+    with monkeypatch.context() as patch:
+        patch.setattr(runtime, "_validate_audit_caveats", lambda _dispatch, _payload: None)
+        content, metadata = runtime.compile_review({"dispatch": dispatch, "payload": payload})
+    Path(entry["artifact_path"]).write_bytes(content)
+    Path(entry["metadata_path"]).write_text(json.dumps(metadata))
+    with pytest.raises(ValueError, match="reason must be one non-empty line"):
+        runtime.publish_worker_payload_bytes(contract, json.dumps(payload).encode())
+    with pytest.raises(ValueError, match="reason must be one non-empty line"):
+        runtime.compile_review({"dispatch": dispatch, "payload": payload})
+    with pytest.raises(ValueError, match="reason must be one non-empty line"):
+        runtime._load_evidence_source({key: entry[key] for key in ("artifact_path", "metadata_path")}, require_normalized=True)
+    assert not Path(entry["worker_payload_path"]).exists()
