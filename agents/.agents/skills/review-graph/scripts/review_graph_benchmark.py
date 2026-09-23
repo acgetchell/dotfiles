@@ -240,6 +240,9 @@ def _trial(module: types.ModuleType, document: dict[str, Any], store: Path) -> d
             review = module.review_worker_payload_write(contract, content)
             receipt = module.persist_worker_payload_bytes(contract, content, approval_identity=review["approval_identity"])
             operations += 2
+        if receipt.get("worker_payload_digest") != _digest(content) or receipt.get("worker_payload_path") != str(Path(entry["worker_payload_path"]).resolve()):
+            msg = "benchmark publication receipt does not match the payload digest or dispatch path"
+            raise ValueError(msg)
         receipts.append(receipt)
         dispatch = {**entry["dispatch"], "before_state": document["source_state"], "after_state": document["source_state"]}
         native, metadata = module.compile_review({"dispatch": dispatch, "payload": payload})

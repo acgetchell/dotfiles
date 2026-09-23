@@ -5143,6 +5143,8 @@ def _preflight_executor(unit: ValidationUnit, prerequisite: dict[str, Any] | Non
     else:
         if not prerequisite["native_available"]:
             blockers.append("native environment unavailable: " + prerequisite["reason"])
+        if not prerequisite["executables"]:
+            blockers.append("executor executables have not been declared for this command-bearing unit")
         # Explicit executables avoid pretending that shell parsing finds nested tools.
         blockers.extend(f"executor executable unavailable: {executable}" for executable in prerequisite["executables"] if shutil.which(executable) is None)
     blockers.extend(
@@ -5157,12 +5159,15 @@ def _preflight_outputs(unit: ValidationUnit, repository_root: Path) -> tuple[lis
     observations: list[dict[str, Any]] = []
     blockers: list[str] = []
     approved = {artifact.path: artifact for artifact in unit.allowed_artifacts}
+    effect_root = Path(unit.isolation_root) if unit.requires_isolation and unit.isolation_root else repository_root
     for path in dict.fromkeys((*unit.expected_workspace_effects, *approved)):
-        resolved = _workspace_path(path, repository_root)
         try:
+            resolved = _workspace_path(path, effect_root if path in unit.expected_workspace_effects else repository_root)
             status = _git_path_status(repository_root, resolved)
+            if status == "outside-repository" or (unit.requires_isolation and path in unit.expected_workspace_effects):
+                _verified_artifact_status(str(resolved), "outside-repository", repository_root, unit.isolation_root)
             exists = resolved.exists() or resolved.is_symlink()
-        except OSError as error:
+        except (OSError, ValueError) as error:
             blockers.append(f"cannot inspect output {path}: {error}")
             continue
         observations.append(

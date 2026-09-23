@@ -32,6 +32,7 @@ def projected_waves(nodes: list[dict[str, Any]], concurrent_worker_limit: int) -
 
 def source_demand(nodes: list[dict[str, Any]], repository_root: Path) -> dict[str, Any]:
     """Count planned audit/independent reads; never describe them as observed reads."""
+    repository_root = repository_root.resolve()
     counts = Counter(path for node in nodes if node["mode"] in {"audit", "independent-review"} for path in node["coverage"])
     sizes: dict[str, int] = {}
     unavailable: list[str] = []

@@ -2824,7 +2824,7 @@ def test_exact_overlap_leaves_share_only_trusted_read_only_observations(tmp_path
     assert observations == [
         {
             "byte_count": (SKILL_ROOT.parents[2] / STATE_FIXTURE).stat().st_size,
-            "content_digest": observations[0]["content_digest"],
+            "content_digest": "sha256:" + hashlib.sha256((SKILL_ROOT.parents[2] / STATE_FIXTURE).read_bytes()).hexdigest(),
             "line_count": 3,
             "path": STATE_FIXTURE,
         }

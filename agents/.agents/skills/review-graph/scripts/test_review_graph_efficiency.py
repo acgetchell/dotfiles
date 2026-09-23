@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 import review_graph_runtime as runtime
 from review_graph_benchmark import _baseline_runtime, _trial, benchmark_fixture
-from review_graph_metrics import projected_waves
+from review_graph_metrics import projected_waves, source_demand
 from review_graph_plan import ValidationArtifact, validation_requirements_from_document
 from test_review_graph_runtime import (
     SKILL_ROOT,
@@ -53,6 +53,41 @@ def test_benchmark_preserves_catalog_independence_findings_and_measures_reads(tm
     assert telemetry["observed_review_seconds"] is None
 
 
+@pytest.mark.parametrize("field", ["worker_payload_digest", "worker_payload_path"])
+def test_benchmark_rejects_mismatched_publication_receipts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str) -> None:
+    document = benchmark_fixture(tmp_path / "repository")
+    publish = runtime.publish_worker_payload_bytes
+
+    def mismatched_receipt(contract: dict[str, Any], content: bytes) -> dict[str, Any]:
+        receipt = publish(contract, content)
+        receipt[field] = "sha256:" + "0" * 64 if field == "worker_payload_digest" else str(tmp_path / "wrong-payload.json")
+        return receipt
+
+    monkeypatch.setattr(runtime, "publish_worker_payload_bytes", mismatched_receipt)
+    with pytest.raises(ValueError, match="publication receipt does not match"):
+        _trial(runtime, document, tmp_path / "trial")
+
+
+def test_source_demand_counts_files_under_symlinked_root_without_following_escapes(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    content = b"source fixture\n"
+    (repository / "sample.py").write_bytes(content)
+    outside = tmp_path / "outside.py"
+    outside.write_bytes(b"outside fixture\n")
+    (repository / "escape.py").symlink_to(outside)
+    linked_root = tmp_path / "linked-root"
+    linked_root.symlink_to(repository, target_is_directory=True)
+    nodes = [{"mode": "audit", "coverage": ["sample.py", "escape.py"]}, {"mode": "independent-review", "coverage": ["sample.py"]}]
+
+    demand = source_demand(nodes, linked_root)
+
+    assert demand["distinct_source_bytes"] == len(content)
+    assert demand["planned_source_bytes"] == 2 * len(content)
+    assert demand["unavailable_paths"] == ["escape.py"]
+    assert demand["overlapping_paths"] == {"sample.py": 2}
+
+
 @pytest.mark.parametrize("limit", [0, -1, True, 1.5])
 def test_wave_projection_rejects_invalid_capacity(limit: Any) -> None:
     with pytest.raises(ValueError, match="positive integer"):
@@ -78,11 +113,13 @@ def _preflight_request(tmp_path: Path) -> dict[str, Any]:
     }
 
 
-@pytest.mark.parametrize("defect", ["executable", "native", "directory", "uninspected"])
+@pytest.mark.parametrize("defect", ["executable", "empty-executables", "native", "directory", "uninspected"])
 def test_preflight_detects_executor_blockers_without_running_commands(tmp_path: Path, defect: str) -> None:
     request = _preflight_request(tmp_path)
     if defect == "executable":
         request["execution_prerequisites"][0]["executables"] = [str(tmp_path / "missing-executable")]
+    elif defect == "empty-executables":
+        request["execution_prerequisites"][0]["executables"] = []
     elif defect == "native":
         request["execution_prerequisites"][0].update(native_available=False, reason="Windows runner unavailable")
     elif defect == "directory":
@@ -99,11 +136,74 @@ def test_preflight_detects_executor_blockers_without_running_commands(tmp_path: 
 
 def test_preflight_absent_permitted_output_is_ready_and_not_created(tmp_path: Path) -> None:
     request = _preflight_request(tmp_path)
-    artifact = ValidationArtifact(str(tmp_path.parent / "never-created-output"), "build", "outside-repository", "isolated-output-directory")
-    request["plan"]["coalesced_validation_units"][0]["allowed_artifacts"] = [asdict(artifact)]
+    isolation_root = tmp_path.parent / f"{tmp_path.name}-isolated"
+    artifact = ValidationArtifact(str(isolation_root / "never-created-output"), "build", "outside-repository", "isolated-output-directory")
+    request["plan"]["coalesced_validation_units"][0].update(allowed_artifacts=[asdict(artifact)], isolation_root=str(isolation_root))
     report = runtime.preflight_validation(request)
     assert report["status"] == "ready"
     assert report["units"][0]["output_observations"] == [{"path": artifact.path, "exists": False, "repository_status": "outside-repository", "required": False}]
+    assert not Path(artifact.path).exists()
+
+
+@pytest.mark.parametrize("error_type", [OSError, ValueError])
+def test_preflight_reports_unavailable_output_classification(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error_type: type[Exception]) -> None:
+    request = _preflight_request(tmp_path)
+    request["plan"]["coalesced_validation_units"][0]["expected_workspace_effects"] = ["output"]
+
+    def unavailable_status(repository_root: Path, path: Path) -> str:
+        message = "Git classification unavailable"
+        raise error_type(message)
+
+    monkeypatch.setattr(runtime, "_git_path_status", unavailable_status)
+    report = runtime.preflight_validation(request)
+
+    assert report["status"] == "blocked"
+    assert report["units"][0]["configuration_errors"] == ["cannot inspect output output: Git classification unavailable"]
+    assert report["units"][0]["output_observations"] == []
+
+
+@pytest.mark.parametrize("escape", [False, True])
+def test_preflight_resolves_isolated_relative_effects_and_rejects_escapes(tmp_path: Path, escape: bool) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    isolation_root = tmp_path / "isolated"
+    isolation_root.mkdir()
+    if escape:
+        (isolation_root / "build").symlink_to(repository, target_is_directory=True)
+    else:
+        (isolation_root / "build").mkdir()
+    (isolation_root / "build" / "output.txt").write_text("observed output", encoding="utf-8")
+    request = _preflight_request(repository)
+    request["plan"]["coalesced_validation_units"][0].update(
+        requires_isolation=True, isolation_root=str(isolation_root), working_directories=[str(isolation_root)], expected_workspace_effects=["build/output.txt"]
+    )
+
+    report = runtime.preflight_validation(request)
+
+    if escape:
+        assert report["status"] == "blocked"
+        assert any("inside the captured repository" in reason for reason in report["units"][0]["configuration_errors"])
+    else:
+        assert report["status"] == "ready"
+        assert report["units"][0]["output_observations"] == [
+            {"path": "build/output.txt", "exists": True, "repository_status": "outside-repository", "required": False}
+        ]
+
+
+@pytest.mark.parametrize("root_kind", ["missing", "inside-repository", "ancestor", "unrelated"])
+def test_preflight_rejects_outside_artifacts_without_valid_isolation_root(tmp_path: Path, root_kind: str) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    request = _preflight_request(repository)
+    roots = {"missing": None, "inside-repository": str(repository / "nested"), "ancestor": str(tmp_path), "unrelated": str(tmp_path / "unrelated")}
+    artifact = ValidationArtifact(str(tmp_path / "isolated" / "output"), "build", "outside-repository", "isolated-output-directory")
+    request["plan"]["coalesced_validation_units"][0].update(allowed_artifacts=[asdict(artifact)], isolation_root=roots[root_kind])
+
+    report = runtime.preflight_validation(request)
+
+    assert report["status"] == "blocked"
+    assert any(f"cannot inspect output {artifact.path}:" in reason for reason in report["units"][0]["configuration_errors"])
+    assert report["units"][0]["output_observations"] == []
     assert not Path(artifact.path).exists()
 
 
@@ -141,14 +241,18 @@ def test_successful_validation_may_leave_permitted_outputs_absent(tmp_path: Path
         runtime.compile_validation({"dispatch": dispatch, "payload": payload})
 
 
-def test_commandless_hosted_requirement_preflights_as_blocked(tmp_path: Path) -> None:
+@pytest.mark.parametrize("declared_prerequisites", [False, True])
+def test_commandless_hosted_requirement_preflights_as_blocked(tmp_path: Path, declared_prerequisites: bool) -> None:
     request = _preflight_request(tmp_path)
     unit = request["plan"]["coalesced_validation_units"][0]
     unit.update(commands=[], working_directories=[], canonical_recipe=None, planning_blocker="staged bytes have no hosted commit")
-    request["execution_prerequisites"] = []
+    request["execution_prerequisites"][0]["executables"] = []
+    if not declared_prerequisites:
+        request["execution_prerequisites"] = []
     report = runtime.preflight_validation(request)
     assert report["status"] == "blocked"
     assert any("no hosted commit" in reason for reason in report["units"][0]["execution_blockers"])
+    assert not any("executor" in reason for reason in report["units"][0]["execution_blockers"])
     assert report["units"][0]["configuration_errors"] == []
 
 
