@@ -5519,6 +5519,22 @@ def _compact_routing_overrides_from_document(
     return tuple(overrides)
 
 
+def _workspace_effects_field(item: Mapping[str, Any], repository_root: Path | None) -> tuple[str, ...]:
+    label = f"validation requirement {item.get('requirement_id', '<unknown>')} expected_workspace_effects"
+    paths = _normalized_repository_paths(_tuple_field(item, "expected_workspace_effects"), label=label)
+    for path in paths:
+        if any(character in path for character in ("\n", "\r", "\x00")):
+            msg = f"{label} must contain concrete single-line paths, not prose"
+            raise ValueError(msg)
+        if repository_root is not None and not item.get("requires_isolation", False):
+            try:
+                _verified_artifact_status(path, "ignored", repository_root)
+            except ValueError as error:
+                msg = f"{label} must name concrete ignored output paths: {path}: {error}"
+                raise ValueError(msg) from error
+    return paths
+
+
 def validation_requirements_from_document(document: Mapping[str, Any], repository_root: Path | None) -> tuple[ValidationRequirement, ...]:
     """Parse validation plans consistently for bootstrap and source-preserving expansion."""
     requirements = tuple(
@@ -5552,10 +5568,7 @@ def validation_requirements_from_document(document: Mapping[str, Any], repositor
             evidence_id=_optional_bounded_text_field(item, "evidence_id"),
             required=_boolean_field(item, "required", default=True, label=f"validation requirement {item.get('requirement_id', '<unknown>')} required"),
             baseline=_boolean_field(item, "baseline", default=False, label=f"validation requirement {item.get('requirement_id', '<unknown>')} baseline"),
-            expected_workspace_effects=_normalized_repository_paths(
-                _tuple_field(item, "expected_workspace_effects"),
-                label=f"validation requirement {item.get('requirement_id', '<unknown>')} expected_workspace_effects",
-            ),
+            expected_workspace_effects=_workspace_effects_field(item, repository_root),
             requires_isolation=_boolean_field(
                 item, "requires_isolation", default=False, label=f"validation requirement {item.get('requirement_id', '<unknown>')} requires_isolation"
             ),

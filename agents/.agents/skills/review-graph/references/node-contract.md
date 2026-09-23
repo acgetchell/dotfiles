@@ -427,7 +427,8 @@ git state, or spawn another worker.
 Validation Dispatch:
 <exact planner-owned validation unit and trusted execution identity>
 
-Return only the compact ValidationPayload required by that skill.
+Publish the compact ValidationPayload through the dispatched helper and return
+its bound receipt.
 ```
 
 Persist the payload and compile it with `review_graph_runtime.py

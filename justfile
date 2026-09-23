@@ -12,8 +12,8 @@ cargo_update_version := "22.1.1"
 cargo_version_pattern := '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?'
 dprint_version := "0.57.4"
 just_version := "1.58.0"
-rumdl_version := "0.2.75"
-uv_version := "0.12.17"
+rumdl_version := "0.2.76"
+uv_version := "0.12.18"
 zizmor_version := "1.30.1"
 
 _ensure-actionlint:
@@ -231,6 +231,10 @@ review base="main": _ensure-uv
 # Review only staged, unstaged, and non-ignored untracked changes with CodeRabbit.
 review-uncommitted: _ensure-uv
     uv run --locked --only-group tooling --inexact research-repo-tools review uncommitted
+
+# Paired 18-file protocol benchmark; artifacts go to a unique temporary directory.
+review-workflow-benchmark baseline="eeead7c646a45ca8227bc7fc057e6f2e1bdf52bf" repeats="5": _ensure-uv
+    uv run --locked python agents/.agents/skills/review-graph/scripts/review_graph_benchmark.py --baseline-ref {{ quote(baseline) }} --repeats {{ quote(repeats) }}
 
 # Harden semgrep execution for CI/sandboxes:
 # use explicit temporary cache/log paths, disable version checks and metrics,
