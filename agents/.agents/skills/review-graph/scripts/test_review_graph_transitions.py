@@ -562,6 +562,7 @@ def test_partitioned_audit_retains_original_capture_across_multiple_repairs(tmp_
     lifecycle, entries, _dispatches = _materialize(tmp_path, capture, plan)
     entry = next(item for item in entries["dispatches"] if item["dispatch"]["skill_id"] == "python-cli-review")
     payload = _payload(entry["dispatch"]["owned_paths"])
+    payload["execution_facts"] = ["validators-not-executed", "source-captures-match", "git-not-mutated"]
     payload["coverage_units"] = [
         {"unit_id": path, "owned_paths": [path], "dependency_paths": [], "dependency_uncertainty": "", "finding_indices": []}
         for path in ("tool.py", "pyproject.toml")

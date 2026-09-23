@@ -17,6 +17,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from capture_scope import _scope_data
+from review_graph_coverage import coverage_reference
 from review_graph_reuse import AuditInputIdentity, AuditReuseTransition, ExternalMetadataTransition, ReviewSourceSnapshot, metadata_states, verify_reuse_inputs
 
 if TYPE_CHECKING:
@@ -2769,6 +2770,22 @@ def _native_state_verification_blockers(body: str, fingerprints: FingerprintEvid
     return tuple(blockers)
 
 
+def _coverage_reuse_native_blockers(scope: str, context: dict[str, Any] | None) -> tuple[str, ...]:
+    """Verify compact references while accepting previously compiled inline proofs."""
+    blockers: list[str] = []
+    if context is not None:
+        compact = _native_field_values(scope, "Coverage reuse reference")
+        label = "Coverage reuse reference" if compact else "Coverage reuse"
+        proof = coverage_reference(context) if compact else context
+        serialized_reuse = json.dumps(proof, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        blockers.extend(_native_values_blockers(scope, section="Scope Inspected", label=label, expected=(serialized_reuse,)))
+        if compact and _native_field_values(scope, "Coverage reuse"):
+            blockers.append("native result contains competing coverage reuse representations")
+    elif _native_field_values(scope, "Coverage reuse reference") or _native_field_values(scope, "Coverage reuse"):
+        blockers.append("native result claims coverage reuse absent from its expectation")
+    return tuple(blockers)
+
+
 def _ordinary_review_native_blockers(  # noqa: C901, PLR0912
     sections: Mapping[str, str], expectation: ReviewEvidenceExpectation, evidence: ReviewEvidence
 ) -> tuple[str, ...]:
@@ -2803,9 +2820,7 @@ def _ordinary_review_native_blockers(  # noqa: C901, PLR0912
         )
     )
     scope = sections["## Scope Inspected"]
-    if expectation.coverage_reuse is not None:
-        serialized_reuse = json.dumps(expectation.coverage_reuse, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-        blockers.extend(_native_values_blockers(scope, section="Scope Inspected", label="Coverage reuse", expected=(serialized_reuse,)))
+    blockers.extend(_coverage_reuse_native_blockers(scope, expectation.coverage_reuse))
     if expectation.audit_input_identity is not None:
         serialized_inputs = json.dumps(asdict(expectation.audit_input_identity), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
         blockers.extend(_native_values_blockers(scope, section="Scope Inspected", label="Audit input identity", expected=(serialized_inputs,)))

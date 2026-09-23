@@ -32,7 +32,11 @@ omitted scope, and narrative `limitations` never expand the write set. Only the
 published payload path is a durable artifact target; atomic publication uses a
 runtime-owned temporary sibling. The stdin contract contains no candidate path.
 Legacy `--payload` inputs retain a separate candidate-bearing schema for saved
-dispatches.
+dispatches. New audit contracts include a digest-bound compiler preflight so
+generated native output that exceeds section limits fails before publication.
+Preflight dry-compiles with hypothetical equal captures; it does not attest to
+execution. Actual capture verification still runs during compilation. Saved contracts
+without preflight remain supported.
 
 The persistence receipt and any publication-failure diagnostic carry the same
 `artifact_write_review`: exact byte digest/count, bound paths, path-role summary,
@@ -51,8 +55,10 @@ After publication-contract changes, complement deterministic tests with one
 fresh worker (`fork_turns: "none"`) and an external temporary proof store. Give
 it only a materialized audit dispatch, its skill/instructions, a small owned
 source fixture, and a nearby context fixture. Ask it to inspect both and publish
-its own payload through the generated prompt. Record the context boundary as a
-narrative limitation; let the worker classify path ownership and scope omissions.
+its own payload through the generated prompt. Let the worker classify inspected
+context in `nearby_contract_owners`, omissions in `scope_limitations`, and known
+execution context in `execution_facts`. Preserve actual unresolved or
+unclassified caveats in their blocking fields.
 
 Observe the actual tool/approval outcome, compare returned and persisted bytes,
 and compile the payload through `compile-node` to journal acceptance. Record the

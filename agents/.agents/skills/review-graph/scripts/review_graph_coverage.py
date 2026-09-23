@@ -1,8 +1,22 @@
 """Explicit audit coverage partitions and content-bound delta decisions."""
 
+import hashlib
+import json
 from typing import Any, cast
 
 from review_graph_reuse import AuditInputIdentity, AuditReuseTransition, ReviewSourceSnapshot, verify_reuse_inputs
+
+
+def coverage_reference(context: dict[str, Any]) -> dict[str, Any]:
+    """Bind compact native output to the complete verified metadata proof."""
+    canonical = json.dumps(context, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    return {
+        "schema_version": 1,
+        "metadata_field": "expectation.coverage_reuse",
+        "digest": "sha256:" + hashlib.sha256(canonical).hexdigest(),
+        "reused_units": sum(unit["disposition"] == "reused" for unit in context["units"]),
+        "recheck_units": sum(unit["disposition"] == "recheck" for unit in context["units"]),
+    }
 
 
 def validate_coverage_units(payload: dict[str, Any], owned_paths: tuple[str, ...]) -> None:

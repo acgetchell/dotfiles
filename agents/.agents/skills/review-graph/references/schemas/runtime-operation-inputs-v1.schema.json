@@ -266,10 +266,20 @@
     "persist-worker-payload": {
       "oneOf": [{"$ref": "#/$defs/stdinWorkerPayloadContract"}, {"$ref": "#/$defs/legacyWorkerPayloadContract"}]
     },
+    "compilerPreflight": {
+      "additionalProperties": false,
+      "properties": {
+        "worker_input_path": {"minLength": 1, "type": "string"},
+        "digest": {"pattern": "^sha256:[0-9a-f]{64}$", "type": "string"}
+      },
+      "required": ["worker_input_path", "digest"],
+      "type": "object"
+    },
     "stdinWorkerPayloadContract": {
       "additionalProperties": false,
       "properties": {
         "coverage_reuse": {"type": "object"},
+        "compiler_preflight": {"$ref": "#/$defs/compilerPreflight"},
         "mode": {"enum": ["audit", "fix", "independent-review", "revalidation", "synthesis", "validation"]},
         "node_id": {"minLength": 1, "type": "string"},
         "owned_paths": {"$ref": "#/$defs/stringArray"},
@@ -284,6 +294,7 @@
       "additionalProperties": false,
       "properties": {
         "coverage_reuse": {"type": "object"},
+        "compiler_preflight": {"$ref": "#/$defs/compilerPreflight"},
         "candidate_path": {"minLength": 1, "type": "string"},
         "mode": {"enum": ["audit", "fix", "independent-review", "revalidation", "synthesis", "validation"]},
         "node_id": {"minLength": 1, "type": "string"},
