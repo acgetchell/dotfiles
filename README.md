@@ -164,10 +164,14 @@ resolving the failure to finish synchronization and pin reconciliation.
 The same locked package owns the Semgrep fixture runner and CodeRabbit wrapper.
 `just semgrep-test` reads `[tool.research-repo-tools.semgrep]`; the repository keeps its
 rules and real fixtures while generic runner tests live upstream.
-The Jupyter review skill delegates notebook validation, native Ruff/ty lint, cleanup,
-and execution to shared commands in each consumer's locked notebook environment.
-Its remaining helper supplies compact inspection and advisory policy pending
-[v0.1.5 adoption and retirement in #78](https://github.com/acgetchell/dotfiles/issues/78).
+The Jupyter review skill delegates notebook inspection, advice, validation, native
+Ruff/ty lint, cleanup, and execution to published v0.1.5 shared commands. It keeps
+only review policy and a tested consumer configuration template; generic notebook
+implementation and regression coverage live upstream. See the
+[shared notebook workflow](agents/.agents/skills/jupyter-notebook-review/references/shared-notebooks.md)
+for locked-consumer and isolated inspection commands. Dotfiles' development
+environment includes `nbformat` for read-only consumer integration tests; notebook
+execution dependencies belong to each consumer's locked notebook environment.
 
 `bin/verify.sh` derives its cask and CLI checks from the Brewfile, so removing an entry there never causes a stale verify failure. It also surfaces `brew missing` output as warnings; some casks (e.g. `mactex`) declare Homebrew dependencies they actually bundle themselves, so those lines are informational rather than fatal.
 

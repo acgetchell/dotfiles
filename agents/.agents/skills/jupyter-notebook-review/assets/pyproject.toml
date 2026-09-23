@@ -1,0 +1,26 @@
+# Merge these tables into the consumer's pyproject.toml; preserve its other rules.
+[tool.research-repo-tools.notebooks.advice]
+descriptive-ids = true
+ruff-rules = [
+  "ANN001",
+  "ANN002",
+  "ANN003",
+  "ANN201",
+  "ANN202",
+  "ANN204",
+  "ANN205",
+  "ANN206",
+  "BLE001",
+  "E722",
+  "TID251",
+]
+strict = false
+subprocess-timeout = true
+
+[tool.ruff.lint]
+# Keep shell=True a hard native-lint failure, separate from advisory warnings.
+extend-select = ["S602"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"pandas" = { msg = "Prefer Polars unless pandas is required by this consumer" }
+"csv" = { msg = "Prefer Polars for dataframe-shaped CSV analysis" }

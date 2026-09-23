@@ -52,8 +52,11 @@ independent reviews, syntheses, and unproven audits rerun. Follow returned
 `lifecycle_input_path`, `dispatches_path`, `journal_path`, and `capture_path`;
 old artifacts remain unchanged. `preserved_evidence` contains only proven reuse.
 Per-node `reuse_decisions` explain disposition and reason code, distinguishing
-`coverage-limitations` from `unclassified-limitations`. Untyped caveats prevent
-reuse, never inferred informational exemptions.
+`coverage-limitations`, `unclassified-limitations`, `unresolved-uncertainty`,
+and `validation-evidence-limits`. Typed execution facts and delegated validation
+context remain visible without blocking otherwise proven reuse. Untyped caveats
+prevent reuse, never inferred informational exemptions. See the
+[audit context fields](audit-context.md).
 
 For broad audits, optionally partition `owned_paths` into `coverage_units`.
 Each unit declares a local `unit_id`, `owned_paths`, concrete `dependency_paths`,
@@ -63,7 +66,10 @@ once; account for every nearby dependency. Shared manifests belong in each
 unit's dependencies when their contract affects its judgments. Do not infer
 independence just because implementation bytes are unchanged.
 
-`advance-after-mutation` reports `coverage_reuse_decisions` for each partition.
+`advance-after-mutation` reports `coverage_reuse_decisions` with reason codes for
+each unit, including uncertain dependencies and failed input proofs. Ineligible
+audits also report the applicable category; an audit without a partition reports
+`no-coverage-partition` with an empty unit list.
 Its plan-bound `coverage_reuse` dispatch retains original artifacts, captures,
 findings, and instruction identities. Inspect only units marked `recheck`;
 `files_inspected` records those actual reads. The compiler combines this with
@@ -73,6 +79,22 @@ handoffs in the new payload. Validators still run for the new source. Omitted
 partitions, uncertain dependencies, changed instructions, or changed routing
 require fresh inspection. Legacy audits without partitions retain whole-audit
 reuse behavior; a delta audit is not itself a fresh partition origin.
+
+The complete coverage proof stays in metadata at `expectation.coverage_reuse`
+and in the normalized record. Native Markdown carries only a canonical digest
+reference and reused/rechecked unit counts. Verification binds that reference
+to the complete proof and replays source, dependency, instruction, and finding
+provenance checks. Original typed context remains attributed to its evidence ID
+in `inherited_audit_context`; it is not a fresh worker assertion. Older inline
+coverage proofs remain readable under the existing native size limits.
+
+If an older runtime published a worker payload but failed compilation because
+the generated coverage proof exceeded a native section limit, retry
+`compile-node` using the updated runtime and the same saved lifecycle,
+dispatches, journal, before/after captures, and payload bytes. Saved publication
+contracts remain compatible. Do not edit the dispatch, republish the payload,
+or advance the repair epoch for this retry. Accepted original evidence stays
+unchanged; an interrupted compilation can retry the same operation paths.
 
 Synthesis bundles expose `plan_context.validation_environments` by validator
 node ID. Copy its executor `platform` into validation reconciliation; use its

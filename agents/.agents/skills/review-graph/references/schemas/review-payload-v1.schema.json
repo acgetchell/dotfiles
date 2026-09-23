@@ -3,6 +3,77 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
+    "execution_facts": {
+      "description": "Typed audit execution attestations, not semantic uncertainty. Contradictions with dispatched validator commands, supplied captures, or mutation records are rejected, as are unknown facts.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "validators-not-executed",
+          "source-captures-match",
+          "git-not-mutated"
+        ]
+      }
+    },
+    "validation_limits": {
+      "description": "Environmental evidence caveats bound to a validation_requirements entry. Only delegated evidence permits source-audit reuse; unavailable or failed evidence blocks it.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "requirement_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "environment": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "enum": [
+              "delegated",
+              "unavailable",
+              "failed"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "requirement_id",
+          "environment",
+          "status",
+          "reason"
+        ]
+      }
+    },
+    "unresolved_uncertainties": {
+      "description": "Material unresolved semantic or dependency uncertainty; always blocks reuse. For a single coverage unit, use its dependency_uncertainty instead.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "semantic",
+              "dependency"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "kind",
+          "reason"
+        ]
+      }
+    },
     "coverage_units": {
       "description": "Optional for complete fresh audits only: unique unit IDs partition every dispatch-owned path and every finding exactly once, using one-based finding indices; dependency_paths across units must account for every nearby_contract_owners path.",
       "type": "array",
@@ -104,7 +175,7 @@
       "type": "array"
     },
     "limitations": {
-      "description": "Narrative caveats. Path mentions here do not declare omitted audit scope or artifact write targets.",
+      "description": "Unclassified caveats conservatively block reuse. Use execution_facts, validation_limits, unresolved_uncertainties, or scope_limitations for classified context; never omit truthful caveats.",
       "items": {"type": "string"},
       "type": "array"
     },

@@ -25,7 +25,7 @@ def run_shared(root: Path, action: str) -> subprocess.CompletedProcess[str]:
 def test_shared_updater_reconciles_dotfiles_mapping(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     configuration = tomllib.loads((REPOSITORY / "pyproject.toml").read_text())
     mapping = configuration["tool"]["research-repo-tools"]["deps"]["tools"]
-    assert configuration["dependency-groups"]["tooling"] == ["research-repo-tools==0.1.4"]
+    assert configuration["dependency-groups"]["tooling"] == ["research-repo-tools==0.1.5"]
     assert {"include-group": "tooling"} in configuration["dependency-groups"]["dev"]
     # Use the real files so stale mappings or incompatible Just syntax fail here.
     shutil.copy2(REPOSITORY / "pyproject.toml", tmp_path)

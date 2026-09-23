@@ -10,8 +10,8 @@ Review notebooks as reproducible computational artifacts rather than scratchpads
 ## Workflow
 
 1. Locate the named notebooks or use `rg --files -g '*.ipynb'`.
-2. Inspect structure with `scripts/notebook_check.py --summary NOTEBOOK.ipynb` before reading raw JSON.
-3. Read code cells through the summary helper or `jq`; avoid loading large outputs into context.
+2. Inspect structure with `notebooks inspect`; follow [the shared workflow](references/shared-notebooks.md) for invocation and environment setup.
+3. Read code through previews or `jq`, avoiding large outputs. Use `inspect --no-preview` to omit source text.
 4. Review fresh-kernel order, paths, inputs, outputs, secrets, environments, and generated artifacts.
 5. Edit with the consumer's notebook tools or `nbformat`, preserving existing IDs.
 6. Run structured lint after changes. Execute only when runtime behavior or a generated artifact is in scope.
@@ -75,23 +75,19 @@ Ensure human-facing output is intentional and machine-consumed data remains pars
 
 ## Validation
 
-Use the consumer's repository commands first. Shared notebook structure checks,
-native Ruff/ty lint, output cleanup, and execution belong to `research-repo-tools`.
-Read [the shared notebook workflow](references/shared-notebooks.md) when configuring
-those commands or migrating a consumer. It defines dependencies, strict structure
-requirements, and the separate execution artifacts.
+Prefer consumer repository commands using published `research-repo-tools` v0.1.5
+or a deliberately adopted newer release. The [shared workflow](references/shared-notebooks.md)
+defines locked and isolated invocations, consumer policy, and severity rules.
 
-- `scripts/notebook_check.py --summary NOTEBOOK.ipynb` for a compact inventory
-- `scripts/notebook_check.py --advice NOTEBOOK.ipynb` for descriptive-ID and Python review advice
-- Add `--strict` to fail on advisory warnings; plain-AST skips for IPython syntax are informational.
+- `notebooks inspect` provides compact repair diagnostics; `--json` gives a versioned inventory. Neither changes source or IDs.
+- Repair structure before `check`, `lint`, or `advise`; inspection does not certify validity.
+- `notebooks advise` applies configured warnings. `--strict` fails on warnings; plain-AST skips for IPython syntax remain informational.
+- Run `notebooks lint` separately for native syntax, formatting, types, output policy, and hard failures such as `shell=True`.
 
-The standard-library helper tolerates IDs awaiting repair; it does not certify
-notebook validity. Its remaining inspection/advice code and tests will be retired
-through [dotfiles #78](https://github.com/acgetchell/dotfiles/issues/78) after shared
-replacements ship in v0.1.5.
+Manually review `Popen` lifecycle timeouts and positional `section-N`/`step-N` IDs,
+which shared heuristics miss. Honor consumer exceptions to the Polars preference.
 
-Run the helper with `uv run` or the active project environment. Execute a notebook
-only when dependencies, cost, side effects, and requested scope make execution
+Execute only when dependencies, cost, side effects, and requested scope make it
 appropriate. Never treat successful execution as proof of scientific correctness
 or portability.
 

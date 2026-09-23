@@ -313,7 +313,11 @@ also contribute inspected nearby-contract dependencies.
 For supplied accepted audit `sources`, preserve original artifacts and verify
 complete compiler-bound ownership, inspected dependencies, instructions,
 skill/reference identities, and unchanged inputs between content-bound v2
-captures. Only predecessor-free, complete audits without limitations qualify.
+captures. Only predecessor-free, complete audits without reuse-blocking caveats
+qualify. Typed execution facts and delegated validator context are retained;
+scope omissions, unclassified limitations, unresolved uncertainty, and
+unavailable/failed environmental evidence block reuse. See the
+[audit context fields](audit-context.md).
 Convert their exact routed requirements to non-executable reuse before
 materialization; exclude their original IDs from the stale set. Required
 validators, independent reviews, and syntheses still execute against the new

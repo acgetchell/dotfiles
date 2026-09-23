@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from review_graph_bootstrap import bootstrap_document
-from review_graph_coverage import combined_findings, coverage_decisions, reused_paths, validate_coverage_units
+from review_graph_coverage import combined_findings, coverage_decisions, coverage_reference, reused_paths, validate_coverage_units
 from review_graph_metrics import projected_waves, source_demand
 from review_graph_plan import (
     _COMPACT_ROUTING_OVERRIDE_FIELDS,
@@ -633,10 +633,17 @@ def _review_normalized_record(payload: dict[str, Any], expectation: ReviewEviden
     validations = _validation_records(payload)
     handoffs = _handoff_records(payload, evidence.node_id)
     changes = tuple({"change_id": f"{evidence.node_id}-change-{ordinal}", **change} for ordinal, change in enumerate(_records(payload, "changes"), start=1))
+    inherited_context = (expectation.coverage_reuse or {}).get("original_audit_context", {})
     return {
         **(synthesis_fields(payload) if evidence.mode == "synthesis" else {}),
         **({"coverage_units": payload["coverage_units"]} if "coverage_units" in payload else {}),
         **({"coverage_reuse": expectation.coverage_reuse} if expectation.coverage_reuse is not None else {}),
+        **{key: payload[key] for key in ("execution_facts", "validation_limits", "unresolved_uncertainties") if key in payload},
+        **(
+            {"inherited_audit_context": {**inherited_context, "evidence_id": expectation.coverage_reuse["evidence_id"]}}
+            if inherited_context and expectation.coverage_reuse
+            else {}
+        ),
         "artifact_digest": evidence.raw_result_digest,
         "artifact_id": evidence.raw_result_artifact_id,
         "changes": list(changes),
@@ -877,6 +884,46 @@ def _validate_review_coverage_partitions(dispatch: dict[str, Any], payload: dict
     validate_coverage_units(payload, _text_list(dispatch, "owned_paths"))
 
 
+def _validate_audit_caveats(dispatch: dict[str, Any], payload: dict[str, Any]) -> None:
+    """Retain typed attestations and reject contradictions with dispatch facts."""
+    if not any(key in payload for key in ("execution_facts", "validation_limits", "unresolved_uncertainties")):
+        return
+    if dispatch.get("mode") != "audit":
+        msg = "typed audit caveats apply only to audit payloads"
+        raise ValueError(msg)
+    require_schema(payload, _REVIEW_PAYLOAD_SCHEMA)
+    facts = payload.get("execution_facts", [])
+    policy = dispatch.get("command_policy")
+    planned_commands = (
+        set(_text_list(policy, "prohibited_commands")) | set(_text_list(policy, "validator_owned_commands")) if isinstance(policy, dict) else set()
+    )
+    if "validators-not-executed" in facts and planned_commands.intersection(payload["commands_executed"]):
+        msg = "validators-not-executed contradicts the planned validator command ledger"
+        raise ValueError(msg)
+    if "source-captures-match" in facts and "before_state" in dispatch and _state(dispatch, "before_state") != _state(dispatch, "after_state"):
+        msg = "source-captures-match contradicts supplied captures"
+        raise ValueError(msg)
+    if "git-not-mutated" in facts and dispatch.get("git_mutated", False):
+        msg = "git-not-mutated contradicts the dispatch mutation record"
+        raise ValueError(msg)
+    for caveat in (*_records(payload, "unresolved_uncertainties"), *_records(payload, "validation_limits")):
+        _required_text(caveat, "reason")
+    requirements = {record["requirement_id"] for record in payload["validation_requirements"]}
+    if any(limit["requirement_id"] not in requirements for limit in payload.get("validation_limits", [])):
+        msg = "validation_limits must reference explicit validation_requirements"
+        raise ValueError(msg)
+
+
+def _review_limitation_reasons(payload: dict[str, Any]) -> tuple[str, ...]:
+    """Retain material typed caveats in blocked-node journal explanations."""
+    return (
+        *_text_list(payload, "limitations"),
+        *(reason for _path, reason in _scope_limitation_records(payload)),
+        *(_required_text(item, "reason") for item in payload.get("unresolved_uncertainties", [])),
+        *(_required_text(item, "reason") for item in payload.get("validation_limits", []) if item["status"] != "delegated"),
+    )
+
+
 def compile_review(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  # noqa: C901, PLR0912, PLR0915
     """Compile one compact semantic payload into the legacy verified artifact."""
     dispatch = document.get("dispatch")
@@ -902,6 +949,7 @@ def compile_review(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  #
             msg = "delta review must reconcile original validation requirements and routing handoffs"
             raise ValueError(msg)
     _validate_review_coverage_partitions(dispatch, payload)
+    _validate_audit_caveats(dispatch, payload)
     status = _required_text(payload, "status")
     if status not in _REVIEW_STATUSES:
         msg = f"invalid review status {status}"
@@ -953,7 +1001,7 @@ def compile_review(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  #
     if status == "no-findings" and findings:
         msg = "no-findings payload cannot contain findings"
         raise ValueError(msg)
-    if status == "blocked" and not limitations:
+    if status == "blocked" and not _review_limitation_reasons(payload):
         msg = "blocked payload requires a limitation"
         raise ValueError(msg)
     files_inspected = _text_list(payload, "files_inspected", required=status != "blocked" and mode != "synthesis" and not reused_paths(coverage_reuse))
@@ -1068,7 +1116,7 @@ def compile_review(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  #
                 f"- Worker payload digest: {_sha256_bytes(canonical_payload.encode())}",
                 f"- Canonical worker payload: {canonical_payload}",
                 *((f"- Audit input identity: {_canonical_json(asdict(audit_inputs))}",) if audit_inputs is not None else ()),
-                *((f"- Coverage reuse: {_canonical_json(coverage_reuse)}",) if coverage_reuse is not None else ()),
+                *((f"- Coverage reuse reference: {_canonical_json(coverage_reference(coverage_reuse))}",) if coverage_reuse is not None else ()),
             )
         ),
         "## Findings": _findings_body(findings),
@@ -1081,6 +1129,9 @@ def compile_review(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  #
             (
                 f"- General: {'; '.join(limitations) or 'none'}",
                 "- Owned-path omissions: " + ("; ".join(f"{path}: {reason}" for path, reason in _scope_limitation_records(payload)) or "none"),
+                *((f"- Execution facts: {_canonical_json(payload['execution_facts'])}",) if "execution_facts" in payload else ()),
+                *((f"- Validation limits: {_canonical_json(payload['validation_limits'])}",) if "validation_limits" in payload else ()),
+                *((f"- Unresolved uncertainties: {_canonical_json(payload['unresolved_uncertainties'])}",) if "unresolved_uncertainties" in payload else ()),
             )
         ),
     }
@@ -2644,6 +2695,15 @@ def _load_evidence_source(  # noqa: C901, PLR0912, PLR0915
                 recomputed = _independent_normalized_record(content, expectation, evidence)
             else:
                 payload = _canonical_worker_payload(content)
+                _validate_audit_caveats(
+                    {
+                        "mode": expectation.mode,
+                        "before_state": list(evidence.fingerprints.before),
+                        "after_state": list(evidence.fingerprints.after),
+                        "git_mutated": evidence.git_mutated,
+                    },
+                    payload,
+                )
                 if expectation.mode == "synthesis":
                     require_schema(payload, _SYNTHESIS_PAYLOAD_SCHEMA)
                     validate_synthesis(payload, expectation.predecessor_evidence_ids)
@@ -3122,7 +3182,10 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
         "you can partition contracts with explicit dependencies and uncertainty: partition every owned path and every finding exactly once "
         "using one-based finding_indices, give each unit a unique unit_id, and account for every nearby_contract_owners path in dependency_paths. "
         "Mark git_sensitive when judgments depend on Git metadata. "
-        "Narrative limitations do not create omitted scope or artifact write targets."
+        'Put validator-owned nonexecution in execution_facts=["validators-not-executed"]; use source-captures-match and git-not-mutated only when true. '
+        "Put platform/evidence caveats in validation_limits bound to an explicit validation_requirements entry: delegated means the validator still owes "
+        "that evidence, unavailable/failed block reuse. Put unresolved semantic/dependency questions in unresolved_uncertainties (kind, reason), "
+        "or a single unit's dependency_uncertainty. Keep unknown caveats in limitations; these conservatively block reuse. Never omit truthful context."
         if dispatch.get("mode") == "audit"
         else ""
     )
@@ -3138,6 +3201,32 @@ def _review_payload_schema(dispatch: dict[str, Any]) -> Path:
     return _SYNTHESIS_PAYLOAD_SCHEMA if dispatch.get("mode") == "synthesis" else _REVIEW_PAYLOAD_SCHEMA
 
 
+def _preflight_audit_payload(contract: dict[str, Any], payload: dict[str, Any]) -> None:
+    """Dry-compile against a bound dispatch before authorizing payload publication."""
+    reference = contract.get("compiler_preflight")
+    if reference is None:
+        # Saved contracts remain usable; compile-node applies the current verifier.
+        return
+    content = Path(reference["worker_input_path"]).read_bytes()
+    if _sha256_bytes(content) != reference["digest"]:
+        msg = "compiler preflight worker input digest differs from its publication contract"
+        raise ValueError(msg)
+    entry = json.loads(content)
+    dispatch = entry["dispatch"]
+    if contract.get("mode") != "audit" or any(
+        dispatch.get(key) != contract.get(key) for key in ("mode", "node_id", "owned_paths", "worker_payload_path", "coverage_reuse")
+    ):
+        msg = "compiler preflight dispatch differs from its publication contract"
+        raise ValueError(msg)
+    # These are hypothetical equal captures, never published as evidence. The
+    # actual compile still requires independently supplied before/after captures.
+    try:
+        compile_review({"dispatch": {**dispatch, "before_state": dispatch["source_state"], "after_state": dispatch["source_state"]}, "payload": payload})
+    except (ValueError, TypeError) as error:
+        msg = f"audit compiler preflight failed before publication: {error}"
+        raise ValueError(msg) from error
+
+
 def _validate_worker_payload_bytes(contract_document: dict[str, Any], payload_bytes: bytes) -> dict[str, Any] | None:
     """Reject incomplete worker output before it can replace a persisted payload."""
     contract = _required_text(contract_document, "result_contract")
@@ -3150,10 +3239,12 @@ def _validate_worker_payload_bytes(contract_document: dict[str, Any], payload_by
         require_schema(payload, schema)
         if contract == "compact-review":
             _validate_review_coverage_partitions(contract_document, payload)
+            _validate_audit_caveats(contract_document, payload)
             blockers = _review_scope_coverage_blockers(contract_document, payload, status=_required_text(payload, "status"))
             if blockers:
                 msg = "worker payload failed owned-scope validation: " + "; ".join(blockers)
                 raise ValueError(msg)
+            _preflight_audit_payload(contract_document, payload)
         else:
             blockers = tuple(
                 blocker
@@ -3211,15 +3302,20 @@ def review_worker_payload_write(contract_document: dict[str, Any], payload_bytes
         owned_paths = _text_list(contract_document, "owned_paths", required=True)
         inspected_paths = _text_list(payload, "files_inspected")
         inspected = set(inspected_paths)
+        inherited = reused_paths(contract_document.get("coverage_reuse"))
         review["audit_path_roles"] = {
             "dispatch_owned_paths": list(owned_paths),
             "inspected_dispatch_owned_paths": list(inspected_paths),
             "nearby_context_paths": list(_text_list(payload, "nearby_contract_owners")),
-            "omitted_dispatch_owned_paths": [path for path in owned_paths if path not in inspected],
+            "omitted_dispatch_owned_paths": [path for path in owned_paths if path not in inspected and path not in inherited],
+            **({"runtime_reused_paths": list(inherited)} if inherited else {}),
             "scope_limitation_paths": [path for path, _reason in _scope_limitation_records(payload)],
         }
         review["payload_field_semantics"] = {
-            "limitations": "narrative-only",
+            "limitations": "unclassified-reuse-blocker",
+            "execution_facts": "typed-execution-attestations",
+            "validation_limits": "requirement-bound-environmental-evidence",
+            "unresolved_uncertainties": "semantic-or-dependency-reuse-blocker",
             "nearby_contract_owners": "inspected-context-only",
             "scope_limitations": "omitted-dispatch-owned-only",
         }
@@ -3555,9 +3651,6 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             "schema_version": 1,
             "worker_payload_path": str(worker_payload_path),
         }
-        _queue_materialized_write(
-            pending_writes, worker_payload_contract_path, (json.dumps(persistence_contract, indent=2, sort_keys=True) + "\n").encode(), mode=0o444
-        )
         worker_input_path = artifact_store / f"{node.node_id}.worker-input.json"
         entry = {
             "artifact_path": str(artifact_path),
@@ -3572,7 +3665,13 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             "worker_payload_path": str(worker_payload_path),
             "worker_prompt": _worker_prompt(contract, common),
         }
-        _queue_materialized_write(pending_writes, worker_input_path, (json.dumps(entry, indent=2, sort_keys=True) + "\n").encode(), mode=0o444)
+        worker_input_bytes = (json.dumps(entry, indent=2, sort_keys=True) + "\n").encode()
+        if node.mode == "audit":
+            persistence_contract["compiler_preflight"] = {"worker_input_path": str(worker_input_path), "digest": _sha256_bytes(worker_input_bytes)}
+        _queue_materialized_write(
+            pending_writes, worker_payload_contract_path, (json.dumps(persistence_contract, indent=2, sort_keys=True) + "\n").encode(), mode=0o444
+        )
+        _queue_materialized_write(pending_writes, worker_input_path, worker_input_bytes, mode=0o444)
         dispatches.append(entry)
     output: dict[str, Any] = {"dispatches": dispatches, "plan_digest": _plan_digest(plan), "schema_version": 1, "source_state": list(source_state)}
     output["telemetry"] = {
@@ -3789,15 +3888,17 @@ def _compact_reuse_overrides(plan: GraphPlan, reused_requirements: dict[str, str
 
 
 def _audit_reuse_blocker(record: dict[str, Any], *, invalidated: bool) -> tuple[str, str] | None:
-    if invalidated:
-        return "invalidated-inputs", "Owned inputs, routing, or a predecessor changed."
     if record.get("mode") != "audit" or record.get("status") not in {"completed", "no-findings"}:
         return "ineligible-evidence", "Only completed audit leaves can be reused across captures."
     if record.get("scope_limitations"):
         return "coverage-limitations", "The audit declares incomplete owned-path coverage."
     if record.get("limitations"):
         return "unclassified-limitations", "Free-text caveats cannot prove independence from changed inputs or prior validation."
-    return None
+    if record.get("unresolved_uncertainties"):
+        return "unresolved-uncertainty", "The audit declares unresolved semantic or dependency uncertainty."
+    if any(limit["status"] != "delegated" for limit in record.get("validation_limits", [])):
+        return "validation-evidence-limits", "Required environmental validation evidence is unavailable or failed."
+    return ("invalidated-inputs", "Owned inputs, routing, or a predecessor changed.") if invalidated else None
 
 
 def _carry_forward_audits(  # noqa: C901, PLR0912, PLR0913, PLR0915 - preserve provenance and report every reuse rejection.
@@ -3952,12 +4053,36 @@ def _verify_delta_context(context: dict[str, Any], dispatch: dict[str, Any]) -> 
         or context["original_handoffs"] != record["handoffs"]
         or context["evidence_id"] != evidence.evidence_id
         or context["artifact_digest"] != evidence.raw_result_digest
+        or context.get("original_audit_context", {})
+        != {key: record[key] for key in ("execution_facts", "validation_limits", "unresolved_uncertainties") if key in record}
     ):
         msg = "delta coverage differs from original immutable findings or verified unit decisions"
         raise ValueError(msg)
     if not reused_paths(context):
         msg = "delta coverage has no reusable units"
         raise ValueError(msg)
+
+
+def _blocked_coverage_reviews(record: dict[str, Any], candidate: GraphPlan) -> list[dict[str, Any]] | None:
+    """Expose why a partition, or an audit without one, cannot support reuse."""
+    blocker = _audit_reuse_blocker(record, invalidated=False)
+    if blocker is None and not record.get("coverage_units"):
+        blocker = ("no-coverage-partition", "The audit did not supply a complete coverage partition.")
+    if blocker is None and record.get("coverage_reuse"):
+        blocker = ("derived-coverage-origin", "A partial recheck cannot replace its original fresh partition proof.")
+    if blocker is None:
+        return None
+    decision = {"disposition": "recheck", "reason_code": blocker[0], "reason": blocker[1]}
+    return [
+        {
+            "node_id": node.node_id,
+            "evidence_id": record["evidence_id"],
+            **decision,
+            "units": [{**unit, **decision} for unit in record.get("coverage_units", [])],
+        }
+        for node in candidate.actual_worker_nodes
+        if node.mode == "audit" and node.requirement_ids == tuple(record["requirement_ids"])
+    ]
 
 
 def _plan_delta_audits(
@@ -3975,7 +4100,9 @@ def _plan_delta_audits(
     contexts = []
     reviews = []
     for source, record in sources.values():
-        if not record.get("coverage_units") or record.get("coverage_reuse") or _audit_reuse_blocker(record, invalidated=False):
+        blocked = _blocked_coverage_reviews(record, candidate)
+        if blocked is not None:
+            reviews.extend(blocked)
             continue
         _kind, expectation, evidence, _content, _record = _load_evidence_source(source, require_normalized=True)
         if not isinstance(expectation, ReviewEvidenceExpectation) or not isinstance(evidence, ReviewEvidence) or expectation.audit_input_identity is None:
@@ -4005,7 +4132,25 @@ def _plan_delta_audits(
             )
             transition = replace(transition, source_state=audit_origin.source_state)
             units = coverage_decisions(record, audit_origin, target, inputs, transition)
-            reviews.append({"node_id": node.node_id, "evidence_id": evidence.evidence_id, "units": units})
+            reviews.append(
+                {
+                    "node_id": node.node_id,
+                    "evidence_id": evidence.evidence_id,
+                    "units": [
+                        {
+                            **unit,
+                            "reason_code": (
+                                "dependency-uncertainty"
+                                if unit["dependency_uncertainty"]
+                                else "verified"
+                                if unit["disposition"] == "reused"
+                                else "input-proof-failed"
+                            ),
+                        }
+                        for unit in units
+                    ],
+                }
+            )
             if not any(unit["disposition"] == "reused" for unit in units):
                 continue
             context = {
@@ -4019,6 +4164,7 @@ def _plan_delta_audits(
                 "original_findings": record["findings"],
                 "original_validation_requirements": record["validation_requirements"],
                 "original_handoffs": record["handoffs"],
+                "original_audit_context": {key: record[key] for key in ("execution_facts", "validation_limits", "unresolved_uncertainties") if key in record},
                 "instruction_digests": list(transition.instruction_digests),
                 "metadata_transitions": [asdict(item) for item in chain],
             }
@@ -4351,7 +4497,7 @@ def _verified_journal_evidence(
     else:  # Defensive for future evidence variants.
         msg = f"journal evidence has an unsupported type for {node.node_id}"
         raise TypeError(msg)
-    limitations = tuple(cast("list[str]", normalized.get("limitations", [])))
+    limitations = _review_limitation_reasons(normalized)
     record = {
         "artifact_digest": evidence.raw_result_digest,
         "artifact_id": evidence.raw_result_artifact_id,
@@ -6122,7 +6268,7 @@ def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace)
             _events, lifecycle_state, _head = _read_execution_journal_content(journal_content, path=args.journal, plan=plan, source_state=source_state)
             _apply_journal_transition(plan, lifecycle_state, node_id=request.node_id, status=request.status)
             normalized = metadata.get("normalized_record")
-            journal_limitations = tuple(cast("list[str]", normalized.get("limitations", []))) if isinstance(normalized, dict) else ()
+            journal_limitations = _review_limitation_reasons(normalized) if isinstance(normalized, dict) else ()
             _new_journal_reason(request, journal_limitations)
             existing_size = len(journal_content)
             created_paths: list[Path] = []

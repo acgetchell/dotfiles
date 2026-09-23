@@ -26,7 +26,6 @@ namespace = "dotfiles."
 [tool.ruff]
 line-length = 160
 src = [
-  "agents/.agents/skills/jupyter-notebook-review/scripts",
   "agents/.agents/skills/scientific-citation-audit/scripts",
   "scripts",
 ]
@@ -142,7 +141,6 @@ max-complexity = 10
 
 [tool.ruff.lint.isort]
 known-first-party = [
-  "notebook_check",
   "skill_validate",
   "stow_verify",
   "validate_reference_dois",
@@ -191,6 +189,7 @@ python_functions = ["test_*"]
 dev = [
   { include-group = "tooling" },
   "actionlint-py==1.7.12.25",
+  "nbformat==5.10.4",
   "PyYAML>=6.0",
   "pytest==9.1.1",
   "ruff==0.16.8",
@@ -199,5 +198,5 @@ dev = [
   "yamllint==1.38.0",
 ]
 tooling = [
-    "research-repo-tools==0.1.4",
+    "research-repo-tools==0.1.5",
 ]

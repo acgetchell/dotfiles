@@ -104,8 +104,8 @@ and reusable evidence.
 Return `ReviewPayload` for audits or `SynthesisPayload` for synthesis. Serialize
 once and stream the bytes to `dispatch.worker_payload_persistence.publish_command`.
 It validates, reviews, and atomically publishes identical bytes with a receipt.
-Return that receipt without echoing the full payload. Python integrations can
-call `publish_worker_payload_bytes` for the same transaction.
+Return only the receipt. Python integrations use `publish_worker_payload_bytes`
+for the same transaction.
 Approval binds contract and payload; separate review/persist commands support
 approved retries. Use materialized schemas and dispatched validation IDs/digests.
 
@@ -120,6 +120,9 @@ and owned. Publication and compilation enforce both scope and optional coverage
 partitions: unique unit IDs, every owned path/finding assigned exactly once
 (one-based indices), and nearby dependencies in `dependency_paths`. Rejection
 names missing dependencies before writing.
+
+For typed audit caveats, see [audit-context.md](audit-context.md).
+
 Bundle-only synthesis allows empty `files_inspected`, but requires predecessor
 evidence. Never invent source reads.
 Synthesis supplies `readiness_verdict`, reasons, predecessor coverage, routing
