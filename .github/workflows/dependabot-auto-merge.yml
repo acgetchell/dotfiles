@@ -1,66 +1,34 @@
-name: Dependabot review and auto-merge
+name: Dependabot approval and auto-merge
 
 on:
-  pull_request:
+  # Security review: .github/DEPENDABOT.md; pinned shared job, no checkout or PR execution.
+  # nosemgrep: dotfiles.github-actions.no-pull-request-target
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
     types:
       - opened
       - reopened
       - ready_for_review
       - synchronize
+    branches:
+      - main
+
+permissions: {}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  group: dependabot-auto-merge-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
-permissions:
-  contents: write
-  pull-requests: write
-
 jobs:
-  review-and-enable-auto-merge:
-    if: >-
-      github.event.pull_request.user.login == 'dependabot[bot]' &&
-      github.repository == 'acgetchell/dotfiles'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Request CodeRabbit review
-        env:
-          # Dependabot-triggered workflows receive Dependabot secrets.
-          GH_TOKEN: ${{ secrets.CODERABBIT_REVIEW_TOKEN }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPOSITORY: ${{ github.repository }}
-        run: |
-          if [[ -z "$GH_TOKEN" ]]; then
-            echo "::error::CODERABBIT_REVIEW_TOKEN is not configured."
-            exit 1
-          fi
-
-          token_owner="$(gh api user --jq '.login')"
-          if [[ "$token_owner" != "acgetchell" ]]; then
-            echo "::error::CODERABBIT_REVIEW_TOKEN must belong to acgetchell."
-            exit 1
-          fi
-
-          marker="<!-- coderabbit-review-request:${PR_HEAD_SHA} -->"
-          comments="$(
-            gh api --paginate \
-              "repos/${REPOSITORY}/issues/${PR_NUMBER}/comments" \
-              --jq '.[] | select(.user.login == "acgetchell") | .body'
-          )"
-          if grep -Fxq -- "$marker" <<< "$comments"; then
-            echo "CodeRabbit review already requested for ${PR_HEAD_SHA}."
-            exit 0
-          fi
-          body="$(printf '@coderabbitai review\n\n%s' "$marker")"
-          gh api \
-            --method POST \
-            "repos/${REPOSITORY}/issues/${PR_NUMBER}/comments" \
-            --raw-field body="$body"
-
-      - name: Enable auto-merge
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-        run: gh pr merge --auto --squash --match-head-commit "$PR_HEAD_SHA" "$PR_URL"
+  approve-and-enable-auto-merge:
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: acgetchell/research-repo-tools/.github/workflows/dependabot-approve.yml@0a02204d4a889dfc97f55286c008397ced05d6ad # v0.1.7
+    with:
+      repository: acgetchell/dotfiles
+      policy: >-
+        {"uv": {
+          "files": ["pyproject.toml", "uv.lock"]
+        }, "github_actions": {
+          "files": [".github/workflows/ci.yml", ".github/workflows/dependabot-auto-merge.yml", ".github/workflows/zizmor.yml"]
+        }}

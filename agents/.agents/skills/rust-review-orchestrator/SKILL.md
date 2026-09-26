@@ -40,12 +40,18 @@ Otherwise keep the standalone behavior below.
 
 ## Review Trace
 
+Read [references/execution-v1.md](references/execution-v1.md) once for the
+versioned parent receipt, instruction reuse, compact pass results, and shared
+validation rules. Preserve graph-routing behavior above.
+
 At the start, record the scope, changed Rust-owned files, selected and skipped individual skills with reasons, repository references to load, focused validators, and the initial validation ledger.
 
 For every selected skill:
 
 - announce its group and name before loading it
-- load its `SKILL.md` completely and only directly relevant references
+- load its complete execution view (`SKILL.md` and directly relevant references),
+  or reuse an unchanged view already loaded under the execution-v1 receipt;
+  do not load standalone discovery/report references in this mode
 - record files inspected, findings or explicit no-finding result, fixes, and validator evidence
 
 When a caller supplies an established scope and requests the standalone pass
@@ -131,13 +137,15 @@ Always load `rust-production-review` after selected specialist skills. Hand it p
 For each selected skill:
 
 1. Announce the group and skill.
-2. Load the complete skill and directly relevant references.
+2. Load or validly reuse the complete execution view and required references;
+   record paths and content digests in the instruction receipt.
 3. Inspect scoped files and nearby owners of the affected contract.
 4. Record findings or an explicit no-finding result.
 5. Apply the smallest safe correction when fixes were requested.
 6. Run the focused validator selected from routing guidance only when equivalent evidence is not already valid in the shared ledger.
 7. Resolve caused failures or document a genuine blocker.
-8. Record changed files or read-only status and the skill outcome.
+8. Record one compact execution-v1 evidence row, including changed files or
+   read-only status and the skill outcome; leave the full report to synthesis.
 
 If prior work was an undifferentiated review, treat it as preliminary context and rerun applicable individual skills before claiming orchestrator completion.
 

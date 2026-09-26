@@ -5,6 +5,8 @@ description: "Audit performance-sensitive Rust while preserving invariants, boun
 
 # rust-invariant-performance
 
+Rust-orchestrator passes use the shared [execution-v1 contract](../rust-review-orchestrator/references/execution-v1.md).
+
 Audit Rust code for performance while keeping the crate's correctness model
 intact. The goal is to find the best practical performance inside the invariant
 envelope, not to trade correctness, typed APIs, or diagnostics for speed.

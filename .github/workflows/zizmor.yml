@@ -21,6 +21,7 @@ jobs:
   analyze:
     name: GitHub Actions Security Analysis
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       actions: read
       contents: read
@@ -32,8 +33,30 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Run zizmor
-        uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+      - name: Install uv
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
-          advanced-security: true
-          inputs: .github
+          version-file: pyproject.toml
+
+      - name: Fail on workflow findings
+        id: audit
+        env:
+          ZIZMOR_GITHUB_TOKEN: ${{ github.token }}
+        run: uv run --locked --group dev just zizmor-check --require-online
+
+      - name: Produce SARIF even when the finding gate fails
+        id: sarif
+        if: ${{ !cancelled() && steps.audit.outcome != 'skipped' }}
+        env:
+          ZIZMOR_GITHUB_TOKEN: ${{ github.token }}
+        run: uv run --locked --group dev just zizmor-check --require-online --format sarif > "$RUNNER_TEMP/zizmor.sarif"
+
+      - name: Upload security findings
+        if: >-
+          ${{ !cancelled() && steps.sarif.outcome == 'success'
+              && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+              && github.actor != 'dependabot[bot]' }}
+        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        with:
+          sarif_file: ${{ runner.temp }}/zizmor.sarif
+          category: zizmor

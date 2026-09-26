@@ -5,6 +5,11 @@ description: "Design, review, and refactor Rust public and cross-crate APIs for 
 
 # Rust API Design
 
+Rust-orchestrator passes use the shared [execution-v1 contract](../rust-review-orchestrator/references/execution-v1.md).
+
+For direct invocation, read [references/standalone-workflow.md](references/standalone-workflow.md)
+for scope discovery and the complete standalone report.
+
 Design Rust APIs as durable caller contracts. Judge the surface from realistic
 downstream use, concept ownership, invalid-use prevention, and evolution cost,
 not only from the implementation that currently satisfies it.
@@ -149,11 +154,3 @@ and the smallest coherent correction. Classify the disposition as one of:
 `keep-distinct`, `consolidate`, `make-private`, `canonicalize`, `re-export`, or
 `retain-adapter`. Distinguish confirmed contract defects from design preferences
 and avoid aesthetic churn.
-
-## Handoff
-
-Summarize the public surfaces and consumers inspected, concept ownership and
-layering decisions, canonical workflows, compatibility constraints, optional
-graph assistance used, findings and dispositions, specialist handoffs,
-validators and results, remaining migration work, and confirmation that no Git
-state mutation occurred when true.

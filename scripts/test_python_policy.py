@@ -23,11 +23,17 @@ def just_dump() -> dict[str, Any]:
     return cast("dict[str, Any]", json.loads(result.stdout))
 
 
-def test_ci_directly_requires_python_fixture_lint() -> None:
-    """The canonical CI recipe cannot bypass fixture linting."""
-    dependencies = just_dump()["recipes"]["ci"]["dependencies"]
-
-    assert "python-fixture-lint" in {dependency["recipe"] for dependency in dependencies}
+def test_ci_requires_full_python_inventory_and_shared_baseline() -> None:
+    """CI includes fixtures once through the complete Python gate."""
+    recipes = just_dump()["recipes"]
+    for parent, child in (("ci", "check"), ("check", "python-ci"), ("python-ci", "python-check"), ("python-check", "python-baseline-check")):
+        assert child in {dependency["recipe"] for dependency in recipes[parent]["dependencies"]}
+    commands = [line[0] for line in recipes["python-check"]["body"]]
+    for command in commands[:2]:
+        assert "research-repo-tools files run --include '*.py' --include '*.pyi'" in command
+        assert "--no-force-exclude" in command
+        assert "--exclude" not in command
+    assert "--no-fix" in commands[1]
 
 
 def test_python_fixture_lint_uses_the_complete_ruff_configuration() -> None:

@@ -7,14 +7,13 @@ export UV_CACHE_DIR := env_var_or_default("UV_CACHE_DIR", ".uv-cache")
 
 python_fixture_paths := "tests/semgrep"
 python_primary_paths := "agents/.agents/skills scripts"
-python_paths := python_primary_paths + " " + python_fixture_paths
 cargo_update_version := "22.1.1"
 cargo_version_pattern := '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?'
 dprint_version := "0.57.4"
 just_version := "1.58.0"
 rumdl_version := "0.2.76"
-uv_version := "0.12.18"
-zizmor_version := "1.30.1"
+# Bootstrap without Python; pyproject.toml is the single uv pin authority.
+uv_version := `sed -nE 's/^required-version = "==([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' pyproject.toml`
 
 _ensure-actionlint:
     #!/usr/bin/env bash
@@ -73,31 +72,8 @@ _ensure-uv:
         exit 1
     fi
 
-_ensure-zizmor:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    installed_version=""
-    if command -v zizmor >/dev/null; then
-        installed_version="$(zizmor --version 2>/dev/null | grep -oE '{{ cargo_version_pattern }}' | head -1 || true)"
-    fi
-    if [[ "$installed_version" != "{{ zizmor_version }}" ]]; then
-        echo "'zizmor' {{ zizmor_version }} not found. Run bin/bootstrap.sh or install:"
-        echo "   cargo install --locked zizmor --version {{ zizmor_version }}"
-        exit 1
-    fi
-
 action-lint: _ensure-actionlint
-    #!/usr/bin/env bash
-    set -euo pipefail
-    files=()
-    while IFS= read -r -d '' file; do
-        files+=("$file")
-    done < <(git ls-files -co --exclude-standard -z -- '.github/workflows/*.yml' '.github/workflows/*.yaml')
-    if [ "${#files[@]}" -gt 0 ]; then
-        printf '%s\0' "${files[@]}" | xargs -0 uv run --locked actionlint
-    else
-        echo "No workflow files found to lint."
-    fi
+    uv run --locked --group dev research-repo-tools files run --include '.github/workflows/*.yml' --include '.github/workflows/*.yaml' -- actionlint
 
 brew-check: _ensure-brew
     HOMEBREW_NO_AUTO_UPDATE=1 brew bundle check --file="$PWD/Brewfile"
@@ -143,7 +119,7 @@ check-skills: _ensure-uv
     fi
     echo "Skill checks complete!"
 
-ci: check python-fixture-lint
+ci: check
     @echo "CI checks complete!"
 
 fix: justfile-fmt python-fix yaml-fix markdown-fix
@@ -161,35 +137,11 @@ justfile-fmt: _ensure-just
 justfile-fmt-check: _ensure-just
     just --fmt --check
 
-markdown-check: _ensure-rumdl
-    #!/usr/bin/env bash
-    set -euo pipefail
-    files=()
-    while IFS= read -r -d '' file; do
-        if [ -f "$file" ]; then
-            files+=("$file")
-        fi
-    done < <(git ls-files -co --exclude-standard -z -- '*.md')
-    if [ "${#files[@]}" -gt 0 ]; then
-        printf '%s\0' "${files[@]}" | xargs -0 -n100 rumdl check --deny-config-warnings --
-    else
-        echo "No Markdown files found to check."
-    fi
+markdown-check: _ensure-rumdl _ensure-uv
+    uv run --locked --group dev research-repo-tools files run --include '*.md' -- rumdl check --deny-config-warnings --
 
-markdown-fix: _ensure-rumdl
-    #!/usr/bin/env bash
-    set -euo pipefail
-    files=()
-    while IFS= read -r -d '' file; do
-        if [ -f "$file" ]; then
-            files+=("$file")
-        fi
-    done < <(git ls-files -co --exclude-standard -z -- '*.md')
-    if [ "${#files[@]}" -gt 0 ]; then
-        printf '%s\0' "${files[@]}" | xargs -0 -n100 rumdl check --fix --deny-config-warnings --
-    else
-        echo "No Markdown files found to fix."
-    fi
+markdown-fix: _ensure-rumdl _ensure-uv
+    uv run --locked --group dev research-repo-tools files run --include '*.md' -- rumdl check --fix --deny-config-warnings --
 
 markdown-lint: markdown-check
 
@@ -201,10 +153,13 @@ macos-defaults:
 macos-defaults-rectangle-pro:
     bin/macos-defaults.sh --rectangle-pro-takeover
 
-python-check: _ensure-uv python-fixture-lint
-    uv run --locked ruff format --check {{ python_paths }}
-    uv run --locked ruff check {{ python_primary_paths }}
+python-check: _ensure-uv python-baseline-check
+    uv run --locked --group dev research-repo-tools files run --include '*.py' --include '*.pyi' -- ruff format --check --no-force-exclude
+    uv run --locked --group dev research-repo-tools files run --include '*.py' --include '*.pyi' -- ruff check --no-fix --no-force-exclude
     just python-typecheck
+
+python-baseline-check: _ensure-uv
+    uv run --locked --no-sync --no-python-downloads research-repo-tools toolchain python-check
 
 python-ci: python-check test-python
     @echo "Python checks complete!"
@@ -219,10 +174,10 @@ python-fixture-lint: _ensure-uv
 python-lint: python-check
 
 python-sync: _ensure-uv
-    uv sync --group dev
+    uv sync --locked --group dev
 
 python-typecheck: _ensure-uv
-    uv run --locked ty check {{ python_paths }} --error all
+    uv run --locked --group dev research-repo-tools files run --include '*.py' --include '*.pyi' -- ty check --no-force-exclude --error all
 
 # Review committed and local changes with CodeRabbit; the base defaults to main.
 review base="main": _ensure-uv
@@ -236,69 +191,64 @@ review-uncommitted: _ensure-uv
 review-workflow-benchmark baseline="eeead7c646a45ca8227bc7fc057e6f2e1bdf52bf" repeats="5": _ensure-uv
     uv run --locked python agents/.agents/skills/review-graph/scripts/review_graph_benchmark.py --baseline-ref {{ quote(baseline) }} --repeats {{ quote(repeats) }}
 
-# Harden semgrep execution for CI/sandboxes:
-# use explicit temporary cache/log paths, disable version checks and metrics,
-# and prefer system CA certs so checks work when HOME/.cache paths are restricted.
-semgrep: _ensure-brew _ensure-uv
+# Sequential Rust review instruction accounting and deterministic callback evidence.
+rust-review-fixture baseline="fa7231d431db9d6207bed98be0e719d085a700bf": _ensure-uv
+    uv run --locked python agents/.agents/skills/rust-review-orchestrator/scripts/review_fixture.py --baseline {{ quote(baseline) }}
+
+# Shared inventory and fixture semantics; retain local TLS and reviewed suppressions.
+semgrep: _ensure-uv
     #!/usr/bin/env bash
     set -euo pipefail
-    uv_executable="${UV_EXECUTABLE:-$(brew --prefix uv)/bin/uv}"
-    if [[ ! -x "$uv_executable" ]]; then
-        echo "Selected uv executable is unavailable at $uv_executable." >&2
-        exit 1
-    fi
-    files=()
-    while IFS= read -r -d '' file; do
-        if [[ -f "$file" && "$file" != tests/semgrep/* ]]; then
-            files+=("$file")
-        fi
-    done < <(git ls-files -co --exclude-standard -z)
-    if ((${#files[@]})); then
-        semgrep_tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-semgrep.XXXXXX")"
-        cleanup() {
-            rm -rf "$semgrep_tmp_dir"
-        }
-        trap cleanup EXIT
-        semgrep_version_cache_path="$semgrep_tmp_dir/version-cache"
-        semgrep_log_file="$semgrep_tmp_dir/semgrep.log"
-        if [ -f /etc/ssl/cert.pem ]; then
-            export SSL_CERT_FILE="/etc/ssl/cert.pem"
-        elif [ -f /etc/ssl/certs/ca-certificates.crt ]; then
-            export SSL_CERT_FILE="/etc/ssl/certs/ca-certificates.crt"
-        else
-            unset SSL_CERT_FILE
-        fi
-        SEMGREP_VERSION_CACHE_PATH="$semgrep_version_cache_path" \
-            SEMGREP_LOG_FILE="$semgrep_log_file" \
-            SEMGREP_SEND_METRICS=off \
-            OTEL_SDK_DISABLED=true \
-            "$uv_executable" run --locked semgrep --disable-version-check --metrics off --error --strict --timeout 120 --config semgrep.yaml "${files[@]}"
-    else
-        echo "No repository files found to scan."
-    fi
+    scan_cache="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-semgrep.XXXXXX")"
+    trap 'rm -rf "$scan_cache"' EXIT
+    export SEMGREP_VERSION_CACHE_PATH="$scan_cache/version-cache"
+    export SEMGREP_LOG_FILE="$scan_cache/semgrep.log"
+    export SEMGREP_SETTINGS_FILE="$scan_cache/settings.yml"
+    export SEMGREP_SEND_METRICS=off OTEL_SDK_DISABLED=true
+    if [[ -f /etc/ssl/cert.pem ]]; then export SSL_CERT_FILE=/etc/ssl/cert.pem; fi
+    uv run --locked --group dev research-repo-tools files run --exclude 'tests/semgrep/**' --timeout 600 -- semgrep --disable-version-check --metrics off --error --strict --timeout 120 --config semgrep.yaml
 
-# Keep fixture semgrep tests robust under the same CI/sandbox constraints.
-semgrep-test: _ensure-brew _ensure-uv
+semgrep-test: _ensure-uv
     #!/usr/bin/env bash
     set -euo pipefail
-    uv_executable="${UV_EXECUTABLE:-$(brew --prefix uv)/bin/uv}"
-    if [[ ! -x "$uv_executable" ]]; then
-        echo "Selected uv executable is unavailable at $uv_executable." >&2
-        exit 1
-    fi
-    if [ -f /etc/ssl/cert.pem ]; then
-        export SSL_CERT_FILE="/etc/ssl/cert.pem"
-    elif [ -f /etc/ssl/certs/ca-certificates.crt ]; then
-        export SSL_CERT_FILE="/etc/ssl/certs/ca-certificates.crt"
-    else
-        unset SSL_CERT_FILE
-    fi
+    if [[ -f /etc/ssl/cert.pem ]]; then export SSL_CERT_FILE=/etc/ssl/cert.pem; fi
+    uv run --locked --group dev research-repo-tools semgrep check-fixtures
 
-    "$uv_executable" run --locked research-repo-tools semgrep check-fixtures
+# Preview/apply migrations outside the old project environment, even across Python minors.
+shared-python-plan version:
+    uvx --no-config --isolated --managed-python --from {{ quote("research-repo-tools==" + version) }} research-repo-tools toolchain adopt --dry-run
+
+shared-python-update version:
+    uvx --no-config --isolated --managed-python --from {{ quote("research-repo-tools==" + version) }} research-repo-tools toolchain adopt --apply
+
+# Repository-owned managed tools; no user-wide shell or Just installation.
+tools-sync: _ensure-uv
+    uv run --locked --group dev research-repo-tools toolchain sync
+
+tools-check: _ensure-uv
+    uv run --locked --no-sync --no-python-downloads research-repo-tools toolchain check
+
+[positional-arguments]
+clean *args: _ensure-uv
+    uv run --locked --no-sync --no-python-downloads research-repo-tools toolchain clean "$@"
+
+[positional-arguments]
+files +args: _ensure-uv
+    uv run --locked --group dev research-repo-tools files "$@"
+
+security-osv: _ensure-uv
+    uv run --locked --group dev research-repo-tools security osv uv.lock
+
+security-secrets: _ensure-uv
+    uv run --locked --group dev research-repo-tools security secrets
+
+# Online vulnerability data and managed scanners make this a separate explicit gate.
+security-check: security-osv security-secrets
 
 setup:
     DOTFILES_DIR="$PWD" bin/bootstrap.sh
     just python-sync
+    just tools-sync
 
 _preflight-stable-uv: (_shared-deps "check-uv")
 
@@ -312,10 +262,12 @@ _shared-deps action: _ensure-brew
         echo "Homebrew-managed uv is unavailable at $uv_executable." >&2
         exit 1
     fi
-    PATH="$(dirname "$uv_executable"):$PATH" "$uv_executable" run --locked --only-group tooling --inexact research-repo-tools deps {{ quote(action) }}
+    PATH="$(dirname "$uv_executable"):$PATH" "$uv_executable" run --locked --no-config --only-group tooling --inexact research-repo-tools deps {{ quote(action) }}
 
 # Update Homebrew, Python pins/environment, and all installed Cargo tools.
 update: update-dependencies update-cargo-tools
+    # Re-evaluate the uv pin after Homebrew and the shared updater reconcile it.
+    just update-security-tools
     @echo "Repository dependencies and tools updated."
 
 # Update all installed Cargo CLI tools and reconcile repository-owned pins.
@@ -335,7 +287,16 @@ update-cargo-tools: _preflight-stable-uv
 # Upgrade Brewfile dependencies and the complete uv development environment.
 update-dependencies: _preflight-stable-uv
     brew bundle upgrade --file="$PWD/Brewfile"
+    just update-uv
     just update-python-dependencies
+
+# Shared updater uses uv's installation owner and reconciles pyproject.toml.
+update-uv:
+    uv run --locked --no-config --no-sync --no-python-downloads research-repo-tools deps update-uv
+
+# Update declared scanner binaries without changing user-wide installations.
+update-security-tools: _ensure-uv
+    uv run --locked --group dev research-repo-tools toolchain upgrade
 
 # Advance direct dev pins, refresh the full lock, and explicitly synchronize dev.
 update-python-dependencies: _preflight-stable-uv
@@ -446,54 +407,23 @@ test-python: _ensure-uv
     uv run --locked pytest
 
 toml-check: _ensure-uv
-    uv run --locked python -c 'import subprocess, tomllib; from pathlib import Path; [tomllib.load(Path(path).open("rb")) for path in subprocess.run(["git", "ls-files", "*.toml"], check=True, capture_output=True, text=True).stdout.splitlines()]'
+    uv run --locked --group dev research-repo-tools files run --include '*.toml' -- python -c 'import sys, tomllib; from pathlib import Path; [tomllib.loads(Path(path).read_text()) for path in sys.argv[1:]]'
 
 yaml-check: yaml-fmt-check yaml-lint
 
-yaml-fix: _ensure-dprint
-    #!/usr/bin/env bash
-    set -euo pipefail
-    files=()
-    while IFS= read -r -d '' file; do
-        if [ -f "$file" ]; then
-            files+=("$file")
-        fi
-    done < <(git ls-files -co --exclude-standard -z -- '*.yml' '*.yaml' 'CITATION.cff')
-    if [ "${#files[@]}" -gt 0 ]; then
-        printf '%s\0' "${files[@]}" | xargs -0 dprint fmt --incremental=false
-    else
-        echo "No YAML files found to format."
-    fi
+yaml-fix: _ensure-dprint _ensure-uv
+    uv run --locked --group dev research-repo-tools files run --include '*.yml' --include '*.yaml' --include 'CITATION.cff' -- dprint fmt --incremental=false
 
-yaml-fmt-check: _ensure-dprint
-    #!/usr/bin/env bash
-    set -euo pipefail
-    files=()
-    while IFS= read -r -d '' file; do
-        if [ -f "$file" ]; then
-            files+=("$file")
-        fi
-    done < <(git ls-files -co --exclude-standard -z -- '*.yml' '*.yaml' 'CITATION.cff')
-    if [ "${#files[@]}" -gt 0 ]; then
-        printf '%s\0' "${files[@]}" | xargs -0 dprint check --incremental=false
-    else
-        echo "No YAML files found to check."
-    fi
+yaml-fmt-check: _ensure-dprint _ensure-uv
+    uv run --locked --group dev research-repo-tools files run --include '*.yml' --include '*.yaml' --include 'CITATION.cff' -- dprint check --incremental=false
 
 yaml-lint: _ensure-uv
-    #!/usr/bin/env bash
-    set -euo pipefail
-    files=()
-    while IFS= read -r -d '' file; do
-        if [ -f "$file" ]; then
-            files+=("$file")
-        fi
-    done < <(git ls-files -co --exclude-standard -z -- '*.yml' '*.yaml' 'CITATION.cff')
-    if [ "${#files[@]}" -gt 0 ]; then
-        uv run --locked yamllint --strict -c .yamllint "${files[@]}"
-    else
-        echo "No YAML files found to lint."
-    fi
+    uv run --locked --group dev research-repo-tools files run --include '*.yml' --include '*.yaml' --include 'CITATION.cff' -- yamllint --strict -c .yamllint
 
-zizmor: _ensure-zizmor
-    zizmor .github
+# Normal checks are reproducible offline; the dedicated CI audit requires online access.
+zizmor: _ensure-uv
+    uv run --locked --group dev research-repo-tools zizmor check --offline
+
+[positional-arguments]
+zizmor-check *args: _ensure-uv
+    uv run --locked --group dev research-repo-tools zizmor check "$@"

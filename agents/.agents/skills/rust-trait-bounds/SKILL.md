@@ -5,6 +5,11 @@ description: "Audit Rust trait bounds, generic constraints, associated types, HR
 
 # rust-trait-bounds
 
+Rust-orchestrator passes use the shared [execution-v1 contract](../rust-review-orchestrator/references/execution-v1.md).
+
+For direct invocation, read [references/standalone-workflow.md](references/standalone-workflow.md)
+for scope discovery and the complete standalone report.
+
 Audit Rust trait bounds, generic constraints, and `where` clauses for simplification and idiomatic API clarity.
 
 Good bounds express the minimum contract needed by the code. Overly broad, duplicated, or misplaced bounds make APIs harder to use and compiler diagnostics harder to understand, while overly clever simplification can hide important semantics.
@@ -23,20 +28,6 @@ Focus on newly added or modified Rust code that includes:
 - repeated bounds across multiple impls or methods
 
 Ignore unrelated unchanged code unless needed to understand existing generic conventions.
-
-### Scope Modes
-
-Default mode:
-
-- Audit newly added or modified generics, trait bounds, associated type constraints, and `where` clauses.
-- Ignore unrelated unchanged bounds unless they define local generic conventions for the changed code.
-
-Whole-repo baseline mode:
-
-- Use when the user explicitly says "whole repo", "entire repo", "baseline audit", or similar.
-- Audit public generic APIs and complex internal generic code across Rust source, tests, examples, and benches.
-- Prioritize findings by downstream API ergonomics, unnecessary public bounds, leaked implementation details, duplicated constraints, and bounds that obscure ownership or Send/Sync intent.
-- Do not require fixing every historical generic cleanup in one pass; separate semver-sensitive API changes from internal simplifications.
 
 ## Review goals
 
@@ -147,27 +138,3 @@ Avoid:
 
 - relying only on internal unit tests that use overly capable types
 - adding compile-fail infrastructure for a small cleanup unless the project already supports it
-
-## Output Format
-
-### Summary
-
-- PASS
-- NEEDS IMPROVEMENT
-- FAIL
-
-### Findings
-
-- Concrete issues with file/function/type references
-- For each issue, state whether the problem is redundant, misplaced, overly broad, under-specified, or public-API-hostile
-
-### Required Fixes
-
-- Bounds to remove
-- Bounds to move from type definitions to impls/methods
-- Signatures or `where` clauses to simplify
-- Public API docs, doctests, or integration tests to update
-
-### Optional Improvements
-
-- Non-blocking readability or ergonomics refinements

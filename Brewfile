@@ -30,7 +30,7 @@ brew "pkgconf"                         # pkg-config implementation (`pkg-config`
 brew "pkgx"                            # ephemeral repository-scoped developer tools
 brew "powershell"                      # PowerShell shell (`pwsh`)
 brew "pylint"                          # Python linter
-brew "python@3.14"                     # Python 3 interpreter (`python3`)
+brew "python"                          # Host Python; repository Python follows research-repo-tools via uv
 brew "pytorch"                         # machine learning tensor library
 brew "ripgrep"                         # fast text search (`rg`)
 brew "rustup"                          # Rust toolchain manager

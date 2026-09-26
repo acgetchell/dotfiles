@@ -5,6 +5,8 @@ description: "Review Rust for production readiness as either a directly requeste
 
 # Rust Production Review
 
+Rust-orchestrator passes use the shared [execution-v1 contract](../rust-review-orchestrator/references/execution-v1.md).
+
 Review Rust as long-lived production software whose correctness, soundness, portability, and public contracts matter. Follow the repository's declared edition, MSRV, feature/target support, safety policy, and semver promises.
 
 Prioritize observable defects, invariant corruption, unsoundness, scientifically invalid behavior, and release risk over stylistic churn.

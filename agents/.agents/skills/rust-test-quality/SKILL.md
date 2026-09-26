@@ -5,6 +5,8 @@ description: "Review Rust unit, integration, doctest, property, fuzz, compile-fa
 
 # Rust Test Quality
 
+Rust-orchestrator passes use the shared [execution-v1 contract](../rust-review-orchestrator/references/execution-v1.md).
+
 Review Rust tests as executable evidence for behavior, invariants, compatibility, and safety. Strengthen tests that can pass while the target behavior is wrong.
 
 ## Ground Rules
@@ -16,11 +18,8 @@ Review Rust tests as executable evidence for behavior, invariants, compatibility
 - Do not add a property, fuzz, compile-fail, Miri, Loom, or sanitizer framework merely for ceremony; use established tooling or add it only when the uncovered risk justifies the maintenance cost.
 - Do not mutate git state without explicit authorization.
 
-When invoked directly without a parent validation ledger and result contract,
-read
-[`references/standalone-validation.md`](references/standalone-validation.md).
-Graph and Rust-orchestrator dispatches follow the supplied validation ownership
-and compact result contract without loading that reference.
+For direct invocation without a parent receipt, read
+[standalone validation](references/standalone-validation.md).
 
 ## Workflow
 

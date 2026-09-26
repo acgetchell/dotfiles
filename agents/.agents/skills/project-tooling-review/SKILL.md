@@ -5,6 +5,8 @@ description: "Review and fix repository tooling: just recipes, GitHub Actions, C
 
 # project-tooling-review
 
+Rust-orchestrator passes use the shared [execution-v1 contract](../rust-review-orchestrator/references/execution-v1.md).
+
 Review the project command layer: the recipes, workflows, version pins, and docs that let maintainers run the right checks without remembering every underlying tool.
 
 ## Ground Rules
@@ -30,7 +32,7 @@ coordinator:
   catalog handoffs instead of broadening the dispatch
 - return the exact Review Node Result required by the graph's node contract
 
-For a direct tooling review outside `review-graph`, read
+For direct invocation without a parent scope and result contract, read
 [`references/standalone-workflow.md`](references/standalone-workflow.md)
 completely and follow its scope discovery, trace, fix, validation, and reporting
 workflow.

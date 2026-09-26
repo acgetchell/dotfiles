@@ -1,13 +1,13 @@
 # Shared Notebook Workflow
 
 Use the consumer's named Just recipes when present. Published
-`research-repo-tools==0.1.5` supplies inspection, advice, validation, native lint,
+`research-repo-tools==0.1.7` supplies inspection, advice, validation, native lint,
 cleanup, and execution. Only the CLI and `research_repo_tools.cli.main` are
 supported notebook interfaces; do not import internal loaders or copy helpers.
 
 ## Locked Consumer Environment
 
-For an adopted consumer, declare `research-repo-tools[notebooks]==0.1.5` in its
+For an adopted consumer, declare `research-repo-tools[notebooks]==0.1.7` in its
 notebook dependency group at the same exact version as its tooling pin. Keep
 analysis dependencies in that group and Ruff 0.16.8 or newer and ty 0.0.82 or newer
 in its locked development environment. Preserve a deliberately adopted newer
@@ -27,7 +27,7 @@ uv run --locked --group notebook --group dev research-repo-tools notebooks lint 
 types, IDs, line/output/execution counts, and short source previews without
 printing stored outputs or metadata, executing cells, generating IDs, or writing
 source files. Previews expose source text; use `--no-preview` to omit it. Use
-`--json` for the [versioned inventory schema](https://github.com/acgetchell/research-repo-tools/blob/v0.1.5/docs/notebook-inspection.md).
+`--json` for the [versioned inventory schema](https://github.com/acgetchell/research-repo-tools/blob/v0.1.7/docs/notebook-inspection.md).
 
 Inspection tolerates older nbformat 4 notebooks and missing, invalid, or duplicate
 IDs, reporting repair problems while returning zero for a complete inventory.
@@ -42,14 +42,14 @@ If the consumer has not adopted the shared package, an isolated inspection can
 use the published base package without changing its manifest or environment:
 
 ```sh
-uv run --no-project --with research-repo-tools==0.1.5 research-repo-tools --root "$PWD" notebooks inspect notebooks/example.ipynb
+uv run --no-project --with research-repo-tools==0.1.7 research-repo-tools --root "$PWD" notebooks inspect notebooks/example.ipynb
 ```
 
 For isolated advice, include the notebook extra and Ruff. This reads policy from
 the consumer root; without configured policy, only descriptive-ID advice applies:
 
 ```sh
-uv run --no-project --with 'research-repo-tools[notebooks]==0.1.5' --with ruff==0.16.8 research-repo-tools --root "$PWD" notebooks advise notebooks/example.ipynb
+uv run --no-project --with 'research-repo-tools[notebooks]==0.1.7' --with ruff==0.16.8 research-repo-tools --root "$PWD" notebooks advise notebooks/example.ipynb
 ```
 
 These commands may download dependencies into uv's cache. Use the consumer's
@@ -61,8 +61,9 @@ consumer's execution environment.
 
 When adopting the skill's defaults, merge
 [`assets/pyproject.toml`](../assets/pyproject.toml) into the consumer's existing
-configuration. It contains only policy: shared descriptive-ID and timeout advice,
-native Ruff annotation/exception rules, and opt-in pandas/csv import guidance.
+configuration. It contains only policy: a blocking ban on dependency installation
+inside notebook cells, shared descriptive-ID and timeout advice, native Ruff
+annotation/exception rules, and opt-in pandas/csv import guidance.
 Preserve the consumer's existing rules and ignores, and omit banned-import entries
 where the repository standardizes on those libraries or a dependency requires
 them. Polars remains a preference for dataframe-shaped work, not a universal ban.
@@ -78,6 +79,11 @@ failure. Keep annotation, broad-exception, library-preference, and timeout advic
 as warnings unless the consumer requests stricter policy. Other consumer lint
 rules still apply; neither pass fixes or executes cells.
 
+`prohibit-installs = true` also blocks statically recognized pip, uv, conda, and
+similar dependency-install commands during native lint. Declare dependencies in
+the consumer's locked notebook group. Review dynamically constructed commands
+manually; static detection cannot prove arbitrary code avoids installation.
+
 Native Ruff/ty handle supported IPython syntax in the original notebook. Only
 the supplemental plain-AST timeout pass skips magic/non-Python cells, with an
 informational diagnostic. It covers direct `subprocess.run`, `call`, `check_call`,
@@ -87,7 +93,7 @@ runtime bounds, and `Popen` wait/communicate/termination lifecycles manually.
 Descriptive-ID warnings are heuristics. Keep stable descriptive IDs, and manually
 review positional `section-N` and `step-N` IDs in addition to the generated and
 positional patterns detected upstream. Never rename valid IDs automatically.
-See the [advisory contract and limits](https://github.com/acgetchell/research-repo-tools/blob/v0.1.5/docs/RUNNING_NOTEBOOKS.md#review-advisories).
+See the [advisory contract and limits](https://github.com/acgetchell/research-repo-tools/blob/v0.1.7/docs/RUNNING_NOTEBOOKS.md#review-advisories).
 
 ## Cleanup And Execution
 
@@ -103,7 +109,7 @@ metadata. There is no local cleanup implementation.
 
 Execution additionally requires the consumer's declared Python/uv toolchain and
 locked notebook environment. Follow its setup recipe and the
-[upstream environment contract](https://github.com/acgetchell/research-repo-tools/blob/v0.1.5/docs/RUNNING_NOTEBOOKS.md).
+[upstream environment contract](https://github.com/acgetchell/research-repo-tools/blob/v0.1.7/docs/RUNNING_NOTEBOOKS.md).
 Synchronize that environment before deliberate execution:
 
 ```sh
@@ -121,5 +127,5 @@ inspect its effects and cost before running it.
 Dotfiles retains integration checks for the published CLI and this skill's actual
 policy template. Generic inspection, ID heuristics, parser failures, native
 syntax, checker failures, and advisory regression coverage belong to upstream
-[`tests/notebooks`](https://github.com/acgetchell/research-repo-tools/tree/v0.1.5/tests/notebooks),
+[`tests/notebooks`](https://github.com/acgetchell/research-repo-tools/tree/v0.1.7/tests/notebooks),
 including the installed-consumer contracts in `public_notebook_consumer.py`.

@@ -5,6 +5,8 @@ description: "Audit Rust error enums and pathways for correctness, debuggability
 
 # rust-error-variants
 
+Rust-orchestrator passes use the shared [execution-v1 contract](../rust-review-orchestrator/references/execution-v1.md).
+
 Audit Rust error variants and error pathways for correctness, debuggability, and orthogonality.
 
 Correct error design is part of correctness: callers need to distinguish failure modes, developers need useful messages, and tests should be able to pattern-match meaningful variants instead of parsing strings.
@@ -35,10 +37,7 @@ Focus on newly added or modified Rust code that:
 
 Ignore unrelated unchanged code unless needed to understand existing error conventions.
 
-When invoked directly without an exact parent scope and result contract, read
-[`references/standalone-workflow.md`](references/standalone-workflow.md).
-Graph and Rust-orchestrator dispatches use their supplied scope and compact
-result contract without loading that reference.
+For direct invocation, read [the standalone workflow](references/standalone-workflow.md).
 
 ## Review goals
 

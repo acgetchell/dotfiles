@@ -130,3 +130,12 @@ def test_skill_native_lint_keeps_shell_execution_a_hard_failure(tmp_path: Path) 
     assert "S602" in lint.stderr
     assert "cell 1 (run-program)" in lint.stderr
     assert notebook.read_bytes() == original
+
+
+def test_skill_blocks_dependency_installation_without_executing_cells(tmp_path: Path) -> None:
+    notebook, original = consumer(tmp_path, [code("%pip install pandas", "install-dependency")])
+    result = run_shared(tmp_path, "lint")
+    assert result.returncode == 1, result.stderr
+    assert "install" in result.stderr.lower()
+    assert "cell 1 (install-dependency)" in result.stderr
+    assert notebook.read_bytes() == original

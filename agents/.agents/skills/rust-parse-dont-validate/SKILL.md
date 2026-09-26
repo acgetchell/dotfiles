@@ -5,6 +5,11 @@ description: "Audit Rust boundary parsing and invalid-state prevention with proo
 
 # Rust Parse Don't Validate
 
+Rust-orchestrator passes use the shared [execution-v1 contract](../rust-review-orchestrator/references/execution-v1.md).
+
+For direct invocation, read [references/standalone-workflow.md](references/standalone-workflow.md)
+for scope discovery and the complete standalone report.
+
 Convert raw external representations into domain types that can represent only supported states. Let core computation accept those types and rely on their invariants instead of repeatedly checking raw values.
 
 ## Ground Rules
@@ -24,14 +29,6 @@ Load only the detail matching the scoped boundary:
 - Read [references/nonzero-numeric-refinements.md](references/nonzero-numeric-refinements.md) when positive counts, bounded integers, finite floats, probabilities, tolerances, dimensions, or numeric conversions carry invariants.
 - Read [references/serialization-boundaries.md](references/serialization-boundaries.md) when Serde, configuration, wire formats, checkpoints, persistence, or restore paths can bypass constructors.
 - Read [references/semgrep-guardrails.md](references/semgrep-guardrails.md) only when the repository already uses Semgrep or similar project rules and the pattern is recurring.
-
-## Scope Modes
-
-Use changed-code mode by default. Inspect changed invariant-bearing types and nearby constructors, parsers, mutators, and consumers.
-
-Use pull-request mode for a named PR, branch, or diff base. Prioritize new public boundaries, invalid stored states, discarded validation evidence, and missing rejection tests.
-
-Use whole-repository baseline mode only when explicitly requested. Start with public construction, configuration, deserialization, setters, and repeated validation helpers; group findings by owning type.
 
 ## Workflow
 
@@ -122,7 +119,3 @@ Prefer exact error variants and fields over `is_err()`. Use property tests for b
 ## Finding Standard
 
 For each finding, name the invariant, bypass or discarded-proof path, representable invalid state, observable consequence, smallest boundary/type correction, compatibility cost, and regression evidence. Separate confirmed defects from optional modeling improvements.
-
-## Handoff
-
-Summarize boundaries and invariant owners reviewed, proof-bearing types, bypass paths closed, routed state/error/lifetime work, tests and validators, files changed, and confirmation that no git state mutation occurred when true.
