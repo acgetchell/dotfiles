@@ -144,6 +144,7 @@ def test_restow_recipe_migrates_file_links_to_discoverable_directory_links(tmp_p
     personal.write_text("personal skill\n", encoding="utf-8")
     repository = Path(__file__).resolve().parents[1]
     shutil.copy2(repository / "justfile", dotfiles / "justfile")
+    shutil.copy2(repository / "pyproject.toml", dotfiles / "pyproject.toml")
     (dotfiles / "bin").mkdir()
     shutil.copy2(repository / "bin" / "restow-agents.sh", dotfiles / "bin")
     just = shutil.which("just")

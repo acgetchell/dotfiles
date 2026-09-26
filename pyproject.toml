@@ -9,14 +9,24 @@ authors = [{ name = "Adam Getchell", email = "adam@adamgetchell.org" }]
 
 [tool.uv]
 package = false
+required-version = "==0.12.19"
+
+[tool.research-repo-tools.toolchain]
+inherit-python = true
+
+[tool.research-repo-tools.toolchain.binaries]
+gitleaks = "8.30.1"
+osv-scanner = "2.6.0"
+
+[tool.research-repo-tools.zizmor]
+persona = "regular"
+timeout = 300
 
 [tool.research-repo-tools.deps.tools]
 cargo_update_version = "cargo-update"
 dprint_version = "dprint"
 just_version = "just"
 rumdl_version = "rumdl"
-uv_version = "uv"
-zizmor_version = "zizmor"
 
 [tool.research-repo-tools.semgrep]
 config = "semgrep.yaml"
@@ -196,7 +206,8 @@ dev = [
   "semgrep==1.177.0",
   "ty==0.0.83",
   "yamllint==1.38.0",
+  "zizmor==1.30.1",
 ]
 tooling = [
-    "research-repo-tools==0.1.5",
+    "research-repo-tools==0.1.7",
 ]

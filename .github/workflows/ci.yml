@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
@@ -62,12 +63,10 @@ jobs:
           dprint_version="$(resolve_version dprint_version)"
           rumdl_version="$(resolve_version rumdl_version)"
           uv_version="$(resolve_version uv_version)"
-          zizmor_version="$(resolve_version zizmor_version)"
           {
             printf 'dprint_version=%s\n' "$dprint_version"
             printf 'rumdl_version=%s\n' "$rumdl_version"
             printf 'uv_version=%s\n' "$uv_version"
-            printf 'zizmor_version=%s\n' "$zizmor_version"
           } >> "$GITHUB_OUTPUT"
 
       - name: Install dprint
@@ -93,13 +92,13 @@ jobs:
       - name: Install Stow for integration tests
         run: brew install stow
 
-      - name: Install zizmor
-        uses: taiki-e/cache-cargo-install-action@9ee83daaa7b96a6fab930949ecf1122bba04a389 # v3.0.8
-        with:
-          tool: zizmor@${{ steps.tool_versions.outputs.zizmor_version }}
+      - name: Install managed security scanners
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: just tools-sync
+
+      - name: Audit dependencies and secrets
+        run: just security-check
 
       - name: Run CI checks
-        run: |
-          UV_EXECUTABLE="$(command -v uv)"
-          export UV_EXECUTABLE
-          just ci
+        run: just ci

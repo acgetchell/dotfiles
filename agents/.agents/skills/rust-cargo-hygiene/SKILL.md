@@ -5,6 +5,8 @@ description: "Audit Cargo manifests and crate configuration for release readines
 
 # rust-cargo-hygiene
 
+Rust-orchestrator passes use the shared [execution-v1 contract](../rust-review-orchestrator/references/execution-v1.md).
+
 Audit `Cargo.toml`, feature flags, MSRV, lint configuration, and other crate-level settings for clarity, semver discipline, and release readiness.
 
 Manifest mistakes break downstream builds quietly: an unintended `default-features = true`, a missing dev-only dependency move, or a slipping MSRV often only surfaces on a user's machine. Treat the manifest as part of the public API.
@@ -21,10 +23,7 @@ Focus on newly added or modified files such as:
 - crate-root attributes (`#![deny(...)]`, `#![warn(...)]`, `#![forbid(...)]`)
 - `rust-toolchain.toml`
 
-When invoked directly without an exact parent scope and result contract, read
-[`references/standalone-workflow.md`](references/standalone-workflow.md).
-Graph and Rust-orchestrator dispatches use their supplied scope and compact
-result contract without loading that reference.
+For direct invocation, read [the standalone workflow](references/standalone-workflow.md).
 
 Read
 [`references/release-readiness.md`](references/release-readiness.md) only for

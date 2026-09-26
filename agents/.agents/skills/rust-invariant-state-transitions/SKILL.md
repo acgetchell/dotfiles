@@ -5,6 +5,11 @@ description: "Audit Rust construction and mutation workflows for invariant prese
 
 # Rust Invariant State Transitions
 
+Rust-orchestrator passes use the shared [execution-v1 contract](../rust-review-orchestrator/references/execution-v1.md).
+
+For direct invocation, read [references/standalone-workflow.md](references/standalone-workflow.md)
+for scope discovery and the complete standalone report.
+
 Audit whether every observable Rust value remains valid before, during, and after construction or mutation. Treat a transition as a contract over the complete owning state, not as a sequence of independently plausible field assignments.
 
 ## Ground Rules
@@ -105,7 +110,3 @@ Use snapshots only when they independently capture the full promised state. Pref
 ## Finding Standard
 
 For each finding, name the invariant, canonical owner, transition and failure point, observable invalid state, smallest atomic correction, and focused regression evidence. Distinguish a confirmed corruption path from an optional architectural simplification.
-
-## Handoff
-
-Summarize transitions inspected, guarantees established, rollback or commit behavior, derived-state consistency, tests and validators, routed ownership/error/concurrency follow-up, files changed, and confirmation that no git state mutation occurred when true.

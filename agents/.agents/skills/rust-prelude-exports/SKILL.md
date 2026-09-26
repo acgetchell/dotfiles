@@ -5,6 +5,8 @@ description: "Audit Rust prelude modules and public re-exports for minimality, o
 
 # rust-prelude-exports
 
+Rust-orchestrator passes use the shared [execution-v1 contract](../rust-review-orchestrator/references/execution-v1.md).
+
 Audit Rust prelude modules and public re-export surfaces for minimality, orthogonality, and usability.
 
 A good prelude makes examples and downstream code pleasant without turning into a dumping ground. It should expose the concepts users need to compose the crate's public API, while keeping specialized domains separate enough that imports remain obvious.
@@ -25,9 +27,7 @@ Focus on newly added or modified Rust public APIs that affect:
 
 Ignore private implementation imports unless they reveal a missing or confused public export.
 
-When invoked directly without an exact parent scope and result contract, read
-[`references/standalone-workflow.md`](references/standalone-workflow.md).
-Review-graph and Rust-orchestrator dispatches already own that information.
+For direct invocation, read [the standalone workflow](references/standalone-workflow.md).
 
 ## Review goals
 

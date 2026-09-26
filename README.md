@@ -150,14 +150,17 @@ an explicit package upgrade; ranges, markers, and other included-group constrain
 It also runs `cargo install-update -a --locked`, updating all Cargo-installed tools with
 their published lockfiles, including tools such as `cargo-nextest` that require `--locked`.
 The `cup` shell alias runs the same Cargo command; `just update-cargo-tools` additionally
-reconciles the repository-owned `justfile` pins (`cargo-update`, `dprint`, `just`, `rumdl`,
-`zizmor`, and Homebrew-managed `uv`). The Cargo tool update requires
+reconciles the repository-owned `justfile` pins (`cargo-update`, `dprint`, `just`, and `rumdl`).
+The Cargo tool update requires
 `cargo-install-update` from the `cargo-update` package, installed by bootstrap and checked by `bin/verify.sh`.
 The owned pin mapping lives in `[tool.research-repo-tools.deps.tools]` in `pyproject.toml`.
 Cargo pins use the shared package's SemVer contract, including prerelease/build suffixes;
-the bootstrap and version checks preserve those suffixes. The uv pin remains stable `X.Y.Z`.
+the bootstrap and version checks preserve those suffixes. The exact uv pin lives only in
+`[tool.uv].required-version`; Just and CI read it. `just update-uv` uses the shared
+updater to upgrade uv through Homebrew and reconcile that declaration.
 The shared launcher selects Homebrew uv before resolving or updating pins. Bootstrap remains
-self-contained shell code; `just setup` installs the locked Python environment afterward.
+self-contained shell code; `just setup` installs the locked Python environment and
+the repository's managed security scanners afterward.
 Updates stop on failure, but successful package-manager steps remain applied; rerun after
 resolving the failure to finish synchronization and pin reconciliation.
 
@@ -165,13 +168,48 @@ The same locked package owns the Semgrep fixture runner and CodeRabbit wrapper.
 `just semgrep-test` reads `[tool.research-repo-tools.semgrep]`; the repository keeps its
 rules and real fixtures while generic runner tests live upstream.
 The Jupyter review skill delegates notebook inspection, advice, validation, native
-Ruff/ty lint, cleanup, and execution to published v0.1.5 shared commands. It keeps
+Ruff/ty lint, cleanup, and execution to published v0.1.7 shared commands. It keeps
 only review policy and a tested consumer configuration template; generic notebook
 implementation and regression coverage live upstream. See the
 [shared notebook workflow](agents/.agents/skills/jupyter-notebook-review/references/shared-notebooks.md)
 for locked-consumer and isolated inspection commands. Dotfiles' development
 environment includes `nbformat` for read-only consumer integration tests; notebook
 execution dependencies belong to each consumer's locked notebook environment.
+
+### Shared tooling and Python upgrades
+
+Dotfiles adopts `research-repo-tools==0.1.7` for Python baseline inheritance,
+tracked and nonignored file selection, notebook policy, workflow audits, dependency
+and secret scans, and managed scanner setup/cleanup. The
+[adoption map](docs/shared-tooling.md) records the command owners and scope.
+
+When a published shared-tools release adopts Python 3.15, migrate with its version:
+
+```sh
+just shared-python-plan VERSION
+just shared-python-update VERSION
+just ci
+just security-check
+```
+
+The shared package updates the Python selector, dependency-only runtime requirement,
+package pin, lockfile, and environment together. CI checks these mirrors against the
+installed package. Ruff and ty infer the target; workflows read `.python-version`.
+A new upstream release takes effect here through this explicit pinned migration.
+Homebrew's unversioned `python` formula serves the host; uv selects repository Python.
+
+`just tools-sync` installs checksum-verified OSV/Gitleaks into the package-owned
+`~/.cache/research-repo-tools` store; `just tools-check` verifies them. `just security-check`
+scans the real `uv.lock`, full reachable Git history, and current files, writing redacted
+reports under `target/security`. It requires online advisory access and runs in the
+required CI `verify` job. `just clean` previews obsolete managed installations;
+`just clean --apply` removes eligible package-owned candidates after checking again.
+Pass `--keep-root PATH` for other consumers that share this store.
+
+`just zizmor` is an explicit offline audit. `just zizmor-check --require-online`
+runs the same locked scanner/persona with authenticated online audits; the dedicated
+workflow also publishes SARIF when authorized. Zizmor now comes from the locked Python
+environment. Existing user-wide Cargo installations are outside repository setup.
 
 `bin/verify.sh` derives its cask and CLI checks from the Brewfile, so removing an entry there never causes a stale verify failure. It also surfaces `brew missing` output as warnings; some casks (e.g. `mactex`) declare Homebrew dependencies they actually bundle themselves, so those lines are informational rather than fatal.
 
@@ -257,6 +295,12 @@ Both recipes emit structured findings and pass `AGENTS.md` and `.coderabbit.yaml
 as review instructions. `just review <base>` requires a locally available commit
 or reference; choose the intended comparison base explicitly when it differs
 from `main`. CodeRabbit reviews are opt-in and are separate from `just ci`.
+
+## Dependabot approvals
+
+Dependabot uses the shared approval workflow with exact ecosystem/file policy.
+See the [rollout and hosted verification procedure](.github/DEPENDABOT.md) for
+required GitHub settings, current-head approvals, and post-merge CI dispatch.
 
 ## Shared agent skills
 

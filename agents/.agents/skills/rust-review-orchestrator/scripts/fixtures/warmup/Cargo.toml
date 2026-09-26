@@ -1,0 +1,8 @@
+[package]
+name = "warmup-fixture"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+license = "BSD-3-Clause"
+description = "Reduced deterministic Rust review protocol fixture"

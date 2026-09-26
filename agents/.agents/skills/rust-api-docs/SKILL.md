@@ -5,6 +5,8 @@ description: "Audit Rust API documentation for completeness, required Errors, Pa
 
 # rust-api-docs
 
+Rust-orchestrator passes use the shared [execution-v1 contract](../rust-review-orchestrator/references/execution-v1.md).
+
 Audit Rust public API documentation for completeness, structure, and discoverability.
 
 Good public docs explain why callers would use the item, what they must guarantee, and what to expect when things go wrong. They also enable `cargo doc` and docs.rs to render the public surface coherently.
@@ -25,10 +27,7 @@ constrain, or explain public API behavior, especially when they encode error
 classification, panic/rollback invariants, proposal semantics, serialization
 compatibility, or other behavior callers observe indirectly.
 
-When invoked directly without an exact parent scope and result contract, read
-[`references/standalone-workflow.md`](references/standalone-workflow.md).
-Graph and Rust-orchestrator dispatches use their supplied scope and compact
-result contract without loading that reference.
+For direct invocation, read [the standalone workflow](references/standalone-workflow.md).
 
 ## Review goals
 

@@ -1,4 +1,8 @@
 # Merge these tables into the consumer's pyproject.toml; preserve its other rules.
+[tool.research-repo-tools.notebooks]
+# Dependencies belong in the locked notebook group, not notebook cells.
+prohibit-installs = true
+
 [tool.research-repo-tools.notebooks.advice]
 descriptive-ids = true
 ruff-rules = [

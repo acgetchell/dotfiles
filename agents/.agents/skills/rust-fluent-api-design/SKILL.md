@@ -5,6 +5,11 @@ description: "Review Rust public APIs for fluent, staged workflow ergonomics wit
 
 # rust-fluent-api-design
 
+Rust-orchestrator passes use the shared [execution-v1 contract](../rust-review-orchestrator/references/execution-v1.md).
+
+For direct invocation, read [references/standalone-workflow.md](references/standalone-workflow.md)
+for scope discovery and the complete standalone report.
+
 Review Rust APIs for fluent workflow ergonomics: staged chains that read in domain order, make the happy path obvious, and preserve explicit fallibility and mutation boundaries.
 
 This skill is a review lens, not a blanket mandate. Recommend fluent APIs when they improve correctness, orthogonality, or caller ergonomics; avoid forcing ordinary accessors, queries, primitive helpers, or one-step operations into chains.
@@ -125,30 +130,3 @@ When recommending changes, be specific about the API shape:
 - add tests that prove rejected terminal operations have no unwanted side effects
 
 Avoid broad rewrites. Prefer small, staged API improvements that preserve correctness and make the workflow easier to copy.
-
-## Output Format
-
-### Scope
-
-- State whether the review covers changed APIs, a specific public workflow, or a broader API baseline.
-
-### Summary
-
-- PASS
-- NEEDS IMPROVEMENT
-- FAIL
-
-### Findings
-
-- Ordered by impact.
-- Include file and line references.
-- Explain whether the issue is workflow order, hidden mutation, redundant public surface, lost validation evidence, or public-sample ergonomics.
-
-### Suggested Fixes
-
-- Give concrete method/type names and the intended chain shape.
-- Name tests or examples that should change.
-
-### Optional Improvements
-
-- List non-blocking ergonomic polish separately from correctness or API-surface concerns.

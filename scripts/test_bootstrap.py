@@ -43,6 +43,7 @@ def test_bootstrap_installs_updater_by_package_and_checks_its_executable(tmp_pat
     (checkout / "bin").mkdir(parents=True)
     shutil.copy2(repository / "bin" / "resolve-just-version.sh", checkout / "bin")
     shutil.copy2(repository / "bin" / "restow-agents.sh", checkout / "bin")
+    shutil.copy2(repository / "pyproject.toml", checkout)
     source = (repository / "justfile").read_text(encoding="utf-8")
     fixture = "\n".join('cargo_update_version := "22.1.1"' if line.startswith("cargo_update_version :=") else line for line in source.splitlines())
     (checkout / "justfile").write_text(f"{fixture}\n", encoding="utf-8")
@@ -73,7 +74,7 @@ def test_bootstrap_installs_updater_by_package_and_checks_its_executable(tmp_pat
         "printf '#!/bin/bash\\necho cargo-install-update 22.1.1\\n' > \"$FAKE_PREFIX/bin/cargo-install-update\"\n"
         'chmod +x "$FAKE_PREFIX/bin/cargo-install-update"',
     )
-    for tool in ("dprint", "rumdl", "zizmor"):
+    for tool in ("dprint", "rumdl"):
         version = subprocess.run(  # noqa: S603 - resolved Just executable and fixed pin queries.
             [just, "--justfile", str(checkout / "justfile"), "--evaluate", f"{tool}_version"], check=True, capture_output=True, text=True
         ).stdout.strip()

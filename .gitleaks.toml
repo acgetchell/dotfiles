@@ -1,0 +1,20 @@
+# Keep default detectors. Each exception requires both a path and exact nonsecret value.
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "Review-routing category names are not API credentials"
+condition = "AND"
+paths = ['''(?:^|/)agents/\.agents/skills/(?:cpp|rust)-review-orchestrator/references/check-routing\.md$''']
+regexTarget = "secret"
+regexes = ['''^Validation/Test$''']
+
+[[rules.allowlists]]
+description = "Historical README signing-key placeholder, never a real credential"
+condition = "AND"
+paths = ['''(?:^|/)README\.md$''']
+regexTarget = "secret"
+regexes = ['''^ABCDEF123456$''']

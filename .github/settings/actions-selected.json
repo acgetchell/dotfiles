@@ -1,0 +1,15 @@
+{
+  "github_owned_allowed": false,
+  "verified_allowed": false,
+  "patterns_allowed": [
+    "actions/checkout@*",
+    "actions/setup-python@*",
+    "actions/cache@*",
+    "astral-sh/setup-uv@*",
+    "github/codeql-action/upload-sarif@*",
+    "taiki-e/cache-cargo-install-action@*",
+    "zizmorcore/zizmor-action@*",
+    "dependabot/fetch-metadata@*",
+    "acgetchell/research-repo-tools/.github/workflows/dependabot-approve.yml@*"
+  ]
+}

@@ -5,6 +5,8 @@ description: "Audit Rust scientific and numerical code for mathematical validity
 
 # Rust Scientific Correctness
 
+Rust-orchestrator passes use the shared [execution-v1 contract](../rust-review-orchestrator/references/execution-v1.md).
+
 Audit whether Rust scientific software answers the scientific question it claims to answer. A clean build, plausible output, or agreement between two paths that share the same assumptions is not sufficient evidence of correctness.
 
 ## Ownership Boundary
@@ -45,9 +47,7 @@ When no reference matches, apply the portable workflow below and derive concrete
 
 Include nearby code that owns a scientific invariant even when it is outside the initial diff. Typical scope includes formulas, kernels, predicates, factorizations, solvers, exact-arithmetic paths, conversions, tolerances, random samplers, scientific fixtures, properties, examples, benchmarks, and documentation claims.
 
-When invoked directly without an exact parent scope and result contract, read
-[`references/standalone-workflow.md`](references/standalone-workflow.md).
-Review-graph and Rust-orchestrator dispatches already own that information.
+For direct invocation, read [the standalone workflow](references/standalone-workflow.md).
 
 ## Workflow
 
