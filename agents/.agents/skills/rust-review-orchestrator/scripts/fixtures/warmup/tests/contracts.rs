@@ -1,4 +1,4 @@
-use warmup_fixture::{adaptive::WarmupSteps, prelude::*};
+use warmup_fixture::{adaptive::{InvalidSteps, WarmupSteps}, prelude::*};
 
 struct Fixed(bool);
 impl Proposal for Fixed {
@@ -11,8 +11,8 @@ impl Proposal for Fixed {
 
 #[test]
 fn transition_and_boundary_contracts() {
-    assert!(WarmupSteps::new(0).is_err());
-    assert!(WarmupSteps::new(1001).is_err());
+    assert!(matches!(WarmupSteps::new(0), Err(InvalidSteps(0))));
+    assert!(matches!(WarmupSteps::new(1001), Err(InvalidSteps(1001))));
     let steps = WarmupSteps::new(100).unwrap();
     for accepted in [true, false] {
         for delayed in [true, false] {

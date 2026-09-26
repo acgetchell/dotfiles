@@ -104,18 +104,37 @@ def measure(root: Path, output: Path, *, baseline: bool, scope: str) -> dict[str
     }
 
 
+def library_artifact(cargo_output: str) -> Path:
+    """Find the fixture library from Cargo messages, independent of target layout."""
+    libraries = []
+    for line in cargo_output.splitlines():
+        if not line.startswith("{"):
+            continue
+        message = json.loads(line)
+        if message.get("reason") == "build-finished":
+            break
+        if message.get("reason") == "compiler-artifact" and message["target"]["name"] == "warmup_fixture":
+            libraries.extend(Path(name) for name in message["filenames"] if name.endswith(".rlib"))
+    if len(libraries) != 1:
+        raise ValueError("Expected one warmup_fixture rlib artifact from Cargo")  # noqa: EM101
+    return libraries[0]
+
+
 def validate_source(output: Path, source: Path = SCRIPT / "fixtures/warmup") -> dict[str, Any]:
     """Run shared source validation and the independent downstream callback probe."""
     fingerprints = {path.relative_to(source).as_posix(): digest(path.read_bytes()) for path in sorted(source.rglob("*")) if path.is_file()}
     source_bytes = sum(path.stat().st_size for path in source.rglob("*") if path.is_file())
     target = output / "target"
-    command = ["cargo", "test", "--locked", "--offline", "--target-dir", str(target)]
+    toolchain = run(["rustc", "-vV"], source)
+    (host,) = (line.removeprefix("host: ") for line in toolchain.splitlines() if line.startswith("host: "))
+    # Both the tests and the separately compiled probe execute on this host.
+    command = ["cargo", "test", "--locked", "--offline", "--target", host, "--target-dir", str(target), "--message-format=json"]
     tests = run(command, source)
     (output / "validation.txt").write_text(tests)
-    (library,) = (target / "debug/deps").glob("libwarmup_fixture-*.rlib")
+    library = library_artifact(tests)
     probe = SCRIPT / "fixtures/callback_probe.rs"
     executable = output / "callback-probe"
-    run(["rustc", "--edition=2024", str(probe), "--extern", f"warmup_fixture={library}", "-o", str(executable)], source)
+    run(["rustc", "--edition=2024", "--target", host, str(probe), "--extern", f"warmup_fixture={library}", "-o", str(executable)], source)
     callbacks = run([str(executable)], source)
     (output / "callbacks.txt").write_text(callbacks)
     return {
@@ -124,7 +143,7 @@ def validate_source(output: Path, source: Path = SCRIPT / "fixtures/warmup") -> 
         "source_read_bytes": source_bytes,
         "probe_bytes": probe.stat().st_size,
         "probe_sha256": digest(probe.read_bytes()),
-        "toolchain": run(["rustc", "-vV"], source),
+        "toolchain": toolchain,
         "command": command,
         "cwd": str(source),
         "features": "default (none)",

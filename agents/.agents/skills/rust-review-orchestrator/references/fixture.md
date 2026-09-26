@@ -12,6 +12,10 @@ or changes Git state. Output goes to a fresh temporary directory. The baseline
 must exist locally; supply another locally available revision as the recipe's
 argument only for an intentionally different comparison.
 
+The tests and callback probe build explicitly for rustc's host target because
+they execute locally, overriding Cargo target defaults. The library path comes
+from Cargo's artifact messages rather than an assumed target-directory layout.
+
 ## What Is Measured
 
 `report.json` records the exact 14 selected skills from #84, seven explicit

@@ -69,8 +69,10 @@ already owns that machine provisioning through bootstrap/Homebrew/Cargo, so
 `just setup` composes it with shared `toolchain sync` rather than introducing a
 second owner. Managed scanner binaries and cleanup use the package's standard
 `~/.cache/research-repo-tools` store. Supply `clean --keep-root PATH` for other
-consumers sharing it. v0.1.7 cleanup rejects relative paths in uv's Python
-inventory, so keep a custom store outside the checkout.
+consumers sharing it. To use a custom store, set `RESEARCH_REPO_TOOLS_HOME` to an
+absolute path. The store may be inside or outside the checkout.
+v0.1.7 cleanup still rejects relative paths returned by uv's Python inventory;
+this can occur even when the custom store path is absolute.
 
 The Gitleaks policy keeps all default detectors. Two rule-specific exceptions
 match only the exact `Validation/Test` routing label in the two review-routing
