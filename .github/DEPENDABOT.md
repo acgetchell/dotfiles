@@ -97,7 +97,7 @@ passed. Live settings were read again on September 28 (Pacific time):
 - Actions defaults remain read-only; Actions approval, native auto-merge, and
   squash merging are enabled.
 - Selected actions and full SHA pinning remain enforced. The allowlist matches
-  `settings/actions-selected.json`, including the two shared-workflow entries.
+  `.github/settings/actions-selected.json`, including the two shared-workflow entries.
 - Ruleset `17625990` and the effective `main` rules require one approval, stale
   review dismissal, resolved threads, and strict `verify` and `CodeRabbit`
   checks. The existing administrator bypass remains unchanged; the approval
