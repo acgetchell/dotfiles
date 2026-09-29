@@ -5,9 +5,9 @@ description: "Review and fix an active repository documentation suite for naviga
 
 # Repository Documentation Review
 
-Review the active documentation suite as a coherent product. Keep instructions,
-navigation, operational claims, generated outputs, and source-owned facts aligned
-without assuming that the repository is a Rust crate or scientific software.
+Align active documentation's instructions, navigation, operational claims,
+generated outputs, and source-owned facts without assuming Rust or scientific
+software.
 
 ## Ground Rules
 
@@ -15,10 +15,9 @@ without assuming that the repository is a Rust crate or scientific software.
   files before editing.
 - Do not mutate git state unless the user explicitly asks in the current turn.
 - Preserve unrelated worktree changes and use read-only git discovery.
-- Treat source code, configuration, inventories, fixtures, and generators as the
-  authorities for facts they own. Do not silently change supplied data to make prose
-  agree; preserve it and report discrepancies unless the user asks to change the
-  authoritative source.
+- Treat source code, configuration, inventories, fixtures, and generators as
+  authoritative. Preserve supplied data and report discrepancies unless the user
+  asks to change its source.
 - Never hand-edit generated regions or build output. Update the declared source or
   generator, regenerate through the repository command, and include the output when
   repository guidance requires it.
@@ -27,8 +26,7 @@ without assuming that the repository is a Rust crate or scientific software.
 
 ## Scope
 
-Inventory the documentation surface that actually exists. Common active documents
-include:
+Inventory existing documentation, including:
 
 - `README*`, `AGENTS.md`, `CONTRIBUTING*`, `SECURITY*`, and `CODE_OF_CONDUCT*`
 - active `docs/**` content, including runbooks, architecture guides, ADRs, policies,
@@ -84,11 +82,17 @@ Check each applicable document for:
 - consistent terminology, scope, ownership, and cross-references
 - accurate status, support, compatibility, and limitation statements
 - reachable navigation, valid local links, and non-duplicative placement
+- active documentation links independent of the library or package version;
+  release automation must preserve stable destinations instead of rewriting them
+  to release tags or version-specific API URLs
 - clear generated-file boundaries and reproducible regeneration instructions
 - repository-consistent headings, code fences, line length, and Markdown style
 
-Distinguish intentional historical examples, versioned migration notes, and archive
-content from stale current guidance. Do not perform blind version or name replacement.
+Use relative links within a documentation tree and stable default-branch or
+published API aliases where absolute URLs are needed. Keep active navigation
+working before a release tag exists. Preserve version-specific destinations for
+historical evidence, changelogs, citations, and explicitly versioned documentation.
+Distinguish these from stale current guidance; do not perform blind replacements.
 
 When reviewing README entry points or links reused in generated documentation and
 package pages, read [README navigation](references/readme-navigation.md).

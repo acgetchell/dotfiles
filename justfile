@@ -11,7 +11,7 @@ cargo_update_version := "22.1.1"
 cargo_version_pattern := '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?'
 dprint_version := "0.57.4"
 just_version := "1.58.0"
-rumdl_version := "0.2.76"
+rumdl_version := "0.2.77"
 # Bootstrap without Python; pyproject.toml is the single uv pin authority.
 uv_version := `sed -nE 's/^required-version = "==([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' pyproject.toml`
 
@@ -242,8 +242,10 @@ security-osv: _ensure-uv
 security-secrets: _ensure-uv
     uv run --locked --group dev research-repo-tools security secrets
 
-# Online vulnerability data and managed scanners make this a separate explicit gate.
-security-check: security-osv security-secrets
+# Scan dependency vulnerabilities and secrets with the pinned OSV/Gitleaks tools.
+security: security-osv security-secrets
+
+alias security-check := security
 
 setup:
     DOTFILES_DIR="$PWD" bin/bootstrap.sh

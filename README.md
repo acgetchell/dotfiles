@@ -189,7 +189,7 @@ When a published shared-tools release adopts Python 3.15, migrate with its versi
 just shared-python-plan VERSION
 just shared-python-update VERSION
 just ci
-just security-check
+just security
 ```
 
 The shared package updates the Python selector, dependency-only runtime requirement,
@@ -199,10 +199,13 @@ A new upstream release takes effect here through this explicit pinned migration.
 Homebrew's unversioned `python` formula serves the host; uv selects repository Python.
 
 `just tools-sync` installs checksum-verified OSV/Gitleaks into the package-owned
-`~/.cache/research-repo-tools` store; `just tools-check` verifies them. `just security-check`
+`~/.cache/research-repo-tools` store; `just tools-check` verifies them. `just security`
 scans the real `uv.lock`, full reachable Git history, and current files, writing redacted
 reports under `target/security`. It requires online advisory access and runs in the
-required CI `verify` job. `just clean` previews obsolete managed installations;
+required CI `verify` job. `just security-check` remains an alias. Run
+`just security-osv` or `just security-secrets` for either scan separately;
+`just update-security-tools` updates their managed pins and installations.
+`just clean` previews obsolete managed installations;
 `just clean --apply` removes eligible package-owned candidates after checking again.
 Pass `--keep-root PATH` for other consumers that share this store.
 

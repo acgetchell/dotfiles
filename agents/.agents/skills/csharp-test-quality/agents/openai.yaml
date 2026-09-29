@@ -1,0 +1,4 @@
+interface:
+  display_name: "C# Test Quality"
+  short_description: "xUnit and ASP.NET behavior-focused test evidence"
+  default_prompt: "Use $csharp-test-quality to improve the relevant boundaries and behavior in this project."

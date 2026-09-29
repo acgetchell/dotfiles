@@ -98,7 +98,7 @@ jobs:
         run: just tools-sync
 
       - name: Audit dependencies and secrets
-        run: just security-check
+        run: just security
 
       - name: Run CI checks
         run: just ci

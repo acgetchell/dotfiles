@@ -85,26 +85,61 @@ gh run view RUN_ID --json headSha,status,conclusion,url
 
 If `main` advances before dispatch, that run does not validate the earlier merge.
 Do not close #85 until both ecosystems and the hosted protections are evidenced.
-No open Dependabot PR was available during initial implementation; hosted rollout
-and merge evidence remain pending.
 
-## Retire the old credential
+### Verified rollout: September 28, 2026
 
-After the deployed default branch no longer uses the old review-request caller,
-inventory all workflow references and the Actions, Dependabot, and applicable
-environment secret names. The initial inventory found the old credential in
-both repository Actions and Dependabot stores. Remove only those unused
-repository secrets after confirming no remaining consumer:
+The caller was deployed by [PR #86](https://github.com/acgetchell/dotfiles/pull/86)
+at `43ea646a2f526c8ba1545bed01b9070a314d0701`. Its ordinary-PR
+[CI](https://github.com/acgetchell/dotfiles/actions/runs/36279915632) and
+[default-branch CI](https://github.com/acgetchell/dotfiles/actions/runs/36280315217)
+passed. Live settings were read again on September 28 (Pacific time):
 
-```sh
-rg -n 'secrets\.CODERABBIT_REVIEW_TOKEN' .github/workflows
-gh secret list --repo acgetchell/dotfiles --app actions
-gh secret list --repo acgetchell/dotfiles --app dependabot
-gh api repos/acgetchell/dotfiles/environments --jq '.environments[].name'
-gh secret delete CODERABBIT_REVIEW_TOKEN --repo acgetchell/dotfiles --app actions
-gh secret delete CODERABBIT_REVIEW_TOKEN --repo acgetchell/dotfiles --app dependabot
-```
+- Actions defaults remain read-only; Actions approval, native auto-merge, and
+  squash merging are enabled.
+- Selected actions and full SHA pinning remain enforced. The allowlist matches
+  `.github/settings/actions-selected.json`, including the two shared-workflow entries.
+- Ruleset `17625990` and the effective `main` rules require one approval, stale
+  review dismissal, resolved threads, and strict `verify` and `CodeRabbit`
+  checks. The existing administrator bypass remains unchanged; the approval
+  job is optional.
 
-Inventory any returned environment with `gh secret list --env NAME` before
-removing an unused environment copy. Do not revoke the underlying credential or
-remove another repository's copy. No personal token is needed by the replacement.
+The first consumer pilot was
+[PR #92](https://github.com/acgetchell/dotfiles/pull/92), a GitHub Actions minor
+update of `astral-sh/setup-uv` from 10.1.0 to 10.2.0:
+
+| Evidence | Verified record |
+|---|---|
+| Head | `9c824763bf7472abb45fc3295bc066c67371451a`, authored by `dependabot[bot]`, committed by `web-flow`, with a verified signature |
+| Approval | [Bot review](https://github.com/acgetchell/dotfiles/pull/92#pullrequestreview-5341429584) at 16:08:47 UTC on September 28; `commit_id` matches the head |
+| Workflow | [Successful approval run](https://github.com/acgetchell/dotfiles/actions/runs/36448882262); `referenced_workflows` confirms shared SHA `0a02204d4a889dfc97f55286c008397ced05d6ad` |
+| Merge gates | [PR CI](https://github.com/acgetchell/dotfiles/actions/runs/36448881588) passed at 16:17:38 UTC; `CodeRabbit` also succeeded |
+| Auto-merge | `github-actions[bot]` enabled native `SQUASH` at 16:08:49 UTC and merged at 16:23:45 UTC, after required checks passed |
+| Merge commit | [`e656bc4fbfd37e7c0b429b6a02923b9c627b47e3`](https://github.com/acgetchell/dotfiles/commit/e656bc4fbfd37e7c0b429b6a02923b9c627b47e3) |
+| Default branch | [Dispatched CI](https://github.com/acgetchell/dotfiles/actions/runs/36516931876) passed on that exact merge SHA on September 29 UTC (September 28 Pacific) |
+
+### Remaining hosted evidence
+
+The September 28 [uv updater run](https://github.com/acgetchell/dotfiles/actions/runs/36449870462)
+failed before creating a PR. While updating `nbformat`, Dependabot reported
+`tool_version_not_supported`: the repository required uv `==0.12.19`, but the
+hosted updater supported `0.12.18`. This is an updater/runtime mismatch; the
+approval workflow was not reached. Request a fresh check from the repository's
+Dependabot updates page once the hosted image supports the required version.
+The failed dynamic run cannot be retried with `gh run rerun`.
+
+Issue #85 remains open until a real dotfiles `uv` PR receives current-head bot
+approval and native auto-merge, followed by CI on its actual merge commit.
+Hosted evidence is also still needed for a preserving base merge, rejection of
+a dependency-changing base merge or unexpected file, and dismissal of stale
+approval after a changed head. PR #92 had a single commit and does not establish
+those mutation cases. Keep generic regression tests in `research-repo-tools`;
+the four local consumer tests cover the caller and repository policy only.
+
+## Retired credential
+
+The September 28 inventory confirmed that the deployed caller uses no personal
+token, the repository Actions and Dependabot secret stores are empty, and no
+repository environments exist. `CODERABBIT_REVIEW_TOKEN` is therefore already
+absent from the applicable dotfiles stores. No credential deletion or revocation
+was needed during this verification. Credentials belonging to other repositories
+are outside this retirement; CodeRabbit remains a required status check.

@@ -1,0 +1,4 @@
+interface:
+  display_name: "C# Service Boundaries"
+  short_description: "ASP.NET identity, failures, and reliable service boundaries"
+  default_prompt: "Use $csharp-service-boundaries to improve the relevant boundaries and behavior in this project."

@@ -32,7 +32,7 @@ When upstream publishes the desired Python baseline, run:
 just shared-python-plan VERSION
 just shared-python-update VERSION
 just ci
-just security-check
+just security
 ```
 
 Preview resolves a temporary candidate and may download packages or Python.
@@ -79,7 +79,9 @@ match only the exact `Validation/Test` routing label in the two review-routing
 references and the historical `ABCDEF123456` README placeholder. Neither skips
 a file or commit; other credentials in those locations still fail the scan.
 
-`just ci` is the local validation tier. `just security-check` is the explicit
-network/scanner tier, also required inside the hosted `verify` job. The dedicated
+`just ci` is the local validation tier. `just security` is the explicit
+network/scanner tier, also required inside the hosted `verify` job;
+`just security-check` remains a compatibility alias. Use `just security-osv` and
+`just security-secrets` for individual scans. The dedicated
 zizmor workflow tests authenticated online audits and upload permissions; a local
 offline pass does not establish those hosted results.
