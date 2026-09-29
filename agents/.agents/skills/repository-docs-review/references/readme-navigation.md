@@ -15,3 +15,10 @@
 - Check the intended version or revision of each destination and distinguish local
   rendering evidence from published availability. Route ecosystem-specific build,
   release, and API-link details to the relevant documentation specialist.
+- Keep active README navigation independent of the package version: use the
+  repository's default branch for current guides, source, and policies, and a
+  stable alias such as docs.rs `latest` for published APIs. Check release updaters
+  and their tests so the next release cannot restore version-dependent links.
+  Verify destinations before tagging; rendering Markdown alone does not establish
+  that linked pages exist. Retain immutable image and historical evidence links
+  when their purpose requires provenance.

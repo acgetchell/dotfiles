@@ -1,0 +1,4 @@
+interface:
+  display_name: "JavaScript Test Quality"
+  short_description: "Vitest, Testing Library, and MSW behavior tests"
+  default_prompt: "Use $javascript-test-quality to improve the relevant boundaries and behavior in this project."

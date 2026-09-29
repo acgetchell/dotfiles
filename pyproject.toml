@@ -199,12 +199,12 @@ python_functions = ["test_*"]
 dev = [
   { include-group = "tooling" },
   "actionlint-py==1.7.12.25",
-  "nbformat==5.10.4",
+  "nbformat==5.11.1",
   "PyYAML>=6.0",
   "pytest==9.1.1",
-  "ruff==0.16.8",
-  "semgrep==1.177.0",
-  "ty==0.0.83",
+  "ruff==0.16.9",
+  "semgrep==1.178.0",
+  "ty==0.0.84",
   "yamllint==1.38.0",
   "zizmor==1.30.1",
 ]
