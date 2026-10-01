@@ -55,6 +55,9 @@ approval.
 
 ## Execute
 
+Use [execution timing](execution-timing.md) for the portable command runner,
+receipt artifacts, and asynchronous polling rules.
+
 Verify every field and run the source-state command before execution. Execute
 each coalesced command once and map its accepted evidence to every owned
 requirement. Stop dependent commands after prerequisite failure; continue only
