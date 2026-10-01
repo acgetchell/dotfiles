@@ -9,9 +9,9 @@ python_fixture_paths := "tests/semgrep"
 python_primary_paths := "agents/.agents/skills scripts"
 cargo_update_version := "22.1.1"
 cargo_version_pattern := '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?'
-dprint_version := "0.57.4"
+dprint_version := "0.58.0"
 just_version := "1.58.0"
-rumdl_version := "0.2.77"
+rumdl_version := "0.2.78"
 # Bootstrap without Python; pyproject.toml is the single uv pin authority.
 uv_version := `sed -nE 's/^required-version = "==([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' pyproject.toml`
 
@@ -227,6 +227,34 @@ tools-sync: _ensure-uv
 
 tools-check: _ensure-uv
     uv run --locked --no-sync --no-python-downloads research-repo-tools toolchain check
+
+# Inject a 1Password reference for one command; OP_ACCOUNT can select an account.
+[positional-arguments]
+typesafe-local secret_ref +command:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ "$1" != op://* ]]; then
+        echo "Expected a 1Password secret reference (op://vault/item/field), not an API key." >&2
+        exit 2
+    fi
+    command -v op >/dev/null || { echo "Install 1Password CLI before using typesafe-local." >&2; exit 1; }
+    export TYPESAFE_API_KEY="$1"
+    shift
+    exec op run -- "$@"
+
+# Check an injected TypeSafe credential without sending code or making an inference.
+typesafe-check: _ensure-uv
+    uv run --locked python scripts/typesafe_check.py
+
+# Shadow routing pilot; --live sends the explicit scope to TypeSafe, otherwise offline.
+[positional-arguments]
+review-routing-experiment *args: _ensure-uv
+    uv run --locked python agents/.agents/skills/review-graph/scripts/review_graph_routing_experiment.py "$@"
+
+# Per-stage request accounting, including partial or interrupted runs.
+[positional-arguments]
+review-usage *args: _ensure-uv
+    uv run --locked python agents/.agents/skills/review-graph/scripts/review_graph_usage.py "$@"
 
 [positional-arguments]
 clean *args: _ensure-uv

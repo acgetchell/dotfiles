@@ -9,7 +9,10 @@ authors = [{ name = "Adam Getchell", email = "adam@adamgetchell.org" }]
 
 [tool.uv]
 package = false
-required-version = "==0.12.19"
+required-version = "==0.12.21"
+# Semgrep 1.178.0 requires vulnerable PyJWT ~=2.13.0. Remove this override when
+# its dependency range permits the fixes in PyJWT 2.15.0 (GHSA-42vr-xj54-vc7v).
+override-dependencies = ["pyjwt[crypto]==2.15.0"]
 
 [tool.research-repo-tools.toolchain]
 inherit-python = true

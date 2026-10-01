@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "description": "Synthetic pilot. Partial labels are provisional, not independently adjudicated. Baselines are frozen coordinator judgments; unlabeled candidates remain unknown.",
+  "cases": [
+    {
+      "id": "python-metropolis-transition",
+      "split": "development",
+      "label_status": "provisional",
+      "scope": {
+        "request": "Review this complete numerical transition helper for scientific correctness and boundary handling.",
+        "complete": true,
+        "context": "The sampler targets exp(-energy). Proposals are asymmetric; log_q_reverse_minus_forward is log q(old|new) minus log q(new|old). All inputs are finite real scalars; uniform01 is in [0,1). No CLI, notebooks, packaging or tests are in scope.",
+        "files": [{"path": "sampler/accept.py", "complete": true, "content": "import math\n\ndef accept(delta_energy, log_q_reverse_minus_forward, uniform01):\n    log_alpha = -delta_energy + log_q_reverse_minus_forward\n    return uniform01 == 0 or math.log(uniform01) < min(0.0, log_alpha)\n"}]
+      },
+      "baseline": {"method": "frozen-coordinator-pilot", "decisions": {"python.scientific": true, "python.parse": true, "python.cli": false, "python.notebook": false, "cpp.concurrency": false}},
+      "expected": {"python.scientific": true, "python.parse": true, "python.cli": false, "python.notebook": false, "cpp.concurrency": false}
+    },
+    {
+      "id": "rust-transactional-index",
+      "split": "development",
+      "label_status": "provisional",
+      "scope": {
+        "request": "Review a mutation helper and its dependent data representation for invariant preservation and failure behavior.",
+        "complete": true,
+        "context": "Every ID in by_name must reference a live entry in values. A duplicate must leave the registry unchanged. This is an internal, single-threaded helper.",
+        "files": [
+          {"path": "src/registry.rs", "complete": true, "content": "use std::collections::HashMap;\nstruct Registry { values: Vec<String>, by_name: HashMap<String, usize> }\nimpl Registry {\n fn insert(&mut self, name: String) -> Result<usize, &'static str> {\n  if self.by_name.contains_key(&name) { return Err(\"duplicate\"); }\n  let id = self.values.len();\n  self.values.push(name.clone());\n  self.by_name.insert(name, id);\n  Ok(id)\n }\n}\n"}
+        ]
+      },
+      "baseline": {"method": "frozen-coordinator-pilot", "decisions": {"rust.invariants": true, "rust.errors": true, "rust.concurrency": false, "python.scientific": false}},
+      "expected": {"rust.invariants": true, "rust.errors": true, "rust.concurrency": false, "python.scientific": false}
+    },
+    {
+      "id": "scientific-ci-documentation",
+      "split": "development",
+      "label_status": "provisional",
+      "scope": {
+        "request": "Review the documented numerical claim and the command used to check it, including their cross-file relationship.",
+        "complete": true,
+        "context": "This is operational scientific-software documentation, not an academic manuscript. The shown content is the complete changed scope.",
+        "files": [
+          {"path": "docs/VALIDATION.md", "complete": true, "content": "# Validation\nRun `just test` to establish detailed balance for all supported proposals. The test checks 100 seeded sample transitions.\n"},
+          {"path": "justfile", "complete": true, "content": "test:\n    uv run pytest tests/test_balance.py\n"}
+        ]
+      },
+      "baseline": {"method": "frozen-coordinator-pilot", "decisions": {"repo.tooling": true, "docs.repository": true, "docs.scientific-software": true, "docs.authorship": false, "rust.concurrency": false}},
+      "expected": {"repo.tooling": true, "docs.repository": true, "docs.scientific-software": true, "docs.authorship": false, "rust.concurrency": false}
+    },
+    {
+      "id": "cpp-scientific-test",
+      "split": "held-out",
+      "label_status": "provisional",
+      "scope": {
+        "request": "Review this numerical unit test and the mathematical contract it asserts.",
+        "complete": true,
+        "context": "orientation(a,b,c) is the floating-point signed determinant, not an exact predicate. Points may be arbitrarily close to collinear. No concurrency or Python code is involved.",
+        "files": [{"path": "tests/orientation.cpp", "complete": true, "content": "TEST_CASE(\"orientation\") {\n const Point a{0., 0.}, b{1., 1.}, c{2., 2. + 1e-15};\n CHECK(orientation(a,b,c) > 0.);\n}\n"}]
+      },
+      "baseline": {"method": "frozen-coordinator-pilot", "decisions": {"cpp.tests": true, "cpp.scientific": true, "cpp.concurrency": false, "python.scientific": false}},
+      "expected": {"cpp.tests": true, "cpp.scientific": true, "cpp.concurrency": false, "python.scientific": false}
+    }
+  ]
+}

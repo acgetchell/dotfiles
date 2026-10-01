@@ -127,6 +127,15 @@ approval workflow was not reached. Request a fresh check from the repository's
 Dependabot updates page once the hosted image supports the required version.
 The failed dynamic run cannot be retried with `gh run rerun`.
 
+A [manual uv check](https://github.com/acgetchell/dotfiles/actions/runs/36526883205)
+on September 29 at 05:35 UTC (September 28 Pacific) succeeded against
+`abcb359bedc1769cd823e4414df23c6577316ca4`, but created no PR. Every direct
+dependency needed no update under the existing seven-day cooldown policy after
+the maintainer's dependency refresh. The log still reported hosted uv `0.12.18`;
+without an eligible dependency update, this run does not establish that the
+required-version mismatch is resolved. It also provides no approval or merge
+evidence. Repeat the manual check when an eligible update is available.
+
 Issue #85 remains open until a real dotfiles `uv` PR receives current-head bot
 approval and native auto-merge, followed by CI on its actual merge commit.
 Hosted evidence is also still needed for a preserving base merge, rejection of
