@@ -227,6 +227,41 @@ while not Path('release').exists():
                     process.kill()
                     process.wait()
 
+    def test_second_interrupt_reaps_child_and_records_completion(self) -> None:
+        self.launch("import time; time.sleep(30)")
+        launch = run_timed.read_launch(self.source)
+        with subprocess.Popen(launch.argv, cwd=launch.working_directory) as process:  # noqa: S603 -- fixture-owned arguments
+            wait = process.wait
+            interrupts = iter((True, True))
+
+            def interrupted_wait(timeout: float | None = None) -> int:
+                if next(interrupts, False):
+                    raise KeyboardInterrupt
+                return wait(timeout=timeout)
+
+            try:
+                with patch.object(run_timed.subprocess, "Popen", return_value=process), patch.object(process, "wait", side_effect=interrupted_wait):
+                    try:
+                        outcome = run_timed.main(["--input", str(self.source), "--receipt", str(self.receipt)])
+                    except KeyboardInterrupt:
+                        self.fail("a second interrupt escaped without recording completion")
+                self.assertEqual(outcome, 130)
+                self.assertIsNotNone(process.returncode)
+                start, finish = self.events()
+                self.assertEqual(start["event"], "attempt-started")
+                self.assertEqual(finish["event"], "finished")
+                self.assertEqual(finish["status"], "interrupted")
+                assert finish["command_started"] is True
+                self.assertEqual(finish["exit_code"], process.returncode)
+                self.assertNotEqual(finish["exit_code"], 0)
+                elapsed = finish["elapsed_seconds"]
+                assert isinstance(elapsed, float)
+                self.assertGreaterEqual(elapsed, 0)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=5)
+
     @unittest.skipIf(os.name == "nt", "native bash and zsh execution")
     def test_posix_executor_shells(self) -> None:
         for name in ("bash", "zsh"):

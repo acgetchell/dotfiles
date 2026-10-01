@@ -98,7 +98,11 @@ def execute(launch: Launch, stream: TextIO) -> int:
     try:
         code = process.wait()
     except KeyboardInterrupt:
-        code = _stop(process)
+        try:
+            code = _stop(process)
+        except KeyboardInterrupt:
+            process.kill()
+            code = process.wait()
         status = "interrupted"
     _record(
         stream,
