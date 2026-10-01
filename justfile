@@ -436,6 +436,10 @@ stow-verify: _ensure-uv
 test-python: _ensure-uv
     uv run --locked pytest
 
+# Standard-library tests also run on Windows without installing POSIX-only tools.
+test-validation-timing: _ensure-uv
+    uv run --locked --no-default-groups --no-python-downloads python -m unittest discover -s agents/.agents/skills/review-validator/scripts -p test_run_timed.py -v
+
 toml-check: _ensure-uv
     uv run --locked --group dev research-repo-tools files run --include '*.toml' -- python -c 'import sys, tomllib; from pathlib import Path; [tomllib.loads(Path(path).read_text()) for path in sys.argv[1:]]'
 
