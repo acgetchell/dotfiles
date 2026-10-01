@@ -30,7 +30,8 @@ contract with `worker_created: false`.
   capture branch scope.
 - Run `capture_scope.py` before routing and after each authorized repair batch.
 - Bootstrap the capture and compact template with
-  `review_graph_bootstrap.py`; do not transcribe fingerprint fields.
+  `review_graph_bootstrap.py`; follow its compact receipt and `next_command`.
+  Keep full proof artifacts on disk; use `--full-output` only for diagnosis.
 - Fix only when authorized and never mutate Git state.
 - Keep all proof artifacts outside the reviewed repository.
 
@@ -65,7 +66,7 @@ Dispatch selected leaves with exact skills and owned paths. Workers stream
 `ReviewPayload` audit bytes or `SynthesisPayload` synthesis bytes through dispatch-bound review and persistence
 commands; the runtime validates before writing, binds approval retries, and
 atomically publishes. They return the publication receipt; `compile-node` reads
-the bound bytes without a second conversational copy. Workers do not author
+the bound bytes without a second conversational copy. Audit and synthesis workers do not author
 fingerprints, digests, evidence IDs, execution metadata, canonical Markdown,
 or machine-evidence JSON. Materialize dispatch bases from the accepted plan
 with `review_graph_runtime.py materialize-dispatches`; never reconstruct planner-owned fields.
@@ -86,8 +87,9 @@ Do not splice a dispatch or author compiler identities. Accept only when the
 compiler and evidence verifier succeed.
 
 For a concrete change target, run `repository-independent-review` fresh and
-conclusion-blind. Compile its six native sections through `compile-node`; never
-send it specialist findings or synthesis context.
+conclusion-blind. It supplies structured judgments and observed fingerprints;
+the compiler renders native sections and verifies them through `compile-node`.
+Never send it specialist findings or synthesis context.
 
 Fix nodes are serialized. Batch compatible fixes, recapture once per batch,
 invalidate affected evidence, reroute changed surfaces, and rerun only stale or

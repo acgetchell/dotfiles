@@ -8,6 +8,7 @@ Public contracts:
 
 - `schemas/planning-input-v1.schema.json`
 - `schemas/review-payload-v1.schema.json`
+- `schemas/independent-payload-v1.schema.json`
 - `schemas/synthesis-payload-v1.schema.json`
 - `schemas/validation-payload-v2.schema.json`
 - `schemas/runtime-operation-inputs-v1.schema.json`
@@ -21,8 +22,11 @@ uv run --locked python scripts/review_graph_bootstrap.py \
   --capture <capture.json> --input <template.json> --output <planning.json>
 ```
 
-Bootstrap binds capture identities with JSON-path diagnostics and emits stage
-inputs. `review_graph_plan.py --input` prints the plan.
+Bootstrap saves complete stage inputs and prints a receipt with `output.path`,
+`output.digest`, blockers, node count, and a directly executable `next_command`
+argument array (null if blocked). Pass its saved bundle directly to materialization.
+Runtime commands also default to compact receipts; full proofs stay on disk.
+`--full-output` prints complete results for diagnosis. See [transport details](runtime-safety.md#compact-transport).
 
 Every graph requires `baseline: true` repository validation; branch `just ci`
 retains `requested_scope: branch`.
@@ -55,27 +59,11 @@ Observation lists use digest-bound references. Telemetry records context bytes
 and overlap; supply `concurrent_worker_limit` for wave projections. Unknown actual
 reads/timing remain null. See the [repeatable benchmark](dispatch-overhead.md).
 
-`journal-append` serializes `in-flight`, `accepted`, `blocked`, `invalidated`,
-and terminal `awaiting-replan` states; acceptance requires compiled evidence.
-Its CLI field contract is:
-
-| Status | Artifact + metadata | Kind | Reason |
-| --- | --- | --- | --- |
-| `in-flight` | forbidden | forbidden | forbidden |
-| `accepted` | required | optional with evidence | forbidden |
-| `blocked` | optional as a pair | optional with evidence | required |
-| `invalidated` | forbidden | forbidden | required |
-| `awaiting-replan` | forbidden | forbidden | required |
-
-Reserve ready dispatches; append `in-flight` only after creation succeeds.
-Final results may not release capacity immediately. On capacity-only failure,
-retain the reservation, wait at most 30 seconds for progress, and retry once.
-Then record attempts and apply profile fallback/resume. Never probe with
-throwaway workers, replay accepted work, or claim execution without a worker.
-For unstarted adaptive nodes, `fallback-to-coordinator` takes lifecycle input plus
-`node_id`, `worker_created: false`, `reason`, `artifact_store`, and flags
-`--dispatches`, `--journal`, `--current-capture`. Follow returned paths; other
-dispatches/artifacts remain unchanged. Never rematerialize for one executor.
+Journal transitions require verified evidence for acceptance. Reserve ready nodes;
+record `in-flight` after worker creation. For capacity-only failures, wait at most
+30 seconds and retry once before profile fallback/resume. Follow
+[journal and fallback details](runtime-safety.md#journal-and-fallback); never probe
+with throwaway workers or replay accepted work.
 
 `next-ready` treats missing/zero-byte journals as empty without writing.
 `journal-append` creates missing files if their parent exists. Nonempty journals
@@ -91,8 +79,10 @@ uv run --locked python scripts/review_graph_runtime.py next-ready \
 Journal, dispatch, and current-source identities are verified. Both legacy
 empty-reuse-field digests remain valid without rewriting records; changed
 nonempty fields/instruction digests do not. Freeze the runtime/skill checkout.
-`--output-dir` prints JSON `output_path`/`output_generation`; generation and
-content-digest filenames remain immutable across expansion and compact output.
+`--output-dir` reports `output.path`, `output.digest`, and `output_generation`;
+generation and content-digest filenames remain immutable. `--compact` additionally
+compacts the saved ready-list artifact for existing callers; it is no longer
+needed to get compact stdout.
 
 ## Review Workers
 
@@ -108,6 +98,10 @@ Return only the receipt. Python integrations use `publish_worker_payload_bytes`
 for the same transaction.
 Approval binds contract and payload; separate review/persist commands support
 approved retries. Use materialized schemas and dispatched validation IDs/digests.
+
+Audits receive shared planned-validation references and short execution summaries.
+Use dispatched requirement IDs/digests; the compiler verifies full immutable
+identities, including captured paths. Read sidecars only when needed.
 
 `compile-node` seals accepted bytes in a read-only content-addressed sibling,
 recorded in evidence metadata. The dispatch-bound path remains staging;
@@ -140,10 +134,12 @@ evidence, then journals it. `compile-review` supports diagnosis.
 
 ## Independent Review And Validation
 
-Independent workers return `repository-independent-review`'s six sections.
-`compile-node` verifies target/path provenance, line bounds, fingerprints,
-adversarial checks, findings, and handoffs; assigns identities; and emits
-enveloped evidence and journal-compatible metadata.
+Independent workers return `compact-independent-review` JSON using the dispatched
+schema/template: observations, fingerprints, attestations, findings, handoffs, and
+evidence/paths for each dispatched check ID. Preflight rejects missing evidence or
+broken bindings before publication. The compiler renders labels, verifies canonical
+payload/provenance/line bounds, and seals exact bytes. Incomplete inspection remains
+blocked. See [structured evidence](runtime-safety.md#independent-review-format).
 
 Validators read only `review-validator/references/graph-dispatch.md` and use the
 same persistence flow. Snapshot immediately before/after commands; the runtime

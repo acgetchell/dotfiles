@@ -2862,7 +2862,7 @@ def _independent_review_native_blockers(  # noqa: C901, PLR0912, PLR0915
 ) -> tuple[str, ...]:
     blockers: list[str] = []
     scope = sections["## Scope Inspected"]
-    planned_paths = ", ".join(expectation.planned_paths)
+    inspected_paths: tuple[str, ...] = ()
     blockers.extend(_native_nonempty_section_blockers(scope, section="Scope Inspected"))
     blockers.extend(_native_values_blockers(scope, section="Scope Inspected", label="Change target", expected=(expectation.change_target or "",)))
     file_values = _native_field_values(scope, "Files")
@@ -2871,7 +2871,8 @@ def _independent_review_native_blockers(  # noqa: C901, PLR0912, PLR0915
     else:
         inspected_paths, file_blockers = _native_repository_path_list(file_values[0], label="native result Scope Inspected Files")
         blockers.extend(file_blockers)
-        if not file_blockers and inspected_paths != expectation.planned_paths:
+        scope_matches = set(inspected_paths) <= set(expectation.planned_paths) if evidence.status == "blocked" else inspected_paths == expectation.planned_paths
+        if not file_blockers and not scope_matches:
             blockers.append("native result Scope Inspected Files values do not match its evidence envelope")
     findings = sections["## Findings"]
     if evidence.status == "completed":
@@ -2921,7 +2922,7 @@ def _independent_review_native_blockers(  # noqa: C901, PLR0912, PLR0915
         ("Repository state fingerprint", evidence.fingerprints.expected[2]),
         ("Skill file", expectation.skill_path),
         ("Change target", expectation.change_target or ""),
-        ("Files inspected", planned_paths),
+        ("Files inspected", ", ".join(inspected_paths) or "none"),
     ):
         blockers.extend(_native_values_blockers(envelope, section="Review Graph Envelope", label=label, expected=(expected,)))
     for ordinal, label in enumerate(("Observed scope fingerprint", "Observed worktree fingerprint", "Observed repository state fingerprint")):
@@ -3512,8 +3513,10 @@ def _review_native_result_blockers(content: bytes, expectation: ReviewEvidenceEx
         "worktree_fingerprint": evidence.fingerprints.expected[1],
     }
     if independent:
+        inspected_values = _native_field_values(sections["## Scope Inspected"], "Files")
+        inspected_paths, _ = _native_repository_path_list(inspected_values[0], label="independent Files") if len(inspected_values) == 1 else ((), ())
         expected_payload.update(
-            {"change_target": expectation.change_target, "handoff_ids": list(evidence.handoff_ids), "inspected_paths": list(expectation.planned_paths)}
+            {"change_target": expectation.change_target, "handoff_ids": list(evidence.handoff_ids), "inspected_paths": list(inspected_paths)}
         )
     for field_name, expected_value in expected_payload.items():
         if payload.get(field_name) != expected_value:

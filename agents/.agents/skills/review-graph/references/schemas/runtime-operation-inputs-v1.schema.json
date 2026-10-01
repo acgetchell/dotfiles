@@ -137,10 +137,9 @@
       "properties": {
         "dispatch": {"type": "object"},
         "handoff_attempt": {"minimum": 1, "type": "integer"},
-        "limitations": {"$ref": "#/$defs/stringArray"},
-        "status": {"enum": ["blocked", "completed", "no-findings"]}
+        "payload": {"type": "object"}
       },
-      "required": ["dispatch", "limitations", "status"],
+      "required": ["dispatch", "payload"],
       "type": "object"
     },
     "compile-node": {
@@ -238,6 +237,7 @@
         "execution_locations": {"additionalProperties": {"enum": ["worker", "coordinator"]}, "type": "object"},
         "inspection_profile": {"enum": ["independent-source", "shared-read-only"]},
         "concurrent_worker_limit": {"type": "integer", "minimum": 1},
+        "external_metadata_transitions": {"type": "array", "items": {"type": "object"}},
         "plan": {"type": "object"},
         "repository_root": {"minLength": 1, "type": "string"},
         "routing_catalog_path": {"minLength": 1, "type": "string"},
@@ -283,7 +283,7 @@
         "mode": {"enum": ["audit", "fix", "independent-review", "revalidation", "synthesis", "validation"]},
         "node_id": {"minLength": 1, "type": "string"},
         "owned_paths": {"$ref": "#/$defs/stringArray"},
-        "result_contract": {"enum": ["compact-review", "compact-validation", "native-independent-review"]},
+        "result_contract": {"enum": ["compact-review", "compact-validation", "compact-independent-review"]},
         "schema_version": {"const": 1},
         "worker_payload_path": {"minLength": 1, "type": "string"}
       },
@@ -299,7 +299,7 @@
         "mode": {"enum": ["audit", "fix", "independent-review", "revalidation", "synthesis", "validation"]},
         "node_id": {"minLength": 1, "type": "string"},
         "owned_paths": {"$ref": "#/$defs/stringArray"},
-        "result_contract": {"enum": ["compact-review", "compact-validation", "native-independent-review"]},
+        "result_contract": {"enum": ["compact-review", "compact-validation", "compact-independent-review"]},
         "schema_version": {"const": 1},
         "worker_payload_path": {"minLength": 1, "type": "string"}
       },

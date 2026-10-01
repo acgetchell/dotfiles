@@ -19,6 +19,7 @@ from typing import Any, cast
 import pytest
 from capture_scope import _scope_data
 from review_graph_bootstrap import bootstrap_document, main as bootstrap_main
+from review_graph_independent import CHECK_LABELS
 from review_graph_plan import (
     GraphPlan,
     ValidationArtifact,
@@ -36,6 +37,7 @@ from review_graph_plan import (
 from review_graph_runtime import (
     JournalEventRequest,
     _argument_parser,
+    _canonical_worker_payload,
     _git_path_status,
     _graph_plan,
     _late_validation_quality_blockers,
@@ -52,7 +54,7 @@ from review_graph_runtime import (
     build_routing_projection_document,
     build_synthesis_bundle,
     capture_workspace_snapshot,
-    compile_independent_review,
+    compile_independent_payload,
     compile_review,
     compile_validation,
     finalize_proof,
@@ -71,8 +73,6 @@ ROUTING_CATALOG = Path(__file__).resolve().parents[1] / "references" / "routing-
 RUST_ERROR_SKILL = SKILL_ROOT / "rust-error-variants" / "SKILL.md"
 VALIDATOR_SKILL = SKILL_ROOT / "review-validator" / "SKILL.md"
 VALIDATOR_CONTRACT = SKILL_ROOT / "review-validator" / "references" / "graph-dispatch.md"
-INDEPENDENT_NATIVE_EXAMPLE = SKILL_ROOT / "repository-independent-review" / "references" / "native-example.md"
-INDEPENDENT_NATIVE_POSITIVE_EXAMPLE = SKILL_ROOT / "repository-independent-review" / "references" / "native-positive-example.md"
 SCHEMA_ROOT = Path(__file__).resolve().parents[1] / "references" / "schemas"
 STATE_FIXTURE = "agents/.agents/skills/review-graph/scripts/fixtures/state.rs"
 ORDINARY_PROMPT_WORD_BUDGET = 2400
@@ -742,6 +742,9 @@ def test_bootstrap_binds_capture_and_validation_fingerprints_without_field_renam
     template_path.write_text(json.dumps(_sparse_plan_document()), encoding="utf-8")
     assert bootstrap_main(["--capture", str(capture_path), "--input", str(template_path), "--output", str(bundle_path)]) == 0
 
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["output"]["path"] == str(bundle_path)
+    assert receipt["next_command"][2] == "materialize-dispatches"
     bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
     command = shlex.split(bundle["materialization_input"]["state_verification_command"])
     assert Path(command[0]).is_absolute()
@@ -751,6 +754,10 @@ def test_bootstrap_binds_capture_and_validation_fingerprints_without_field_renam
 
     assert plan_main(["--input", str(bundle_path)]) == 0
     assert json.loads(capsys.readouterr().out) == bundle["plan"]
+    assert main(receipt["next_command"][2:]) == 0
+    materialized_receipt = json.loads(capsys.readouterr().out)
+    assert materialized_receipt["dispatches"]
+    assert Path(materialized_receipt["output"]["path"]).is_file()
 
 
 def _baseline_mutation_fixture(tmp_path: Path) -> tuple[str, Path, dict[str, Any], dict[str, Any], GraphPlan]:
@@ -2102,7 +2109,12 @@ def _assert_planned_validation_policy(audit_dispatch: dict[str, Any], validation
     assert len(planned_validation) == 1
     assert planned_validation[0]["requirement_ids"] == ["baseline-validation"]
     assert planned_validation[0]["validation_unit_id"] == validation_dispatch["validation_unit"]["node_id"]
-    assert planned_validation[0]["execution_identity"]["working_directories"] == validation_dispatch["validation_unit"]["working_directories"]
+    identity_ref = planned_validation[0]["execution_identity_reference"]
+    identity_bytes = Path(identity_ref["path"]).read_bytes()
+    assert identity_ref["digest"] == "sha256:" + hashlib.sha256(identity_bytes).hexdigest()
+    identity = json.loads(identity_bytes)
+    assert identity["working_directories"] == validation_dispatch["validation_unit"]["working_directories"]
+    assert planned_validation[0]["execution_summary"]["working_directories"] == identity["working_directories"]
     assert planned_validation[0]["planned_validation_digest"].startswith("sha256:")
     validation_requirement_shape = audit_dispatch["payload_schema"]["required_shape"]["validation_requirements"][0]
     assert {tuple(sorted(shape)) for shape in validation_requirement_shape["oneOf"]} == {
@@ -2204,6 +2216,35 @@ def _worker_input_fixture(tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any
         "state_verification_command": "capture_scope.py --mode baseline",
     }
     return document, materialize_dispatches(document)
+
+
+def _compact_independent_payload(dispatch: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": "no-findings",
+        "files_inspected": list(dispatch["planned_paths"]),
+        "branches": "Captured change and adjacent control flow inspected.",
+        "boundary_cases": "Inspection covers the dispatched adversarial cases.",
+        "tests": "Read the test contracts; execution remains validator-owned.",
+        "findings": [],
+        "no_finding_evidence": [],
+        "adversarial_checks": [
+            {
+                "check_id": check_id,
+                "evidence": "The fixture has a single unconditional transition and no external calls.",
+                "inspected_paths": list(dispatch["planned_paths"]),
+            }
+            for check_id, label in CHECK_LABELS.items()
+            if label in dispatch["adversarial_checks"]
+        ],
+        "handoffs": [],
+        "before_state": list(dispatch["source_state"]),
+        "after_state": list(dispatch["source_state"]),
+        "source_mutated": False,
+        "git_mutated": False,
+        "command_policy_attested": True,
+        "commands_executed": [],
+        "limitations": [],
+    }
 
 
 def _compact_audit_payload(entry: dict[str, Any], *, commands: tuple[str, ...] = ()) -> dict[str, Any]:
@@ -2685,9 +2726,9 @@ def test_first_next_ready_accepts_missing_or_zero_byte_journal(tmp_path: Path, c
     assert response.err == ""
     receipt = json.loads(response.out)
     assert receipt["output_generation"] == 0
-    assert Path(receipt["output_path"]).parent == output_directory
-    assert Path(receipt["output_path"]).name.startswith("next-ready.000000.")
-    ready = json.loads(Path(receipt["output_path"]).read_text(encoding="utf-8"))
+    assert Path(receipt["output"]["path"]).parent == output_directory
+    assert Path(receipt["output"]["path"]).name.startswith("next-ready.000000.")
+    ready = json.loads(Path(receipt["output"]["path"]).read_text(encoding="utf-8"))
     assert ready["ready_dispatches"]
     for entry in ready["ready_dispatches"]:
         worker_input = json.loads(Path(entry["worker_input_path"]).read_text(encoding="utf-8"))
@@ -2791,7 +2832,9 @@ def test_independent_review_dispatch_excludes_coordinator_context(tmp_path: Path
     )
     entry = next(item for item in result["dispatches"] if item["node_id"] == independent.node_id)
 
-    assert entry["result_contract"] == "native-independent-review"
+    assert entry["result_contract"] == "compact-independent-review"
+    assert entry["dispatch"]["adversarial_check_ids"]
+    assert entry["dispatch"]["payload_schema"]["path"].endswith("independent-payload-v1.schema.json")
     assert entry["compiler_operation"] == "compile-independent-review"
     assert entry["dispatch"]["planned_path_line_bounds"] == [[STATE_FIXTURE, 3]]
     _assert_compact_dispatches(result["dispatches"])
@@ -2846,166 +2889,7 @@ def test_exact_overlap_leaves_share_only_trusted_read_only_observations(tmp_path
     assert all("shared_inspection_evidence" not in entry["dispatch"] for entry in independent["dispatches"])
 
 
-def test_compile_independent_review_wraps_native_result_and_reloads_evidence(tmp_path: Path) -> None:
-    skill_path = SKILL_ROOT / "repository-independent-review" / "SKILL.md"
-    change_target = f"git diff -- {STATE_FIXTURE}"
-    dispatch = {
-        "adversarial_checks": ["fallback absence and failure", "platform seams", "parser suffixes and error branches", "unexpected exception types"],
-        "after_state": ["scope", "worktree", "repository"],
-        "artifact_id": "artifact://independent",
-        "authorization": "review-only",
-        "before_state": ["scope", "worktree", "repository"],
-        "change_target": change_target,
-        "evidence_id": "review:independent",
-        "execution_location": "worker",
-        "execution_profile": "grouped",
-        "fresh_context": True,
-        "handoff_catalog_ids": ["rust.invariants"],
-        "mode": "independent-review",
-        "node_id": "independent",
-        "planned_path_line_bounds": [[STATE_FIXTURE, 3]],
-        "planned_paths": [STATE_FIXTURE],
-        "reference_paths": [],
-        "requirement_ids": ["repo.independent"],
-        "selection_reason": "concrete change target",
-        "skill_id": "repository-independent-review",
-        "skill_path": str(skill_path),
-        "source_state": ["scope", "worktree", "repository"],
-        "worker_created": True,
-    }
-    checks = "\n".join(f"- Inspected: {check}" for check in dispatch["adversarial_checks"])
-    native = f"""# Repository Independent Review
-
-## Scope Inspected
-
-- Change target: {change_target}
-- Files: {STATE_FIXTURE}
-- Branches: captured change target
-- Boundary cases: dispatched adversarial checks
-- Tests: planned validator evidence
-
-## Findings
-
-No findings.
-
-## No-Finding Evidence
-
-{checks}
-
-## Routing Handoffs
-
-none
-
-## Fingerprint Proof
-
-- Expected:
-  - Scope fingerprint: scope
-  - Worktree fingerprint: worktree
-  - Repository state fingerprint: repository
-- Before:
-  - Scope fingerprint: scope
-  - Worktree fingerprint: worktree
-  - Repository state fingerprint: repository
-- After:
-  - Scope fingerprint: scope
-  - Worktree fingerprint: worktree
-  - Repository state fingerprint: repository
-
-## Git State
-
-- Source-controlled files changed: none
-- Git state mutated: no
-""".encode()
-
-    content, metadata = compile_independent_review({"dispatch": dispatch, "limitations": [], "status": "no-findings"}, native)
-    mutated_native = native.replace(b"- Git state mutated: no", b"- Git state mutated: yes", 1)
-    with pytest.raises(ValueError, match="native state proof failed validation"):
-        compile_independent_review({"dispatch": dispatch, "limitations": [], "status": "no-findings"}, mutated_native)
-
-    stale_dispatch = deepcopy(dispatch)
-    stale_dispatch["before_state"] = ["stale-scope", "worktree", "repository"]
-    stale_native = native.replace(b"- Before:\n  - Scope fingerprint: scope", b"- Before:\n  - Scope fingerprint: stale-scope", 1)
-    with pytest.raises(ValueError, match="observed fingerprints differ"):
-        compile_independent_review({"dispatch": stale_dispatch, "limitations": [], "status": "no-findings"}, stale_native)
-
-    artifact_path = tmp_path / "independent.md"
-    metadata_path = tmp_path / "independent.json"
-    artifact_path.write_bytes(content)
-    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
-    bundle = build_synthesis_bundle(
-        {"source_state": ["scope", "worktree", "repository"], "sources": [{"artifact_path": str(artifact_path), "metadata_path": str(metadata_path)}]}
-    )
-
-    assert b"## Review Graph Envelope" in content
-    assert b"## Machine Evidence" in content
-    assert metadata["native_input_digest"].startswith("sha256:")
-    assert bundle["records"][0]["mode"] == "independent-review"
-
-    blocked_content, blocked_metadata = compile_independent_review(
-        {"dispatch": dispatch, "limitations": ["target; unavailable", "retry exhausted"], "status": "blocked"}, native
-    )
-    blocked_artifact_path = tmp_path / "blocked-independent.md"
-    blocked_metadata_path = tmp_path / "blocked-independent.json"
-    blocked_artifact_path.write_bytes(blocked_content)
-    blocked_metadata_path.write_text(json.dumps(blocked_metadata), encoding="utf-8")
-    blocked_bundle = build_synthesis_bundle(
-        {
-            "source_state": ["scope", "worktree", "repository"],
-            "sources": [{"artifact_path": str(blocked_artifact_path), "metadata_path": str(blocked_metadata_path)}],
-        }
-    )
-    assert blocked_metadata["normalized_record"]["limitations"] == ["target; unavailable; retry exhausted"]
-    assert blocked_bundle["records"][0]["limitations"] == ["target; unavailable; retry exhausted"]
-
-
-def test_independent_native_example_compiles_verbatim_and_aggregates_contract_errors() -> None:
-    dispatch = {
-        "adversarial_checks": ["fallback absence and failure", "platform seams", "parser suffixes and error branches", "unexpected exception types"],
-        "after_state": ["scope", "worktree", "repository"],
-        "artifact_id": "artifact://independent-example",
-        "authorization": "review-only",
-        "before_state": ["scope", "worktree", "repository"],
-        "change_target": f"git diff -- {STATE_FIXTURE}",
-        "evidence_id": "review:independent-example",
-        "execution_location": "worker",
-        "execution_profile": "grouped",
-        "fresh_context": True,
-        "handoff_catalog_ids": ["rust.invariants"],
-        "mode": "independent-review",
-        "node_id": "independent-example",
-        "planned_path_line_bounds": [[STATE_FIXTURE, 3]],
-        "planned_paths": [STATE_FIXTURE],
-        "reference_paths": [],
-        "requirement_ids": ["repo.independent"],
-        "selection_reason": "concrete change target",
-        "skill_id": "repository-independent-review",
-        "skill_path": str(SKILL_ROOT / "repository-independent-review" / "SKILL.md"),
-        "source_state": ["scope", "worktree", "repository"],
-        "worker_created": True,
-    }
-    native = INDEPENDENT_NATIVE_EXAMPLE.read_bytes()
-
-    content, metadata = compile_independent_review({"dispatch": dispatch, "limitations": [], "status": "no-findings"}, native)
-
-    assert metadata["native_input_digest"].startswith("sha256:")
-    assert content.startswith(native.rstrip() + b"\n\n")
-
-    malformed = (
-        native.replace(f"`{STATE_FIXTURE}`".encode(), b"`wrong.rs`")
-        .replace(b"- Inspected: platform seams\n", b"")
-        .replace(b"## Routing Handoffs\n\nnone", b"## Routing Handoffs\n\nmalformed")
-        .replace(b"- Git state mutated: no", b"- Git state mutated: yes")
-    )
-    with pytest.raises(ValueError, match="contract validation") as raised:
-        compile_independent_review({"dispatch": dispatch, "limitations": [], "status": "no-findings"}, malformed)
-    diagnostic = str(raised.value)
-    assert "files do not equal" in diagnostic
-    assert "platform seams" in diagnostic
-    assert "must contain Catalog ID records" in diagnostic
-    assert "native state proof failed validation" in diagnostic
-
-
-def test_positive_independent_example_persists_compiles_and_journals_verbatim(tmp_path: Path) -> None:
+def test_positive_independent_payload_persists_compiles_and_journals_verbatim(tmp_path: Path) -> None:
     git = shutil.which("git")
     assert git is not None
     repository = SKILL_ROOT.parents[2]
@@ -3027,10 +2911,24 @@ def test_positive_independent_example_persists_compiles_and_journals_verbatim(tm
             "state_verification_command": "capture_scope.py --mode baseline",
         }
     )
-    entry = next(item for item in materialized["dispatches"] if item["result_contract"] == "native-independent-review")
-    native = INDEPENDENT_NATIVE_POSITIVE_EXAMPLE.read_bytes()
-    for symbolic, actual in zip((b"scope", b"worktree", b"repository"), source_state, strict=True):
-        native = native.replace(b"fingerprint: " + symbolic, b"fingerprint: " + actual.encode())
+    entry = next(item for item in materialized["dispatches"] if item["dispatch"].get("mode") == "independent-review")
+    payload = _compact_independent_payload(entry["dispatch"])
+    payload["status"] = "completed"
+    payload["findings"] = [
+        {
+            "severity": "P2",
+            "location": STATE_FIXTURE + ":1",
+            "summary": "Fixture contract is insufficient.",
+            "evidence": "Independent fixture finding.",
+            "impact": "Callers lack a guaranteed contract.",
+            "owner": "rust.errors",
+            "remediation": "Clarify the contract.",
+        }
+    ]
+    payload["handoffs"] = [
+        {"catalog_id": "rust.errors", "observed_trigger": "Fixture error contract", "reason": "Specialist inspection required", "scope": [STATE_FIXTURE]}
+    ]
+    native = json.dumps(payload).encode()
     _publish_worker_bytes(entry, native)
     lifecycle_path = tmp_path / "lifecycle.json"
     dispatches_path = tmp_path / "dispatches.json"
@@ -3068,60 +2966,18 @@ def test_positive_independent_example_persists_compiles_and_journals_verbatim(tm
     metadata = json.loads(Path(result["metadata_path"]).read_text(encoding="utf-8"))
     events, state, _head = read_execution_journal(journal_path, plan=plan, source_state=source_state)
 
-    assert metadata["native_input_digest"] == "sha256:" + hashlib.sha256(native).hexdigest()
+    assert metadata["worker_payload_digest"] == "sha256:" + hashlib.sha256(native).hexdigest()
+    sealed = Path(metadata["worker_payload_path"])
+    assert sealed.read_bytes() == native
+    assert sealed.stat().st_mode & 0o777 == 0o444
+    assert metadata["payload_digest"]
+
     assert b"- ID: " in compiled
     assert metadata["normalized_record"]["findings"][0]["severity"] == "P2"
     assert metadata["normalized_record"]["handoffs"][0]["catalog_id"] == "rust.errors"
+    assert _canonical_worker_payload(compiled) == payload
     assert events[-1]["status"] == "accepted"
     assert state[entry["node_id"]] == "accepted"
-
-
-def test_positive_independent_finding_reports_all_structural_errors_together() -> None:
-    dispatch = {
-        "adversarial_checks": [],
-        "after_state": ["scope", "worktree", "repository"],
-        "artifact_id": "artifact://independent-positive-errors",
-        "authorization": "review-only",
-        "before_state": ["scope", "worktree", "repository"],
-        "change_target": f"git diff -- {STATE_FIXTURE}",
-        "evidence_id": "review:independent-positive-errors",
-        "execution_location": "worker",
-        "execution_profile": "grouped",
-        "fresh_context": True,
-        "handoff_catalog_ids": ["rust.errors"],
-        "mode": "independent-review",
-        "node_id": "independent-positive-errors",
-        "planned_path_line_bounds": [[STATE_FIXTURE, 3]],
-        "planned_paths": [STATE_FIXTURE],
-        "reference_paths": [],
-        "requirement_ids": ["repo.independent"],
-        "selection_reason": "concrete change target",
-        "skill_id": "repository-independent-review",
-        "skill_path": str(SKILL_ROOT / "repository-independent-review" / "SKILL.md"),
-        "source_state": ["scope", "worktree", "repository"],
-        "worker_created": True,
-    }
-    documented = INDEPENDENT_NATIVE_POSITIVE_EXAMPLE.read_bytes()
-    _content, metadata = compile_independent_review({"dispatch": dispatch, "limitations": [], "status": "completed"}, documented)
-
-    assert metadata["native_input_digest"] == "sha256:" + hashlib.sha256(documented).hexdigest()
-    assert metadata["normalized_record"]["findings"][0]["severity"] == "P2"
-    assert metadata["normalized_record"]["handoffs"][0]["catalog_id"] == "rust.errors"
-    assert metadata["normalized_record"]["findings"][0]["summary"] == "The changed transition accepts an invalid state."
-
-    malformed = (
-        documented.replace(b"- Finding: unchecked state transition", b"- Finding:")
-        .replace(b"  - Severity: P2", b"  - Severity: medium")
-        .replace(b"  - Summary: The changed transition accepts an invalid state.\n", b"")
-    )
-
-    with pytest.raises(ValueError, match="contract validation") as raised:
-        compile_independent_review({"dispatch": dispatch, "limitations": [], "status": "completed"}, malformed)
-
-    diagnostic = str(raised.value)
-    assert "non-empty value on the same line" in diagnostic
-    assert "invalid severity medium" in diagnostic
-    assert "Summary is missing" in diagnostic
 
 
 @pytest.mark.parametrize("writer", ["direct", "atomic"])
@@ -3704,7 +3560,7 @@ def test_invalid_execution_fields_get_no_approval_and_preserve_persisted_evidenc
 
 
 @pytest.mark.parametrize("validation_status", ["passed", "failed"])
-def test_compact_branch_runs_from_bootstrap_through_journal_and_final_proof(tmp_path: Path, validation_status: str) -> None:  # noqa: PLR0915
+def test_compact_branch_runs_from_bootstrap_through_journal_and_final_proof(tmp_path: Path, validation_status: str, capsys: pytest.CaptureFixture[str]) -> None:  # noqa: PLR0915
     git = shutil.which("git")
     assert git is not None
     repository = tmp_path / "repository"
@@ -3777,51 +3633,10 @@ def test_compact_branch_runs_from_bootstrap_through_journal_and_final_proof(tmp_
             persisted = json.loads(Path(entry["worker_payload_path"]).read_bytes())
             content, metadata = compile_validation({"dispatch": dispatch, "payload": persisted})
             kind = "validation"
-        elif entry["result_contract"] == "native-independent-review":
-            checks = "\n".join(f"- Inspected: {check}" for check in dispatch["adversarial_checks"])
-            native = f"""# Repository Independent Review
-
-## Scope Inspected
-
-- Change target: {dispatch["change_target"]}
-- Files: state.rs
-- Branches: HEAD~1...HEAD
-- Boundary cases: changed state transition
-- Tests: baseline validation command
-
-## Findings
-
-No findings.
-
-## No-Finding Evidence
-
-{checks}
-
-## Routing Handoffs
-
-none
-
-## Fingerprint Proof
-
-- Expected:
-  - Scope fingerprint: {source_state[0]}
-  - Worktree fingerprint: {source_state[1]}
-  - Repository state fingerprint: {source_state[2]}
-- Before:
-  - Scope fingerprint: {source_state[0]}
-  - Worktree fingerprint: {source_state[1]}
-  - Repository state fingerprint: {source_state[2]}
-- After:
-  - Scope fingerprint: {source_state[0]}
-  - Worktree fingerprint: {source_state[1]}
-  - Repository state fingerprint: {source_state[2]}
-
-## Git State
-
-- Source-controlled files changed: none
-- Git state mutated: no
-""".encode()
-            content, metadata = compile_independent_review({"dispatch": dispatch, "limitations": [], "status": "no-findings"}, native)
+        elif entry["result_contract"] == "compact-independent-review":
+            payload = _compact_independent_payload(dispatch)
+            _publish_worker_bytes(entry, json.dumps(payload).encode())
+            content, metadata = compile_independent_payload({"dispatch": dispatch, "payload": payload})
             kind = "review"
         else:
             payload = {
@@ -3893,6 +3708,17 @@ none
     sources = list(sources_by_node.values())
     bundle = build_synthesis_bundle({"source_state": list(source_state), "sources": sources})
     final = finalize_proof({**lifecycle, "current_source_state": list(source_state), "sources": sources})
+    request_path, capture_path, output_path = (tmp_path / name for name in ("final-request.json", "capture.json", "final-result.json"))
+    request_path.write_text(json.dumps({**lifecycle, "sources": sources}), encoding="utf-8")
+    capture_path.write_text(json.dumps(capture), encoding="utf-8")
+    capsys.readouterr()
+    assert main(["finalize-proof", "--input", str(request_path), "--current-capture", str(capture_path), "--output", str(output_path)]) == 0
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["graph_proof_status"] == "complete"
+    assert receipt["repository_validation_status"] == validation_status
+    assert receipt["repository_readiness"] == ("ready" if validation_status == "passed" else "not-ready")
+    assert receipt["summary"]["planned_nodes"] == len(plan.actual_worker_nodes)
+
     lifecycle_path = proof_store / "lifecycle.json"
     dispatch_path = proof_store / "dispatches.json"
     capture_path = proof_store / "capture.json"
@@ -4212,10 +4038,11 @@ def test_compile_review_rejects_conflicting_planned_validation_identity(tmp_path
         }
         expected = "planned validation digest conflicts"
     else:
+        identity = json.loads(Path(planned["execution_identity_reference"]["path"]).read_bytes())
         requirement = {
-            "commands": planned["execution_identity"]["commands"],
-            "dependency_policy": planned["execution_identity"]["dependency_policy"],
-            "environment": planned["execution_identity"]["environment"],
+            "commands": identity["commands"],
+            "dependency_policy": identity["dependency_policy"],
+            "environment": identity["environment"],
             "expected_evidence": "planned validation passes",
             "owner": dispatch["skill_id"],
             "reason": "audit restates the planned need incorrectly",

@@ -1,0 +1,28 @@
+{
+  "status": "blocked",
+  "files_inspected": [],
+  "branches": "Not inspected yet.",
+  "boundary_cases": "Not inspected yet.",
+  "tests": "Not inspected yet.",
+  "findings": [],
+  "no_finding_evidence": [],
+  "adversarial_checks": [],
+  "handoffs": [],
+  "before_state": [
+    "REPLACE_FROM_BEFORE_CAPTURE",
+    "REPLACE_FROM_BEFORE_CAPTURE",
+    "REPLACE_FROM_BEFORE_CAPTURE"
+  ],
+  "after_state": [
+    "REPLACE_FROM_AFTER_CAPTURE",
+    "REPLACE_FROM_AFTER_CAPTURE",
+    "REPLACE_FROM_AFTER_CAPTURE"
+  ],
+  "source_mutated": false,
+  "git_mutated": false,
+  "command_policy_attested": true,
+  "commands_executed": [],
+  "limitations": [
+    "Template only: inspection has not been performed. Replace observations and attestations truthfully."
+  ]
+}

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from review_graph_plan import DEFAULT_ROUTING_CATALOG, DEFAULT_SKILL_ROOT, plan_from_document
+from review_graph_receipts import stage_receipt
 from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
 
 PLANNING_SCHEMA = Path(__file__).resolve().parents[1] / "references" / "schemas" / "planning-input-v1.schema.json"
@@ -132,6 +133,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", type=Path, required=True, help="immutable normalized planning document")
     parser.add_argument("--catalog", type=Path, default=DEFAULT_ROUTING_CATALOG)
     parser.add_argument("--skill-root", action="append", type=Path)
+    parser.add_argument("--full-output", action="store_true", help="print the complete saved bundle instead of a compact receipt")
     return parser
 
 
@@ -172,6 +174,22 @@ def main(argv: list[str] | None = None) -> int:
             "schema_version": 1,
         }
         _write_once(args.output, output)
+        receipt = stage_receipt("bootstrap", args.output, output)
+        receipt["next_command"] = (
+            [
+                sys.executable,
+                str(Path(__file__).with_name("review_graph_runtime.py").resolve()),
+                "materialize-dispatches",
+                "--input",
+                str(args.output.resolve()),
+                "--output",
+                str(args.output.resolve().with_suffix(".dispatches.json")),
+            ]
+            if plan.dispatch_allowed
+            else None
+        )
+        receipt["next_operation_inputs"] = {"input": str(args.output.resolve()), "current_capture": str(args.capture.resolve())}
+        print(json.dumps(output if args.full_output else receipt, sort_keys=True))
         return 0 if plan.dispatch_allowed else 2
     except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as error:
         if isinstance(error, SchemaValidationError):

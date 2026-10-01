@@ -37,8 +37,12 @@ def test_benchmark_preserves_catalog_independence_findings_and_measures_reads(tm
     assert len(manifest["receipts"]) == 9
     assert metrics["scripted_reads"]["source_file_reads"] == 18  # Independent review reads every source directly.
     assert metrics["scripted_reads"]["repeated_source_file_reads"] == 0
-    assert metrics["coordinator_api_operations"] == 19
+    assert metrics["coordinator_api_operations"] == 21
     assert metrics["model_review_seconds"] is None
+    assert sum(metrics["per_worker_input_bytes"].values()) == metrics["worker_input_bytes"]
+    assert metrics["default_cli_output_bytes"] == metrics["coordinator_result_bytes"] < metrics["full_result_bytes"]
+    assert metrics["repeated_validation_identity_bytes"] == 0
+    assert metrics["independent_protocol_replay"] == {"publication_attempts": 1, "formatting_only_retries": 0, "coordinator_api_operations": 2}
     telemetry = manifest["dispatches"]["telemetry"]
     assert telemetry["source_demand"]["distinct_paths"] == 18
     assert telemetry["source_demand"]["repeated_file_reads"] > 0
@@ -51,6 +55,18 @@ def test_benchmark_preserves_catalog_independence_findings_and_measures_reads(tm
         completed.update(wave)
     assert completed == set(by_id)
     assert telemetry["observed_review_seconds"] is None
+
+
+def test_large_fixture_measures_compact_transport_without_git_history(tmp_path: Path) -> None:
+    document = benchmark_fixture(tmp_path / "repository", scale=20)
+    manifest = _trial(runtime, document, tmp_path / "trial")
+    metrics = manifest["metrics"]
+    assert manifest["dispatches"]["telemetry"]["source_demand"]["distinct_paths"] == 265
+    assert len(manifest["findings"]) == 4
+    assert metrics["coordinator_result_bytes"] < metrics["full_result_bytes"] / 10
+    assert metrics["embedded_validation_identity_bytes"] == metrics["repeated_validation_identity_bytes"] == 0
+    assert metrics["shared_validation_identity_bytes"] > 0
+    assert metrics["independent_protocol_replay"] == {"publication_attempts": 1, "formatting_only_retries": 0, "coordinator_api_operations": 2}
 
 
 @pytest.mark.parametrize("field", ["worker_payload_digest", "worker_payload_path"])
@@ -97,7 +113,7 @@ def test_wave_projection_rejects_invalid_capacity(limit: Any) -> None:
 @pytest.mark.parametrize("ref", ["", "--output=unexpected-file"])
 def test_benchmark_rejects_git_options_before_invocation(tmp_path: Path, ref: str) -> None:
     with pytest.raises(ValueError, match="not an option"):
-        _baseline_runtime(tmp_path, ref)
+        _baseline_runtime(tmp_path, ref, schema_store=tmp_path / "schema")
     assert not list(tmp_path.iterdir())
 
 
@@ -319,3 +335,19 @@ def test_combined_publication_preserves_binding_on_wrong_approval(tmp_path: Path
     receipt = runtime.publish_worker_payload_bytes(contract, content)
     assert receipt["artifact_write_review"]["approval_identity"]
     assert Path(entry["worker_payload_path"]).read_bytes() == content
+
+
+@pytest.mark.parametrize("field", ["worker_payload_digest", "worker_payload_path"])
+def test_benchmark_verifies_independent_publication_receipt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str) -> None:
+    document = benchmark_fixture(tmp_path / "repository")
+    publish = runtime.publish_worker_payload_bytes
+
+    def mismatched_receipt(contract: dict[str, Any], content: bytes) -> dict[str, Any]:
+        receipt = publish(contract, content)
+        if contract["result_contract"] == "compact-independent-review":
+            receipt[field] = "wrong"
+        return receipt
+
+    monkeypatch.setattr(runtime, "publish_worker_payload_bytes", mismatched_receipt)
+    with pytest.raises(ValueError, match="publication receipt does not match"):
+        _trial(runtime, document, tmp_path / "trial")

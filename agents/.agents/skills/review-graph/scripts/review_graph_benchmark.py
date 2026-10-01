@@ -2,6 +2,7 @@
 
 import argparse
 import hashlib
+import io
 import json
 import shutil
 import statistics
@@ -10,11 +11,13 @@ import sys
 import tempfile
 import time
 import types
+from contextlib import redirect_stdout
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 import review_graph_runtime as runtime
+from review_graph_independent import CHECK_LABELS, render_independent_payload
 from review_graph_metrics import projected_waves, source_demand
 from review_graph_plan import (
     DEFAULT_ROUTING_CATALOG,
@@ -31,17 +34,21 @@ from review_graph_plan import (
 )
 
 RUNTIME_PATH = Path(runtime.__file__).resolve()
-BASELINE_REF = "eeead7c646a45ca8227bc7fc057e6f2e1bdf52bf"
+RUNTIME_INPUT_SCHEMA = RUNTIME_PATH.parents[1] / "references/schemas/runtime-operation-inputs-v1.schema.json"
+BASELINE_REF = "da0e045d420a890d53a1e0993a0ecdfee5057c72"
 
 
 def _digest(content: bytes) -> str:
     return "sha256:" + hashlib.sha256(content).hexdigest()
 
 
-def benchmark_fixture(root: Path) -> dict[str, Any]:
-    """Build 18 portable files, exhaustive catalog routing, and all 15 required nodes."""
-    python_paths = [f"src/module_{index}.py" for index in range(6)] + ["scripts/check.py", "tests/test_check.py"]
-    doc_paths = ["README.md", *(f"docs/topic_{index}.md" for index in range(7))]
+def benchmark_fixture(root: Path, *, scale: int = 1) -> dict[str, Any]:
+    """Build a scalable mixed-surface fixture, exhaustive routing, and 15 required nodes."""
+    if scale < 1:
+        msg = "fixture scale must be positive"
+        raise ValueError(msg)
+    python_paths = [f"src/module_{index}.py" for index in range(6 * scale)] + ["scripts/check.py", "tests/test_check.py"]
+    doc_paths = ["README.md", *(f"docs/topic_{index}.md" for index in range(7 * scale))]
     files = {path: f'"""Benchmark source {path}."""\n\ndef normalize(value):\n    return int(value)\n' for path in python_paths}
     files.update({path: f"# {path}\n\nScientific fixture contract: integer input, deterministic output.\n" for path in doc_paths})
     files.update({"justfile": "check:\n    uv run pytest\n", "pyproject.toml": '[project]\nname = "review-benchmark"\nversion = "0.1.0"\n'})
@@ -61,6 +68,7 @@ def benchmark_fixture(root: Path) -> dict[str, Any]:
         asdict(
             ValidationRequirement(
                 requirement_id=name,
+                captured_paths=tuple(files),
                 source_state=(identity, identity, identity),
                 commands=(command,) if command else (),
                 working_directories=(str(root),) if command else (),
@@ -83,7 +91,7 @@ def benchmark_fixture(root: Path) -> dict[str, Any]:
         "captured_path_line_bounds": {path: len(content.splitlines()) for path, content in files.items()},
         "source_state": state,
         "concrete_change_target": True,
-        "change_target": "synthetic staged 18-file change",
+        "change_target": f"synthetic staged whole-repository {len(files)}-file change",
         "consulted_routers": ["review-graph", "python-review-orchestrator", "docs-review-orchestrator"],
         "execution_profile": "grouped",
         "scope_mode": "staged-only",
@@ -138,7 +146,7 @@ def benchmark_fixture(root: Path) -> dict[str, Any]:
     }
 
 
-def _baseline_runtime(repository: Path, ref: str) -> types.ModuleType:
+def _baseline_runtime(repository: Path, ref: str, *, schema_store: Path) -> types.ModuleType:
     if not ref or ref.startswith("-"):
         msg = "baseline-ref must be a nonempty Git revision, not an option"
         raise ValueError(msg)
@@ -146,14 +154,29 @@ def _baseline_runtime(repository: Path, ref: str) -> types.ModuleType:
     if git is None:
         msg = "benchmark comparison requires Git to read the baseline runtime"
         raise ValueError(msg)
-    relative = RUNTIME_PATH.relative_to(repository).as_posix()
-    content = subprocess.run([git, "show", f"{ref}:{relative}"], cwd=repository, capture_output=True, check=True).stdout  # noqa: S603
+
+    def read_revision(path: Path) -> bytes:
+        relative = path.relative_to(repository).as_posix()
+        try:
+            return subprocess.run([git, "show", f"{ref}:{relative}"], cwd=repository, capture_output=True, check=True, timeout=30).stdout  # noqa: S603
+        except (OSError, subprocess.SubprocessError) as error:
+            msg = f"cannot read benchmark baseline {ref}; ensure the revision and its runtime/schema are available locally"
+            raise ValueError(msg) from error
+
+    content = read_revision(RUNTIME_PATH)
+    schema_content = read_revision(RUNTIME_INPUT_SCHEMA)
+    schema_store.mkdir(parents=True, exist_ok=False)
+    schema_path = schema_store / RUNTIME_INPUT_SCHEMA.name
+    schema_path.write_bytes(schema_content)
     module = types.ModuleType("review_graph_benchmark_baseline")
-    # Resolve dependencies, schemas, and command paths identically in both trials.
+    # Share planner/dependencies and skills; each runtime keeps its own public
+    # input schema so removed current formats remain historical benchmark data.
     module.__file__ = str(RUNTIME_PATH)
     sys.modules[module.__name__] = module
     exec(compile(content, str(RUNTIME_PATH), "exec"), module.__dict__)  # noqa: S102 - explicitly selected trusted repository revision.
+    module.__dict__["_RUNTIME_OPERATION_INPUT_SCHEMA"] = schema_path
     module.__dict__["benchmark_source_digest"] = _digest(content)
+    module.__dict__["benchmark_schema_digest"] = _digest(schema_content)
     return module
 
 
@@ -217,9 +240,121 @@ def _read_worker_sources(entries: list[dict[str, Any]], repository: Path) -> dic
     }
 
 
+def _independent_replay(module: types.ModuleType, entry: dict[str, Any], state: list[str]) -> dict[str, int]:
+    """Replay a known native-label error; counts are scripted, not model retry rates."""
+    dispatch = {**entry["dispatch"], "before_state": state, "after_state": state}
+    payload = {
+        "status": "no-findings",
+        "files_inspected": dispatch["planned_paths"],
+        "branches": "Synthetic whole-repository staged fixture.",
+        "boundary_cases": "Static integer conversion, recipe and documentation inspection only.",
+        "tests": "Scripted fixture transcript; no tests executed.",
+        "findings": [],
+        "no_finding_evidence": [],
+        "handoffs": [],
+        "before_state": state,
+        "after_state": state,
+        "source_mutated": False,
+        "git_mutated": False,
+        "command_policy_attested": True,
+        "commands_executed": [],
+        "limitations": [],
+        "adversarial_checks": [
+            {
+                "check_id": key,
+                "evidence": "Fixture contains only integer conversion, static recipes and prose; no fallback or asynchronous branches.",
+                "inspected_paths": dispatch["planned_paths"],
+            }
+            for key, label in CHECK_LABELS.items()
+            if label in dispatch["adversarial_checks"]
+        ],
+    }
+    contract = json.loads(Path(entry["worker_payload_contract_path"]).read_bytes())
+    attempts = retries = operations = 0
+
+    def publish(content: bytes) -> None:
+        nonlocal attempts, operations
+        attempts += 1
+        if hasattr(module, "publish_worker_payload_bytes"):
+            operations += 1
+            receipt = module.publish_worker_payload_bytes(contract, content)
+        else:
+            operations += 1
+            approval = module.review_worker_payload_write(contract, content)
+            operations += 1
+            receipt = module.persist_worker_payload_bytes(contract, content, approval_identity=approval["approval_identity"])
+        _verify_publication(receipt, entry, content)
+
+    if entry["result_contract"] == "compact-independent-review":
+        publish(json.dumps(payload).encode())
+        operations += 1
+        native, metadata = module.compile_independent_payload({"dispatch": dispatch, "payload": payload})
+    else:
+        # Strip the structured binding for the legacy worker transcript, then
+        # change only labels. Substantive observations remain identical.
+        correct = (
+            b"\n".join(line for line in render_independent_payload(payload, dispatch).splitlines() if not line.startswith(b"- Canonical worker payload:"))
+            + b"\n"
+        )
+        malformed = correct.replace(b"- Inspected:", b"- Check:")
+        try:
+            publish(malformed)
+            operations += 1
+            module.compile_independent_review({"dispatch": dispatch, "status": "no-findings", "limitations": []}, malformed)
+        except ValueError as error:
+            if "adversarial" not in str(error):
+                raise
+            retries += 1
+        else:
+            msg = "legacy formatting replay unexpectedly accepted missing Inspected labels"
+            raise ValueError(msg)
+        publish(correct)
+        operations += 1
+        native, metadata = module.compile_independent_review({"dispatch": dispatch, "status": "no-findings", "limitations": []}, correct)
+    Path(entry["artifact_path"]).write_bytes(native)
+    Path(entry["metadata_path"]).write_text(json.dumps(metadata), encoding="utf-8")
+    return {"publication_attempts": attempts, "formatting_only_retries": retries, "coordinator_api_operations": operations}
+
+
+def _verify_publication(receipt: dict[str, Any], entry: dict[str, Any], content: bytes) -> None:
+    path = Path(entry["worker_payload_path"])
+    if receipt.get("worker_payload_digest") != _digest(content) or receipt.get("worker_payload_path") != str(path.resolve()):
+        msg = "benchmark publication receipt does not match the payload digest or dispatch path"
+        raise ValueError(msg)
+    if path.read_bytes() != content:
+        msg = "benchmark publication changed payload bytes"
+        raise ValueError(msg)
+
+
+def _validation_identity_metrics(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    embedded: list[bytes] = []
+    sidecars: dict[str, int] = {}
+    for entry in entries:
+        for record in entry["dispatch"].get("command_policy", {}).get("planned_validation_units", []):
+            if "execution_identity" in record:
+                embedded.append(json.dumps(record["execution_identity"], sort_keys=True, separators=(",", ":")).encode())
+            else:
+                path = record["execution_identity_reference"]["path"]
+                sidecars[path] = Path(path).stat().st_size
+    return {
+        "embedded_validation_identity_bytes": sum(map(len, embedded)),
+        "repeated_validation_identity_bytes": sum(map(len, embedded)) - sum(map(len, set(embedded))),
+        "shared_validation_identity_bytes": sum(sidecars.values()),
+    }
+
+
 def _trial(module: types.ModuleType, document: dict[str, Any], store: Path) -> dict[str, Any]:
     started = time.perf_counter()
-    dispatches = module.materialize_dispatches({**document, "artifact_store": str(store)})
+    input_path, output_path = store.with_suffix(".input.json"), store.with_suffix(".output.json")
+    input_path.write_text(json.dumps({**document, "artifact_store": str(store)}), encoding="utf-8")
+    stdout = io.StringIO()
+    with redirect_stdout(stdout):
+        result = module.main(["materialize-dispatches", "--input", str(input_path), "--output", str(output_path)])
+    if result != 0:
+        msg = "benchmark materialization CLI failed"
+        raise ValueError(msg)
+    dispatches = json.loads(output_path.read_bytes())
+    cli_bytes = len(stdout.getvalue().encode())
     materialize_seconds = time.perf_counter() - started
     entries = dispatches["dispatches"]
     read_started = time.perf_counter()
@@ -240,9 +375,7 @@ def _trial(module: types.ModuleType, document: dict[str, Any], store: Path) -> d
             review = module.review_worker_payload_write(contract, content)
             receipt = module.persist_worker_payload_bytes(contract, content, approval_identity=review["approval_identity"])
             operations += 2
-        if receipt.get("worker_payload_digest") != _digest(content) or receipt.get("worker_payload_path") != str(Path(entry["worker_payload_path"]).resolve()):
-            msg = "benchmark publication receipt does not match the payload digest or dispatch path"
-            raise ValueError(msg)
+        _verify_publication(receipt, entry, content)
         receipts.append(receipt)
         dispatch = {**entry["dispatch"], "before_state": document["source_state"], "after_state": document["source_state"]}
         native, metadata = module.compile_review({"dispatch": dispatch, "payload": payload})
@@ -257,15 +390,22 @@ def _trial(module: types.ModuleType, document: dict[str, Any], store: Path) -> d
     if len(independent) != 1 or "shared_inspection_evidence" in independent[0]["dispatch"]:
         msg = "benchmark must preserve one conclusion-blind independent dispatch"
         raise ValueError(msg)
+    independent_replay = _independent_replay(module, independent[0], document["source_state"])
     manifest = {
         "dispatches": dispatches,
         "receipts": receipts,
         "findings": findings,
         "metrics": {
+            "default_cli_output_bytes": cli_bytes,
+            "full_result_bytes": output_path.stat().st_size,
+            "coordinator_result_bytes": cli_bytes or output_path.stat().st_size,
+            "per_worker_input_bytes": {item["node_id"]: Path(item["worker_input_path"]).stat().st_size for item in entries},
+            **_validation_identity_metrics(entries),
+            "independent_protocol_replay": independent_replay,
             "worker_input_bytes": sum(Path(item["worker_input_path"]).stat().st_size for item in entries),
             "worker_prompt_bytes": sum(len(item["worker_prompt"].encode()) for item in entries),
             "scripted_reads": reads,
-            "coordinator_api_operations": operations,
+            "coordinator_api_operations": operations + independent_replay["coordinator_api_operations"],
             "projected_publication_cli_invocations": sum(1 if "publish_command" in item["dispatch"]["worker_payload_persistence"] else 2 for item in entries),
             "materialize_seconds": materialize_seconds,
             "scripted_read_seconds": read_seconds,
@@ -278,14 +418,14 @@ def _trial(module: types.ModuleType, document: dict[str, Any], store: Path) -> d
     return manifest
 
 
-def run_benchmark(output: Path, *, baseline_ref: str = BASELINE_REF, repeats: int = 5) -> dict[str, Any]:
+def run_benchmark(output: Path, *, baseline_ref: str = BASELINE_REF, repeats: int = 5, scale: int = 20) -> dict[str, Any]:
     """Retain paired immutable trials and honest measurements in a new output directory."""
     if repeats < 1:
         msg = "repeats must be positive"
         raise ValueError(msg)
     output.mkdir(parents=True, exist_ok=False)
-    document = benchmark_fixture(output / "repository")
-    baseline = _baseline_runtime(DEFAULT_SKILL_ROOT.parents[2], baseline_ref)
+    document = benchmark_fixture(output / "repository", scale=scale)
+    baseline = _baseline_runtime(DEFAULT_SKILL_ROOT.parents[2], baseline_ref, schema_store=output / "baseline-schema")
     trials: dict[str, list[dict[str, Any]]] = {"before": [], "after_": []}
     for index in range(repeats):
         # Alternate first execution to reduce warm-cache ordering bias.
@@ -301,6 +441,8 @@ def run_benchmark(output: Path, *, baseline_ref: str = BASELINE_REF, repeats: in
         "fixture_source_state": document["source_state"],
         "baseline_ref": baseline_ref,
         "baseline_runtime_digest": baseline.benchmark_source_digest,
+        "baseline_input_schema_digest": baseline.benchmark_schema_digest,
+        "current_input_schema_digest": _digest(RUNTIME_INPUT_SCHEMA.read_bytes()),
         "current_runtime_digest": _digest(RUNTIME_PATH.read_bytes()),
         "plan": document["plan"],
         "concurrent_worker_limit": 4,
@@ -317,8 +459,10 @@ def run_benchmark(output: Path, *, baseline_ref: str = BASELINE_REF, repeats: in
             for name, samples in trials.items()
         },
         "limits": "Scripted protocol replay, not a model review. Four-slot waves are projections; nine audit payloads are published and compiled. "
-        "Independent/validation/synthesis dispatches are retained but not executed. Reads follow complete source packets with direct fallback. "
-        "Four seeded findings test preservation, not recall. Same current planner/schemas/skills isolate runtime changes. "
+        "One independent transcript is published/compiled with a scripted legacy label error and retry; "
+        "validation/synthesis dispatches are not executed. Reads follow complete source packets with direct fallback. "
+        "Four seeded findings test preservation, not recall. Current planner/dependencies/skills with each runtime's input schema isolate protocol changes. "
+        "Coordinator bytes count stdout, or a full saved-result read when the legacy CLI is silent; actual stdout bytes are reported separately. "
         "No repository checks or Git mutations run. Timings exclude model work and Git baseline loading.",
     }
     (output / "report.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -331,9 +475,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, help="New output directory; default is a unique temporary directory")
     parser.add_argument("--baseline-ref", default=BASELINE_REF, help="Trusted local Git revision of the baseline runtime")
     parser.add_argument("--repeats", type=int, default=5)
+    parser.add_argument("--scale", type=int, default=20, help="Mixed whole-repository fixture scale; 20 creates 265 paths")
     args = parser.parse_args(argv)
     output = args.output or Path(tempfile.mkdtemp(prefix="review-workflow-benchmark-")) / "results"
-    run_benchmark(output.resolve(), baseline_ref=args.baseline_ref, repeats=args.repeats)
+    try:
+        run_benchmark(output.resolve(), baseline_ref=args.baseline_ref, repeats=args.repeats, scale=args.scale)
+    except (OSError, ValueError) as error:
+        print(f"review_graph_benchmark: {error}", file=sys.stderr)
+        return 2
     print(output.resolve() / "report.json")
     return 0
 

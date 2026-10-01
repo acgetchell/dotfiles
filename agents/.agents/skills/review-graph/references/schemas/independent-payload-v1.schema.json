@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "independent-payload-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "files_inspected", "branches", "boundary_cases", "tests", "findings", "no_finding_evidence", "adversarial_checks", "handoffs", "before_state", "after_state", "source_mutated", "git_mutated", "command_policy_attested", "commands_executed", "limitations"],
+  "properties": {
+    "status": {"enum": ["blocked", "completed", "no-findings"]},
+    "files_inspected": {"$ref": "#/$defs/strings"},
+    "branches": {"$ref": "#/$defs/text"},
+    "boundary_cases": {"$ref": "#/$defs/text"},
+    "tests": {"$ref": "#/$defs/text"},
+    "before_state": {"$ref": "#/$defs/state"},
+    "after_state": {"$ref": "#/$defs/state"},
+    "source_mutated": {"const": false},
+    "git_mutated": {"const": false},
+    "command_policy_attested": {"const": true},
+    "commands_executed": {"$ref": "#/$defs/strings"},
+    "limitations": {"$ref": "#/$defs/strings"},
+    "no_finding_evidence": {"$ref": "#/$defs/strings"},
+    "adversarial_checks": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["check_id", "evidence", "inspected_paths"],
+        "properties": {
+          "check_id": {"enum": ["fallback", "platform", "parser-errors", "unexpected-exceptions", "test-boundaries"]},
+          "evidence": {"$ref": "#/$defs/text"},
+          "inspected_paths": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/text"}}
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["severity", "location", "summary", "evidence", "impact", "owner", "remediation"],
+        "properties": {
+          "severity": {"enum": ["P0", "P1", "P2", "P3"]},
+          "location": {"$ref": "#/$defs/text"}, "summary": {"$ref": "#/$defs/text"},
+          "evidence": {"$ref": "#/$defs/text"}, "impact": {"$ref": "#/$defs/text"},
+          "owner": {"$ref": "#/$defs/text"}, "remediation": {"$ref": "#/$defs/text"}
+        }
+      }
+    },
+    "handoffs": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["catalog_id", "observed_trigger", "reason", "scope"],
+        "properties": {
+          "catalog_id": {"$ref": "#/$defs/text"}, "observed_trigger": {"$ref": "#/$defs/text"},
+          "reason": {"$ref": "#/$defs/text"}, "scope": {"$ref": "#/$defs/strings"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "dispatch": {
+      "type": "object",
+      "required": ["planned_paths", "change_target", "source_state", "before_state", "after_state", "adversarial_checks"],
+      "properties": {
+        "planned_paths": {"$ref": "#/$defs/strings"},
+        "change_target": {"$ref": "#/$defs/text"},
+        "source_state": {"$ref": "#/$defs/state"},
+        "before_state": {"$ref": "#/$defs/state"},
+        "after_state": {"$ref": "#/$defs/state"},
+        "adversarial_checks": {"$ref": "#/$defs/strings"}
+      }
+    },
+    "text": {"type": "string", "minLength": 1, "pattern": "^[^\\r\\n]*\\S[^\\r\\n]*$"},
+    "strings": {"type": "array", "items": {"$ref": "#/$defs/text"}},
+    "state": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"$ref": "#/$defs/text"}}
+  }
+}
