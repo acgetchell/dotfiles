@@ -328,6 +328,44 @@ Invoke it with `$typesafe-ai` in Codex, or ask an agent that has loaded it to
 requires a separately configured `TYPESAFE_API_KEY`; keep credentials out of
 this public repository. Installing the skill does not make API calls.
 
+Store the API key in a 1Password item. Enable the desktop app's CLI integration,
+then use a secret reference to inject the key for one command:
+
+```sh
+just typesafe-local 'op://<vault>/<item>/<field>' just typesafe-check
+```
+
+Replace the reference with your item's **Copy Secret Reference** value. If you
+use multiple 1Password accounts, prefix the command with
+`OP_ACCOUNT='<account sign-in address or ID>'`. The command may prompt for
+1Password authorization. The reference is configuration; never pass the actual
+key as a command argument or commit it in a file. No shell startup-file changes
+are required. `typesafe-local` can wrap other TypeSafe commands the same way.
+
+`just typesafe-check` reads the injected `TYPESAFE_API_KEY`, calls the TypeSafe
+model-list endpoint, and reports only authentication status and model count.
+It makes no inference request and sends no repository content. It does not log
+the key or raw response/error bodies. Keep 1Password's output masking enabled.
+When a cloud environment supplies `TYPESAFE_API_KEY` through its secret provider,
+run `just typesafe-check` directly. Credential provisioning is separate for each
+execution environment.
+
+For the configured Codex Cloud coding environment:
+
+1. Allow HTTPS access to `api.typesafe.ai` and have the environment request a
+   personal **Network secret** named `TYPESAFE_API_KEY` for that destination.
+2. In **Settings > Codex Cloud > Personal vault**, add a **Network secret** with
+   the matching key, enter the API key through the private settings form, and
+   apply it to the coding environment. Personal secrets do not automatically
+   add network destinations to the environment's allowlist.
+3. Save and publish the environment configuration. Once these repository changes
+   are available in its checkout, run `just typesafe-check` in a new cloud task.
+
+The cloud process receives a placeholder; its HTTPS proxy supplies the real
+credential for the allowed destination. The local 1Password session is not
+needed for cloud runs. See the official
+[cloud environment secret configuration](https://learn.chatgpt.com/docs/environments/cloud-environments#configure-environment-variables-and-network-secrets).
+
 To update, review and replace the complete upstream `skills/typesafe-ai/`
 directory, including any references and its license, while preserving the
 local `agents/openai.yaml`. Update the pinned revision above, then run

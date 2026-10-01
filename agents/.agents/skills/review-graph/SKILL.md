@@ -5,14 +5,12 @@ description: "Coordinate provenance-preserving mixed-surface repository reviews 
 
 # Review Graph
 
-Deliver the coverage of every applicable focused review while keeping proof
-bookkeeping out of model-authored prose. Reviewers make semantic judgments;
-deterministic scripts own catalog identity, fingerprints, digests, canonical
-artifacts, evidence envelopes, and proof reconciliation.
+Cover every applicable focused review. Reviewers make semantic judgments;
+scripts own catalog identity, fingerprints, digests, canonical artifacts,
+evidence envelopes, and proof reconciliation.
 
-Read [the runtime contract](references/runtime-contract.md). Execute the helper
-scripts without reading their implementations unless a script fails or this
-task changes them.
+Read [the runtime contract](references/runtime-contract.md). Execute scripts;
+inspect implementations only for failures or requested changes.
 
 ## Profiles
 
@@ -38,9 +36,8 @@ contract with `worker_created: false`.
 
 ## Route Compactly And Exhaustively
 
-Use `references/routing-catalog.json` through
-`scripts/review_graph_plan.py`. The planner owns catalog IDs, router IDs, rule
-IDs, skill paths, priorities, and synthesis dependencies.
+Use `references/routing-catalog.json` through `scripts/review_graph_plan.py`,
+which owns catalog/router/rule IDs, skill paths, priorities, and synthesis dependencies.
 
 1. Apply the deterministic repository classifier to captured paths.
 2. Run `review_graph_runtime.py routing-projection` for the consulted routers.
@@ -58,6 +55,10 @@ IDs, skill paths, priorities, and synthesis dependencies.
 Every applicable leaf remains required. Resolve late handoffs before dependent
 validation or synthesis.
 
+For requested TypeSafe comparisons, follow
+[the shadow experiment](references/routing-experiment.md). Freeze ordinary routing
+first; preserve its decisions and proof gates.
+
 ## Execute Review Nodes
 
 Dispatch selected leaves with exact skills and owned paths. Workers stream
@@ -66,9 +67,8 @@ commands; the runtime validates before writing, binds approval retries, and
 atomically publishes. They return the publication receipt; `compile-node` reads
 the bound bytes without a second conversational copy. Workers do not author
 fingerprints, digests, evidence IDs, execution metadata, canonical Markdown,
-or machine-evidence JSON. Materialize exact dispatch bases from the accepted
-plan with `review_graph_runtime.py materialize-dispatches`; do not reconstruct
-planner-owned fields in prompts.
+or machine-evidence JSON. Materialize dispatch bases from the accepted plan
+with `review_graph_runtime.py materialize-dispatches`; never reconstruct planner-owned fields.
 
 The materialized command policy is authoritative. Review nodes attest to every
 command and do not execute validator-owned commands without an exact duplicate
@@ -78,7 +78,7 @@ execution identities.
 Identical skill/source/scope leaves execute once; each catalog requirement
 retains ownership of the coalesced judgment and evidence.
 
-Run the capture command before and after execution. Then invoke
+Capture before and after execution. Invoke
 `scripts/review_graph_runtime.py compile-node` with the node ID, materialized
 dispatch set, captures, and journal. It reads the bound payload, seals accepted
 bytes at a read-only content-addressed path, and records that copy in evidence.
@@ -124,9 +124,9 @@ Follow its returned continuation configuration; see
 
 ## Synthesize From A Compact Bundle
 
-Use `synthesis-bundle` rather than complete predecessor reports. Give synthesis
-workers its canonical hashed view, digest, accepted predecessor IDs, and
-exclusions. Keep raw artifacts in the proof store.
+Give synthesis workers the `synthesis-bundle` canonical hashed view, digest,
+accepted predecessor IDs, and exclusions. Keep complete predecessor reports and
+raw artifacts in the proof store.
 
 ## Complete And Report
 
@@ -146,8 +146,12 @@ It derives the mappings, manifest, and `RepositoryReviewProof`; report complete
 only when its verifier returns `complete`. Report repository readiness from
 typed synthesis separately from proof completeness and validation success.
 
-The default user report is compact: findings, changes, validation, blockers,
-selected skills, proof status, final repository state, and artifact-manifest
-location. Persist exhaustive lifecycle, routing, evidence, and resume views in
-the proof store; render them inline only when requested or needed to explain an
-incomplete result.
+Report findings, changes, validation, blockers, selected skills, proof status,
+final repository state, and artifact-manifest location compactly. Keep exhaustive
+lifecycle, routing, evidence, and resume views in the proof store; show them only
+when requested or needed to explain incompleteness.
+
+Report stage costs as measured, estimated, or unavailable using
+[graph accounting](references/routing-experiment.md#account-for-the-whole-graph).
+Set external `REVIEW_GRAPH_USAGE_LEDGER` for runtime timings; preserve unknown
+counts and failed/unfinished attempts.

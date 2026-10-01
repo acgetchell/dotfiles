@@ -98,6 +98,7 @@ from review_graph_reuse import (
 )
 from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
 from review_graph_synthesis import synthesis_fields, validate_synthesis
+from review_graph_usage import digest as usage_digest, measure_call
 
 _READ_ONLY_MODES = frozenset({"audit", "revalidation", "synthesis"})
 _REVIEW_MODES = _READ_ONLY_MODES | {"fix"}
@@ -6426,6 +6427,14 @@ def main(argv: list[str] | None = None) -> int:
             raise TypeError(msg)
         operation_document = _operation_document(document, args.operation)
         require_schema_definition(operation_document, _RUNTIME_OPERATION_INPUT_SCHEMA, args.operation)
+        usage_ledger = os.environ.get("REVIEW_GRAPH_USAGE_LEDGER")
+        if usage_ledger:
+            return measure_call(
+                lambda: _run_operation(operation_document, args),
+                Path(usage_ledger),
+                stage=f"runtime:{args.operation}",
+                scope_digest=usage_digest(operation_document),
+            )
         return _run_operation(operation_document, args)
     except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as error:
         if isinstance(error, WorkerPayloadWriteError):
