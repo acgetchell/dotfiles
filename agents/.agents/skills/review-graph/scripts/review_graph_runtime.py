@@ -20,6 +20,7 @@ from typing import Any, cast
 
 from review_graph_bootstrap import bootstrap_document
 from review_graph_coverage import combined_findings, coverage_decisions, coverage_reference, reused_paths, validate_coverage_units
+from review_graph_independent import CHECK_LABELS, SCHEMA as _INDEPENDENT_PAYLOAD_SCHEMA, render_independent_payload
 from review_graph_metrics import projected_waves, source_demand
 from review_graph_plan import (
     _COMPACT_ROUTING_OVERRIDE_FIELDS,
@@ -86,6 +87,7 @@ from review_graph_plan import (
     validation_execution_result_blockers,
     validation_requirements_from_document,
 )
+from review_graph_receipts import stage_receipt
 from review_graph_reuse import (
     SNAPSHOT_FORMAT,
     AuditInputIdentity,
@@ -738,6 +740,40 @@ def _planned_validation_units(plan: GraphPlan) -> list[dict[str, Any]]:
     ]
 
 
+def _validation_identity_summary(identity: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **{key: identity[key] for key in ("commands", "working_directories", "requested_scope", "platform", "required")},
+        "captured_path_count": len(identity["captured_paths"]),
+    }
+
+
+def _resolve_planned_validation_record(record: dict[str, Any]) -> dict[str, Any]:
+    expected_keys = {"execution_identity_reference", "execution_summary", "planned_validation_digest", "requirement_ids", "validation_unit_id"}
+    if set(record) != expected_keys:
+        msg = "planned validation reference contains missing or unknown fields"
+        raise ValueError(msg)
+    reference = record["execution_identity_reference"]
+    if not isinstance(reference, dict) or set(reference) != {"path", "digest"}:
+        msg = "planned validation identity reference requires path and digest"
+        raise ValueError(msg)
+    path = Path(_required_text(reference, "path"))
+    if not path.is_absolute():
+        msg = "planned validation identity reference path must be absolute"
+        raise ValueError(msg)
+    content = _read_regular_file_no_follow(path)
+    if _sha256_bytes(content) != reference["digest"] or reference["digest"] != record["planned_validation_digest"]:
+        msg = "planned validation identity sidecar digest mismatch"
+        raise ValueError(msg)
+    identity = json.loads(content)
+    if not isinstance(identity, dict) or set(identity) != _PLANNED_VALIDATION_IDENTITY_KEYS:
+        msg = "planned validation identity sidecar is incomplete"
+        raise ValueError(msg)
+    if record["execution_summary"] != _validation_identity_summary(identity):
+        msg = "planned validation summary differs from its bound identity"
+        raise ValueError(msg)
+    return {**{key: record[key] for key in ("planned_validation_digest", "requirement_ids", "validation_unit_id")}, "execution_identity": identity}
+
+
 def _dispatched_planned_validations(dispatch: dict[str, Any]) -> dict[str, tuple[str, str, dict[str, Any]]]:
     raw_policy = dispatch.get("command_policy")
     if raw_policy is None:
@@ -747,7 +783,8 @@ def _dispatched_planned_validations(dispatch: dict[str, Any]) -> dict[str, tuple
         raise TypeError(msg)
     by_requirement: dict[str, tuple[str, str, dict[str, Any]]] = {}
     unit_ids: set[str] = set()
-    for record in _records(raw_policy, "planned_validation_units"):
+    for raw_record in _records(raw_policy, "planned_validation_units"):
+        record = _resolve_planned_validation_record(raw_record)
         if frozenset(record) != frozenset({"execution_identity", "planned_validation_digest", "requirement_ids", "validation_unit_id"}):
             msg = "planned validation unit dispatch records must contain only unit ID, requirement IDs, identity, and digest"
             raise ValueError(msg)
@@ -777,7 +814,7 @@ def _dispatched_planned_validations(dispatch: dict[str, Any]) -> dict[str, tuple
 def _review_validation_requirement_blockers(dispatch: dict[str, Any], validations: tuple[tuple[str, dict[str, Any]], ...]) -> tuple[str, ...]:
     try:
         planned = _dispatched_planned_validations(dispatch)
-    except (TypeError, ValueError) as error:
+    except (OSError, TypeError, ValueError) as error:
         return (str(error),)
     blockers: list[str] = []
     for requirement_id, requirement in validations:
@@ -926,7 +963,7 @@ def _review_limitation_reasons(payload: dict[str, Any]) -> tuple[str, ...]:
 
 
 def compile_review(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  # noqa: C901, PLR0912, PLR0915
-    """Compile one compact semantic payload into the legacy verified artifact."""
+    """Compile one compact semantic payload into the verified proof artifact."""
     dispatch = document.get("dispatch")
     payload = document.get("payload")
     if not isinstance(dispatch, dict) or not isinstance(payload, dict):
@@ -1302,8 +1339,8 @@ def _independent_handoffs_body(handoffs: tuple[tuple[str, dict[str, Any]], ...])
     )
 
 
-def compile_independent_review(document: dict[str, Any], native_content: bytes) -> tuple[bytes, dict[str, Any]]:  # noqa: C901, PLR0912, PLR0915
-    """Wrap one conclusion-blind native independent review in verified graph evidence."""
+def _compile_independent_native(document: dict[str, Any], native_content: bytes) -> tuple[bytes, dict[str, Any]]:  # noqa: C901, PLR0912, PLR0915
+    """Verify and envelope generated independent-review sections."""
     dispatch = document.get("dispatch")
     if not isinstance(dispatch, dict):
         msg = "compile-independent-review input requires a dispatch object"
@@ -1375,6 +1412,8 @@ def compile_independent_review(document: dict[str, Any], native_content: bytes) 
         msg = "every independent review reference path must exist"
         raise ValueError(msg)
     planned_paths = _text_list(dispatch, "planned_paths", required=True)
+    inspected_values = _native_field_values(sections["## Scope Inspected"], "Files")
+    inspected_paths, _ = _native_repository_path_list(inspected_values[0], label="independent Files") if len(inspected_values) == 1 else ((), ())
     change_target = _required_text(dispatch, "change_target")
     execution_profile = _required_text(dispatch, "execution_profile")
     execution_location = _required_text(dispatch, "execution_location")
@@ -1447,7 +1486,7 @@ def compile_independent_review(document: dict[str, Any], native_content: bytes) 
             f"- Repository state fingerprint: {expected[2]}",
             f"- Skill file: {skill_path}",
             f"- Change target: {change_target}",
-            f"- Files inspected: {', '.join(planned_paths)}",
+            f"- Files inspected: {', '.join(inspected_paths) or 'none'}",
             "- State verification before:",
             f"  - Observed scope fingerprint: {before[0]}",
             f"  - Observed worktree fingerprint: {before[1]}",
@@ -1481,7 +1520,7 @@ def compile_independent_review(document: dict[str, Any], native_content: bytes) 
         "finding_ids": list(evidence.finding_ids),
         "git_mutated": False,
         "handoff_ids": list(evidence.handoff_ids),
-        "inspected_paths": list(planned_paths),
+        "inspected_paths": list(inspected_paths),
         "mode": "independent-review",
         "node_id": node_id,
         "predecessor_evidence_ids": [],
@@ -1520,6 +1559,21 @@ def compile_independent_review(document: dict[str, Any], native_content: bytes) 
         "native_input_digest": _sha256_bytes(native_content),
         "normalized_record": normalized,
     }
+
+
+def compile_independent_payload(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:
+    """Compile structured judgments through the existing native evidence verifier."""
+    dispatch, payload = document.get("dispatch"), document.get("payload")
+    if not isinstance(dispatch, dict) or not isinstance(payload, dict):
+        msg = "compile-independent-review input requires dispatch and payload objects"
+        raise TypeError(msg)
+    native = render_independent_payload(payload, dispatch)
+    blockers = _review_command_policy_blockers(dispatch, payload)
+    if blockers:
+        raise ValueError("; ".join(blockers))
+    content, metadata = _compile_independent_native({"dispatch": dispatch, "status": payload["status"], "limitations": payload["limitations"]}, native)
+    metadata["payload_digest"] = _sha256_bytes(_canonical_json(payload).encode())
+    return content, metadata
 
 
 def _independent_normalized_record(content: bytes, expectation: ReviewEvidenceExpectation, evidence: ReviewEvidence) -> dict[str, Any]:
@@ -2630,6 +2684,44 @@ def _canonical_worker_payload(content: bytes) -> dict[str, Any]:
     return payload
 
 
+def _verify_independent_payload_binding(content: bytes, metadata: dict[str, Any], expectation: ReviewEvidenceExpectation, evidence: ReviewEvidence) -> None:
+    """Bind structured judgments to sealed bytes and every rendered native section."""
+    payload = _canonical_worker_payload(content)
+    if metadata.get("payload_digest") != _sha256_bytes(_canonical_json(payload).encode()):
+        msg = "independent canonical payload digest differs from metadata"
+        raise ValueError(msg)
+    if "worker_payload_path" in metadata and json.loads(Path(metadata["worker_payload_path"]).read_bytes()) != payload:
+        msg = "independent canonical payload differs from sealed worker bytes"
+        raise ValueError(msg)
+    native = render_independent_payload(
+        payload,
+        {
+            "planned_paths": list(expectation.planned_paths),
+            "change_target": expectation.change_target,
+            "source_state": list(expectation.source_state),
+            "before_state": list(evidence.fingerprints.before),
+            "after_state": list(evidence.fingerprints.after),
+            "adversarial_checks": list(_independent_adversarial_checks(expectation.planned_paths)),
+        },
+    )
+    if _sha256_bytes(native) != metadata.get("native_input_digest") or payload["status"] != evidence.status:
+        msg = "independent rendered payload differs from its bound native input"
+        raise ValueError(msg)
+    expected = _independent_input_sections(native)
+    findings = _independent_findings(expected["## Findings"], evidence.node_id, evidence.status)
+    handoffs = _independent_handoffs(expected["## Routing Handoffs"], evidence.node_id, {})
+    expected["## Findings"] = _independent_findings_body(findings, evidence.status)
+    expected["## Routing Handoffs"] = _independent_handoffs_body(handoffs)
+    sections, blockers = _native_section_bodies(content.decode(), (*_INDEPENDENT_NATIVE_SECTIONS, "## Review Graph Envelope", "## Machine Evidence"))
+    if blockers or sections is None or any(sections[key] != value for key, value in expected.items()):
+        msg = "independent native evidence differs from its canonical payload"
+        raise ValueError(msg)
+    limitations = _native_field_values(sections["## Review Graph Envelope"], "Limitations")
+    if limitations != ("; ".join(payload["limitations"]) or "none",):
+        msg = "independent limitations differ from its canonical payload"
+        raise ValueError(msg)
+
+
 def _load_evidence_source(  # noqa: C901, PLR0912, PLR0915
     raw: dict[str, Any], *, require_normalized: bool = False
 ) -> tuple[str, ReviewEvidenceExpectation | ValidationEvidenceExpectation, ReviewEvidence | ValidationEvidence, bytes, dict[str, Any] | None]:
@@ -2683,6 +2775,8 @@ def _load_evidence_source(  # noqa: C901, PLR0912, PLR0915
         msg = f"evidence source failed verification {artifact_path}: " + "; ".join(blockers)
         raise ValueError(msg)
 
+    if isinstance(expectation, ReviewEvidenceExpectation) and isinstance(evidence, ReviewEvidence) and expectation.mode == "independent-review":
+        _verify_independent_payload_binding(content, metadata, expectation, evidence)
     normalized = metadata.get("normalized_record")
     if normalized is not None and not isinstance(normalized, dict):
         msg = f"normalized record must be an object: {metadata_path}"
@@ -3165,12 +3259,13 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
             "never rewrite evidence to obtain approval. "
             f"Only after it atomically publishes {worker_payload_path} may you return those same bytes."
         )
-    if contract == "native-independent-review":
+    if contract == "compact-independent-review":
         return (
-            "Perform only the dispatched repository-independent-review in fresh context. Publish the six canonical native sections "
-            "Scope Inspected, Findings, No-Finding Evidence, Routing Handoffs, Fingerprint Proof, and Git State; do not append graph IDs, "
-            "an envelope, or Machine Evidence because compile-independent-review owns those identities. "
-            f"Command policy: {command_policy}{persistence_text}{shared_text}"
+            "Perform only the dispatched repository-independent-review in fresh context. Publish the structured JSON payload from "
+            "dispatch.payload_schema and its template. Supply substantive evidence and inspected_paths for each dispatched stable check_id. "
+            "Record observed before_state/after_state and truthful mutation and command attestations. The compiler renders native headings, "
+            "labels and graph identities; never supply an unperformed check or borrow other reviewers' conclusions. "
+            f"Command policy: {command_policy}{persistence_text}"
         )
     validation_text = (
         " Omit artifacts: the runtime captures workspace status and artifact digests before and after execution." if contract == "compact-validation" else ""
@@ -3214,7 +3309,7 @@ def _preflight_audit_payload(contract: dict[str, Any], payload: dict[str, Any]) 
         raise ValueError(msg)
     entry = json.loads(content)
     dispatch = entry["dispatch"]
-    if contract.get("mode") != "audit" or any(
+    if contract.get("mode") not in {"audit", "independent-review"} or any(
         dispatch.get(key) != contract.get(key) for key in ("mode", "node_id", "owned_paths", "worker_payload_path", "coverage_reuse")
     ):
         msg = "compiler preflight dispatch differs from its publication contract"
@@ -3222,23 +3317,34 @@ def _preflight_audit_payload(contract: dict[str, Any], payload: dict[str, Any]) 
     # These are hypothetical equal captures, never published as evidence. The
     # actual compile still requires independently supplied before/after captures.
     try:
-        compile_review({"dispatch": {**dispatch, "before_state": dispatch["source_state"], "after_state": dispatch["source_state"]}, "payload": payload})
+        compiler = compile_independent_payload if contract.get("mode") == "independent-review" else compile_review
+        current_state = list(_current_metadata_state(dispatch))
+        compiler({"dispatch": {**dispatch, "before_state": current_state, "after_state": current_state}, "payload": payload})
     except (ValueError, TypeError) as error:
-        msg = f"audit compiler preflight failed before publication: {error}"
+        msg = f"{contract.get('mode')} compiler preflight failed before publication: {error}"
         raise ValueError(msg) from error
 
 
 def _validate_worker_payload_bytes(contract_document: dict[str, Any], payload_bytes: bytes) -> dict[str, Any] | None:
     """Reject incomplete worker output before it can replace a persisted payload."""
     contract = _required_text(contract_document, "result_contract")
-    if contract in {"compact-review", "compact-validation"}:
+    if contract in {"compact-review", "compact-validation", "compact-independent-review"}:
         payload = json.loads(payload_bytes)
         if not isinstance(payload, dict):
             msg = "compact worker payload root must be an object"
             raise TypeError(msg)
-        schema = _review_payload_schema(contract_document) if contract == "compact-review" else _VALIDATION_PAYLOAD_SCHEMA
+        schema = (
+            _INDEPENDENT_PAYLOAD_SCHEMA
+            if contract == "compact-independent-review"
+            else (_review_payload_schema(contract_document) if contract == "compact-review" else _VALIDATION_PAYLOAD_SCHEMA)
+        )
         require_schema(payload, schema)
-        if contract == "compact-review":
+        if contract == "compact-independent-review":
+            if "compiler_preflight" not in contract_document:
+                msg = "structured independent publication requires its bound compiler preflight"
+                raise ValueError(msg)
+            _preflight_audit_payload(contract_document, payload)
+        elif contract == "compact-review":
             _validate_review_coverage_partitions(contract_document, payload)
             _validate_audit_caveats(contract_document, payload)
             blockers = _review_scope_coverage_blockers(contract_document, payload, status=_required_text(payload, "status"))
@@ -3258,9 +3364,6 @@ def _validate_worker_payload_bytes(contract_document: dict[str, Any], payload_by
                 msg = "worker payload failed execution-result validation: " + "; ".join(blockers)
                 raise ValueError(msg)
         return payload
-    if contract == "native-independent-review":
-        _independent_input_sections(payload_bytes)
-        return None
     msg = f"unsupported worker payload result contract: {contract}"
     raise ValueError(msg)
 
@@ -3431,6 +3534,7 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             raise ValueError(msg)
         if planned_states:
             source_state = planned_states.pop()
+    _current_metadata_state({**document, "source_state": list(source_state)})
     _verified_reused_sources(plan, source_state)
     repository_root_path = Path(_required_text(document, "repository_root"))
     if not repository_root_path.is_absolute() or not repository_root_path.is_dir():
@@ -3460,6 +3564,9 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
     review_schema = _schema_reference(_REVIEW_PAYLOAD_SCHEMA)
     synthesis_schema = _schema_reference(_SYNTHESIS_PAYLOAD_SCHEMA)
     validation_schema = _schema_reference(_VALIDATION_PAYLOAD_SCHEMA)
+    independent_schema = _schema_reference(_INDEPENDENT_PAYLOAD_SCHEMA)
+    template_path = _SCHEMA_ROOT.parent / "independent-payload-template.json"
+    independent_schema["template"] = {"path": str(template_path), "digest": _file_identity_digest(str(template_path))}
     catalog_path = Path(document.get("routing_catalog_path", DEFAULT_ROUTING_CATALOG)).resolve()
     if not catalog_path.is_file():
         msg = f"routing catalog does not exist: {catalog_path}"
@@ -3503,6 +3610,19 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         msg = "duplicate command authorizations reference unknown nodes: " + ", ".join(unknown_authorizations)
         raise ValueError(msg)
     validator_commands = {command for unit in plan.coalesced_validation_units for command in unit.commands}
+    validation_references = []
+    for record in _planned_validation_units(plan):
+        identity = record.pop("execution_identity")
+        digest = record["planned_validation_digest"]
+        identity_path = artifact_store / f"planned-validation.{digest.removeprefix('sha256:')}.json"
+        _queue_materialized_write(pending_writes, identity_path, _canonical_json(identity).encode(), mode=0o444)
+        validation_references.append(
+            {
+                **record,
+                "execution_identity_reference": {"path": str(identity_path), "digest": digest},
+                "execution_summary": _validation_identity_summary(identity),
+            }
+        )
     dispatches: list[dict[str, Any]] = []
     for node in plan.actual_worker_nodes:
         if preserved_entries is not None and node.node_id in preserved_entries:
@@ -3516,8 +3636,7 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         artifact_suffix = "validation.md" if node.mode == "validation" else "review.md"
         artifact_path = artifact_store / f"{node.node_id}.{artifact_suffix}"
         metadata_path = artifact_store / f"{node.node_id}.evidence.json"
-        worker_payload_suffix = "md" if node.mode == "independent-review" else "json"
-        worker_payload_path = artifact_store / f"{node.node_id}.worker-payload.{worker_payload_suffix}"
+        worker_payload_path = artifact_store / f"{node.node_id}.worker-payload.json"
         worker_payload_contract_path = artifact_store / f"{node.node_id}.worker-payload-contract.json"
         worker_payload_command_prefix = [
             str(Path(sys.executable).resolve()),
@@ -3581,6 +3700,10 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             },
             "worker_created": location == "worker",
         }
+        if document.get("external_metadata_transitions"):
+            common["external_metadata_transitions"] = document["external_metadata_transitions"]
+        if node.mode != "validation":
+            common["command_policy"]["planned_validation_units"] = validation_references
         deltas = [item for item in plan.audit_delta_reviews if item["node_id"] == node.node_id]
         if deltas:
             if len(deltas) != 1:
@@ -3639,7 +3762,9 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
                     raise ValueError(msg)
                 common["planned_path_line_bounds"] = [[path, line_bounds[path]] for path in node.coverage]
                 common["adversarial_checks"] = list(_independent_adversarial_checks(node.coverage))
-                contract = "native-independent-review"
+                common["adversarial_check_ids"] = [key for key, label in CHECK_LABELS.items() if label in common["adversarial_checks"]]
+                contract = "compact-independent-review"
+                common["payload_schema"] = independent_schema
             else:
                 common["payload_schema"] = synthesis_schema if node.mode == "synthesis" else review_schema
                 contract = "compact-review"
@@ -3667,7 +3792,7 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             "worker_prompt": _worker_prompt(contract, common),
         }
         worker_input_bytes = (json.dumps(entry, indent=2, sort_keys=True) + "\n").encode()
-        if node.mode == "audit":
+        if node.mode == "audit" or contract == "compact-independent-review":
             persistence_contract["compiler_preflight"] = {"worker_input_path": str(worker_input_path), "digest": _sha256_bytes(worker_input_bytes)}
         _queue_materialized_write(
             pending_writes, worker_payload_contract_path, (json.dumps(persistence_contract, indent=2, sort_keys=True) + "\n").encode(), mode=0o444
@@ -4250,6 +4375,7 @@ def resume_after_external_metadata(document: dict[str, Any]) -> dict[str, Any]:
         {
             "plan": document["plan"],
             "source_state": list(state),
+            "external_metadata_transitions": transitions,
             "artifact_store": str(root),
             "repository_root": transition.after.repository_root,
             "authorization": first_entry["dispatch"]["authorization"],
@@ -5808,6 +5934,7 @@ def _runtime_subparser(subparsers: Any, operation: str, help_text: str, *, contr
     if not isinstance(parser, argparse.ArgumentParser):
         msg = f"runtime parser factory returned an invalid parser for {operation}"
         raise TypeError(msg)
+    parser.add_argument("--full-output", action="store_true", help="print the complete result instead of a compact artifact receipt")
     return parser
 
 
@@ -5821,9 +5948,8 @@ def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     compile_parser.add_argument("--input", type=Path, required=True)
     compile_parser.add_argument("--artifact", type=Path, required=True)
     compile_parser.add_argument("--metadata", type=Path, required=True)
-    independent_parser = _runtime_subparser(subparsers, "compile-independent-review", "compile a native independent review")
+    independent_parser = _runtime_subparser(subparsers, "compile-independent-review", "compile a structured independent review")
     independent_parser.add_argument("--input", type=Path, required=True)
-    independent_parser.add_argument("--native-artifact", type=Path, required=True)
     independent_parser.add_argument("--artifact", type=Path, required=True)
     independent_parser.add_argument("--metadata", type=Path, required=True)
     validation_parser = _runtime_subparser(subparsers, "compile-validation", "compile a compact validation payload")
@@ -5934,7 +6060,7 @@ def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     ready_output = ready_parser.add_mutually_exclusive_group(required=True)
     ready_output.add_argument("--output", type=Path)
     ready_output.add_argument(
-        "--output-dir", type=Path, help="runtime-managed immutable next-ready generations; prints output_path and output_generation as JSON"
+        "--output-dir", type=Path, help="runtime-managed immutable next-ready generations; receipt reports output.path, output.digest and output_generation"
     )
     final_parser = _runtime_subparser(subparsers, "finalize-proof", "derive and verify the repository proof")
     final_parser.add_argument("--current-capture", type=Path, required=True)
@@ -6099,13 +6225,6 @@ def _snapshot_workspace_from_files(document: dict[str, Any], args: argparse.Name
     return {**capture_workspace_snapshot(dispatch), "observed_source_state": list(_capture_source_state(args.current_capture))}
 
 
-def _independent_status(native_content: bytes, explicit: str | None) -> str:
-    if explicit is not None:
-        return explicit
-    sections = _independent_input_sections(native_content)
-    return "no-findings" if sections["## Findings"].strip() == "No findings." else "completed"
-
-
 def _workspace_records(
     path: Path, *, node_id: str, source_state: tuple[str, str, str], observed_state: tuple[str, str, str] | None = None
 ) -> list[dict[str, Any]]:
@@ -6208,10 +6327,15 @@ def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace)
             dispatch["synthesis_bundle"] = build_synthesis_bundle({**document, "sources": list(sources.values())})
         compiler_input = {"dispatch": dispatch, "payload": payload}
         content, metadata = compile_review(compiler_input) if contract == "compact-review" else compile_validation(compiler_input)
-    elif contract == "native-independent-review":
-        limitations = tuple(args.limitation or ())
-        compiler_input = {"dispatch": dispatch, "limitations": list(limitations), "status": _independent_status(payload_bytes, args.status)}
-        content, metadata = compile_independent_review(compiler_input, payload_bytes)
+    elif contract == "compact-independent-review":
+        payload = json.loads(payload_bytes)
+        require_schema(payload, _INDEPENDENT_PAYLOAD_SCHEMA)
+        if (args.status is not None and args.status != payload.get("status")) or (
+            args.limitation is not None and args.limitation != payload.get("limitations")
+        ):
+            msg = "independent status and limitations must match the canonical structured payload"
+            raise ValueError(msg)
+        content, metadata = compile_independent_payload({"dispatch": dispatch, "payload": payload})
     else:
         msg = f"compile-node does not support result contract {contract}"
         raise ValueError(msg)
@@ -6366,6 +6490,13 @@ def _run_worker_payload_operation(document: dict[str, Any], args: argparse.Names
     return 0
 
 
+def _print_operation_result(args: argparse.Namespace, output_path: Path, output: dict[str, Any]) -> None:
+    receipt = stage_receipt(args.operation, output_path, output)
+    if args.operation == "materialize-dispatches":
+        receipt["next_operation_inputs"] = {"dispatches": str(output_path.resolve())}
+    print(_canonical_json(output if args.full_output else receipt))
+
+
 def _run_operation(document: dict[str, Any], args: argparse.Namespace) -> int:  # noqa: C901, PLR0912
     if args.operation in {"persist-worker-payload", "review-worker-payload-write", "publish-worker-payload"}:
         return _run_worker_payload_operation(document, args)
@@ -6379,19 +6510,26 @@ def _run_operation(document: dict[str, Any], args: argparse.Namespace) -> int:  
         elif args.operation == "compile-validation":
             content, metadata = compile_validation(document)
         else:
-            content, metadata = compile_independent_review(document, args.native_artifact.read_bytes())
+            content, metadata = compile_independent_payload(document)
         _write_bytes_once(args.artifact, content)
         _write_text_once(args.metadata, json.dumps(metadata, indent=2, sort_keys=True) + "\n")
+        _print_operation_result(
+            args,
+            args.metadata,
+            {**metadata, "artifact_path": str(args.artifact), "metadata_path": str(args.metadata), "status": metadata["evidence"]["status"]},
+        )
         return 0
     if args.operation == "journal-append":
         event = append_journal_event(args.journal, document, _journal_request_from_args(args))
         print(_canonical_json(event))
         return 0
     if args.operation == "compile-node":
-        _compile_node_from_files(document, args)
+        output = _compile_node_from_files(document, args)
+        _print_operation_result(args, args.output, output)
         return 0
     if args.operation == "materialize-dispatches":
-        materialize_dispatches(document, operation_output_path=args.output)
+        output = materialize_dispatches(document, operation_output_path=args.output)
+        _print_operation_result(args, args.output, output)
         return 0
     output = _json_operation_output(document, args)
     output_path = args.output
@@ -6411,8 +6549,7 @@ def _run_operation(document: dict[str, Any], args: argparse.Namespace) -> int:  
         _write_bytes_atomically_once(output_path, output_text.encode(), mode=0o644)
     else:
         _write_text_once(output_path, output_text)
-    if args.operation == "next-ready" and args.output_dir is not None:
-        print(_canonical_json({"output_generation": output["output_generation"], "output_path": str(output_path)}))
+    _print_operation_result(args, output_path, output)
     return 2 if args.operation == "finalize-proof" and output["status"] != "complete" else 0
 
 

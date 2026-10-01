@@ -14,7 +14,7 @@ from review_graph_runtime import (
     advance_after_mutation,
     append_journal_event,
     build_synthesis_bundle,
-    compile_independent_review,
+    compile_independent_payload,
     compile_review,
     compile_validation,
     finalize_proof,
@@ -27,12 +27,11 @@ from review_graph_runtime import (
 from review_graph_schema import SchemaValidationError, require_schema_definition
 from review_graph_synthesis import validate_synthesis
 from test_review_graph_runtime import (
-    INDEPENDENT_NATIVE_EXAMPLE,
     ROUTING_CATALOG,
     SCHEMA_ROOT,
     SKILL_ROOT,
-    STATE_FIXTURE,
     _baseline_mutation_fixture,
+    _compact_independent_payload,
     _json_plan,
     _publish_worker_bytes,
     _run_test_git,
@@ -227,9 +226,11 @@ def test_manifest_delta_reuses_implementation_and_preserves_findings(tmp_path: P
         compile_review({"dispatch": {**tampered, "before_state": state, "after_state": state}, "payload": updated})
 
 
-def _staging_fixture(tmp_path: Path) -> tuple[str, Path, dict[str, Any], dict[str, Any], dict[str, Any]]:
+def _staging_fixture(tmp_path: Path, *, independent: bool = False) -> tuple[str, Path, dict[str, Any], dict[str, Any], dict[str, Any]]:
     git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
     (repository / "tool.py").write_text("value = 2\n")
+    if independent:
+        template.update(concrete_change_target=True, change_target="git diff -- state.rs tool.py")
     capture = _scope_data(git, repository, "baseline", None, ())
     plan = plan_from_document(bootstrap_document(capture, template), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)
     lifecycle, entries, dispatches = _materialize(tmp_path, capture, plan)
@@ -412,11 +413,6 @@ def test_independent_review_can_revalidate_on_resumed_metadata(tmp_path: Path) -
     _git, _repository, request, _audit, _entries = _staging_fixture(tmp_path)
     resumed = resume_after_external_metadata(request)
     original, current = request["source_state"], resumed["current_source_state"]
-    native = INDEPENDENT_NATIVE_EXAMPLE.read_text().replace(STATE_FIXTURE, "state.rs")
-    native = native.replace("Scope fingerprint: scope", f"Scope fingerprint: {original[0]}")
-    native = native.replace("Worktree fingerprint: worktree", f"Worktree fingerprint: {original[1]}")
-    native = native.replace("Repository state fingerprint: repository", f"Repository state fingerprint: {original[2]}", 1)
-    native = native.replace("Repository state fingerprint: repository", f"Repository state fingerprint: {current[2]}")
     dispatch = {
         "adversarial_checks": ["fallback absence and failure", "platform seams", "parser suffixes and error branches", "unexpected exception types"],
         "artifact_id": "artifact://independent-staging",
@@ -442,7 +438,9 @@ def test_independent_review_can_revalidate_on_resumed_metadata(tmp_path: Path) -
         "worker_created": True,
         "external_metadata_transitions": resumed["lifecycle_input"]["external_metadata_transitions"],
     }
-    content, metadata = compile_independent_review({"dispatch": dispatch, "limitations": [], "status": "no-findings"}, native.encode())
+    payload = _compact_independent_payload(dispatch)
+    payload.update(before_state=current, after_state=current)
+    content, metadata = compile_independent_payload({"dispatch": dispatch, "payload": payload})
     assert metadata["normalized_record"]["observed_source_state"] == current
     assert b"External metadata transitions:" in content
 
@@ -662,3 +660,38 @@ def test_synthesis_uses_bound_validator_platform_and_exposes_execution_configura
     payload["validation_reconciliation"][0]["platform"] = "linux-native"
     with pytest.raises(ValueError, match="bound executor environment"):
         validate_synthesis(payload, (predecessor,), bundle)
+
+
+def test_structured_independent_publishes_after_metadata_resume(tmp_path: Path) -> None:
+    _git, _repository, request, _audit, _entries = _staging_fixture(tmp_path, independent=True)
+    resumed = resume_after_external_metadata(request)
+    entries = json.loads(Path(resumed["dispatches_path"]).read_bytes())
+    entry = next(item for item in entries["dispatches"] if item["dispatch"].get("mode") == "independent-review")
+    payload = _compact_independent_payload(entry["dispatch"])
+    payload.update(before_state=resumed["current_source_state"], after_state=resumed["current_source_state"])
+    _publish_worker_bytes(entry, json.dumps(payload).encode())
+    output_path = tmp_path / "independent-result.json"
+    assert (
+        main(
+            [
+                "compile-node",
+                "--input",
+                resumed["lifecycle_input_path"],
+                "--dispatches",
+                resumed["dispatches_path"],
+                "--journal",
+                resumed["journal_path"],
+                "--node-id",
+                entry["node_id"],
+                "--before-capture",
+                resumed["capture_path"],
+                "--after-capture",
+                resumed["capture_path"],
+                "--output",
+                str(output_path),
+            ]
+        )
+        == 0
+    )
+    result = json.loads(output_path.read_bytes())
+    assert result["journal_event"]["status"] == "accepted"
