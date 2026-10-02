@@ -1,7 +1,6 @@
 """Replay review dispatch and publication costs; never simulate model review timing."""
 
 import argparse
-import hashlib
 import io
 import json
 import shutil
@@ -17,7 +16,9 @@ from pathlib import Path
 from typing import Any
 
 import review_graph_runtime as runtime
+from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics, run_command_bytes
 from review_graph_independent import CHECK_LABELS, render_independent_payload
+from review_graph_integrity import digest_bytes
 from review_graph_metrics import projected_waves, source_demand
 from review_graph_plan import (
     DEFAULT_ROUTING_CATALOG,
@@ -38,10 +39,6 @@ RUNTIME_INPUT_SCHEMA = RUNTIME_PATH.parents[1] / "references/schemas/runtime-ope
 BASELINE_REF = "da0e045d420a890d53a1e0993a0ecdfee5057c72"
 
 
-def _digest(content: bytes) -> str:
-    return "sha256:" + hashlib.sha256(content).hexdigest()
-
-
 def benchmark_fixture(root: Path, *, scale: int = 1) -> dict[str, Any]:
     """Build a scalable mixed-surface fixture, exhaustive routing, and 15 required nodes."""
     if scale < 1:
@@ -56,7 +53,7 @@ def benchmark_fixture(root: Path, *, scale: int = 1) -> dict[str, Any]:
         target = root / path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
-    identity = _digest(json.dumps(files, sort_keys=True).encode())
+    identity = digest_bytes(json.dumps(files, sort_keys=True).encode())
     state = [identity, identity, identity]
     surfaces = {
         "repo.tooling": ["justfile", "pyproject.toml", *doc_paths],
@@ -158,9 +155,11 @@ def _baseline_runtime(repository: Path, ref: str, *, schema_store: Path) -> type
     def read_revision(path: Path) -> bytes:
         relative = path.relative_to(repository).as_posix()
         try:
-            return subprocess.run([git, "show", f"{ref}:{relative}"], cwd=repository, capture_output=True, check=True, timeout=30).stdout  # noqa: S603
-        except (OSError, subprocess.SubprocessError) as error:
-            msg = f"cannot read benchmark baseline {ref}; ensure the revision and its runtime/schema are available locally"
+            return run_command_bytes(git, ("show", f"{ref}:{relative}"), cwd=repository, check=True, timeout=30).stdout
+        except (ExecutableNotFoundError, OSError, subprocess.SubprocessError) as error:
+            msg = (
+                f"cannot read benchmark baseline {ref}; ensure the revision and its runtime/schema are available locally: {format_exception_diagnostics(error)}"
+            )
             raise ValueError(msg) from error
 
     content = read_revision(RUNTIME_PATH)
@@ -175,8 +174,8 @@ def _baseline_runtime(repository: Path, ref: str, *, schema_store: Path) -> type
     sys.modules[module.__name__] = module
     exec(compile(content, str(RUNTIME_PATH), "exec"), module.__dict__)  # noqa: S102 - explicitly selected trusted repository revision.
     module.__dict__["_RUNTIME_OPERATION_INPUT_SCHEMA"] = schema_path
-    module.__dict__["benchmark_source_digest"] = _digest(content)
-    module.__dict__["benchmark_schema_digest"] = _digest(schema_content)
+    module.__dict__["benchmark_source_digest"] = digest_bytes(content)
+    module.__dict__["benchmark_schema_digest"] = digest_bytes(schema_content)
     return module
 
 
@@ -220,14 +219,14 @@ def _read_worker_sources(entries: list[dict[str, Any]], repository: Path) -> dic
         shared = dispatch.get("shared_inspection_evidence", {})
         if "source_packet_path" in shared:
             content = Path(shared["source_packet_path"]).read_bytes()
-            if _digest(content) != shared["source_packet_digest"]:
+            if digest_bytes(content) != shared["source_packet_digest"]:
                 msg = "source packet digest mismatch"
                 raise ValueError(msg)
             packet_bytes += len(content)
             packet = {item["path"]: item for item in json.loads(content)["excerpts"]}
         for path in dispatch["owned_paths"]:
             excerpt = packet.get(path)
-            if excerpt and excerpt["complete"] and _digest(excerpt["text"].encode()) == excerpt["content_digest"]:
+            if excerpt and excerpt["complete"] and digest_bytes(excerpt["text"].encode()) == excerpt["content_digest"]:
                 continue
             content = (repository / path).read_bytes()
             reads.append(path)
@@ -318,7 +317,7 @@ def _independent_replay(module: types.ModuleType, entry: dict[str, Any], state: 
 
 def _verify_publication(receipt: dict[str, Any], entry: dict[str, Any], content: bytes) -> None:
     path = Path(entry["worker_payload_path"])
-    if receipt.get("worker_payload_digest") != _digest(content) or receipt.get("worker_payload_path") != str(path.resolve()):
+    if receipt.get("worker_payload_digest") != digest_bytes(content) or receipt.get("worker_payload_path") != str(path.resolve()):
         msg = "benchmark publication receipt does not match the payload digest or dispatch path"
         raise ValueError(msg)
     if path.read_bytes() != content:
@@ -442,8 +441,8 @@ def run_benchmark(output: Path, *, baseline_ref: str = BASELINE_REF, repeats: in
         "baseline_ref": baseline_ref,
         "baseline_runtime_digest": baseline.benchmark_source_digest,
         "baseline_input_schema_digest": baseline.benchmark_schema_digest,
-        "current_input_schema_digest": _digest(RUNTIME_INPUT_SCHEMA.read_bytes()),
-        "current_runtime_digest": _digest(RUNTIME_PATH.read_bytes()),
+        "current_input_schema_digest": digest_bytes(RUNTIME_INPUT_SCHEMA.read_bytes()),
+        "current_runtime_digest": digest_bytes(RUNTIME_PATH.read_bytes()),
         "plan": document["plan"],
         "concurrent_worker_limit": 4,
         "projected_waves": projected_waves(nodes, 4),

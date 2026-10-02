@@ -1,6 +1,6 @@
 # Review Graph Runtime Contract
 
-The runtime owns identities, fingerprints, artifacts, and proof reconciliation.
+Use the [Python environment](python-environment.md). Runtime owns identities and proofs.
 
 ## Bootstrap And Route
 
@@ -14,7 +14,7 @@ Public contracts:
 - `schemas/runtime-operation-inputs-v1.schema.json`
 - `runtime-operation-examples-v1.json`
 
-See `--help`, operation examples, and [safety](runtime-safety.md).
+See `--help`, examples, and [safety](runtime-safety.md).
 Bootstrap captured provenance:
 
 ```sh
@@ -22,11 +22,10 @@ uv run --locked python scripts/review_graph_bootstrap.py \
   --capture <capture.json> --input <template.json> --output <planning.json>
 ```
 
-Bootstrap saves complete stage inputs and prints a receipt with `output.path`,
-`output.digest`, blockers, node count, and a directly executable `next_command`
-argument array (null if blocked). Pass its saved bundle directly to materialization.
-Runtime commands also default to compact receipts; full proofs stay on disk.
-`--full-output` prints complete results for diagnosis. See [transport details](runtime-safety.md#compact-transport).
+Bootstrap saves stage inputs and emits `output.path`, `output.digest`, blockers,
+node count, and executable `next_command` (null if blocked). Pass its bundle
+to materialization. Runtime commands print compact receipts; proofs stay
+on disk. Use `--full-output` for diagnosis; see [transport](runtime-safety.md#compact-transport).
 
 Every graph requires `baseline: true` repository validation; branch `just ci`
 retains `requested_scope: branch`.
@@ -50,6 +49,10 @@ state command, and external artifact store to exact dispatches. Send each
 immutable `worker_input_path` directly; never extract aggregate wrappers.
 `next-ready` verifies them and returns paths in `ready_dispatches`.
 
+`schedule-ready` selects grouped/mixed coordinator and worker lanes; see
+[grouped scheduling](grouped-scheduling.md) for capacity, reservations, and continuation.
+Isolated profiles use `next-ready`.
+
 `inspection_profile: shared-read-only` (default) shares digest-bound structural
 observations between overlapping audits. Source text is capped at 64 KiB/packet,
 16 KiB/file; `complete: false` requires further reads. Verify packet digests and
@@ -59,11 +62,11 @@ Observation lists use digest-bound references. Telemetry records context bytes
 and overlap; supply `concurrent_worker_limit` for wave projections. Unknown actual
 reads/timing remain null. See the [repeatable benchmark](dispatch-overhead.md).
 
-Journal transitions require verified evidence for acceptance. Reserve ready nodes;
-record `in-flight` after worker creation. For capacity-only failures, wait at most
-30 seconds and retry once before profile fallback/resume. Follow
-[journal and fallback details](runtime-safety.md#journal-and-fallback); never probe
-with throwaway workers or replay accepted work.
+Reserve ready nodes; journal `in-flight` only after creation and acceptance only
+with verified evidence. For creation races/uncertain capacity, wait at most 30
+seconds and retry once; unexpected errors use profile fallback. See
+[journal and fallback](runtime-safety.md#journal-and-fallback). Never probe with
+throwaway workers or replay accepted work.
 
 `next-ready` treats missing/zero-byte journals as empty without writing.
 `journal-append` creates missing files if their parent exists. Nonempty journals

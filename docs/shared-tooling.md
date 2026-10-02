@@ -17,6 +17,7 @@ No sibling checkout or unreleased code is needed.
 | Semgrep fixtures | Shared assertion runner over repository rules and deliberate positive/negative fixtures |
 | Notebooks | Published inspection/advice/lint/cleanup/execution in the Jupyter skill; its consumer template prohibits dependency installs inside cells |
 | Reviews | Shared opt-in CodeRabbit wrapper; no review is sent merely by running CI |
+| Review-graph helpers | Direct public exact-byte hashing and subprocess APIs; graph serialization and immutable publication retain their protocol contracts |
 | Dependabot | SHA-pinned v0.1.7 reusable workflow; hosted rollout is tracked in [the rollout guide](../.github/DEPENDABOT.md) |
 
 ## Python authority and upgrades

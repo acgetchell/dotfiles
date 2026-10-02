@@ -28,7 +28,7 @@ retries; a failed attempt is recorded and ordinary graph routing continues.
 
 The portable skill entrypoint is
 `uv run python "$SKILLS_ROOT/review-graph/scripts/review_graph_routing_experiment.py"`.
-Only the Python standard library and sibling graph modules are required.
+Use the graph's [Python environment](python-environment.md) and sibling modules.
 
 The default model is pinned to `jev-1.13.0`. The dated rate card estimates input
 cost from provider-reported usage; output is currently free. A different returned

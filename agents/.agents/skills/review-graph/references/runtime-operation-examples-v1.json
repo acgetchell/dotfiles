@@ -1,4 +1,15 @@
 {
+  "schedule-ready": {
+    "artifact_store": "/tmp/review-schedules",
+    "plan": {},
+    "source_state": ["scope", "worktree", "repository"],
+    "reserved_node_ids": [],
+    "worker_capacity": {
+      "source": "authoritative aggregate runtime slots; coordinator excluded",
+      "concurrent_worker_limit": 3,
+      "active_workers": 3
+    }
+  },
   "preflight-validation": {
     "plan": {},
     "repository_root": "/tmp/repository",

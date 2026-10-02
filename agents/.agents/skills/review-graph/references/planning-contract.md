@@ -346,11 +346,19 @@ not omit these dependencies.
 
 ## Failure And Resume
 
-Capacity-only creation failures permit one unchanged-dispatch retry after waiting
-up to 30 seconds for host lifecycle progress. A completed worker may still occupy
-a slot. Track reservations separately from started work and append `in-flight`
-only after creation succeeds. Exhausting this bounded retry follows the profile
-rules below; never replay accepted reviews or validators to recover capacity.
+Adaptive grouped scheduling reserves one coordinator audit lane alongside known
+available worker lanes through `schedule-ready`. Known occupied slots require
+no attempted creation, synthetic failure, or wait. Pending reservations consume
+lanes separately from journal-bound started work; a completed worker may still
+occupy a host slot. Keep all required coverage and immutable dispatch ancestry.
+
+Capacity-only creation races or uncertain capacity permit one unchanged-dispatch
+retry after waiting up to 30 seconds for host lifecycle progress. Unexpected
+creation errors go directly to profile fallback with their actual diagnostic.
+Append `in-flight` only after creation succeeds. Exhausting the bounded retry
+follows the profile rules below; never replay accepted reviews or validators to
+recover capacity. Isolated-only scheduling and its failure/resume rules remain
+unchanged; it has no coordinator lane.
 
 In adaptive grouped execution, a failed worker creation or pre-acceptance worker
 result selects coordinator execution for that exact node. Preserve the failed

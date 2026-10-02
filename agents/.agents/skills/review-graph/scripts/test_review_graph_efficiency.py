@@ -1,6 +1,7 @@
 """Workflow cost, prerequisite, and continuation regressions without Git mutations."""
 
 import json
+import subprocess
 import sys
 from argparse import Namespace
 from collections import Counter
@@ -10,6 +11,7 @@ from typing import Any
 
 import pytest
 import review_graph_runtime as runtime
+from research_repo_tools.process import ExecutableNotFoundError
 from review_graph_benchmark import _baseline_runtime, _trial, benchmark_fixture
 from review_graph_metrics import projected_waves, source_demand
 from review_graph_plan import ValidationArtifact, validation_requirements_from_document
@@ -161,21 +163,36 @@ def test_preflight_absent_permitted_output_is_ready_and_not_created(tmp_path: Pa
     assert not Path(artifact.path).exists()
 
 
-@pytest.mark.parametrize("error_type", [OSError, ValueError])
-def test_preflight_reports_unavailable_output_classification(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error_type: type[Exception]) -> None:
+@pytest.mark.parametrize(
+    ("error", "diagnostic"),
+    [
+        (OSError("Git classification unavailable"), "Git classification unavailable"),
+        (ValueError("Git classification unavailable"), "Git classification unavailable"),
+        (ExecutableNotFoundError("Git classification unavailable"), "Git classification unavailable"),
+        (
+            subprocess.CalledProcessError(128, ["git", "ls-files"], stderr=b"query failure\n"),
+            "command failed with exit status 128: git ls-files\nstderr:\nquery failure",
+        ),
+        (
+            subprocess.TimeoutExpired(["git", "ls-files"], 30, stderr=b"partial Git diagnostic\n"),
+            "command timed out after 30 seconds: git ls-files\nstderr:\npartial Git diagnostic",
+        ),
+    ],
+)
+def test_preflight_reports_unavailable_output_classification(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: Exception, diagnostic: str) -> None:
     request = _preflight_request(tmp_path)
     request["plan"]["coalesced_validation_units"][0]["expected_workspace_effects"] = ["output"]
 
     def unavailable_status(repository_root: Path, path: Path) -> str:
-        message = "Git classification unavailable"
-        raise error_type(message)
+        raise error
 
     monkeypatch.setattr(runtime, "_git_path_status", unavailable_status)
     report = runtime.preflight_validation(request)
 
     assert report["status"] == "blocked"
-    assert report["units"][0]["configuration_errors"] == ["cannot inspect output output: Git classification unavailable"]
+    assert report["units"][0]["configuration_errors"] == [f"cannot inspect output output: {diagnostic}"]
     assert report["units"][0]["output_observations"] == []
+    assert not list(tmp_path.iterdir())
 
 
 @pytest.mark.parametrize("escape", [False, True])

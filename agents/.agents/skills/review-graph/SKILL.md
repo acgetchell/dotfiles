@@ -14,15 +14,14 @@ inspect implementations only for failures or requested changes.
 
 ## Profiles
 
-- **Adaptive grouped** (default): run independent read-only nodes concurrently;
-  permit coordinator fallback after a worker failure.
-- **Isolated**: use a fresh worker per node with declared adaptive fallback.
-- **Isolated-only**: use fresh workers without fallback; emit a resume manifest
-  when blocked.
+- **Adaptive grouped** (default): run read-only nodes concurrently across worker
+  and coordinator lanes; permit worker-failure fallback.
+- **Isolated**: fresh worker per node with declared adaptive fallback.
+- **Isolated-only**: fresh workers without fallback; resume manifest when blocked.
 
-Workers use `fork_turns: "none"` and receive only their dispatch, applicable
-instructions/references, and result schema. Coordinator fallback uses the same
-contract with `worker_created: false`.
+`fork_turns: "none"` workers receive only dispatch, applicable
+instructions/references, and result schema. Coordinator execution records
+`worker_created: false`, `fresh_context: false` under the same contract.
 
 ## Capture And Authorization
 
@@ -132,10 +131,10 @@ raw artifacts in the proof store.
 
 ## Complete And Report
 
-Append verified lifecycle events with `journal-append`, then run `next-ready`
-with a current capture to obtain only dependency-ready dispatches. Prefer its
-runtime-managed `--output-dir` generations. Reconcile accepted handoffs before
-expansion; only genuinely new triggers reroute. After an authorized repair use
+Journal verified lifecycle events with `journal-append`. With a current capture,
+use `schedule-ready` for grouped/mixed lanes or `next-ready` for isolated dispatches;
+follow returned continuations. `next-ready --output-dir` creates immutable generations.
+Reconcile accepted handoffs before expansion; only new triggers reroute. After an authorized repair use
 `advance-after-mutation` to record the serialized repair epoch, recapture once,
 move stale nodes to `awaiting-replan`, and materialize the replacement graph.
 For external staging with unchanged

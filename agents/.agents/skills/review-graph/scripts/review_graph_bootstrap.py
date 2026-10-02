@@ -4,11 +4,13 @@
 import argparse
 import json
 import shlex
+import subprocess
 import sys
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics
 from review_graph_plan import DEFAULT_ROUTING_CATALOG, DEFAULT_SKILL_ROOT, plan_from_document
 from review_graph_receipts import stage_receipt
 from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
@@ -24,7 +26,7 @@ def _source_state(capture: dict[str, Any]) -> list[object]:
 
 def _capture_command(capture: dict[str, Any]) -> str:
     capture_script = Path(__file__).resolve().with_name("capture_scope.py")
-    command = [str(Path(sys.executable).resolve()), str(capture_script), "--mode", str(capture.get("capture_mode", "<missing>"))]
+    command = [str(Path(sys.executable).absolute()), str(capture_script), "--mode", str(capture.get("capture_mode", "<missing>"))]
     repository_root = capture.get("repository_root")
     if isinstance(repository_root, str) and repository_root:
         command.extend(("--repo", repository_root))
@@ -191,11 +193,11 @@ def main(argv: list[str] | None = None) -> int:
         receipt["next_operation_inputs"] = {"input": str(args.output.resolve()), "current_capture": str(args.capture.resolve())}
         print(json.dumps(output if args.full_output else receipt, sort_keys=True))
         return 0 if plan.dispatch_allowed else 2
-    except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as error:
+    except (ExecutableNotFoundError, KeyError, OSError, TypeError, ValueError, json.JSONDecodeError, subprocess.SubprocessError) as error:
         if isinstance(error, SchemaValidationError):
             print(json.dumps(error.as_dict(), sort_keys=True), file=sys.stderr)
         else:
-            print(f"review_graph_bootstrap: {error}", file=sys.stderr)
+            print(f"review_graph_bootstrap: {format_exception_diagnostics(error)}", file=sys.stderr)
         return 2
 
 

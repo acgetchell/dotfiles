@@ -1,13 +1,14 @@
 """Small CLI receipts referencing complete immutable operation artifacts."""
 
-import hashlib
 from pathlib import Path
 from typing import Any
+
+from review_graph_integrity import digest_bytes
 
 
 def artifact_reference(path: Path) -> dict[str, str]:
     """Bind a displayed artifact path to its actual saved bytes."""
-    return {"path": str(path.resolve()), "digest": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()}
+    return {"path": str(path.resolve()), "digest": digest_bytes(path.read_bytes())}
 
 
 def dispatch_summary(entry: dict[str, Any]) -> dict[str, Any]:
@@ -24,7 +25,15 @@ def _continuation_receipt(output: dict[str, Any]) -> dict[str, Any]:
     receipt: dict[str, Any] = {}
     next_inputs = {
         key: output[key]
-        for key in ("lifecycle_input_path", "dispatches_path", "journal_path", "capture_path", "current_capture_path", "next_ready_output_dir")
+        for key in (
+            "lifecycle_input_path",
+            "schedule_input_path",
+            "dispatches_path",
+            "journal_path",
+            "capture_path",
+            "current_capture_path",
+            "next_ready_output_dir",
+        )
         if key in output
     }
     if next_inputs:
@@ -49,6 +58,13 @@ def stage_receipt(operation: str, output_path: Path, output: dict[str, Any]) -> 
         "repository_validation_status",
         "repository_readiness",
         "summary",
+        "capacity_state",
+        "coordinator_node_id",
+        "worker_node_ids",
+        "reserved_node_ids",
+        "deferred_node_ids",
+        "creation_failure_action",
+        "retry_after_seconds",
     ):
         if key in output:
             receipt[key] = output[key]
