@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import shlex
 import shutil
 import subprocess
@@ -11,7 +12,6 @@ from typing import TYPE_CHECKING, Any
 
 import capture_scope
 import pytest
-import research_repo_tools
 import review_graph_bootstrap as bootstrap
 import review_graph_plan as plan
 import review_graph_runtime as runtime
@@ -21,7 +21,7 @@ from review_graph_plan import _file_identity_digest
 from review_graph_receipts import artifact_reference
 from review_graph_usage import digest, parse_json
 from test_capture_scope import _git, _init_repo
-from test_review_graph_runtime import _baseline_capture, _sparse_plan_document, _worker_input_fixture
+from test_review_graph_runtime import SKILL_ROOT, _baseline_capture, _sparse_plan_document, _worker_input_fixture
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -269,12 +269,27 @@ def test_generated_capture_and_publication_commands_keep_the_dependency_environm
     interpreter = environment / "bin" / "python"
     uv = shutil.which("uv")
     assert uv is not None
-    subprocess.run(  # noqa: S603 - pinned published package installed offline into the temporary environment.
-        [uv, "pip", "install", "--offline", "--python", str(interpreter), f"research-repo-tools=={research_repo_tools.__version__}"],
+    # A locked sync caches wheel URLs without requiring registry metadata for offline resolution.
+    installation = subprocess.run(  # noqa: S603 - locked tooling dependencies installed offline into the temporary environment.
+        [
+            uv,
+            "sync",
+            "--locked",
+            "--offline",
+            "--only-group",
+            "tooling",
+            "--project",
+            str(SKILL_ROOT.parents[2]),
+            "--python",
+            str(interpreter),
+            "--no-python-downloads",
+        ],
+        env={**os.environ, "UV_PROJECT_ENVIRONMENT": str(environment)},
         capture_output=True,
-        check=True,
+        check=False,
         timeout=30,
     )
+    assert installation.returncode == 0, installation.stderr.decode(errors="replace")
     isolated = subprocess.run(  # noqa: S603 - temporary environment's Python, fixed read-only import inspection.
         [str(interpreter), "-c", "import importlib.util; print(importlib.util.find_spec('pytest'))"], capture_output=True, check=True, timeout=30
     )
