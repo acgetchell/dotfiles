@@ -2,7 +2,6 @@
 
 import argparse
 import fnmatch
-import hashlib
 import json
 import math
 import os
@@ -17,7 +16,9 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from capture_scope import _scope_data
+from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics, run_command_bytes
 from review_graph_coverage import coverage_reference
+from review_graph_integrity import digest_bytes, digest_json
 from review_graph_reuse import AuditInputIdentity, AuditReuseTransition, ExternalMetadataTransition, ReviewSourceSnapshot, metadata_states, verify_reuse_inputs
 
 if TYPE_CHECKING:
@@ -857,7 +858,7 @@ class RepositoryReviewProofExpectation:
                     reference_digests=node.reference_digests,
                     mode=node.mode,
                     predecessors=node.predecessors,
-                    validation_unit_digest=(_sha256_json(asdict(validation_units[node.node_id])) if node.mode == "validation" else None),
+                    validation_unit_digest=(digest_json(asdict(validation_units[node.node_id])) if node.mode == "validation" else None),
                     change_target=node.change_target,
                     planned_paths=node.coverage if node.mode in {"fix", "independent-review"} else (),
                     planned_path_line_bounds=(tuple((path, line_bounds[path]) for path in node.coverage) if node.mode == "independent-review" else ()),
@@ -1660,7 +1661,7 @@ def build_routing_projection(catalog: Sequence[RoutingCatalogEntry], *, consulte
         "entries": entries,
         "schema_version": 1,
     }
-    projection["projection_digest"] = _sha256_json(projection)
+    projection["projection_digest"] = digest_json(projection)
     return projection
 
 
@@ -2066,7 +2067,7 @@ def _file_identity_digest(path: str) -> str:
     except OSError as error:
         msg = f"could not hash planner-owned provenance file {path}: {error}"
         raise ValueError(msg) from error
-    return "sha256:" + hashlib.sha256(content).hexdigest()
+    return digest_bytes(content)
 
 
 def _resolved_provenance(
@@ -2340,7 +2341,7 @@ def graph_plan_digest(plan: GraphPlan) -> str:
         document.pop("audit_reuse_transitions")
     if not plan.reuse_source_snapshots:
         document.pop("reuse_source_snapshots")
-    return _sha256_json(document)
+    return digest_json(document)
 
 
 def graph_plan_digest_matches(plan: GraphPlan, digest: str) -> bool:
@@ -2352,11 +2353,11 @@ def graph_plan_digest_matches(plan: GraphPlan, digest: str) -> bool:
         legacy.pop("validation_recoveries")
     if not plan.validation_exclusions:
         legacy.pop("validation_exclusions")
-    if digest == _sha256_json(legacy):
+    if digest == digest_json(legacy):
         return True
     if not plan.audit_delta_reviews:
         legacy.pop("audit_delta_reviews")
-    return digest == _sha256_json(legacy)
+    return digest == digest_json(legacy)
 
 
 def validate_isolation_root(isolation_root: str, repository_root: Path) -> None:
@@ -2366,15 +2367,6 @@ def validate_isolation_root(isolation_root: str, repository_root: Path) -> None:
     if root.is_relative_to(repository) or repository.is_relative_to(root):
         msg = f"isolated validation root overlaps the captured repository: {root}; use an external copied tree or worktree"
         raise ValueError(msg)
-
-
-def _sha256_json(value: object) -> str:
-    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
-    return "sha256:" + hashlib.sha256(payload).hexdigest()
-
-
-def _sha256_bytes(value: bytes) -> str:
-    return "sha256:" + hashlib.sha256(value).hexdigest()
 
 
 def _native_heading_blockers(text: str, *, expected_heading: str, required_sections: Sequence[str]) -> tuple[str, ...]:
@@ -3040,7 +3032,7 @@ def _validation_artifact_blockers(  # noqa: C901
             blockers.append(f"native validation result artifact {path} requires a lowercase SHA-256 digest")
         if artifact_digest_mode not in VALIDATION_ARTIFACT_DIGEST_MODES | {"absent-v1"}:
             blockers.append(f"native validation result artifact {path} requires a recognized digest mode")
-        if artifact_digest_mode == "absent-v1" and artifact_digest != "sha256:" + hashlib.sha256(b"absent").hexdigest():
+        if artifact_digest_mode == "absent-v1" and artifact_digest != digest_bytes(b"absent"):
             blockers.append(f"native validation result artifact {path} has an invalid absence digest")
         if artifact_id is not None and (not _nonempty_text(artifact_id) or len(artifact_id) > MAX_NATIVE_IDENTIFIER_LENGTH):
             blockers.append(f"native validation result artifact {path} has an invalid artifact ID")
@@ -3581,12 +3573,12 @@ def repository_review_proof_expectation(plan: GraphPlan, *, source_state: tuple[
 
 def validation_command_identity_digest(unit: ValidationUnit) -> str:
     """Hash the exact command-selection portion of a validator dispatch."""
-    return _sha256_json({"canonical_recipe": unit.canonical_recipe, "commands": unit.commands, "working_directories": unit.working_directories})
+    return digest_json({"canonical_recipe": unit.canonical_recipe, "commands": unit.commands, "working_directories": unit.working_directories})
 
 
 def validation_environment_digest(unit: ValidationUnit) -> str:
     """Hash the exact environment and shared-resource validator identity."""
-    return _sha256_json(
+    return digest_json(
         {
             "artifact_owner": unit.artifact_owner,
             "allowed_artifacts": [asdict(artifact) for artifact in unit.allowed_artifacts],
@@ -3618,7 +3610,7 @@ def validation_evidence_expectation(  # noqa: PLR0913
 
 
 def _manifest_entry_digest(*, evidence_id: str, artifact_id: str, artifact_digest: str) -> str:
-    return _sha256_json({"artifact_digest": artifact_digest, "artifact_id": artifact_id, "evidence_id": evidence_id})
+    return digest_json({"artifact_digest": artifact_digest, "artifact_id": artifact_id, "evidence_id": evidence_id})
 
 
 def _manifest_digest(manifest: ArtifactManifest) -> str:
@@ -3629,7 +3621,7 @@ def _manifest_digest(manifest: ArtifactManifest) -> str:
         ),
         key=lambda item: (item["evidence_id"], item["artifact_id"]),
     )
-    return _sha256_json(
+    return digest_json(
         {"entries": entries, "manifest_id": manifest.manifest_id, "schema_version": manifest.schema_version, "verifier_id": manifest.verifier_id}
     )
 
@@ -3640,8 +3632,8 @@ def create_artifact_manifest(*, manifest_id: str, verifier_id: str, artifacts: S
         ArtifactManifestEntry(
             evidence_id=evidence_id,
             artifact_id=artifact_id,
-            artifact_digest=_sha256_bytes(content),
-            entry_digest=_manifest_entry_digest(evidence_id=evidence_id, artifact_id=artifact_id, artifact_digest=_sha256_bytes(content)),
+            artifact_digest=digest_bytes(content),
+            entry_digest=_manifest_entry_digest(evidence_id=evidence_id, artifact_id=artifact_id, artifact_digest=digest_bytes(content)),
         )
         for evidence_id, artifact_id, content in artifacts
     )
@@ -4242,7 +4234,7 @@ def _planned_node_bundle_blockers(  # noqa: C901, PLR0912, PLR0915
                 record_expectation.skill_path,
                 record_expectation.skill_digest,
                 record_expectation.reference_digests,
-                _sha256_json(asdict(record_expectation.validation_unit)),
+                digest_json(asdict(record_expectation.validation_unit)),
             )
             planned_identity = (node.node_id, node.skill_path, node.skill_digest, node.reference_digests, node.validation_unit_digest)
             envelope_identity = (envelope.node_id, envelope.skill_digest, envelope.reference_digests)
@@ -4369,7 +4361,7 @@ def _artifact_manifest_blockers(  # noqa: C901, PLR0912, PLR0915
         if entry.entry_digest != expected_entry_digest:
             blockers.append(f"artifact manifest entry digest does not verify: {entry.evidence_id}")
         content = verifier_artifacts.get(entry.artifact_id)
-        if content is not None and entry.artifact_digest != _sha256_bytes(content):
+        if content is not None and entry.artifact_digest != digest_bytes(content):
             blockers.append(f"artifact manifest artifact digest does not verify: {entry.evidence_id}")
         review_record = review_records.get(entry.evidence_id)
         validation_record = validation_records.get(entry.evidence_id)
@@ -5143,6 +5135,27 @@ def _source_state_field(item: Mapping[str, Any]) -> tuple[str, str, str]:
     return scope, worktree, repository
 
 
+def _git_ignore_provenance(output: bytes, *, probe: str, path: str) -> tuple[str, str]:
+    """Parse one unquoted NUL record and reject explicit unignore matches."""
+    fields = output.split(b"\0")
+    if (
+        len(fields) != 5
+        or fields[-1] != b""
+        or not fields[0]
+        or not fields[1].isdigit()
+        or int(fields[1]) < 1
+        or not fields[2]
+        or fields[3] != os.fsencode(probe)
+    ):
+        msg = f"could not parse Git ignore provenance for artifact: {path}"
+        raise ValueError(msg)
+    source, line, pattern, _reported_path, _terminator = map(os.fsdecode, fields)
+    if pattern.startswith("!"):
+        msg = f"artifact declared ignored is not ignored by repository policy: {path}"
+        raise ValueError(msg)
+    return source, f"{source}:{line}:{pattern}"
+
+
 def _verified_artifact_status(  # noqa: C901, PLR0912, PLR0915
     path: str, repository_status: str, repository_root: Path | None, isolation_root: str | None = None
 ) -> tuple[str, str | None]:
@@ -5192,27 +5205,24 @@ def _verified_artifact_status(  # noqa: C901, PLR0912, PLR0915
     if git is None:
         msg = "artifact status verification requires Git"
         raise ValueError(msg)
-    result: subprocess.CompletedProcess[str] | None = None
+    rule: tuple[str, str] | None = None
     for probe in (relative, relative.rstrip("/") + "/.review-graph-generated-descendant"):
-        current = subprocess.run(  # noqa: S603 - resolved Git executable and fixed arguments only.
-            [git, "-c", f"core.excludesFile={os.devnull}", "-C", str(repository_root), "check-ignore", "--no-index", "-v", "--", probe],
-            capture_output=True,
+        current = run_command_bytes(
+            git,
+            ("-c", f"core.excludesFile={os.devnull}", "-C", str(repository_root), "check-ignore", "--no-index", "-v", "-z", "--stdin"),
+            input=os.fsencode(probe) + b"\0",
             check=False,
-            text=True,
             timeout=30,
         )
-        if current.returncode == 0 and current.stdout.strip():
-            result = current
+        if current.returncode not in {0, 1}:
+            current.check_returncode()
+        if current.returncode == 0 and current.stdout:
+            rule = _git_ignore_provenance(current.stdout, probe=probe, path=path)
             break
-    if result is None:
+    if rule is None:
         msg = f"artifact declared ignored is not ignored by repository policy: {path}"
         raise ValueError(msg)
-    provenance, separator, _reported_path = result.stdout.strip().partition("\t")
-    provenance_match = re.fullmatch(r"(.+):(\d+):(.*)", provenance)
-    if not separator or provenance_match is None or not provenance_match.group(3):
-        msg = f"could not parse Git ignore provenance for artifact: {path}"
-        raise ValueError(msg)
-    source = provenance_match.group(1)
+    source, provenance = rule
     source_path = (repository_root / source).resolve(strict=False) if not Path(source).is_absolute() else Path(source).resolve(strict=False)
     repository_exclude = (repository_root / ".git" / "info" / "exclude").resolve(strict=False)
     if source_path == repository_exclude:
@@ -5222,9 +5232,11 @@ def _verified_artifact_status(  # noqa: C901, PLR0912, PLR0915
         msg = f"ignored artifact relies on a user-global exclude rather than a repository rule: {path}"
         raise ValueError(msg)
     source_relative = source_path.relative_to(repository_root).as_posix()
-    tracked = subprocess.run(  # noqa: S603 - resolved Git executable and fixed arguments only.
-        [git, "-C", str(repository_root), "ls-files", "--error-unmatch", "--", source_relative], capture_output=True, check=False, text=True, timeout=30
+    tracked = run_command_bytes(
+        git, ("--literal-pathspecs", "-C", str(repository_root), "ls-files", "--error-unmatch", "--", source_relative), check=False, timeout=30
     )
+    if tracked.returncode not in {0, 1}:
+        tracked.check_returncode()
     if tracked.returncode != 0:
         msg = f"ignored artifact relies on an untracked repository rule: {path}"
         raise ValueError(msg)
@@ -5877,8 +5889,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         plan = plan_from_document(
             document, catalog_path=args.catalog, skill_roots=tuple(args.skill_root or (DEFAULT_SKILL_ROOT,)), repository_root=args.repository_root
         )
-    except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
-        print(f"review_graph_plan: {error}", file=sys.stderr)
+    except (ExecutableNotFoundError, OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError, ValueError, subprocess.SubprocessError) as error:
+        print(f"review_graph_plan: {format_exception_diagnostics(error)}", file=sys.stderr)
         return 2
     print(json.dumps(asdict(plan), indent=2, sort_keys=True))
     return 0 if plan.dispatch_allowed else 2

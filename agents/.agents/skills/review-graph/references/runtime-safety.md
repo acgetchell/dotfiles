@@ -149,9 +149,22 @@ Its CLI field contract is:
 
 Reserve ready dispatches; append `in-flight` only after creation succeeds.
 Final results may not release capacity immediately. On capacity-only failure,
-retain the reservation, wait at most 30 seconds for progress, and retry once.
+retain the reservation, wait at most 30 seconds for progress, and retry once
+when capacity is uncertain or a creation race occurred.
 Then record attempts and apply profile fallback/resume. Never probe with
 throwaway workers, replay accepted work, or claim execution without a worker.
+
+For grouped audits, `schedule-ready` accepts an optional `creation_failure` with
+the exact unstarted worker `node_id`, `failure_kind` (`capacity` or `unexpected`),
+`attempts` (1 or 2), observed `reason`, and `worker_created: false`. It preserves
+the diagnostic in its immutable continuation. A first capacity failure with
+uncertain or available slots returns `bounded-retry` and `retry_after_seconds: 30`;
+wait for progress up to that bound before the unchanged dispatch's sole retry.
+Known exhaustion, a second capacity failure, or an unexpected error selects
+`coordinator-fallback` without a capacity wait. Execute only returned selected
+dispatches: when the coordinator lane is occupied, retain the failure for the
+next request. Other node failures use the existing profile fallback/resume path.
+
 For unstarted adaptive nodes, `fallback-to-coordinator` takes lifecycle input plus
 `node_id`, `worker_created: false`, `reason`, `artifact_store`, and flags
 `--dispatches`, `--journal`, `--current-capture`. Follow returned paths; other

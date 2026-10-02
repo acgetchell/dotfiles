@@ -2,7 +2,6 @@
 
 import argparse
 import fcntl
-import hashlib
 import json
 import math
 import os
@@ -12,13 +11,15 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from review_graph_integrity import digest_json
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 
 def digest(value: object) -> str:
     """Identify exact JSON inputs, rejecting non-finite numbers."""
-    return "sha256:" + hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+    return digest_json(value, allow_nan=False)
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:

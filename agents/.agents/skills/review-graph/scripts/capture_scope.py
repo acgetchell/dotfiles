@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics, run_command_bytes
 from review_graph_reuse import SNAPSHOT_FORMAT, source_snapshot
 
 if TYPE_CHECKING:
@@ -51,9 +52,7 @@ class _PathDigest:
 
 def _run_git(git: str, repo: Path, arguments: Sequence[str]) -> bytes:
     """Run one bounded, literal-pathspec Git command and return stdout bytes."""
-    result = subprocess.run(  # noqa: S603 - resolved Git executable and fixed argument lists only.
-        [git, "--literal-pathspecs", "-C", os.fspath(repo), *arguments], capture_output=True, check=False, timeout=_TIMEOUT_SECONDS
-    )
+    result = run_command_bytes(git, ("--literal-pathspecs", "-C", os.fspath(repo), *arguments), check=False, timeout=_TIMEOUT_SECONDS)
     if result.returncode != 0:
         command = " ".join(("git", *arguments))
         detail = result.stderr.decode(errors="replace").strip()
@@ -492,8 +491,8 @@ def main() -> int:
         root = Path(_decode(_run_git(git, requested_repo, ("rev-parse", "--show-toplevel"))))
         pathspecs = _normalize_pathspecs(root, requested_repo, arguments.path)
         manifest = _scope_data(git, root, arguments.mode, arguments.base, pathspecs)
-    except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
-        print(f"capture_scope.py: {error}", file=sys.stderr)
+    except (ExecutableNotFoundError, OSError, RuntimeError, subprocess.TimeoutExpired) as error:
+        print(f"capture_scope.py: {format_exception_diagnostics(error)}", file=sys.stderr)
         return 2
 
     print(json.dumps(manifest, indent=2, sort_keys=True))

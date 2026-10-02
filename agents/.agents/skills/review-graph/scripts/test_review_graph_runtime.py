@@ -4487,7 +4487,10 @@ def test_fallback_preserves_accepted_bindings_and_finishes_without_replaying_ci(
     audit = next(entry for entry in dispatches["dispatches"] if entry["dispatch"].get("mode") == "audit")
     validation = next(entry for entry in dispatches["dispatches"] if entry["result_contract"] == "compact-validation")
     source = _compile_repair_fixture_entry(validation, lifecycle, paths["journal"])
-    original_files = {path: path.read_bytes() for path in (*paths.values(), *(Path(path) for path in source.values()))}
+    original_files = {
+        path: path.read_bytes()
+        for path in (*paths.values(), *(Path(path) for path in source.values()), Path(audit["worker_input_path"]), Path(audit["worker_payload_contract_path"]))
+    }
     request = {
         **lifecycle,
         "node_id": audit["node_id"],
@@ -4526,6 +4529,11 @@ def test_fallback_preserves_accepted_bindings_and_finishes_without_replaying_ci(
             assert new["dispatch"]["execution_location"] == "coordinator"
             assert new["dispatch"]["worker_created"] is False
             assert new["dispatch"]["fresh_context"] is False
+            contract = json.loads(Path(new["worker_payload_contract_path"]).read_bytes())
+            assert contract["compiler_preflight"] == {
+                "worker_input_path": new["worker_input_path"],
+                "digest": "sha256:" + hashlib.sha256(Path(new["worker_input_path"]).read_bytes()).hexdigest(),
+            }
     plan = _graph_plan(lifecycle["plan"])
     events, _state, _head = read_execution_journal(paths["journal"], plan=plan, source_state=("scope", "worktree", "repository"))
     ready = next_ready_nodes({**lifecycle, "current_source_state": lifecycle["source_state"]}, journal_events=events, dispatch_set=updated)
@@ -4557,7 +4565,7 @@ def test_fallback_preserves_accepted_bindings_and_finishes_without_replaying_ci(
     assert all(Path(path).read_bytes() == original_files[Path(path)] for path in source.values())
 
 
-@pytest.mark.parametrize("case", ["started", "isolated", "worker-created", "output-present", "stale-capture"])
+@pytest.mark.parametrize("case", ["started", "isolated", "worker-created", "output-present", "dangling-output", "stale-capture"])
 def test_fallback_rejects_unsafe_transitions_without_publishing(tmp_path: Path, capsys: pytest.CaptureFixture[str], case: str) -> None:
     lifecycle, dispatches, paths = _continuation_fixture(tmp_path)
     audit = next(entry for entry in dispatches["dispatches"] if entry["dispatch"].get("mode") == "audit")
@@ -4576,6 +4584,8 @@ def test_fallback_rejects_unsafe_transitions_without_publishing(tmp_path: Path, 
         request["worker_created"] = True
     elif case == "output-present":
         Path(audit["worker_payload_path"]).write_text("pending worker result", encoding="utf-8")
+    elif case == "dangling-output":
+        Path(audit["worker_payload_path"]).symlink_to(tmp_path / "absent-output")
     else:
         paths["current-capture"].write_text(
             json.dumps({"scope_fingerprint": "other", "captured_worktree_fingerprint": "other", "repository_state_fingerprint": "other"}), encoding="utf-8"

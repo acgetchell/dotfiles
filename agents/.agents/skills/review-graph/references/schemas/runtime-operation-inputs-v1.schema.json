@@ -178,6 +178,40 @@
       "required": ["dispatch", "payload"],
       "type": "object"
     },
+    "schedule-ready": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "plan": {"type": "object"},
+        "source_state": {"$ref": "#/$defs/sourceState"},
+        "artifact_store": {"type": "string", "minLength": 1},
+        "external_metadata_transitions": {"type": "array", "items": {"type": "object"}},
+        "reserved_node_ids": {"$ref": "#/$defs/stringArray"},
+        "worker_capacity": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "source": {"type": "string", "minLength": 1},
+            "concurrent_worker_limit": {"type": "integer", "minimum": 1},
+            "active_workers": {"type": "integer", "minimum": 0}
+          },
+          "required": ["source", "concurrent_worker_limit", "active_workers"]
+        },
+        "creation_failure": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "node_id": {"type": "string", "minLength": 1},
+            "failure_kind": {"enum": ["capacity", "unexpected"]},
+            "attempts": {"type": "integer", "minimum": 1, "maximum": 2},
+            "reason": {"type": "string", "minLength": 1},
+            "worker_created": {"const": false}
+          },
+          "required": ["node_id", "failure_kind", "attempts", "reason", "worker_created"]
+        }
+      },
+      "required": ["plan", "source_state", "artifact_store"]
+    },
     "fallback-to-coordinator": {
       "additionalProperties": false,
       "properties": {

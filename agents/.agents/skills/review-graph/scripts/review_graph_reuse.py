@@ -1,17 +1,14 @@
 """Content-bound capture identities and immutable audit reuse transitions."""
 
-import hashlib
-import json
 import re
 from dataclasses import asdict, dataclass
 from pathlib import PurePosixPath
 from typing import Any
 
+from research_repo_tools.evidence import sha256
+from review_graph_integrity import canonical_json
+
 SNAPSHOT_FORMAT = "review-graph-path-snapshot-v2"
-
-
-def _digest(value: object) -> str:
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()).hexdigest()
 
 
 def _repository_path(path: str) -> bool:
@@ -51,7 +48,7 @@ class ReviewSourceSnapshot:
         """Bind capture context and the complete repository path map."""
         fields = asdict(self)
         fields.pop("repository_state_fingerprint")
-        return _digest(fields)
+        return sha256(canonical_json(fields).encode("utf-8"))
 
     def verify(self) -> None:
         """Reject unsupported or internally inconsistent capture identities."""

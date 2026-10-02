@@ -2,7 +2,6 @@
 
 import argparse
 import fcntl
-import hashlib
 import json
 import os
 import re
@@ -18,9 +17,11 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 
+from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics, run_command_bytes
 from review_graph_bootstrap import bootstrap_document
 from review_graph_coverage import combined_findings, coverage_decisions, coverage_reference, reused_paths, validate_coverage_units
 from review_graph_independent import CHECK_LABELS, SCHEMA as _INDEPENDENT_PAYLOAD_SCHEMA, render_independent_payload
+from review_graph_integrity import canonical_json, digest_bytes
 from review_graph_metrics import projected_waves, source_demand
 from review_graph_plan import (
     _COMPACT_ROUTING_OVERRIDE_FIELDS,
@@ -98,6 +99,7 @@ from review_graph_reuse import (
     source_snapshot,
     verify_reuse_inputs,
 )
+from review_graph_scheduling import select_execution_lanes
 from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
 from review_graph_synthesis import synthesis_fields, validate_synthesis
 from review_graph_usage import digest as usage_digest, measure_call
@@ -199,14 +201,6 @@ class WorkerPayloadWriteError(OSError):
         """Attach the deterministic safety review to the publication failure."""
         super().__init__(message)
         self.artifact_write_review = artifact_write_review
-
-
-def _canonical_json(value: object) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-
-
-def _sha256_bytes(value: bytes) -> str:
-    return "sha256:" + hashlib.sha256(value).hexdigest()
 
 
 def _read_regular_file_no_follow(path: Path) -> bytes:
@@ -504,7 +498,7 @@ def _state_verification(dispatch: dict[str, Any], evidence: ReviewEvidence, chan
             f"- Changed repository paths: {', '.join(changed_paths) or 'none'}",
             f"- HEAD, branch, or index mutated: {'yes' if evidence.git_mutated else 'no'}",
             *(
-                (f"- External metadata transitions: {_canonical_json([asdict(item) for item in evidence.fingerprints.metadata_transitions])}",)
+                (f"- External metadata transitions: {canonical_json([asdict(item) for item in evidence.fingerprints.metadata_transitions])}",)
                 if evidence.fingerprints.metadata_transitions
                 else ()
             ),
@@ -663,7 +657,7 @@ def _review_normalized_record(payload: dict[str, Any], expectation: ReviewEviden
         "mode": evidence.mode,
         "node_id": evidence.node_id,
         "nearby_contract_owners": list(_text_list(payload, "nearby_contract_owners")),
-        "payload_digest": _sha256_bytes(_canonical_json(payload).encode()),
+        "payload_digest": digest_bytes(canonical_json(payload).encode()),
         "record_type": "review",
         "requirement_ids": list(evidence.requirement_ids),
         "selection_reason": expectation.selection_reason,
@@ -725,7 +719,7 @@ def _planned_validation_identity(unit: ValidationUnit) -> dict[str, Any]:
 
 
 def _planned_validation_digest(unit: ValidationUnit) -> str:
-    return _sha256_bytes(_canonical_json(_planned_validation_identity(unit)).encode())
+    return digest_bytes(canonical_json(_planned_validation_identity(unit)).encode())
 
 
 def _planned_validation_units(plan: GraphPlan) -> list[dict[str, Any]]:
@@ -761,7 +755,7 @@ def _resolve_planned_validation_record(record: dict[str, Any]) -> dict[str, Any]
         msg = "planned validation identity reference path must be absolute"
         raise ValueError(msg)
     content = _read_regular_file_no_follow(path)
-    if _sha256_bytes(content) != reference["digest"] or reference["digest"] != record["planned_validation_digest"]:
+    if digest_bytes(content) != reference["digest"] or reference["digest"] != record["planned_validation_digest"]:
         msg = "planned validation identity sidecar digest mismatch"
         raise ValueError(msg)
     identity = json.loads(content)
@@ -800,7 +794,7 @@ def _dispatched_planned_validations(dispatch: dict[str, Any]) -> dict[str, tuple
             raise ValueError(msg)
         digest = _required_text(record, "planned_validation_digest")
         _sha256_digest(digest, "planned validation digest")
-        if digest != _sha256_bytes(_canonical_json(identity).encode()):
+        if digest != digest_bytes(canonical_json(identity).encode()):
             msg = f"planned validation unit {unit_id} digest does not match its execution identity"
             raise ValueError(msg)
         for requirement_id in requirement_ids:
@@ -1111,7 +1105,7 @@ def compile_review(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  #
             for handoff_id, record in handoffs
         ),
     )
-    canonical_payload = _canonical_json(payload)
+    canonical_payload = canonical_json(payload)
     machine_payload = {
         "after_repository_state_fingerprint": after[2],
         "after_scope_fingerprint": after[0],
@@ -1151,10 +1145,10 @@ def compile_review(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  #
             (
                 f"- Files: {', '.join(files_inspected) or ('bundle-only synthesis' if mode == 'synthesis' else 'blocked-before-inspection')}",
                 f"- Nearby contract owners: {', '.join(nearby_contract_owners) or 'none'}",
-                f"- Worker payload digest: {_sha256_bytes(canonical_payload.encode())}",
+                f"- Worker payload digest: {digest_bytes(canonical_payload.encode())}",
                 f"- Canonical worker payload: {canonical_payload}",
-                *((f"- Audit input identity: {_canonical_json(asdict(audit_inputs))}",) if audit_inputs is not None else ()),
-                *((f"- Coverage reuse reference: {_canonical_json(coverage_reference(coverage_reuse))}",) if coverage_reuse is not None else ()),
+                *((f"- Audit input identity: {canonical_json(asdict(audit_inputs))}",) if audit_inputs is not None else ()),
+                *((f"- Coverage reuse reference: {canonical_json(coverage_reference(coverage_reuse))}",) if coverage_reuse is not None else ()),
             )
         ),
         "## Findings": _findings_body(findings),
@@ -1167,9 +1161,9 @@ def compile_review(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  #
             (
                 f"- General: {'; '.join(limitations) or 'none'}",
                 "- Owned-path omissions: " + ("; ".join(f"{path}: {reason}" for path, reason in _scope_limitation_records(payload)) or "none"),
-                *((f"- Execution facts: {_canonical_json(payload['execution_facts'])}",) if "execution_facts" in payload else ()),
-                *((f"- Validation limits: {_canonical_json(payload['validation_limits'])}",) if "validation_limits" in payload else ()),
-                *((f"- Unresolved uncertainties: {_canonical_json(payload['unresolved_uncertainties'])}",) if "unresolved_uncertainties" in payload else ()),
+                *((f"- Execution facts: {canonical_json(payload['execution_facts'])}",) if "execution_facts" in payload else ()),
+                *((f"- Validation limits: {canonical_json(payload['validation_limits'])}",) if "validation_limits" in payload else ()),
+                *((f"- Unresolved uncertainties: {canonical_json(payload['unresolved_uncertainties'])}",) if "unresolved_uncertainties" in payload else ()),
             )
         ),
     }
@@ -1189,12 +1183,12 @@ def compile_review(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  #
     body = "\n\n".join(f"{section}\n\n{section_bodies[section]}" for section in sections[:-1])
     if mode == "synthesis":
         body += "\n\n### Readiness Verdict\n\n" + payload["readiness_verdict"] + "\n\n" + "; ".join(payload["verdict_reasons"])
-        body += "\n\n### Synthesis Reconciliation\n\n" + _canonical_json(synthesis_fields(payload))
+        body += "\n\n### Synthesis Reconciliation\n\n" + canonical_json(synthesis_fields(payload))
     content = (
         f"# Review Node Result\n\n{_review_header(expectation, evidence)}\n\n{body}\n\n## Machine Evidence\n\n"
-        f"{NATIVE_EVIDENCE_BLOCK_OPEN}{_canonical_json(machine_payload)}{NATIVE_EVIDENCE_BLOCK_CLOSE}\n"
+        f"{NATIVE_EVIDENCE_BLOCK_OPEN}{canonical_json(machine_payload)}{NATIVE_EVIDENCE_BLOCK_CLOSE}\n"
     ).encode()
-    evidence = replace(evidence, raw_result_digest=_sha256_bytes(content))
+    evidence = replace(evidence, raw_result_digest=digest_bytes(content))
     envelope_assessment = assess_review_evidence(expectation, evidence)
     native_blockers = _review_native_result_blockers(content, expectation, evidence)
     blockers = (*policy_blockers, *validation_requirement_blockers, *handoff_blockers, *scope_blockers, *envelope_assessment.blockers, *native_blockers)
@@ -1204,7 +1198,7 @@ def compile_review(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  #
     metadata = {
         "expectation": asdict(expectation),
         "evidence": asdict(evidence),
-        "payload_digest": _sha256_bytes(canonical_payload.encode()),
+        "payload_digest": digest_bytes(canonical_payload.encode()),
         "artifact_digest": evidence.raw_result_digest,
         "normalized_record": _review_normalized_record(payload, expectation, evidence),
     }
@@ -1500,7 +1494,7 @@ def _compile_independent_native(document: dict[str, Any], native_content: bytes)
             "- Source-controlled files changed: none",
             "- Git state mutated: no",
             *(
-                (f"- External metadata transitions: {_canonical_json([asdict(item) for item in fingerprints.metadata_transitions])}",)
+                (f"- External metadata transitions: {canonical_json([asdict(item) for item in fingerprints.metadata_transitions])}",)
                 if fingerprints.metadata_transitions
                 else ()
             ),
@@ -1540,11 +1534,11 @@ def _compile_independent_native(document: dict[str, Any], native_content: bytes)
         "## Findings": _independent_findings_body(findings, status),
         "## Routing Handoffs": _independent_handoffs_body(handoffs),
         "## Review Graph Envelope": envelope,
-        "## Machine Evidence": f"{NATIVE_EVIDENCE_BLOCK_OPEN}{_canonical_json(machine_payload)}{NATIVE_EVIDENCE_BLOCK_CLOSE}",
+        "## Machine Evidence": f"{NATIVE_EVIDENCE_BLOCK_OPEN}{canonical_json(machine_payload)}{NATIVE_EVIDENCE_BLOCK_CLOSE}",
     }
     ordered = (*_INDEPENDENT_NATIVE_SECTIONS, "## Review Graph Envelope", "## Machine Evidence")
     content = ("# Repository Independent Review\n\n" + "\n\n".join(f"{section}\n\n{output_sections[section]}" for section in ordered) + "\n").encode()
-    evidence = replace(evidence, raw_result_digest=_sha256_bytes(content))
+    evidence = replace(evidence, raw_result_digest=digest_bytes(content))
     assessment = assess_review_evidence(expectation, evidence)
     native_blockers = _review_native_result_blockers(content, expectation, evidence)
     blockers = (*assessment.blockers, *native_blockers)
@@ -1556,7 +1550,7 @@ def _compile_independent_native(document: dict[str, Any], native_content: bytes)
         "artifact_digest": evidence.raw_result_digest,
         "evidence": asdict(evidence),
         "expectation": asdict(expectation),
-        "native_input_digest": _sha256_bytes(native_content),
+        "native_input_digest": digest_bytes(native_content),
         "normalized_record": normalized,
     }
 
@@ -1572,7 +1566,7 @@ def compile_independent_payload(document: dict[str, Any]) -> tuple[bytes, dict[s
     if blockers:
         raise ValueError("; ".join(blockers))
     content, metadata = _compile_independent_native({"dispatch": dispatch, "status": payload["status"], "limitations": payload["limitations"]}, native)
-    metadata["payload_digest"] = _sha256_bytes(_canonical_json(payload).encode())
+    metadata["payload_digest"] = digest_bytes(canonical_json(payload).encode())
     return content, metadata
 
 
@@ -1906,7 +1900,7 @@ def _validation_state_verification(dispatch: dict[str, Any], evidence: Validatio
             f"  - Observed repository state fingerprint: {evidence.fingerprints.after[2]}",
             f"  - Result: {result}",
             *(
-                (f"- External metadata transitions: {_canonical_json([asdict(item) for item in evidence.fingerprints.metadata_transitions])}",)
+                (f"- External metadata transitions: {canonical_json([asdict(item) for item in evidence.fingerprints.metadata_transitions])}",)
                 if evidence.fingerprints.metadata_transitions
                 else ()
             ),
@@ -2085,7 +2079,7 @@ def _validation_normalized_record(payload: dict[str, Any], evidence: ValidationE
         "limitations": list(_text_list(payload, "limitations")),
         "mode": "validation",
         "node_id": evidence.node_id,
-        "payload_digest": _sha256_bytes(_canonical_json(payload).encode()),
+        "payload_digest": digest_bytes(canonical_json(payload).encode()),
         "record_type": "validation",
         "requirement_ids": list(evidence.requirement_ids),
         "skill_id": "review-validator",
@@ -2123,14 +2117,14 @@ def _bounded_workspace_directory_digest(path: Path) -> str:
     manifest = {
         "entry_limit": _BOUNDED_WORKSPACE_ENTRY_LIMIT,
         "entry_count": len(all_entry_metadata),
-        "entry_metadata_digest": _sha256_bytes(_canonical_json(all_entry_metadata).encode()),
-        "entry_name_digest": _sha256_bytes(_canonical_json([entry["name"] for entry in all_entry_metadata]).encode()),
+        "entry_metadata_digest": digest_bytes(canonical_json(all_entry_metadata).encode()),
+        "entry_name_digest": digest_bytes(canonical_json([entry["name"] for entry in all_entry_metadata]).encode()),
         "policy": _BOUNDED_WORKSPACE_POLICY,
         "root": {"mode": root_stat.st_mode, "mtime_ns": root_stat.st_mtime_ns, "size": root_stat.st_size},
         "sampled_entries": all_entry_metadata[:_BOUNDED_WORKSPACE_ENTRY_LIMIT],
         "truncated": truncated,
     }
-    return _sha256_bytes(_canonical_json(manifest).encode())
+    return digest_bytes(canonical_json(manifest).encode())
 
 
 def _recursive_workspace_directory_digest(path: Path) -> str:
@@ -2155,22 +2149,22 @@ def _recursive_workspace_directory_digest(path: Path) -> str:
             if child.is_symlink():
                 records.append({"kind": "symlink", "path": relative, "target": str(child.readlink())})
             elif child.is_file():
-                records.append({"digest": _sha256_bytes(child.read_bytes()), "kind": "file", "path": relative})
+                records.append({"digest": digest_bytes(child.read_bytes()), "kind": "file", "path": relative})
             else:
                 records.append({"kind": "special", "mode": child.stat().st_mode, "path": relative})
     records.sort(key=lambda item: str(item["path"]))
-    return _sha256_bytes(_canonical_json(records).encode())
+    return digest_bytes(canonical_json(records).encode())
 
 
 def _workspace_content_digest(path: Path) -> tuple[bool, str, str]:
     if not path.exists() and not path.is_symlink():
-        return False, _sha256_bytes(b"absent"), "absent-v1"
+        return False, digest_bytes(b"absent"), "absent-v1"
     if path.is_symlink():
-        return True, _sha256_bytes(f"symlink:{path.readlink()}".encode()), "symlink-target-v1"
+        return True, digest_bytes(f"symlink:{path.readlink()}".encode()), "symlink-target-v1"
     if path.is_file():
-        return True, _sha256_bytes(path.read_bytes()), "content-sha256-v1"
+        return True, digest_bytes(path.read_bytes()), "content-sha256-v1"
     if not path.is_dir():
-        return True, _sha256_bytes(f"special:{path.stat().st_mode}".encode()), "special-metadata-v1"
+        return True, digest_bytes(f"special:{path.stat().st_mode}".encode()), "special-metadata-v1"
     if path.name in _BOUNDED_WORKSPACE_DIRECTORY_NAMES:
         return True, _bounded_workspace_directory_digest(path), _BOUNDED_WORKSPACE_POLICY
     return True, _recursive_workspace_directory_digest(path), _RECURSIVE_WORKSPACE_POLICY
@@ -2184,9 +2178,11 @@ def _git_path_status(repository_root: Path, path: Path) -> str:
         msg = "git is required to classify validation workspace paths"
         raise ValueError(msg)
     relative = path.relative_to(repository_root).as_posix()
-    tracked = subprocess.run(  # noqa: S603 - fixed executable and argument array; no shell interpretation
-        [git, "-C", str(repository_root), "ls-files", "--error-unmatch", "--", relative], check=False, capture_output=True, text=True, timeout=10
+    tracked = run_command_bytes(
+        git, ("--literal-pathspecs", "-C", str(repository_root), "ls-files", "--error-unmatch", "--", relative), check=False, timeout=10
     )
+    if tracked.returncode not in {0, 1}:
+        tracked.check_returncode()
     if tracked.returncode == 0:
         return "tracked"
     try:
@@ -2239,7 +2235,7 @@ def _workspace_snapshot(dispatch: dict[str, Any], name: str) -> dict[str, tuple[
         if snapshot_mode not in VALIDATION_ARTIFACT_DIGEST_MODES | {"absent-v1"}:
             msg = f"{name} record {ordinal} has invalid snapshot mode {snapshot_mode}"
             raise ValueError(msg)
-        if exists == (snapshot_mode == "absent-v1") or (not exists and digest != _sha256_bytes(b"absent")):
+        if exists == (snapshot_mode == "absent-v1") or (not exists and digest != digest_bytes(b"absent")):
             msg = f"{name} record {ordinal} has inconsistent existence and snapshot identity"
             raise ValueError(msg)
         snapshot[path] = (status, digest, exists, snapshot_mode)
@@ -2401,7 +2397,7 @@ def compile_validation(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]
     requirement_counts = {item: requirement_dispositions.count(item) for item in ("passed", "failed", "blocked", "reused")}
     execution_counts = {item: execution_results.count(item) for item in ("passed", "failed", "blocked", "not-run")}
     overall = {"passed": "PASSED", "failed": "FAILED", "blocked": "BLOCKED", "reused": "REUSED", "not-applicable": "NOT-APPLICABLE"}[status]
-    canonical_payload = _canonical_json(payload)
+    canonical_payload = canonical_json(payload)
     machine_payload = {
         "after_repository_state_fingerprint": fingerprints.after[2],
         "after_scope_fingerprint": fingerprints.after[0],
@@ -2469,7 +2465,7 @@ def compile_validation(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]
         "## Validation Ledger Export": "\n".join(f"- {label}: {value}" for label, value in _validation_ledger_expected_fields(expectation, evidence)),
         "## Limitations": "\n".join(
             (
-                f"- Worker payload digest: {_sha256_bytes(canonical_payload.encode())}",
+                f"- Worker payload digest: {digest_bytes(canonical_payload.encode())}",
                 f"- Canonical worker payload: {canonical_payload}",
                 *(limitations or ("none",)),
             )
@@ -2492,9 +2488,9 @@ def compile_validation(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]
     body = "\n\n".join(f"{section}\n\n{section_bodies[section]}" for section in sections[:-1])
     content = (
         f"# Validation Result\n\n{header}\n\n{body}\n\n## Machine Evidence\n\n"
-        f"{NATIVE_EVIDENCE_BLOCK_OPEN}{_canonical_json(machine_payload)}{NATIVE_EVIDENCE_BLOCK_CLOSE}\n"
+        f"{NATIVE_EVIDENCE_BLOCK_OPEN}{canonical_json(machine_payload)}{NATIVE_EVIDENCE_BLOCK_CLOSE}\n"
     ).encode()
-    evidence = replace(evidence, raw_result_digest=_sha256_bytes(content))
+    evidence = replace(evidence, raw_result_digest=digest_bytes(content))
     envelope_assessment = assess_validation_evidence(expectation, evidence)
     native_blockers = _validation_native_result_blockers(content, expectation, evidence)
     blockers = (*envelope_assessment.blockers, *native_blockers)
@@ -2504,7 +2500,7 @@ def compile_validation(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]
     return content, {
         "expectation": asdict(expectation),
         "evidence": asdict(evidence),
-        "payload_digest": _sha256_bytes(canonical_payload.encode()),
+        "payload_digest": digest_bytes(canonical_payload.encode()),
         "artifact_digest": evidence.raw_result_digest,
         "normalized_record": _validation_normalized_record(payload, evidence),
         "workspace_audit": workspace_audit,
@@ -2687,7 +2683,7 @@ def _canonical_worker_payload(content: bytes) -> dict[str, Any]:
 def _verify_independent_payload_binding(content: bytes, metadata: dict[str, Any], expectation: ReviewEvidenceExpectation, evidence: ReviewEvidence) -> None:
     """Bind structured judgments to sealed bytes and every rendered native section."""
     payload = _canonical_worker_payload(content)
-    if metadata.get("payload_digest") != _sha256_bytes(_canonical_json(payload).encode()):
+    if metadata.get("payload_digest") != digest_bytes(canonical_json(payload).encode()):
         msg = "independent canonical payload digest differs from metadata"
         raise ValueError(msg)
     if "worker_payload_path" in metadata and json.loads(Path(metadata["worker_payload_path"]).read_bytes()) != payload:
@@ -2704,7 +2700,7 @@ def _verify_independent_payload_binding(content: bytes, metadata: dict[str, Any]
             "adversarial_checks": list(_independent_adversarial_checks(expectation.planned_paths)),
         },
     )
-    if _sha256_bytes(native) != metadata.get("native_input_digest") or payload["status"] != evidence.status:
+    if digest_bytes(native) != metadata.get("native_input_digest") or payload["status"] != evidence.status:
         msg = "independent rendered payload differs from its bound native input"
         raise ValueError(msg)
     expected = _independent_input_sections(native)
@@ -2734,7 +2730,7 @@ def _load_evidence_source(  # noqa: C901, PLR0912, PLR0915
         msg = f"evidence metadata lacks expectation or evidence: {metadata_path}"
         raise TypeError(msg)
     content = artifact_path.read_bytes()
-    artifact_digest = _sha256_bytes(content)
+    artifact_digest = digest_bytes(content)
     if metadata.get("artifact_digest") != artifact_digest or evidence_raw.get("raw_result_digest") != artifact_digest:
         msg = f"artifact digest does not match evidence metadata: {artifact_path}"
         raise ValueError(msg)
@@ -2745,7 +2741,7 @@ def _load_evidence_source(  # noqa: C901, PLR0912, PLR0915
             msg = f"worker payload provenance is incomplete: {metadata_path}"
             raise TypeError(msg)
         payload_bytes = Path(payload_path).read_bytes()
-        if _sha256_bytes(payload_bytes) != payload_digest or len(payload_bytes) != payload_byte_count:
+        if digest_bytes(payload_bytes) != payload_digest or len(payload_bytes) != payload_byte_count:
             msg = f"worker payload bytes do not match evidence metadata: {payload_path}"
             raise ValueError(msg)
 
@@ -2802,7 +2798,7 @@ def _load_evidence_source(  # noqa: C901, PLR0912, PLR0915
                 if expectation.mode == "synthesis":
                     require_schema(payload, _SYNTHESIS_PAYLOAD_SCHEMA)
                     validate_synthesis(payload, expectation.predecessor_evidence_ids)
-                payload_digest = _sha256_bytes(_canonical_json(payload).encode())
+                payload_digest = digest_bytes(canonical_json(payload).encode())
                 if metadata.get("payload_digest") != payload_digest:
                     msg = f"worker payload digest does not match compiled artifact: {artifact_path}"
                     raise ValueError(msg)
@@ -2812,7 +2808,7 @@ def _load_evidence_source(  # noqa: C901, PLR0912, PLR0915
                 msg = f"validation metadata has mismatched typed evidence: {metadata_path}"
                 raise TypeError(msg)
             payload = _canonical_worker_payload(content)
-            payload_digest = _sha256_bytes(_canonical_json(payload).encode())
+            payload_digest = digest_bytes(canonical_json(payload).encode())
             if metadata.get("payload_digest") != payload_digest:
                 msg = f"worker payload digest does not match compiled artifact: {artifact_path}"
                 raise ValueError(msg)
@@ -2836,7 +2832,7 @@ def _validation_reconciliation(plan: GraphPlan, records: list[dict[str, Any]]) -
         if record.get("status") not in {"completed", "no-findings"}:
             continue
         for requirement_id, requirement in _validation_records(record):
-            digest = _sha256_bytes(_canonical_json(requirement).encode())
+            digest = digest_bytes(canonical_json(requirement).encode())
             origin = _required_text(record, "evidence_id")
             planned = units.get(requirement_id)
             unit = planned[0] if planned is not None else None
@@ -2951,12 +2947,12 @@ def build_synthesis_bundle(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
         _required_text(raw, "status")
         _text_list(raw, "requirement_ids")
         record = dict(raw)
-        record["record_digest"] = _sha256_bytes(_canonical_json(record).encode())
+        record["record_digest"] = digest_bytes(canonical_json(record).encode())
         records.append(record)
     bundle: dict[str, Any] = {"schema_version": 1, "source_state": list(source_state), "records": sorted(records, key=lambda item: item["evidence_id"])}
     if plan is not None:
         bundle["plan_context"] = _synthesis_plan_context(plan, bundle["records"])
-    bundle["bundle_digest"] = _sha256_bytes(_canonical_json(bundle).encode())
+    bundle["bundle_digest"] = digest_bytes(canonical_json(bundle).encode())
     return bundle
 
 
@@ -3167,19 +3163,19 @@ def _inspection_groups(plan: GraphPlan, source_state: tuple[str, str, str], arti
             limit = min(16384, remaining_bytes)
             excerpt = content[:limit].decode("utf-8", errors="ignore")
             remaining_bytes -= len(content[:limit])
-            excerpts.append({"path": path, "content_digest": _sha256_bytes(content), "text": excerpt, "complete": excerpt.encode() == content})
+            excerpts.append({"path": path, "content_digest": digest_bytes(content), "text": excerpt, "complete": excerpt.encode() == content})
             observations.append(
                 {
                     "byte_count": len(content),
-                    "content_digest": _sha256_bytes(content),
+                    "content_digest": digest_bytes(content),
                     "line_count": content.count(b"\n") + (1 if content and not content.endswith(b"\n") else 0),
                     "path": path,
                 }
             )
         if not observations:
             continue
-        observation_digest = _sha256_bytes(_canonical_json(observations).encode())
-        identity = _sha256_bytes(_canonical_json({"observation_digest": observation_digest, "source_state": source_state}).encode())
+        observation_digest = digest_bytes(canonical_json(observations).encode())
+        identity = digest_bytes(canonical_json({"observation_digest": observation_digest, "source_state": source_state}).encode())
         record: dict[str, object] = {
             "artifact_path": str(artifact_store / f"inspection.{identity.removeprefix('sha256:')[:16]}.json"),
             "group_id": f"inspection:{identity.removeprefix('sha256:')[:16]}",
@@ -3304,7 +3300,7 @@ def _preflight_audit_payload(contract: dict[str, Any], payload: dict[str, Any]) 
         # Saved contracts remain usable; compile-node applies the current verifier.
         return
     content = Path(reference["worker_input_path"]).read_bytes()
-    if _sha256_bytes(content) != reference["digest"]:
+    if digest_bytes(content) != reference["digest"]:
         msg = "compiler preflight worker input digest differs from its publication contract"
         raise ValueError(msg)
     entry = json.loads(content)
@@ -3377,9 +3373,9 @@ def review_worker_payload_write(contract_document: dict[str, Any], payload_bytes
     target = Path(_required_text(contract_document, "worker_payload_path")).resolve()
     target_path = str(target)
     payload = _validate_worker_payload_bytes(contract_document, payload_bytes)
-    payload_digest = _sha256_bytes(payload_bytes)
+    payload_digest = digest_bytes(payload_bytes)
     identity_record: dict[str, object] = {
-        "contract_digest": _sha256_bytes(_canonical_json(contract_document).encode()),
+        "contract_digest": digest_bytes(canonical_json(contract_document).encode()),
         "node_id": node_id,
         "payload_byte_count": len(payload_bytes),
         "payload_digest": payload_digest,
@@ -3397,7 +3393,7 @@ def review_worker_payload_write(contract_document: dict[str, Any], payload_bytes
         identity_record["candidate_path"] = candidate_path
         write_targets.insert(0, candidate_path)
     review: dict[str, Any] = {
-        "approval_identity": _sha256_bytes(_canonical_json(identity_record).encode()),
+        "approval_identity": digest_bytes(canonical_json(identity_record).encode()),
         "artifact_write_targets": write_targets,
         "decision": "valid-bound-artifact-write",
         **identity_record,
@@ -3444,7 +3440,7 @@ def _worker_payload_receipt(contract_document: dict[str, Any], payload_bytes: by
         "result_contract": _required_text(contract_document, "result_contract"),
         "schema_version": 1,
         "worker_payload_byte_count": len(payload_bytes),
-        "worker_payload_digest": _sha256_bytes(payload_bytes),
+        "worker_payload_digest": digest_bytes(payload_bytes),
         "worker_payload_path": str(Path(_required_text(contract_document, "worker_payload_path")).resolve()),
         "artifact_write_review": artifact_write_review,
     }
@@ -3581,6 +3577,9 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
     if unknown_locations:
         msg = "execution_locations reference unknown nodes: " + ", ".join(unknown_locations)
         raise ValueError(msg)
+    if plan.execution_profile in {"isolated", "isolated-only"} and any(location == "coordinator" for location in locations.values()):
+        msg = "isolated dispatches require worker execution locations"
+        raise ValueError(msg)
     validation_units = {unit.node_id: unit for unit in plan.coalesced_validation_units}
     evidence_ids = {node.node_id: f"{'validation' if node.mode == 'validation' else 'review'}:{node.node_id}" for node in plan.actual_worker_nodes}
     line_bounds = dict(plan.captured_path_line_bounds)
@@ -3588,14 +3587,14 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         _inspection_groups(plan, source_state, artifact_store, repository_root_path.resolve()) if inspection_profile == "shared-read-only" else {}
     )
     for record in {str(record["artifact_path"]): record for record in inspection_groups.values()}.values():
-        packet_bytes = (_canonical_json(record.pop("source_packet")) + "\n").encode()
+        packet_bytes = (canonical_json(record.pop("source_packet")) + "\n").encode()
         packet_path = Path(cast("str", record["artifact_path"])).with_suffix(".source.json")
         _queue_materialized_write(pending_writes, packet_path, packet_bytes, mode=0o444)
         record["source_packet_path"] = str(packet_path)
-        record["source_packet_digest"] = _sha256_bytes(packet_bytes)
+        record["source_packet_digest"] = digest_bytes(packet_bytes)
         observation_bytes = (json.dumps(record, indent=2, sort_keys=True) + "\n").encode()
         _queue_materialized_write(pending_writes, Path(cast("str", record["artifact_path"])), observation_bytes, mode=0o444)
-        record["artifact_digest"] = _sha256_bytes(observation_bytes)
+        record["artifact_digest"] = digest_bytes(observation_bytes)
     raw_duplicate_authorizations = document.get("duplicate_command_authorizations", {})
     if not isinstance(raw_duplicate_authorizations, dict) or any(
         not isinstance(node_id, str)
@@ -3615,7 +3614,7 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         identity = record.pop("execution_identity")
         digest = record["planned_validation_digest"]
         identity_path = artifact_store / f"planned-validation.{digest.removeprefix('sha256:')}.json"
-        _queue_materialized_write(pending_writes, identity_path, _canonical_json(identity).encode(), mode=0o444)
+        _queue_materialized_write(pending_writes, identity_path, canonical_json(identity).encode(), mode=0o444)
         validation_references.append(
             {
                 **record,
@@ -3639,7 +3638,7 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         worker_payload_path = artifact_store / f"{node.node_id}.worker-payload.json"
         worker_payload_contract_path = artifact_store / f"{node.node_id}.worker-payload-contract.json"
         worker_payload_command_prefix = [
-            str(Path(sys.executable).resolve()),
+            str(Path(sys.executable).absolute()),
             str(Path(__file__).resolve()),
             "persist-worker-payload",
             "--input",
@@ -3647,7 +3646,7 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             "--payload-stdin",
         ]
         worker_payload_review_command = [
-            str(Path(sys.executable).resolve()),
+            str(Path(sys.executable).absolute()),
             str(Path(__file__).resolve()),
             "review-worker-payload-write",
             "--input",
@@ -3691,7 +3690,7 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
                 "operation": "persist-worker-payload",
                 "review_command": worker_payload_review_command,
                 "publish_command": [
-                    str(Path(sys.executable).resolve()),
+                    str(Path(sys.executable).absolute()),
                     str(Path(__file__).resolve()),
                     "publish-worker-payload",
                     "--input",
@@ -3726,7 +3725,7 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             if unit.source_state != source_state:
                 msg = f"validation unit source state differs from dispatch state: {node.node_id}"
                 raise ValueError(msg)
-            common["validation_unit"] = json.loads(_canonical_json(asdict(unit)))
+            common["validation_unit"] = json.loads(canonical_json(asdict(unit)))
             recovery = next(
                 (item for item in plan.validation_recoveries if item["node_id"] == node.node_id and tuple(item["source_state"]) == source_state), None
             )
@@ -3793,7 +3792,7 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         }
         worker_input_bytes = (json.dumps(entry, indent=2, sort_keys=True) + "\n").encode()
         if node.mode == "audit" or contract == "compact-independent-review":
-            persistence_contract["compiler_preflight"] = {"worker_input_path": str(worker_input_path), "digest": _sha256_bytes(worker_input_bytes)}
+            persistence_contract["compiler_preflight"] = {"worker_input_path": str(worker_input_path), "digest": digest_bytes(worker_input_bytes)}
         _queue_materialized_write(
             pending_writes, worker_payload_contract_path, (json.dumps(persistence_contract, indent=2, sort_keys=True) + "\n").encode(), mode=0o444
         )
@@ -3820,7 +3819,7 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             "Serialized context and planned demand; waves assume equal durations and serialize validation/fixes. Unknown observations remain null."
         ),
     }
-    output["dispatch_set_digest"] = _sha256_bytes(_canonical_json(output).encode())
+    output["dispatch_set_digest"] = digest_bytes(canonical_json(output).encode())
     if operation_output_path is None:
         _publish_materialized_writes(artifact_store, pending_writes)
     else:
@@ -4010,7 +4009,7 @@ def _compact_reuse_overrides(plan: GraphPlan, reused_requirements: dict[str, str
                 review_surface=tuple(sorted(decision.review_surface)),
             )
         overrides.append({key: value for key, value in asdict(decision).items() if key in _COMPACT_ROUTING_OVERRIDE_FIELDS and value is not None})
-    return json.loads(_canonical_json(overrides))
+    return json.loads(canonical_json(overrides))
 
 
 def _audit_reuse_blocker(record: dict[str, Any], *, invalidated: bool) -> tuple[str, str] | None:
@@ -4294,7 +4293,7 @@ def _plan_delta_audits(
                 "instruction_digests": list(transition.instruction_digests),
                 "metadata_transitions": [asdict(item) for item in chain],
             }
-            contexts.append(json.loads(_canonical_json(context)))
+            contexts.append(json.loads(canonical_json(context)))
     return replace(candidate, audit_delta_reviews=tuple(contexts)), reviews
 
 
@@ -4365,7 +4364,7 @@ def resume_after_external_metadata(document: dict[str, Any]) -> dict[str, Any]:
         and not _git_sensitive_review(by_node.get(node.node_id, {}))
     }
     transitions = [*_records(document, "external_metadata_transitions"), asdict(transition)]
-    continuation = json.loads(_canonical_json({"plan": asdict(plan), "source_state": list(state), "external_metadata_transitions": transitions}))
+    continuation = json.loads(canonical_json({"plan": asdict(plan), "source_state": list(state), "external_metadata_transitions": transitions}))
     root = Path(document["artifact_store"]).resolve()
     first_entry = next(iter(entries.values()), None)
     if first_entry is None:
@@ -4462,7 +4461,7 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
         {
             "artifact_store": str(artifact_store),
             "authorization": authorization_after,
-            "plan": json.loads(_canonical_json(asdict(new_plan))),
+            "plan": json.loads(canonical_json(asdict(new_plan))),
             "repository_root": str(repository_root),
             "routing_catalog_path": str(catalog_path),
             "source_state": list(new_state),
@@ -4630,7 +4629,7 @@ def _verified_journal_evidence(
         "artifact_id": evidence.raw_result_artifact_id,
         "evidence_id": evidence.evidence_id,
         "evidence_status": evidence.status,
-        "normalized_record_digest": _sha256_bytes(_canonical_json(normalized).encode()),
+        "normalized_record_digest": digest_bytes(canonical_json(normalized).encode()),
     }
     return record, limitations
 
@@ -4729,7 +4728,7 @@ def _fold_execution_journal(plan: GraphPlan, source_state: tuple[str, str, str],
         event_digest = _sha256_digest(event.get("event_digest"), "event_digest")
         unsigned = dict(event)
         unsigned.pop("event_digest")
-        if event_digest != _sha256_bytes(_canonical_json(unsigned).encode()):
+        if event_digest != digest_bytes(canonical_json(unsigned).encode()):
             msg = f"journal event {expected_sequence} digest does not match its content"
             raise ValueError(msg)
         previous_digest = event_digest
@@ -4803,7 +4802,7 @@ def _new_journal_reason(request: JournalEventRequest, limitations: tuple[str, ..
 
 
 def _persist_journal_event(stream: Any, path: Path, event: dict[str, Any], *, existing_size: int) -> None:
-    encoded = (_canonical_json(event) + "\n").encode()
+    encoded = (canonical_json(event) + "\n").encode()
     stream.seek(0, os.SEEK_END)
     if stream.tell() != existing_size:
         msg = f"execution journal changed during append: {path}"
@@ -4840,7 +4839,7 @@ def _prepare_journal_event(
         "source_state": list(source_state),
         "status": request.status,
     }
-    event["event_digest"] = _sha256_bytes(_canonical_json(event).encode())
+    event["event_digest"] = digest_bytes(canonical_json(event).encode())
     return event, existing_size
 
 
@@ -4882,7 +4881,7 @@ def _dispatches_by_node(dispatch_set: dict[str, Any], *, plan: GraphPlan, source
     expected_digest = _required_text(dispatch_set, "dispatch_set_digest")
     unsigned = dict(dispatch_set)
     unsigned.pop("dispatch_set_digest")
-    if expected_digest != _sha256_bytes(_canonical_json(unsigned).encode()):
+    if expected_digest != digest_bytes(canonical_json(unsigned).encode()):
         msg = "dispatch set digest does not match its content"
         raise ValueError(msg)
     entries: dict[str, dict[str, Any]] = {}
@@ -4901,7 +4900,7 @@ def _dispatches_by_node(dispatch_set: dict[str, Any], *, plan: GraphPlan, source
         shared = dispatch.get("shared_inspection_evidence")
         if isinstance(shared, dict) and "source_packet_path" in shared:
             packet = _read_regular_file_no_follow(Path(_required_text(shared, "source_packet_path")))
-            if _sha256_bytes(packet) != _required_text(shared, "source_packet_digest"):
+            if digest_bytes(packet) != _required_text(shared, "source_packet_digest"):
                 msg = f"shared source packet differs from its materialized identity: {node_id}"
                 raise ValueError(msg)
         entries[node_id] = entry
@@ -5012,6 +5011,111 @@ def next_ready_nodes(document: dict[str, Any], *, journal_events: tuple[dict[str
     }
 
 
+def _coordinator_lane_entry(original: dict[str, Any], store: Path, pending: dict[Path, tuple[bytes, int]]) -> dict[str, Any]:
+    """Rebind an unstarted adaptive node and its preflight, preserving outputs."""
+    if any(
+        Path(original[field]).exists(follow_symlinks=False)
+        for field in ("artifact_path", "metadata_path", "worker_payload_path", "worker_payload_candidate_path")
+        if field in original
+    ):
+        msg = f"coordinator lane node already has execution output: {original['node_id']}"
+        raise ValueError(msg)
+    entry = json.loads(canonical_json(original))
+    node_id = entry["node_id"]
+    entry["worker_input_path"] = str(store / f"{node_id}.worker-input.json")
+    contract_path = store / f"{node_id}.worker-payload-contract.json"
+    entry["worker_payload_contract_path"] = str(contract_path)
+    dispatch = entry["dispatch"]
+    dispatch.update({"execution_location": "coordinator", "worker_created": False, "fresh_context": False})
+    persistence = dispatch["worker_payload_persistence"]
+    persistence["input_path"] = str(contract_path)
+    for field in ("command", "review_command", "publish_command"):
+        command = persistence[field]
+        command[command.index("--input") + 1] = str(contract_path)
+    entry["worker_prompt"] = _worker_prompt(entry["result_contract"], dispatch)
+    entry_bytes = (json.dumps(entry, indent=2, sort_keys=True) + "\n").encode()
+    contract = _read_json_object(Path(original["worker_payload_contract_path"]))
+    if "compiler_preflight" in contract:
+        contract["compiler_preflight"] = {"worker_input_path": entry["worker_input_path"], "digest": digest_bytes(entry_bytes)}
+    _queue_materialized_write(pending, Path(entry["worker_input_path"]), entry_bytes, mode=0o444)
+    _queue_materialized_write(pending, contract_path, (json.dumps(contract, indent=2, sort_keys=True) + "\n").encode(), mode=0o444)
+    return entry
+
+
+def schedule_ready(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    """Publish one capacity-aware adaptive schedule and immutable continuation."""
+    lock_path = args.journal.with_name(args.journal.name + ".lock")
+    with lock_path.open("a+b") as stream:
+        fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+        try:
+            return _schedule_ready_locked(document, args)
+        finally:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+
+def _schedule_ready_locked(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    plan = _graph_plan(document["plan"])
+    if plan.execution_profile not in {"grouped", "mixed"}:
+        msg = "schedule-ready requires an adaptive grouped or mixed profile"
+        raise ValueError(msg)
+    current = _with_current_capture(document, args.current_capture)
+    source_state = _state(document, "source_state")
+    events, _state_view, head = read_execution_journal(args.journal, plan=plan, source_state=source_state)
+    dispatch_set = _read_json_object(args.dispatches)
+    ready = next_ready_nodes(current, journal_events=events, dispatch_set=dispatch_set)
+    entries = {entry["node_id"]: entry for entry in dispatch_set["dispatches"]}
+    selection = select_execution_lanes(document, modes={node.node_id: node.mode for node in plan.actual_worker_nodes}, entries=entries, ready=ready)
+    identity = digest_bytes(
+        canonical_json({"input": document, "previous_dispatch_set_digest": dispatch_set["dispatch_set_digest"], "journal_head": head}).encode()
+    )
+    store = Path(_required_text(document, "artifact_store")).resolve() / f"schedule-{identity[7:23]}"
+    pending: dict[Path, tuple[bytes, int]] = {}
+    coordinator_id = selection["coordinator_node_id"]
+    lineage = {
+        "previous_dispatch_set_digest": dispatch_set["dispatch_set_digest"],
+        "previous_dispatches_path": str(args.dispatches.resolve()),
+        "journal_head": head,
+        "scheduling_input": document,
+    }
+    if coordinator_id is not None and entries[coordinator_id]["dispatch"]["execution_location"] == "worker":
+        entries[coordinator_id] = _coordinator_lane_entry(entries[coordinator_id], store, pending)
+        dispatch_set = {**dispatch_set, "dispatches": [entries[entry["node_id"]] for entry in dispatch_set["dispatches"]], "scheduling_lineage": lineage}
+        dispatch_set.pop("dispatch_set_digest")
+        dispatch_set["dispatch_set_digest"] = digest_bytes(canonical_json(dispatch_set).encode())
+    lifecycle = {key: value for key, value in document.items() if key not in {"artifact_store", "worker_capacity", "creation_failure", "reserved_node_ids"}}
+    paths = {
+        "dispatches_path": str(store / "dispatches.json"),
+        "lifecycle_input_path": str(store / "lifecycle.json"),
+        "schedule_input_path": str(store / "schedule-input.json"),
+        "journal_path": str(args.journal.resolve()),
+        "current_capture_path": str(args.current_capture.resolve()),
+    }
+    selected_ids = [*selection["worker_node_ids"], *([coordinator_id] if coordinator_id is not None else [])]
+    schedule_input = {**lifecycle, "artifact_store": document["artifact_store"], "reserved_node_ids": selection["reserved_node_ids"]}
+    failure = selection["creation_failure"]
+    if failure is not None and failure["node_id"] not in selected_ids:
+        schedule_input["creation_failure"] = failure
+    result = {
+        **ready,
+        **selection,
+        **paths,
+        "status": "scheduled" if selected_ids else "waiting",
+        "ready_node_ids": selected_ids,
+        "ready_dispatches": [entries[node_id] for node_id in selected_ids],
+        "lineage": lineage,
+        "continuation_path": str(store / "continuation.json"),
+    }
+    for filename, content in (
+        ("dispatches.json", dispatch_set),
+        ("lifecycle.json", lifecycle),
+        ("schedule-input.json", schedule_input),
+        ("continuation.json", {**paths, **selection, "lineage": lineage}),
+    ):
+        _queue_materialized_write(pending, store / filename, (json.dumps(content, indent=2, sort_keys=True) + "\n").encode(), mode=0o444)
+    _publish_materialization_with_result(store, pending, args.output, result)
+    return result
+
+
 def fallback_to_coordinator(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
     """Publish one unstarted adaptive fallback while preserving the current journal."""
     lock_path = args.journal.with_name(args.journal.name + ".lock")
@@ -5048,29 +5152,19 @@ def _fallback_to_coordinator_locked(document: dict[str, Any], args: argparse.Nam
     if original["dispatch"]["execution_location"] != "worker":
         msg = f"fallback node is not assigned to a worker: {node_id}"
         raise ValueError(msg)
-    if any(
-        Path(original[field]).exists()
-        for field in ("artifact_path", "metadata_path", "worker_payload_path", "worker_payload_candidate_path")
-        if field in original
-    ):
-        msg = f"fallback node already has execution output: {node_id}"
-        raise ValueError(msg)
-    identity = _sha256_bytes(_canonical_json({"dispatch_set_digest": dispatch_set["dispatch_set_digest"], "node_id": node_id, "journal_head": head}).encode())
+    identity = digest_bytes(canonical_json({"dispatch_set_digest": dispatch_set["dispatch_set_digest"], "node_id": node_id, "journal_head": head}).encode())
     store = Path(_required_text(document, "artifact_store")).resolve() / f"fallback-{identity[7:23]}"
-    entry = json.loads(_canonical_json(original))
-    entry["dispatch"].update({"execution_location": "coordinator", "worker_created": False, "fresh_context": False})
-    entry["worker_prompt"] = _worker_prompt(entry["result_contract"], entry["dispatch"])
-    entry["worker_input_path"] = str(store / f"{node_id}.worker-input.json")
+    pending: dict[Path, tuple[bytes, int]] = {}
+    entry = _coordinator_lane_entry(original, store, pending)
     updated = {**dispatch_set, "dispatches": [entry if item["node_id"] == node_id else item for item in dispatch_set["dispatches"]]}
     updated.pop("dispatch_set_digest")
-    updated["dispatch_set_digest"] = _sha256_bytes(_canonical_json(updated).encode())
+    updated["dispatch_set_digest"] = digest_bytes(canonical_json(updated).encode())
     lifecycle = {"plan": document["plan"], "source_state": list(source_state)}
-    store.mkdir(parents=True, exist_ok=True)
-    _write_bytes_atomically_once(Path(entry["worker_input_path"]), (json.dumps(entry, indent=2, sort_keys=True) + "\n").encode(), mode=0o444)
     dispatches_path = store / "dispatches.json"
     lifecycle_path = store / "lifecycle.json"
-    _write_text_once(dispatches_path, json.dumps(updated, indent=2, sort_keys=True) + "\n")
-    _write_text_once(lifecycle_path, json.dumps(lifecycle, indent=2, sort_keys=True) + "\n")
+    for path, content in ((dispatches_path, updated), (lifecycle_path, lifecycle)):
+        _queue_materialized_write(pending, path, (json.dumps(content, indent=2, sort_keys=True) + "\n").encode(), mode=0o444)
+    _publish_materialized_writes(store, pending)
     return {
         "schema_version": 1,
         "status": "transitioned",
@@ -5325,14 +5419,14 @@ def _publish_validation_continuation(  # noqa: PLR0913, PLR0917
         {
             "artifact_store": str(store / "artifacts"),
             "authorization": sample["authorization"],
-            "plan": json.loads(_canonical_json(asdict(expanded))),
+            "plan": json.loads(canonical_json(asdict(expanded))),
             "repository_root": sample["repository_root"],
             "source_state": list(source_state),
             "state_verification_command": sample["state_verification_command"],
         },
         preserved_entries=retained,
     )
-    lifecycle = {"plan": json.loads(_canonical_json(asdict(expanded))), "source_state": list(source_state)}
+    lifecycle = {"plan": json.loads(canonical_json(asdict(expanded))), "source_state": list(source_state)}
     # Rebind verified states to the new plan, preserving every original artifact.
     # Publish this journal once; never append to or rewrite the historical journal.
     migrated: list[dict[str, Any]] = []
@@ -5357,7 +5451,7 @@ def _publish_validation_continuation(  # noqa: PLR0913, PLR0917
             "source_state": list(source_state),
             "status": previous["status"],
         }
-        event["event_digest"] = _sha256_bytes(_canonical_json(event).encode())
+        event["event_digest"] = digest_bytes(canonical_json(event).encode())
         migrated.append(event)
     paths = {
         "dispatches_path": store / "dispatches.json",
@@ -5370,7 +5464,7 @@ def _publish_validation_continuation(  # noqa: PLR0913, PLR0917
     outputs = {
         paths["dispatches_path"]: (json.dumps(dispatches, indent=2, sort_keys=True) + "\n").encode(),
         paths["lifecycle_input_path"]: (json.dumps(lifecycle, indent=2, sort_keys=True) + "\n").encode(),
-        paths["journal_path"]: "".join(_canonical_json(event) + "\n" for event in migrated).encode(),
+        paths["journal_path"]: "".join(canonical_json(event) + "\n" for event in migrated).encode(),
         paths["current_capture_path"]: _read_regular_file_no_follow(args.current_capture),
         store / "continuation.json": (json.dumps(continuation, indent=2, sort_keys=True) + "\n").encode(),
     }
@@ -5402,7 +5496,7 @@ def _verify_validation_recoveries(plan: GraphPlan) -> None:
         seen.add(identity)
         for artifact in _records(recovery, "preserved_files"):
             content = _read_regular_file_no_follow(Path(_required_text(artifact, "path")))
-            if _sha256_bytes(content) != _required_text(artifact, "digest"):
+            if digest_bytes(content) != _required_text(artifact, "digest"):
                 msg = "preserved validation recovery evidence changed"
                 raise ValueError(msg)
 
@@ -5436,12 +5530,12 @@ def _preflight_outputs(unit: ValidationUnit, repository_root: Path) -> tuple[lis
     for path in dict.fromkeys((*unit.expected_workspace_effects, *approved)):
         try:
             resolved = _workspace_path(path, effect_root if path in unit.expected_workspace_effects else repository_root)
-            status = _git_path_status(repository_root, resolved)
-            if status == "outside-repository" or (unit.requires_isolation and path in unit.expected_workspace_effects):
+            if not resolved.is_relative_to(repository_root) or (unit.requires_isolation and path in unit.expected_workspace_effects):
                 _verified_artifact_status(str(resolved), "outside-repository", repository_root, unit.isolation_root)
+            status = _git_path_status(repository_root, resolved)
             exists = resolved.exists() or resolved.is_symlink()
-        except (OSError, ValueError) as error:
-            blockers.append(f"cannot inspect output {path}: {error}")
+        except (ExecutableNotFoundError, OSError, ValueError, subprocess.SubprocessError) as error:
+            blockers.append(f"cannot inspect output {path}: {format_exception_diagnostics(error)}")
             continue
         observations.append(
             {"path": path, "exists": exists, "repository_status": status, "required": path in approved and approved[path].artifact_digest is not None}
@@ -5574,24 +5668,24 @@ def recover_validation_launch(document: dict[str, Any], args: argparse.Namespace
             "previous_journal_head": head,
         }
     )
-    identity = _sha256_bytes(_canonical_json(recovery).encode())[7:23]
+    identity = digest_bytes(canonical_json(recovery).encode())[7:23]
     history = Path(_required_text(document, "artifact_store")).resolve() / f"launch-history-{identity}"
     history.mkdir(parents=True, exist_ok=True)
     preserved: list[dict[str, str]] = []
     # Snapshot the journal: future appends must not invalidate historical evidence.
     snapshots = {
-        "lifecycle.json": _canonical_json({"plan": asdict(plan), "source_state": source_state}).encode(),
+        "lifecycle.json": canonical_json({"plan": asdict(plan), "source_state": source_state}).encode(),
         "execution.jsonl": _read_regular_file_no_follow(args.journal),
         "dispatches.json": _read_regular_file_no_follow(args.dispatches),
     }
     for name, content in snapshots.items():
         path = history / name
         _write_bytes_atomically_once(path, content, mode=0o444)
-        preserved.append({"path": str(path), "digest": _sha256_bytes(content)})
+        preserved.append({"path": str(path), "digest": digest_bytes(content)})
     for path_text in [failed_source["artifact_path"], failed_source["metadata_path"], metadata.get("worker_payload_path")]:
         if path_text is not None:
             path = Path(path_text).resolve()
-            preserved.append({"path": str(path), "digest": _sha256_bytes(_read_regular_file_no_follow(path))})
+            preserved.append({"path": str(path), "digest": digest_bytes(_read_regular_file_no_follow(path))})
     recovery["preserved_files"] = preserved
     expanded = replace(
         plan,
@@ -6030,6 +6124,12 @@ def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     fallback_parser.add_argument("--dispatches", type=Path, required=True)
     fallback_parser.add_argument("--current-capture", type=Path, required=True)
     fallback_parser.add_argument("--output", type=Path, required=True)
+    schedule_parser = _runtime_subparser(subparsers, "schedule-ready", "reserve an adaptive coordinator audit lane alongside available workers")
+    schedule_parser.add_argument("--input", type=Path, required=True)
+    schedule_parser.add_argument("--journal", type=Path, required=True)
+    schedule_parser.add_argument("--dispatches", type=Path, required=True)
+    schedule_parser.add_argument("--current-capture", type=Path, required=True)
+    schedule_parser.add_argument("--output", type=Path, required=True)
     journal_parser = _runtime_subparser(
         subparsers,
         "journal-append",
@@ -6186,7 +6286,7 @@ def _lifecycle_dispatch(document: dict[str, Any], dispatches_path: Path, node_id
     source_state = _state(document, "source_state")
     entries = _dispatches_by_node(_read_json_object(dispatches_path), plan=plan, source_state=source_state)
     try:
-        selected = json.loads(_canonical_json(entries[node_id]))
+        selected = json.loads(canonical_json(entries[node_id]))
     except KeyError:
         msg = f"dispatch set has no planned node {node_id}"
         raise ValueError(msg) from None
@@ -6342,7 +6442,7 @@ def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace)
 
     artifact_path = Path(_required_text(entry, "artifact_path")).resolve()
     metadata_path = Path(_required_text(entry, "metadata_path")).resolve()
-    worker_payload_digest = _sha256_bytes(payload_bytes)
+    worker_payload_digest = digest_bytes(payload_bytes)
     sealed_payload_path = payload_path.with_name(f"{payload_path.stem}.{worker_payload_digest.removeprefix('sha256:')}.sealed{payload_path.suffix}")
     metadata = {
         **metadata,
@@ -6473,20 +6573,20 @@ def publish_worker_payload_bytes(document: dict[str, Any], payload_bytes: bytes,
 def _run_worker_payload_operation(document: dict[str, Any], args: argparse.Namespace) -> int:
     if args.operation == "publish-worker-payload":
         payload_bytes = sys.stdin.buffer.read()
-        print(_canonical_json(publish_worker_payload_bytes(document, payload_bytes, approval_identity=args.approval_identity)))
+        print(canonical_json(publish_worker_payload_bytes(document, payload_bytes, approval_identity=args.approval_identity)))
         return 0
     if args.operation == "review-worker-payload-write":
         payload_bytes = sys.stdin.buffer.read()
-        print(_canonical_json(review_worker_payload_write(document, payload_bytes, candidate_is_write_target=False)))
+        print(canonical_json(review_worker_payload_write(document, payload_bytes, candidate_is_write_target=False)))
         return 0
     if args.payload_stdin:
         if args.approval_identity is None:
             msg = "persist-worker-payload --payload-stdin requires the artifact-write review approval identity"
             raise ValueError(msg)
         payload_bytes = sys.stdin.buffer.read()
-        print(_canonical_json(persist_worker_payload_bytes(document, payload_bytes, approval_identity=args.approval_identity)))
+        print(canonical_json(persist_worker_payload_bytes(document, payload_bytes, approval_identity=args.approval_identity)))
         return 0
-    print(_canonical_json(persist_worker_payload(document, args.payload, approval_identity=args.approval_identity)))
+    print(canonical_json(persist_worker_payload(document, args.payload, approval_identity=args.approval_identity)))
     return 0
 
 
@@ -6494,7 +6594,7 @@ def _print_operation_result(args: argparse.Namespace, output_path: Path, output:
     receipt = stage_receipt(args.operation, output_path, output)
     if args.operation == "materialize-dispatches":
         receipt["next_operation_inputs"] = {"dispatches": str(output_path.resolve())}
-    print(_canonical_json(output if args.full_output else receipt))
+    print(canonical_json(output if args.full_output else receipt))
 
 
 def _run_operation(document: dict[str, Any], args: argparse.Namespace) -> int:  # noqa: C901, PLR0912
@@ -6521,14 +6621,18 @@ def _run_operation(document: dict[str, Any], args: argparse.Namespace) -> int:  
         return 0
     if args.operation == "journal-append":
         event = append_journal_event(args.journal, document, _journal_request_from_args(args))
-        print(_canonical_json(event))
+        print(canonical_json(event))
         return 0
     if args.operation == "compile-node":
         output = _compile_node_from_files(document, args)
         _print_operation_result(args, args.output, output)
         return 0
-    if args.operation == "materialize-dispatches":
-        output = materialize_dispatches(document, operation_output_path=args.output)
+    if args.operation in {"materialize-dispatches", "schedule-ready"}:
+        output = (
+            materialize_dispatches(document, operation_output_path=args.output)
+            if args.operation == "materialize-dispatches"
+            else schedule_ready(document, args)
+        )
         _print_operation_result(args, args.output, output)
         return 0
     output = _json_operation_output(document, args)
@@ -6540,7 +6644,7 @@ def _run_operation(document: dict[str, Any], args: argparse.Namespace) -> int:  
             msg = f"next-ready output path is not a directory: {output_directory}"
             raise ValueError(msg)
         generation = _required_int(cast("dict[str, Any]", output["journal"]), "event_count")
-        identity = _sha256_bytes(_canonical_json(output).encode()).removeprefix("sha256:")[:16]
+        identity = digest_bytes(canonical_json(output).encode()).removeprefix("sha256:")[:16]
         output_path = output_directory / f"next-ready.{generation:06d}.{identity}.json"
         output["output_generation"] = generation
         output["output_path"] = str(output_path)
@@ -6573,17 +6677,17 @@ def main(argv: list[str] | None = None) -> int:
                 scope_digest=usage_digest(operation_document),
             )
         return _run_operation(operation_document, args)
-    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as error:
+    except (ExecutableNotFoundError, OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError, subprocess.SubprocessError) as error:
         if isinstance(error, WorkerPayloadWriteError):
             output = {"artifact_write_review": error.artifact_write_review, "error": "artifact-write-blocked", "message": str(error)}
-            print(_canonical_json(output), file=sys.stderr)
+            print(canonical_json(output), file=sys.stderr)
         elif isinstance(error, SchemaValidationError):
             attempt = document.get("handoff_attempt", 1) if isinstance(document, dict) else 1
             retry_allowed = isinstance(attempt, int) and not isinstance(attempt, bool) and attempt == 1
             output = {**error.as_dict(), "handoff_attempt": attempt, "maximum_handoff_attempts": 2, "retry_allowed": retry_allowed}
-            print(_canonical_json(output), file=sys.stderr)
+            print(canonical_json(output), file=sys.stderr)
         else:
-            print(f"review_graph_runtime: {error}", file=sys.stderr)
+            print(f"review_graph_runtime: {format_exception_diagnostics(error)}", file=sys.stderr)
         return 2
 
 
