@@ -38,6 +38,20 @@ Preflight dry-compiles with hypothetical equal captures; it does not attest to
 execution. Actual capture verification still runs during compilation. Saved contracts
 without preflight remain supported.
 
+The read-only review command returns `native_size_preflight`: generated result
+and section byte counts, their limits, and `scope_rendering` (`inline` or
+`reference`). Use it before publication to diagnose remaining size failures.
+When an audit's inline Scope Inspected would exceed the section limit, the
+compiler keeps its complete payload at `expectation.canonical_worker_payload`
+in the metadata artifact and renders counts plus digest-backed references.
+The same artifact retains the complete audit input identity and coverage reuse
+proof. Preserve all dependency paths and coverage partitions; compact rendering
+does not require changing the worker payload or lifting native size limits.
+Verification binds every reference and count, rederives normalized evidence,
+and compares the canonical payload with sealed worker bytes when present.
+Missing or changed bound metadata or sealed bytes fail verification. Smaller
+audits and previously compiled inline reports retain their existing format.
+
 The persistence receipt and any publication-failure diagnostic carry the same
 `artifact_write_review`: exact byte digest/count, bound paths, path-role summary,
 and a canonical digest of the entire validated persistence contract, including

@@ -19,7 +19,7 @@ from typing import Any, cast
 
 from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics, run_command_bytes
 from review_graph_bootstrap import bootstrap_document
-from review_graph_coverage import combined_findings, coverage_decisions, coverage_reference, reused_paths, validate_coverage_units
+from review_graph_coverage import combined_findings, coverage_decisions, reused_paths, validate_coverage_units
 from review_graph_independent import CHECK_LABELS, SCHEMA as _INDEPENDENT_PAYLOAD_SCHEMA, render_independent_payload
 from review_graph_integrity import canonical_json, digest_bytes
 from review_graph_metrics import projected_waves, source_demand
@@ -28,6 +28,8 @@ from review_graph_plan import (
     DEFAULT_ROUTING_CATALOG,
     DEFAULT_SKILL_ROOT,
     EVIDENCE_SCHEMA_VERSION,
+    MAX_NATIVE_RESULT_BYTES,
+    MAX_NATIVE_SECTION_BYTES,
     NATIVE_EVIDENCE_BLOCK_CLOSE,
     NATIVE_EVIDENCE_BLOCK_OPEN,
     VALIDATION_ARTIFACT_DIGEST_MODES,
@@ -88,6 +90,7 @@ from review_graph_plan import (
     validation_execution_result_blockers,
     validation_requirements_from_document,
 )
+from review_graph_provenance import review_scope_body, worker_payload_reference
 from review_graph_receipts import stage_receipt
 from review_graph_reuse import (
     SNAPSHOT_FORMAT,
@@ -1036,9 +1039,14 @@ def compile_review(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  #
     if status == "blocked" and not _review_limitation_reasons(payload):
         msg = "blocked payload requires a limitation"
         raise ValueError(msg)
-    files_inspected = _text_list(payload, "files_inspected", required=status != "blocked" and mode != "synthesis" and not reused_paths(coverage_reuse))
-    nearby_contract_owners = _text_list(payload, "nearby_contract_owners")
+    _text_list(payload, "files_inspected", required=status != "blocked" and mode != "synthesis" and not reused_paths(coverage_reuse))
+    _text_list(payload, "nearby_contract_owners")
     audit_inputs = _compiled_audit_inputs(dispatch, payload)
+    scope_body = review_scope_body(payload, mode=mode, audit_inputs=audit_inputs, coverage_reuse=coverage_reuse)
+    compact_scope = mode == "audit" and len(scope_body.encode()) > MAX_NATIVE_SECTION_BYTES
+    if compact_scope:
+        require_schema(payload, _REVIEW_PAYLOAD_SCHEMA)
+        scope_body = review_scope_body(payload, mode=mode, audit_inputs=audit_inputs, coverage_reuse=coverage_reuse, compact=True)
     requirement_ids = _text_list(dispatch, "requirement_ids")
     predecessor_evidence_ids = _text_list(dispatch, "predecessor_evidence_ids")
     evidence_id = _required_text(dispatch, "evidence_id")
@@ -1069,6 +1077,7 @@ def compile_review(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  #
         planned_paths=planned_paths,
         audit_input_identity=audit_inputs,
         coverage_reuse=coverage_reuse,
+        canonical_worker_payload=payload if compact_scope else None,
     )
     evidence = ReviewEvidence(
         schema_version=EVIDENCE_SCHEMA_VERSION,
@@ -1141,16 +1150,7 @@ def compile_review(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  #
             )
         ),
         "## State Verification": _state_verification(dispatch, evidence, changed_paths),
-        "## Scope Inspected": "\n".join(
-            (
-                f"- Files: {', '.join(files_inspected) or ('bundle-only synthesis' if mode == 'synthesis' else 'blocked-before-inspection')}",
-                f"- Nearby contract owners: {', '.join(nearby_contract_owners) or 'none'}",
-                f"- Worker payload digest: {digest_bytes(canonical_payload.encode())}",
-                f"- Canonical worker payload: {canonical_payload}",
-                *((f"- Audit input identity: {canonical_json(asdict(audit_inputs))}",) if audit_inputs is not None else ()),
-                *((f"- Coverage reuse reference: {canonical_json(coverage_reference(coverage_reuse))}",) if coverage_reuse is not None else ()),
-            )
-        ),
+        "## Scope Inspected": scope_body,
         "## Findings": _findings_body(findings),
         "## Validation": "none",
         "## Validation Requirements": _validation_body(validations),
@@ -1771,6 +1771,9 @@ def _audit_input_identity(raw: object) -> AuditInputIdentity | None:
 
 def _review_expectation(raw: dict[str, Any]) -> ReviewEvidenceExpectation:
     expected_after = tuple(raw["expected_after_state"]) if raw.get("expected_after_state") is not None else None
+    payload = raw.get("canonical_worker_payload")
+    if payload is not None:
+        require_schema(payload, _REVIEW_PAYLOAD_SCHEMA)
     return ReviewEvidenceExpectation(
         node_id=_required_text(raw, "node_id"),
         requirement_ids=_string_tuple(raw, "requirement_ids"),
@@ -1791,6 +1794,7 @@ def _review_expectation(raw: dict[str, Any]) -> ReviewEvidenceExpectation:
         planned_path_line_bounds=_path_line_bounds(raw, "planned_path_line_bounds"),
         audit_input_identity=_audit_input_identity(raw.get("audit_input_identity")),
         coverage_reuse=raw.get("coverage_reuse"),
+        canonical_worker_payload=payload,
     )
 
 
@@ -2667,9 +2671,20 @@ def _operation_document(document: dict[str, Any], operation: str) -> dict[str, A
     return dict(nested)
 
 
-def _canonical_worker_payload(content: bytes) -> dict[str, Any]:
+def _canonical_worker_payload(content: bytes, *, expectation: ReviewEvidenceExpectation | None = None) -> dict[str, Any]:
     prefix = b"- Canonical worker payload: "
     matches = [line.removeprefix(prefix) for line in content.splitlines() if line.startswith(prefix)]
+    reference_prefix = b"- Worker payload reference: "
+    references = [line.removeprefix(reference_prefix) for line in content.splitlines() if line.startswith(reference_prefix)]
+    bound_payload = expectation.canonical_worker_payload if expectation else None
+    if references or bound_payload is not None:
+        if len(references) != 1 or matches or bound_payload is None:
+            msg = "compiled artifact must contain exactly one reference to its bound canonical worker payload"
+            raise ValueError(msg)
+        if json.loads(references[0]) != worker_payload_reference(bound_payload):
+            msg = "canonical worker payload reference differs from its bound metadata"
+            raise ValueError(msg)
+        return bound_payload
     if len(matches) != 1:
         msg = "compiled artifact must contain exactly one canonical worker payload"
         raise ValueError(msg)
@@ -2734,6 +2749,7 @@ def _load_evidence_source(  # noqa: C901, PLR0912, PLR0915
     if metadata.get("artifact_digest") != artifact_digest or evidence_raw.get("raw_result_digest") != artifact_digest:
         msg = f"artifact digest does not match evidence metadata: {artifact_path}"
         raise ValueError(msg)
+    payload_bytes: bytes | None = None
     worker_payload_fields = (metadata.get("worker_payload_path"), metadata.get("worker_payload_digest"), metadata.get("worker_payload_byte_count"))
     if any(value is not None for value in worker_payload_fields):
         payload_path, payload_digest, payload_byte_count = worker_payload_fields
@@ -2771,6 +2787,18 @@ def _load_evidence_source(  # noqa: C901, PLR0912, PLR0915
         msg = f"evidence source failed verification {artifact_path}: " + "; ".join(blockers)
         raise ValueError(msg)
 
+    if isinstance(expectation, ReviewEvidenceExpectation) and expectation.canonical_worker_payload is not None:
+        bound_payload = _canonical_worker_payload(content, expectation=expectation)
+        if metadata.get("payload_digest") != digest_bytes(canonical_json(bound_payload).encode()):
+            msg = "bound canonical worker payload digest differs from metadata"
+            raise ValueError(msg)
+        if payload_bytes is not None and json.loads(payload_bytes) != bound_payload:
+            msg = "bound canonical worker payload differs from sealed worker bytes"
+            raise ValueError(msg)
+        _validate_review_coverage_partitions(
+            {**expectation_raw, "owned_paths": list(expectation.audit_input_identity.owned_paths) if expectation.audit_input_identity else []}, bound_payload
+        )
+
     if isinstance(expectation, ReviewEvidenceExpectation) and isinstance(evidence, ReviewEvidence) and expectation.mode == "independent-review":
         _verify_independent_payload_binding(content, metadata, expectation, evidence)
     normalized = metadata.get("normalized_record")
@@ -2785,7 +2813,7 @@ def _load_evidence_source(  # noqa: C901, PLR0912, PLR0915
             if expectation.mode == "independent-review":
                 recomputed = _independent_normalized_record(content, expectation, evidence)
             else:
-                payload = _canonical_worker_payload(content)
+                payload = _canonical_worker_payload(content, expectation=expectation)
                 _validate_audit_caveats(
                     {
                         "mode": expectation.mode,
@@ -3331,12 +3359,12 @@ def _review_payload_schema(dispatch: dict[str, Any]) -> Path:
     return _SYNTHESIS_PAYLOAD_SCHEMA if dispatch.get("mode") == "synthesis" else _REVIEW_PAYLOAD_SCHEMA
 
 
-def _preflight_audit_payload(contract: dict[str, Any], payload: dict[str, Any]) -> None:
+def _preflight_audit_payload(contract: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any] | None:
     """Dry-compile against a bound dispatch before authorizing payload publication."""
     reference = contract.get("compiler_preflight")
     if reference is None:
         # Saved contracts remain usable; compile-node applies the current verifier.
-        return
+        return None
     content = Path(reference["worker_input_path"]).read_bytes()
     if digest_bytes(content) != reference["digest"]:
         msg = "compiler preflight worker input digest differs from its publication contract"
@@ -3353,10 +3381,19 @@ def _preflight_audit_payload(contract: dict[str, Any], payload: dict[str, Any]) 
     try:
         compiler = compile_independent_payload if contract.get("mode") == "independent-review" else compile_review
         current_state = list(_current_metadata_state(dispatch))
-        compiler({"dispatch": {**dispatch, "before_state": current_state, "after_state": current_state}, "payload": payload})
+        native, metadata = compiler({"dispatch": {**dispatch, "before_state": current_state, "after_state": current_state}, "payload": payload})
     except (ValueError, TypeError) as error:
         msg = f"{contract.get('mode')} compiler preflight failed before publication: {error}"
         raise ValueError(msg) from error
+    headings = tuple(line for line in native.decode().splitlines() if line.startswith("## "))
+    sections, _blockers = _native_section_bodies(native.decode(), headings)
+    return {
+        "result_byte_count": len(native),
+        "result_limit": MAX_NATIVE_RESULT_BYTES,
+        "section_byte_counts": {heading.removeprefix("## "): len(body.encode()) for heading, body in (sections or {}).items()},
+        "section_limit": MAX_NATIVE_SECTION_BYTES,
+        "scope_rendering": "reference" if metadata["expectation"].get("canonical_worker_payload") is not None else "inline",
+    }
 
 
 def _validate_worker_payload_bytes(contract_document: dict[str, Any], payload_bytes: bytes) -> dict[str, Any] | None:
@@ -3377,7 +3414,6 @@ def _validate_worker_payload_bytes(contract_document: dict[str, Any], payload_by
             if "compiler_preflight" not in contract_document:
                 msg = "structured independent publication requires its bound compiler preflight"
                 raise ValueError(msg)
-            _preflight_audit_payload(contract_document, payload)
         elif contract == "compact-review":
             _validate_review_coverage_partitions(contract_document, payload)
             _validate_audit_caveats(contract_document, payload)
@@ -3385,7 +3421,6 @@ def _validate_worker_payload_bytes(contract_document: dict[str, Any], payload_by
             if blockers:
                 msg = "worker payload failed owned-scope validation: " + "; ".join(blockers)
                 raise ValueError(msg)
-            _preflight_audit_payload(contract_document, payload)
         else:
             blockers = tuple(
                 blocker
@@ -3411,6 +3446,7 @@ def review_worker_payload_write(contract_document: dict[str, Any], payload_bytes
     target = Path(_required_text(contract_document, "worker_payload_path")).resolve()
     target_path = str(target)
     payload = _validate_worker_payload_bytes(contract_document, payload_bytes)
+    preflight = _preflight_audit_payload(contract_document, payload) if payload is not None else None
     payload_digest = digest_bytes(payload_bytes)
     identity_record: dict[str, object] = {
         "contract_digest": digest_bytes(canonical_json(contract_document).encode()),
@@ -3435,6 +3471,7 @@ def review_worker_payload_write(contract_document: dict[str, Any], payload_bytes
         "artifact_write_targets": write_targets,
         "decision": "valid-bound-artifact-write",
         **identity_record,
+        **({"native_size_preflight": preflight} if preflight is not None else {}),
     }
     if result_contract == "compact-review" and contract_document.get("mode") == "audit" and payload is not None:
         owned_paths = _text_list(contract_document, "owned_paths", required=True)
