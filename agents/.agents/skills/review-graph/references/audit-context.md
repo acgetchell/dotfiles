@@ -14,6 +14,11 @@ Classify audit context explicitly; never suppress a truthful caveat to gain reus
 | Unit `dependency_uncertainty` | Unresolved dependency of one coverage unit | Rechecks that unit |
 | `limitations` | Unclassified free-text caveats | Conservatively blocks reuse |
 
+For external staging, declare `git_dependencies` separately from execution
+caveats: distinguish diff-based `source-discovery` from `index`, `head`, or
+`history` judgments. See [state transitions](state-transitions.md) for the
+command binding, unchanged-read proof, and conservative legacy behavior.
+
 Unknown execution facts are rejected. `validators-not-executed` cannot coexist
 with a ledger entry for a dispatched validator command. The ledger still records
 inspection and artifact-publication commands; these facts neither supply

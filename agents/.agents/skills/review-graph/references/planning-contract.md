@@ -312,7 +312,7 @@ also contribute inspected nearby-contract dependencies.
 
 For supplied accepted audit `sources`, preserve original artifacts and verify
 complete compiler-bound ownership, inspected dependencies, instructions,
-skill/reference identities, and unchanged inputs between content-bound v2
+skill/reference identities, and unchanged inputs between content-bound v3
 captures. Only predecessor-free, complete audits without reuse-blocking caveats
 qualify. Typed execution facts and delegated validator context are retained;
 scope omissions, unclassified limitations, unresolved uncertainty, and

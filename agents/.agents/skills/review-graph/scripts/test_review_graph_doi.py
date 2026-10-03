@@ -48,6 +48,7 @@ def _source_capture(root: Path) -> dict[str, Any]:
         "repository_state_fingerprint": "pending",
         "index_fingerprint": "c" * 64,
         "repository_path_fingerprints": {"CITATION.cff": regular_file_fingerprint("CITATION.cff", CFF_CONTENT)},
+        "repository_symlink_paths": [],
     }
     capture["repository_state_fingerprint"] = source_snapshot(capture).computed_fingerprint()
     return capture

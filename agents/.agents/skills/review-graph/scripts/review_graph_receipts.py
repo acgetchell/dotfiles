@@ -65,6 +65,8 @@ def stage_receipt(operation: str, output_path: Path, output: dict[str, Any]) -> 
         "deferred_node_ids",
         "creation_failure_action",
         "retry_after_seconds",
+        "node_counts",
+        "recheck_reason_counts",
     ):
         if key in output:
             receipt[key] = output[key]
