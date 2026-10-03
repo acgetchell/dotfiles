@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Fixture tests for validate_reference_dois.py."""
 
+import base64
 import contextlib
 import importlib.util
 import io
@@ -276,6 +277,7 @@ def test_canonical_cli_keeps_scholarly_checks_and_input_provenance(tmp_path: Pat
     rows = json.loads(capsys.readouterr().out)
     assert [row["status"] for row in rows] == ["OK", "OK"]
     assert rows[0]["local_status"] == "INSUFFICIENT_CONTEXT"
+    assert base64.b64decode(rows[0]["canonical_software"]["content_base64"], validate=True) == cff.read_bytes()
     assert "canonical_software" not in rows[1]
     assert rows[0]["source"]["path"] == str(markdown)
 

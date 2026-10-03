@@ -44,6 +44,10 @@ supported. Shell pipelines and compound commands are not reconciliation inputs.
 Declare output artifacts and isolation according to the existing validator
 contract; when running in an isolated output directory, pass absolute paths to
 the original Markdown and CFF. Keep both inputs in the captured source state.
+The canonical checker report retains the CFF bytes. `compile-node` binds those
+bytes to the regular-file identity in its source capture and retains that capture
+for evidence reloads. Reports without retained bytes or a matching capture cannot
+justify readiness; rerun the canonical check to obtain that evidence.
 
 Follow the returned continuation paths. Accepted audits and validators remain;
 only the additional check and downstream syntheses run. A legacy `MISMATCH`
@@ -71,7 +75,9 @@ validator's `validation_reconciliation` item, retaining `result: "failed"`:
 Account for every failed execution exactly once. The verifier checks both
 reports against their accepted artifact digests, the same observed source
 state and Markdown input, every DOI/line occurrence, unchanged resolved metadata,
-and passing canonical identity. A formerly failed occurrence must now have
+and passing canonical identity whose CFF digest matches the captured bytes.
+Reconciliation never compares that digest with the current CFF file.
+A formerly failed occurrence must now have
 `local_status: "INSUFFICIENT_CONTEXT"`, never a contradictory bibliography.
 Missing metadata, wrong identities, resolution failures, other failed commands,
 unexecuted commands, changed report bytes, and stale state cannot be excused.

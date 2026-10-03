@@ -1,11 +1,14 @@
 """Narrow readiness reconciliation for immutable software DOI validation reports."""
 
+import base64
 import json
 import re
 import shlex
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
+
+from review_graph_reuse import ReviewSourceSnapshot, regular_file_fingerprint, source_snapshot
 
 
 def _reject(detail: str) -> ValueError:
@@ -129,13 +132,78 @@ def _identity(value: str) -> str:
     return re.sub(r"\W+", " ", value.casefold()).strip()
 
 
-def _canonical_match(row: dict[str, Any], cff: Path) -> None:
+def _captured_cff_digest(canonical: dict[str, Any], cff: Path, capture: ReviewSourceSnapshot) -> str:
+    """Prove retained CFF bytes against the captured path without reading today's file."""
+    try:
+        relative = cff.relative_to(capture.repository_root).as_posix()
+        encoded = canonical.get("content_base64")
+        if not isinstance(encoded, str):
+            msg = "canonical report lacks retained CFF bytes"
+            raise TypeError(msg)
+        content = base64.b64decode(encoded, validate=True)
+    except (TypeError, ValueError) as exc:
+        raise _reject(f"cannot verify captured CFF bytes: {exc}") from exc
+    captured = dict(capture.repository_path_fingerprints).get(relative)
+    if captured is None:
+        msg = "CITATION.cff is absent from the captured source"
+        raise _reject(msg)
+    if captured not in {regular_file_fingerprint(relative, content, executable=executable) for executable in (False, True)}:
+        msg = "retained CFF bytes do not match the captured source"
+        raise _reject(msg)
+    return "sha256:" + sha256(content).hexdigest()
+
+
+def _canonical_rows(record: dict[str, Any]) -> list[tuple[Path, dict[str, Any]]]:
+    rows = []
+    for execution in record["executions"]:
+        if execution["result"] != "passed":
+            continue
+        try:
+            _markdown, cff = _command_inputs(execution)
+        except ValueError:
+            continue  # Other validators do not supply canonical software evidence.
+        if cff is None:
+            continue
+        for artifact in record["artifacts"]:
+            if artifact["kind"] != "report" or artifact["path"] not in execution.get("artifact_paths", []):
+                continue
+            for row in _report(record, execution, artifact["path"]).values():
+                canonical = row.get("canonical_software")
+                if isinstance(canonical, dict):
+                    rows.append((cff, canonical))
+    return rows
+
+
+def captured_software_inputs(record: dict[str, Any], capture: dict[str, Any]) -> dict[str, str]:
+    """Derive compact CFF bindings without discarding completed validation results."""
+    rows = _canonical_rows(record)
+    if not rows:
+        return {}
+    snapshot = source_snapshot(capture)
+    snapshot.verify()
+    if list(snapshot.source_state) != record["observed_source_state"]:
+        msg = "CFF capture differs from the validator's observed source state"
+        raise _reject(msg)
+    bindings: dict[str, str] = {}
+    unproven: set[str] = set()
+    for cff, canonical in rows:
+        try:
+            bindings[str(cff)] = _captured_cff_digest(canonical, cff, snapshot)
+        except ValueError:
+            unproven.add(str(cff))
+    return {path: digest for path, digest in bindings.items() if path not in unproven}
+
+
+def _canonical_match(row: dict[str, Any], cff: Path, captured_inputs: dict[str, str]) -> None:
     canonical = row.get("canonical_software")
     if not isinstance(canonical, dict) or canonical.get("path") != str(cff):
         msg = "canonical identity does not name the executed CITATION.cff"
         raise _reject(msg)
     if not re.fullmatch(r"sha256:[0-9a-f]{64}", str(canonical.get("digest", ""))):
         msg = "canonical metadata has no content digest"
+        raise _reject(msg)
+    if canonical["digest"] != captured_inputs.get(str(cff)):
+        msg = "canonical metadata digest does not match captured CFF bytes"
         raise _reject(msg)
     fields = (("doi", "doi"), ("title", "resolved_title"), ("year", "resolved_year"))
     for expected, actual in fields:
@@ -192,7 +260,7 @@ def _reconcile_reports(original: dict[str, Any], verified: dict[str, Any], check
         if old.get("status") not in {"INSUFFICIENT_CONTEXT", "MISMATCH"} or new.get("local_status") != "INSUFFICIENT_CONTEXT":
             msg = "contradictory local bibliographic claims cannot be reconciled"
             raise _reject(msg)
-        _canonical_match(new, cff)
+        _canonical_match(new, cff, verified.get("captured_software_inputs", {}))
         digest = new["canonical_software"]["digest"]
         if canonical_digest is not None and digest != canonical_digest:
             msg = "canonical metadata digest differs between reconciled rows"
