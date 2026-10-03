@@ -157,7 +157,7 @@ def _canonical_match(row: dict[str, Any], cff: Path) -> None:
         raise _reject(msg)
 
 
-def _reconcile_reports(original: dict[str, Any], verified: dict[str, Any], check: dict[str, Any]) -> None:
+def _reconcile_reports(original: dict[str, Any], verified: dict[str, Any], check: dict[str, Any]) -> None:  # noqa: C901
     old_execution = _execution(original, check["execution_index"], "failed")
     new_execution = _execution(verified, check["verification_execution_index"], "passed")
     old_input, _old_cff = _command_inputs(old_execution)
@@ -170,6 +170,7 @@ def _reconcile_reports(original: dict[str, Any], verified: dict[str, Any], check
     if old_rows.keys() != new_rows.keys():
         msg = "canonical check must cover exactly the original DOI occurrences"
         raise _reject(msg)
+    canonical_digest = None
     for key, old in old_rows.items():
         new = new_rows[key]
         if new.get("status") != "OK":
@@ -192,6 +193,11 @@ def _reconcile_reports(original: dict[str, Any], verified: dict[str, Any], check
             msg = "contradictory local bibliographic claims cannot be reconciled"
             raise _reject(msg)
         _canonical_match(new, cff)
+        digest = new["canonical_software"]["digest"]
+        if canonical_digest is not None and digest != canonical_digest:
+            msg = "canonical metadata digest differs between reconciled rows"
+            raise _reject(msg)
+        canonical_digest = digest
 
 
 def validate_software_doi_resolution(resolution: dict[str, Any], original: dict[str, Any], records: dict[str, dict[str, Any]]) -> None:

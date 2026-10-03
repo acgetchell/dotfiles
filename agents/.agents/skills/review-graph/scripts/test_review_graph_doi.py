@@ -134,10 +134,32 @@ def test_synthesis_reconciles_canonical_software_without_rewriting_failure(tmp_p
         validate_synthesis(payload, predecessors, bundle)
     payload["validation_reconciliation"][0]["software_doi_resolution"] = resolution
     before = deepcopy(records)
+    with pytest.raises(ValueError, match="ready synthesis"):
+        validate_synthesis(payload, predecessors)
     validate_synthesis(payload, predecessors, bundle)
     assert records == before
     assert payload["validation_reconciliation"][0]["result"] == "failed"
     assert original["executions"][0]["exit_code"] == 1
+
+
+@pytest.mark.parametrize("mixed_digests", [False, True])
+def test_resolution_requires_one_captured_cff_digest_across_rows(tmp_path: Path, mixed_digests: bool) -> None:
+    original, verified, resolution = _fixture(tmp_path)
+    for record in (original, verified):
+        path = Path(record["artifacts"][0]["path"])
+        rows = json.loads(path.read_bytes())
+        rows.append({**deepcopy(rows[0]), "line": 5})
+        if record is verified and mixed_digests:
+            rows[1]["canonical_software"]["digest"] = "sha256:" + "c" * 64
+        record["artifacts"] = [_save_report(path, rows)]
+    # Readiness uses the captured reports, not current on-disk CFF bytes.
+    (tmp_path / "CITATION.cff").write_text("changed since the captured validation")
+    records = {verified["evidence_id"]: verified}
+    if mixed_digests:
+        with pytest.raises(ValueError, match="canonical metadata digest differs between reconciled rows"):
+            validate_software_doi_resolution(resolution, original, records)
+    else:
+        validate_software_doi_resolution(resolution, original, records)
 
 
 @pytest.mark.parametrize(
@@ -292,7 +314,7 @@ def _compile_validator(entry: dict[str, Any], lifecycle: dict[str, Any], journal
     return source
 
 
-def test_canonical_followup_expands_only_validation_and_finalizes_with_failed_history(tmp_path: Path) -> None:  # noqa: PLR0915
+def test_canonical_followup_expands_only_validation_and_finalizes_with_failed_history(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:  # noqa: PLR0915
     original, verified, resolution = _fixture(tmp_path)
     planning = _sparse_plan_document()
     planning["validation_requirements"] = [_requirement(original, baseline=True)]
@@ -335,6 +357,31 @@ def test_canonical_followup_expands_only_validation_and_finalizes_with_failed_hi
         invalid["validation_requirements"][0][field] = value
         with pytest.raises(ValueError, match=r"software DOI|source-matching"):
             reconcile_validation_requirements(invalid, args)
+        assert all(path.read_bytes() == content for path, content in preserved.items())
+    for directories in ([], [str(tmp_path), str(tmp_path)]):
+        invalid = deepcopy(request)
+        invalid["validation_requirements"][0]["working_directories"] = directories
+        input_path = tmp_path / "invalid-recheck.json"
+        input_path.write_text(json.dumps(invalid))
+        assert (
+            main(
+                [
+                    "reconcile-validation-requirements",
+                    "--input",
+                    str(input_path),
+                    "--journal",
+                    str(paths["journal"]),
+                    "--dispatches",
+                    str(paths["dispatches"]),
+                    "--current-capture",
+                    str(paths["capture"]),
+                    "--output",
+                    str(tmp_path / "invalid-output.json"),
+                ]
+            )
+            == 2
+        )
+        assert "software DOI recheck requires" in capsys.readouterr().err
         assert all(path.read_bytes() == content for path, content in preserved.items())
     expanded = reconcile_validation_requirements(request, args)
     lifecycle = expanded["lifecycle_input"]

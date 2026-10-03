@@ -1203,6 +1203,9 @@ def compile_review(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  #
         "artifact_digest": evidence.raw_result_digest,
         "normalized_record": _review_normalized_record(payload, expectation, evidence),
     }
+    if mode == "synthesis" and any("software_doi_resolution" in item for item in payload["validation_reconciliation"]):
+        # Retain the evidence needed to reverify resolutions when loading this artifact.
+        metadata["synthesis_bundle"] = dispatch.get("synthesis_bundle")
     return content, metadata
 
 
@@ -2826,7 +2829,7 @@ def _load_evidence_source(  # noqa: C901, PLR0912, PLR0915
                 )
                 if expectation.mode == "synthesis":
                     require_schema(payload, _SYNTHESIS_PAYLOAD_SCHEMA)
-                    validate_synthesis(payload, expectation.predecessor_evidence_ids)
+                    validate_synthesis(payload, expectation.predecessor_evidence_ids, metadata.get("synthesis_bundle"))
                 payload_digest = digest_bytes(canonical_json(payload).encode())
                 if metadata.get("payload_digest") != payload_digest:
                     msg = f"worker payload digest does not match compiled artifact: {artifact_path}"
@@ -5375,7 +5378,7 @@ def _software_doi_recheck_ids(document: dict[str, Any], records: list[dict[str, 
         requirement_id = _required_text(recheck, "requirement_id")
         original = next((record for record in records if record["evidence_id"] == recheck["evidence_id"]), None)
         addition = next((item for item in additions if item.requirement_id == requirement_id), None)
-        if original is None or addition is None or requirement_id in recheck_ids or len(addition.commands) != 1:
+        if original is None or addition is None or requirement_id in recheck_ids or len(addition.commands) != 1 or len(addition.working_directories) != 1:
             msg = "software DOI recheck requires accepted original evidence and one new canonical command"
             raise ValueError(msg)
         inspect_canonical_recheck(original, recheck, addition.commands[0], addition.working_directories[0])

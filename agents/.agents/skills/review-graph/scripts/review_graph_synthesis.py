@@ -69,7 +69,9 @@ def validate_synthesis(payload: dict[str, Any], predecessors: tuple[str, ...], b
             raise ValueError(msg)
     unfinished = any(item["disposition"] in {"remaining", "blocked"} for item in payload["findings"])
     failed = any(
-        item["result"] == "blocked" or (item["result"] == "failed" and "software_doi_resolution" not in item) or item["execution_mode"] == "unexecuted"
+        item["result"] == "blocked"
+        or (item["result"] == "failed" and (bundle is None or "software_doi_resolution" not in item))
+        or item["execution_mode"] == "unexecuted"
         for item in validations
     )
     incomplete = not payload["routing_closure"]["complete"] or bool(payload["routing_closure"]["unresolved_handoff_ids"])
