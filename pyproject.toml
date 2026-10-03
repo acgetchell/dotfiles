@@ -9,7 +9,7 @@ authors = [{ name = "Adam Getchell", email = "adam@adamgetchell.org" }]
 
 [tool.uv]
 package = false
-required-version = "==0.12.21"
+required-version = "==0.12.22"
 # Semgrep 1.178.0 requires vulnerable PyJWT ~=2.13.0. Remove this override when
 # its dependency range permits the fixes in PyJWT 2.15.0 (GHSA-42vr-xj54-vc7v).
 override-dependencies = ["pyjwt[crypto]==2.15.0"]
@@ -35,6 +35,26 @@ rumdl_version = "rumdl"
 config = "semgrep.yaml"
 fixtures = "tests/semgrep"
 namespace = "dotfiles."
+
+# Count assertions retain production path filters, unlike annotation-only tests.
+[tool.research-repo-tools.semgrep.counts."tests/semgrep/.github/workflows/action_policy.yml"]
+"dotfiles.github-actions.external-action-version-comment" = 3
+"dotfiles.github-actions.checkout-persist-credentials-false" = 3
+"dotfiles.github-actions.no-pull-request-target" = 1
+"dotfiles.github-actions.github-script-no-expression-interpolation" = 1
+"dotfiles.github-actions.uv-sync-locked-in-workflows" = 3
+"dotfiles.tooling.uv-run-locked" = 3
+"dotfiles.github-actions.automerge-head-safe-squash" = 2
+"dotfiles.github-actions.no-retired-coderabbit-token" = 1
+
+[tool.research-repo-tools.semgrep.counts."tests/semgrep/.github/workflows/reusable.yml"]
+"dotfiles.github-actions.external-action-version-comment" = 1
+
+[tool.research-repo-tools.semgrep.counts."tests/semgrep/.github/workflows/triggers.yml"]
+"dotfiles.github-actions.no-pull-request-target" = 4
+
+[tool.research-repo-tools.semgrep.counts."tests/semgrep/.github/workflows/dependabot-auto-merge.yml"]
+"dotfiles.github-actions.no-retired-coderabbit-token" = 1
 
 [tool.ruff]
 line-length = 160
@@ -206,7 +226,7 @@ dev = [
   "PyYAML>=6.0",
   "pytest==9.1.1",
   "ruff==0.16.10",
-  "semgrep==1.178.0",
+  "semgrep==1.179.0",
   "ty==0.0.84",
   "yamllint==1.38.0",
   "zizmor==1.30.1",

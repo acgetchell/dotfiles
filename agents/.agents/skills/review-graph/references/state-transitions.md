@@ -51,6 +51,12 @@ accepted `sources` for verified unchanged-input audit reuse; validators,
 independent reviews, syntheses, and unproven audits rerun. Follow returned
 `lifecycle_input_path`, `dispatches_path`, `journal_path`, and `capture_path`;
 old artifacts remain unchanged. `preserved_evidence` contains only proven reuse.
+For a verified reused audit, its original planned validation digest can bind to
+the replacement validator when the complete execution identity is unchanged
+except for the captured source state. Reconciliation reports this runtime-derived
+`reuse_binding` without rewriting the audit or reusing old validation success.
+Changed commands, directories, environment, toolchain, features, platform,
+artifacts, or mutation contracts still require explicit reconciliation.
 Per-node `reuse_decisions` explain disposition and reason code, distinguishing
 `coverage-limitations`, `unclassified-limitations`, `unresolved-uncertainty`,
 and `validation-evidence-limits`. Typed execution facts and delegated validation

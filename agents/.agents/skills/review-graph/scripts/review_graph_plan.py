@@ -1979,7 +1979,7 @@ def _validation_nodes(
             priority="required-validation" if unit.required else "supporting-quality",
             required=unit.required,
             requirement_ids=unit.requirement_ids,
-            coverage=(unit.canonical_recipe or " + ".join(unit.commands),) if unit.canonical_recipe or unit.commands else (),
+            coverage=_normalized_repository_paths(unit.captured_paths, label=f"validation unit {unit.node_id} captured_paths"),
             static_references=tuple(path for path, _ in reference_digests),
             skill_digest=skill_digest,
             reference_digests=reference_digests,

@@ -9,7 +9,7 @@ python_fixture_paths := "tests/semgrep"
 python_primary_paths := "agents/.agents/skills scripts"
 cargo_update_version := "22.1.1"
 cargo_version_pattern := '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?'
-dprint_version := "0.58.0"
+dprint_version := "0.59.0"
 just_version := "1.58.0"
 rumdl_version := "0.2.78"
 # Bootstrap without Python; pyproject.toml is the single uv pin authority.
@@ -75,6 +75,10 @@ _ensure-uv:
 action-lint: _ensure-actionlint
     uv run --locked --group dev research-repo-tools files run --include '.github/workflows/*.yml' --include '.github/workflows/*.yaml' -- actionlint
 
+# One allowlist for both local validation and the GitHub settings payload.
+workflow-allowlist-check: _ensure-uv
+    uv run --locked --group dev research-repo-tools files run --include '.github/workflows/*.yml' --include '.github/workflows/*.yaml' -- python scripts/check_workflow_allowlist.py --policy .github/settings/actions-selected.json
+
 brew-check: _ensure-brew
     HOMEBREW_NO_AUTO_UPDATE=1 brew bundle check --file="$PWD/Brewfile"
 
@@ -128,7 +132,7 @@ fix: justfile-fmt python-fix yaml-fix markdown-fix
 git-config-check:
     git config --file git/.gitconfig --list >/dev/null
 
-github-actions-check: action-lint zizmor
+github-actions-check: action-lint workflow-allowlist-check zizmor
     @echo "GitHub Actions checks complete!"
 
 justfile-fmt: _ensure-just
@@ -180,7 +184,7 @@ python-typecheck: _ensure-uv
     uv run --locked --group dev research-repo-tools files run --include '*.py' --include '*.pyi' -- ty check --no-force-exclude --error all
 
 # Review committed and local changes with CodeRabbit; the base defaults to main.
-review base="main": _ensure-uv
+review base="origin/main": _ensure-uv
     uv run --locked --only-group tooling --inexact research-repo-tools review branch --base={{ quote(base) }}
 
 # Review only staged, unstaged, and non-ignored untracked changes with CodeRabbit.

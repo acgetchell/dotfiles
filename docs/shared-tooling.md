@@ -10,13 +10,13 @@ No sibling checkout or unreleased code is needed.
 | Python migration | `shared-python-plan VERSION` and `shared-python-update VERSION` run the target release through isolated uvx |
 | File selection | Shared inventory and bounded batches for Python, Markdown, YAML, actionlint, and Semgrep |
 | Python lint/type policy | Complete configured Ruff and ty checks over tracked/nonignored `.py` and `.pyi`, including fixtures; fixers retain the narrower safe scope |
-| Workflow auditing | One locked Python zizmor pin and explicit persona; offline local gate, required-online hosted audit, guarded SARIF upload |
+| Workflow auditing | One locked Python zizmor pin and explicit persona; SHA pinning, offline local gate, required-online hosted audit, guarded SARIF upload; local YAML allowlist check reads the committed Actions settings |
 | Dependency/secret scanning | Managed OSV/Gitleaks, explicit root `uv.lock`, full reachable history and current files, redacted reports; required CI `verify` includes the gate |
 | Scanner lifecycle | `tools-sync`, `tools-check`, `update-security-tools`, and preview-first `clean`; package-owned cache store |
 | Dependency/tool updates | Shared dependency and tool-pin helpers; Homebrew uv pin reconciliation; machine Cargo tools remain with their existing owner |
-| Semgrep fixtures | Shared assertion runner over repository rules and deliberate positive/negative fixtures |
+| Semgrep fixtures | Shared assertion runner over repository rules, syntax mutation pairs, and count expectations that retain path filters; integration tests exercise real review-graph source/test paths |
 | Notebooks | Published inspection/advice/lint/cleanup/execution in the Jupyter skill; its consumer template prohibits dependency installs inside cells |
-| Reviews | Shared opt-in CodeRabbit wrapper; no review is sent merely by running CI |
+| Reviews | Shared opt-in CodeRabbit wrapper defaults to verified `origin/main`; no review is sent merely by running CI |
 | Review-graph helpers | Direct public exact-byte hashing and subprocess APIs; graph serialization and immutable publication retain their protocol contracts |
 | Dependabot | SHA-pinned v0.1.7 reusable workflow; hosted rollout is tracked in [the rollout guide](../.github/DEPENDABOT.md) |
 
@@ -50,6 +50,26 @@ it through the shared owner-aware updater. No local machine packages are
 installed by ordinary validation.
 
 ## Scope decisions
+
+`just github-actions-check` combines actionlint, `workflow-allowlist-check`, and
+zizmor. The YAML allowlist checker reads `.github/settings/actions-selected.json`
+for both action steps and reusable-workflow jobs. It supports the current exact
+`owner/repo[/path]@*` entries and rejects unsupported policy forms rather than
+silently widening access. Local and container actions remain outside this
+external-repository allowlist; actionlint owns the complete workflow schema.
+Zizmor owns SHA pinning. Its regular persona does not enforce the repository's
+blanket `persist-credentials: false` policy, and its installed `forbidden-uses`
+audit misses reusable-workflow calls, so these stricter checks retain local owners.
+The generic allowlist checker is proposed for research-repo-tools v0.1.8 in
+[upstream #66](https://github.com/acgetchell/research-repo-tools/issues/66).
+[Dotfiles #105](https://github.com/acgetchell/dotfiles/issues/105) tracks adoption
+and removal of the local checker after the published release supplies it.
+
+Semgrep retains version-comment, locked-command, trigger, explicit checkout,
+bootstrap, portability, and review-graph policies. The retired
+`CODERABBIT_REVIEW_TOKEN` is forbidden in every workflow, including the approval
+caller. The shared approval job uses `GITHUB_TOKEN`. Add mutation pairs for new
+YAML forms and count assertions when a rule's path scope changes.
 
 OSV scans the root Python lockfile. The embedded zero-dependency Rust warmup
 fixture is deliberate review input, not a shipped Cargo product. Root Cargo

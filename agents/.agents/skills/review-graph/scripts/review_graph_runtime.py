@@ -2822,6 +2822,35 @@ def _load_evidence_source(  # noqa: C901, PLR0912, PLR0915
     return kind, expectation, evidence, content, normalized
 
 
+def _reused_validation_reference(
+    plan: GraphPlan, record: dict[str, Any], requirement: dict[str, Any], unit: ValidationUnit, prior: ValidationUnit | None
+) -> dict[str, Any] | None:
+    """Bind an accepted audit's old digest through its verified source-only reuse."""
+    transitions = tuple(item for item in plan.audit_reuse_transitions if item.evidence_id == record["evidence_id"])
+    if len(transitions) != 1:
+        return None
+    transition = transitions[0]
+    if (
+        transition.target_state != unit.source_state
+        or transition.artifact_digest != record.get("artifact_digest")
+        or tuple(record.get("observed_source_state", ())) not in metadata_states(transition.source_state, transition.metadata_transitions)
+    ):
+        return None
+    # Reconstruct the original digest without changing any execution-contract field.
+    # Callers have already verified the immutable record and audit reuse transition.
+    candidates = (unit,) if prior is None else (unit, prior)
+    if requirement["planned_validation_digest"] not in {
+        _planned_validation_digest(replace(candidate, source_state=transition.source_state)) for candidate in candidates
+    }:
+        return None
+    return {
+        "original_planned_validation_digest": requirement["planned_validation_digest"],
+        "original_source_state": list(transition.source_state),
+        "replacement_planned_validation_digest": _planned_validation_digest(unit),
+        "replacement_source_state": list(unit.source_state),
+    }
+
+
 def _validation_reconciliation(plan: GraphPlan, records: list[dict[str, Any]]) -> dict[str, Any]:
     """Bind discovered needs to exact command plans, never to a generic CI pass."""
     units = {requirement: (unit, _planned_validation_digest(unit)) for unit in plan.coalesced_validation_units for requirement in unit.requirement_ids}
@@ -2849,7 +2878,12 @@ def _validation_reconciliation(plan: GraphPlan, records: list[dict[str, Any]]) -
             if prior is not None:
                 compatible_digests.add(_planned_validation_digest(prior))
             exclusion = exclusions.get((origin, requirement_id, digest))
+            reuse_binding = None
             if "planned_validation_digest" in requirement:
+                if unit is not None and unit.required:
+                    reuse_binding = _reused_validation_reference(plan, record, requirement, unit, prior)
+                    if reuse_binding is not None:
+                        compatible_digests.add(reuse_binding["original_planned_validation_digest"])
                 matches = requirement["planned_validation_digest"] in compatible_digests and unit is not None and unit.required
             else:
                 matches = unit is not None and (
@@ -2871,6 +2905,7 @@ def _validation_reconciliation(plan: GraphPlan, records: list[dict[str, Any]]) -
                     "resolution": resolution,
                     "reason": exclusion.reason if exclusion and not matches else None,
                     "validation_unit_id": unit.node_id if matches and unit else None,
+                    **({"reuse_binding": reuse_binding} if reuse_binding is not None else {}),
                 }
             )
     return {"blockers": blockers, "requirements": sorted(results, key=lambda item: (item["requirement_id"], item["originating_evidence_id"]))}
@@ -3074,6 +3109,7 @@ def _schema_reference(path: Path) -> dict[str, object]:
 
 
 def _applicable_instruction_paths(repository_root: Path, owned_paths: tuple[str, ...], declared: tuple[str, ...]) -> tuple[str, ...]:
+    owned_paths = _normalized_repository_paths(owned_paths, label="instruction discovery owned_paths")
     candidates = {Path(path).resolve() for path in declared}
     root_instruction = repository_root / "AGENTS.md"
     if root_instruction.is_file():
@@ -3085,6 +3121,8 @@ def _applicable_instruction_paths(repository_root: Path, owned_paths: tuple[str,
             instruction = repository_root / parent / "AGENTS.md"
             if instruction.is_file():
                 candidates.add(instruction.resolve())
+            if parent == parent.parent:
+                break
             parent = parent.parent
     return tuple(sorted(str(path) for path in candidates))
 
