@@ -8,6 +8,7 @@ import json
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -159,6 +160,124 @@ def test_unresolved_badge_is_still_a_resolution_failure() -> None:
         raise TimeoutError(message)
 
     assert MODULE.validate_entry(entry, 1.0, 0.45, unavailable).status == MODULE.AuditStatus.FAIL
+
+
+SOFTWARE_DOI = "10.5281/zenodo.20033111"
+SOFTWARE_TITLE = "markov-chain-monte-carlo: A composable MCMC framework for Rust"
+CFF = f"""cff-version: 1.2.0
+type: software
+title: "{SOFTWARE_TITLE}"
+doi: {SOFTWARE_DOI}
+authors:
+  - family-names: Getchell
+    given-names: Adam
+date-released: 2026-09-28
+"""
+SOFTWARE_LINKS = [
+    f"[![DOI](https://zenodo.org/badge/DOI/{SOFTWARE_DOI}.svg)](https://doi.org/{SOFTWARE_DOI})",
+    f"DOI: [{SOFTWARE_DOI}](https://doi.org/{SOFTWARE_DOI})",
+    f"For software citation metadata, see [CITATION.cff](CITATION.cff). https://doi.org/{SOFTWARE_DOI}",
+    f"- DOI: <https://doi.org/{SOFTWARE_DOI}>\n- Citation metadata: [CITATION.cff](CITATION.cff)",
+    f"- DOI: <https://doi.org/{SOFTWARE_DOI}>\n- Citation metadata: [CITATION.cff][citation-metadata]",
+]
+
+
+def software_metadata() -> dict[str, object]:
+    """Return the resolved software identity from the motivating issue."""
+    return {**metadata(SOFTWARE_TITLE, family="Getchell", year=2026), "DOI": SOFTWARE_DOI}
+
+
+@pytest.mark.parametrize("link", SOFTWARE_LINKS)
+def test_software_link_requires_context_then_matches_explicit_cff(tmp_path: Path, link: str) -> None:
+    cff = tmp_path / "CITATION.cff"
+    cff.write_text(CFF)
+    entry = MODULE.extract_entries(link)[0]
+    original = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: software_metadata())
+    assert original.status == MODULE.AuditStatus.INSUFFICIENT_CONTEXT
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: software_metadata(), citation=MODULE.SoftwareCitation.load(cff))
+    assert result.status == MODULE.AuditStatus.OK
+    assert result.local_status == MODULE.AuditStatus.INSUFFICIENT_CONTEXT
+    assert result.to_json_object()["canonical_software"]["doi"] == SOFTWARE_DOI
+    assert original.status == MODULE.AuditStatus.INSUFFICIENT_CONTEXT
+
+
+@pytest.mark.parametrize("claim", ["Wrong, A. " + SOFTWARE_TITLE + ". 2026.", "Getchell. Unrelated science. 2026.", "Getchell. " + SOFTWARE_TITLE + ". 2001."])
+@pytest.mark.parametrize("link", SOFTWARE_LINKS[:2])
+def test_canonical_software_never_overrides_local_contradictions(tmp_path: Path, claim: str, link: str) -> None:
+    cff = tmp_path / "CITATION.cff"
+    cff.write_text(CFF)
+    entry = MODULE.extract_entries(f"{claim}\n{link}")[0]
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: software_metadata(), citation=MODULE.SoftwareCitation.load(cff))
+    assert result.status == MODULE.AuditStatus.MISMATCH
+    assert result.canonical_software is None
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("DOI", "10.1234/wrong"), ("DOI", "invalid"), ("title", "Another work"), ("author", [{"family": "Wrong"}]), ("issued", {"date-parts": [[2001]]})],
+)
+def test_canonical_software_rejects_wrong_resolved_identity(tmp_path: Path, field: str, value: object) -> None:
+    cff = tmp_path / "CITATION.cff"
+    cff.write_text(CFF)
+    raw = {**software_metadata(), field: value}
+    result = MODULE.validate_entry(MODULE.extract_entries(SOFTWARE_LINKS[0])[0], 1.0, 0.0, lambda *_: raw, citation=MODULE.SoftwareCitation.load(cff))
+    assert result.status == MODULE.AuditStatus.MISMATCH
+
+
+def test_wrong_linked_doi_cannot_match_canonical_identity(tmp_path: Path) -> None:
+    cff = tmp_path / "CITATION.cff"
+    cff.write_text(CFF)
+    entry = MODULE.extract_entries(SOFTWARE_LINKS[0].replace(SOFTWARE_DOI, "10.1234/wrong"))[0]
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: software_metadata(), citation=MODULE.SoftwareCitation.load(cff))
+    assert result.status == MODULE.AuditStatus.MISMATCH
+
+
+@pytest.mark.parametrize("field", ["DOI", "author", "issued"])
+def test_incomplete_resolved_software_is_not_a_match(tmp_path: Path, field: str) -> None:
+    cff = tmp_path / "CITATION.cff"
+    cff.write_text(CFF)
+    raw = software_metadata()
+    del raw[field]
+    result = MODULE.validate_entry(MODULE.extract_entries(SOFTWARE_LINKS[0])[0], 1.0, 0.45, lambda *_: raw, citation=MODULE.SoftwareCitation.load(cff))
+    assert result.status == MODULE.AuditStatus.INSUFFICIENT_CONTEXT
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "[]",
+        "title: [broken",
+        CFF.replace("type: software", "type: dataset"),
+        CFF.replace("date-released: 2026-09-28", ""),
+        CFF.replace("family-names: Getchell", "family-names: 123"),
+        CFF.replace(f"doi: {SOFTWARE_DOI}", ""),
+        CFF.replace("date-released: 2026-09-28", "date-released: unknown"),
+    ],
+)
+def test_invalid_canonical_input_is_a_cli_error(tmp_path: Path, capsys: pytest.CaptureFixture[str], content: str) -> None:
+    markdown, cff = tmp_path / "README.md", tmp_path / "CITATION.cff"
+    markdown.write_text(SOFTWARE_LINKS[0])
+    cff.write_text(content)
+    assert MODULE.run([str(markdown), "--citation-cff", str(cff), "--json"]) == 2
+    assert not capsys.readouterr().out
+
+
+def test_canonical_cli_keeps_scholarly_checks_and_input_provenance(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    markdown, cff = tmp_path / "README.md", tmp_path / "CITATION.cff"
+    markdown.write_text(SOFTWARE_LINKS[0] + "\n\nShewchuk. Robust predicates. 1997. DOI: [10.1234/paper](https://doi.org/10.1234/paper)\n")
+    cff.write_text(CFF + 'preferred-citation:\n  title: "Unrelated preferred paper"\n')
+    original = MODULE.validate_entries
+
+    def fetcher(doi: Any, _timeout: float) -> dict[str, object]:
+        return software_metadata() if str(doi.value) == SOFTWARE_DOI else metadata("Robust predicates")
+
+    monkeypatch.setattr(MODULE, "validate_entries", lambda entries, timeout, score, **kwargs: original(entries, timeout, score, fetcher, **kwargs))
+    assert MODULE.run([str(markdown), "--citation-cff", str(cff), "--json"]) == 0
+    rows = json.loads(capsys.readouterr().out)
+    assert [row["status"] for row in rows] == ["OK", "OK"]
+    assert rows[0]["local_status"] == "INSUFFICIENT_CONTEXT"
+    assert "canonical_software" not in rows[1]
+    assert rows[0]["source"]["path"] == str(markdown)
 
 
 def test_empty_input_fails_without_allow_empty() -> None:

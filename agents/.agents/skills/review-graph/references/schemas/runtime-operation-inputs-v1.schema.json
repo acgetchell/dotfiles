@@ -363,6 +363,20 @@
           "items": {"type": "object"},
           "type": "array"
         },
+        "software_doi_rechecks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["requirement_id", "evidence_id", "execution_index", "original_report"],
+            "properties": {
+              "requirement_id": {"type": "string", "minLength": 1},
+              "evidence_id": {"type": "string", "minLength": 1},
+              "execution_index": {"type": "integer", "minimum": 0},
+              "original_report": {"type": "string", "minLength": 1}
+            }
+          }
+        },
         "user_exclusions": {
           "items": {
             "additionalProperties": false,

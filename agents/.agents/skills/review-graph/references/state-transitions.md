@@ -2,6 +2,10 @@
 
 Load for content repairs, external staging, or late validation/routing changes.
 
+For completed software DOI checks needing canonical metadata, use
+[software DOI reconciliation](software-doi-reconciliation.md). It adds a focused
+validator while retaining the original failed execution; it is not launch recovery.
+
 Accepted late validation requirements block synthesis/proof until exactly planned
 or explicitly user-excluded. Run
 `reconcile-validation-requirements --input <request.json> --journal <journal>

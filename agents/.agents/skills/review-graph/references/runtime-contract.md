@@ -125,8 +125,10 @@ evidence. Never invent source reads.
 Synthesis supplies `readiness_verdict`, reasons, predecessor coverage, routing
 closure, validation reconciliation, and cross-surface risks. Canonical findings
 name owners, dispositions, and existing `source_findings` IDs. `compile-node`
-reconciles the predecessor bundle; remaining findings or failed/unexecuted
-validation forbid `ready`. Validator-owned commands and non-catalog handoffs
+reconciles predecessors; remaining findings or failed/unexecuted
+validation forbid `ready`, except
+[verified DOI reconciliation](software-doi-reconciliation.md).
+Validator-owned commands and non-catalog handoffs
 are rejected. A schema mismatch permits one diagnostic-guided retry; another
 blocks the node. Authorized changes name finding IDs, files, changes, reasons,
 and preserved contracts; trusted dispatches record mutation facts.

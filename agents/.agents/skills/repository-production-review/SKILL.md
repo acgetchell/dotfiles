@@ -71,6 +71,11 @@ Use `not-ready` when actionable findings remain, even with successful validators
 and a complete graph proof. Use `blocked` for incomplete required evidence or
 routing. Never encode these required fields only as narrative limitations.
 
+For a failed DOI check accompanied by passing canonical software verification,
+read [software DOI reconciliation](../review-graph/references/software-doi-reconciliation.md).
+Keep the original failed result and bind the separate verification in
+`validation_reconciliation`; ordinary failed or unexecuted checks still prevent readiness.
+
 Do not create subagents or recursively invoke `review-graph`.
 Do not request or load complete predecessor artifacts; the proof verifier owns
 their independent validation.

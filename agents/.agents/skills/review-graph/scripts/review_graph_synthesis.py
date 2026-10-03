@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from review_graph_doi import validate_software_doi_resolution
+
 
 def validate_synthesis(payload: dict[str, Any], predecessors: tuple[str, ...], bundle: dict[str, Any] | None = None) -> None:  # noqa: C901, PLR0912, PLR0915
     """Reconcile coverage and finding provenance without deciding semantic severity."""
@@ -19,6 +21,13 @@ def validate_synthesis(payload: dict[str, Any], predecessors: tuple[str, ...], b
     if len(validation_ids) != len(set(validation_ids)) or not set(validation_ids) <= set(predecessors):
         msg = "synthesis validation reconciliation has duplicate or unknown evidence"
         raise ValueError(msg)
+    for item in validations:
+        resolution = item.get("software_doi_resolution")
+        if resolution is not None and (
+            item["result"] != "failed" or any(check["verification_evidence_id"] not in validation_ids for check in resolution["checks"])
+        ):
+            msg = "software DOI resolution requires failed evidence and a dispatched verification validator"
+            raise ValueError(msg)
     if bundle is not None:
         context = bundle.get("plan_context", {})
         exact_reused = {key for _requirement, key in context.get("exact_reused_review_evidence", [])}
@@ -45,6 +54,8 @@ def validate_synthesis(payload: dict[str, Any], predecessors: tuple[str, ...], b
             if item["result"] != record["status"] or set(item["requirement_ids"]) != set(record["requirement_ids"]):
                 msg = "synthesis validation result contradicts accepted evidence"
                 raise ValueError(msg)
+            if "software_doi_resolution" in item:
+                validate_software_doi_resolution(item["software_doi_resolution"], record, records)
             if "validation_environments" in context:
                 environment = context["validation_environments"].get(record["node_id"])
                 if environment is None or item["platform"] != environment["platform"]:
@@ -57,7 +68,12 @@ def validate_synthesis(payload: dict[str, Any], predecessors: tuple[str, ...], b
             msg = "synthesis routing closure contradicts the plan bundle"
             raise ValueError(msg)
     unfinished = any(item["disposition"] in {"remaining", "blocked"} for item in payload["findings"])
-    failed = any(item["result"] in {"failed", "blocked"} or item["execution_mode"] == "unexecuted" for item in validations)
+    failed = any(
+        item["result"] == "blocked"
+        or (item["result"] == "failed" and (bundle is None or "software_doi_resolution" not in item))
+        or item["execution_mode"] == "unexecuted"
+        for item in validations
+    )
     incomplete = not payload["routing_closure"]["complete"] or bool(payload["routing_closure"]["unresolved_handoff_ids"])
     incomplete |= any(item["disposition"] == "blocked" for item in coverage) or payload["status"] == "blocked"
     if payload["readiness_verdict"] == "ready" and (unfinished or failed or incomplete):
