@@ -185,6 +185,15 @@ mapping, adds final exact-reuse evidence where applicable, and requires the
 expectation, envelope, and native payload to match exactly. The compatibility
 `report_complete` Boolean is not completeness evidence at this gate.
 
+Oversized audit scopes use a compact native view bound to the metadata artifact:
+`Worker payload reference` identifies `expectation.canonical_worker_payload`
+by canonical SHA-256, byte count, and coverage-unit count; `Audit input identity
+reference` binds the complete `expectation.audit_input_identity`. The verifier
+requires exact reference and summary values, rejects competing inline data or
+missing bound fields, and derives normalized provenance from the full payload.
+Coverage partitions and precise external dependency paths remain intact. A
+native reference alone is insufficient evidence without its bound metadata.
+
 ## Repository Review Proof
 
 After all routing handoffs close and final synthesis returns accepted review

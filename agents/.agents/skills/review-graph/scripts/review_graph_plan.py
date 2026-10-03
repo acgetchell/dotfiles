@@ -19,6 +19,7 @@ from capture_scope import _scope_data
 from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics, run_command_bytes
 from review_graph_coverage import coverage_reference
 from review_graph_integrity import digest_bytes, digest_json
+from review_graph_provenance import review_scope_body
 from review_graph_reuse import AuditInputIdentity, AuditReuseTransition, ExternalMetadataTransition, ReviewSourceSnapshot, metadata_states, verify_reuse_inputs
 
 if TYPE_CHECKING:
@@ -569,6 +570,7 @@ class ReviewEvidenceExpectation:
     planned_path_line_bounds: tuple[tuple[str, int], ...] = ()
     audit_input_identity: AuditInputIdentity | None = None
     coverage_reuse: dict[str, Any] | None = None
+    canonical_worker_payload: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -2778,6 +2780,26 @@ def _coverage_reuse_native_blockers(scope: str, context: dict[str, Any] | None) 
     return tuple(blockers)
 
 
+def _scope_provenance_blockers(scope: str, expectation: ReviewEvidenceExpectation) -> tuple[str, ...]:
+    """Require compact scope references to match the complete bound metadata."""
+    payload = expectation.canonical_worker_payload
+    if payload is None:
+        if _native_field_values(scope, "Worker payload reference") or _native_field_values(scope, "Audit input identity reference"):
+            return ("native review provenance reference lacks its bound canonical worker payload",)
+        blockers = list(_coverage_reuse_native_blockers(scope, expectation.coverage_reuse))
+        if expectation.audit_input_identity is not None:
+            serialized = json.dumps(asdict(expectation.audit_input_identity), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+            blockers.extend(_native_values_blockers(scope, section="Scope Inspected", label="Audit input identity", expected=(serialized,)))
+        return tuple(blockers)
+    inputs = expectation.audit_input_identity
+    if expectation.mode != "audit" or inputs is None:
+        return ("compact review provenance requires an audit payload and bound input identity",)
+    if payload.get("files_inspected") != list(inputs.inspected_paths) or payload.get("nearby_contract_owners") != list(inputs.nearby_contract_owners):
+        return ("compact review provenance differs from its audit input identity",)
+    expected = review_scope_body(payload, mode=expectation.mode, audit_inputs=inputs, coverage_reuse=expectation.coverage_reuse, compact=True)
+    return () if scope == expected else ("native review provenance reference or summary differs from its bound metadata",)
+
+
 def _ordinary_review_native_blockers(  # noqa: C901, PLR0912
     sections: Mapping[str, str], expectation: ReviewEvidenceExpectation, evidence: ReviewEvidence
 ) -> tuple[str, ...]:
@@ -2812,10 +2834,7 @@ def _ordinary_review_native_blockers(  # noqa: C901, PLR0912
         )
     )
     scope = sections["## Scope Inspected"]
-    blockers.extend(_coverage_reuse_native_blockers(scope, expectation.coverage_reuse))
-    if expectation.audit_input_identity is not None:
-        serialized_inputs = json.dumps(asdict(expectation.audit_input_identity), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-        blockers.extend(_native_values_blockers(scope, section="Scope Inspected", label="Audit input identity", expected=(serialized_inputs,)))
+    blockers.extend(_scope_provenance_blockers(scope, expectation))
     if evidence.status != "blocked":
         blockers.extend(_native_nonempty_section_blockers(scope, section="Scope Inspected"))
         files = _native_field_values(scope, "Files")
