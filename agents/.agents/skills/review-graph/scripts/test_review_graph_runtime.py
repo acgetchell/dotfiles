@@ -1025,7 +1025,8 @@ def test_legacy_unbound_capture_falls_back_to_executable_audit(tmp_path: Path) -
 
 
 def _compile_repair_fixture_entry(entry: dict[str, Any], lifecycle: dict[str, Any], journal: Path) -> dict[str, str]:
-    dispatch = {**entry["dispatch"], "before_state": lifecycle["source_state"], "after_state": lifecycle["source_state"]}
+    state = lifecycle.get("current_source_state", lifecycle["source_state"])
+    dispatch = {**entry["dispatch"], "before_state": state, "after_state": state}
     if entry["result_contract"] == "compact-validation":
         unit = dispatch["validation_unit"]
         payload = {

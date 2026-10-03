@@ -226,23 +226,29 @@ def test_manifest_delta_reuses_implementation_and_preserves_findings(tmp_path: P
         compile_review({"dispatch": {**tampered, "before_state": state, "after_state": state}, "payload": updated})
 
 
-def _staging_fixture(tmp_path: Path, *, independent: bool = False) -> tuple[str, Path, dict[str, Any], dict[str, Any], dict[str, Any]]:
+def _staging_fixture(
+    tmp_path: Path, *, independent: bool = False, staging: str = "subset", mode: str = "baseline"
+) -> tuple[str, Path, dict[str, Any], dict[str, Any], dict[str, Any]]:
     git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
+    if staging == "mixed":
+        (repository / "tool.py").write_text("value = 0\n")
+        _run_test_git(git, "-C", str(repository), "add", "tool.py")
     (repository / "tool.py").write_text("value = 2\n")
+    (repository / "state.rs").write_text("pub fn state() { let value = 2; }\n")
     if independent:
         template.update(concrete_change_target=True, change_target="git diff -- state.rs tool.py")
-    capture = _scope_data(git, repository, "baseline", None, ())
+    capture = _scope_data(git, repository, mode, None, ())
     plan = plan_from_document(bootstrap_document(capture, template), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)
     lifecycle, entries, dispatches = _materialize(tmp_path, capture, plan)
     journal = tmp_path / "old.jsonl"
     audit = next(item for item in entries["dispatches"] if item["dispatch"].get("mode") == "audit")
     _publish_worker_bytes(audit, json.dumps(_payload(audit["dispatch"]["owned_paths"])).encode())
     append_journal_event(journal, lifecycle, JournalEventRequest(audit["node_id"], "in-flight"))
-    _run_test_git(git, "-C", str(repository), "add", "tool.py")
+    _run_test_git(git, "-C", str(repository), "add", "." if staging == "all" else "tool.py")
     request = {
         **lifecycle,
         "previous_capture": capture,
-        "new_capture": _scope_data(git, repository, "baseline", None, ()),
+        "new_capture": _scope_data(git, repository, mode, None, ()),
         "dispatches_path": str(dispatches),
         "journal_path": str(journal),
         "artifact_store": str(tmp_path / "resumed"),
@@ -253,8 +259,13 @@ def _staging_fixture(tmp_path: Path, *, independent: bool = False) -> tuple[str,
 @pytest.mark.parametrize("remaining_findings", [False, True])
 def test_external_staging_between_dispatch_and_compile_completes_without_rollback(tmp_path: Path, remaining_findings: bool) -> None:  # noqa: PLR0915
     git, repository, request, audit, _entries = _staging_fixture(tmp_path)
+    payload = _payload(audit["dispatch"]["owned_paths"])
+    command = "git --no-pager diff -- tool.py state.rs"
+    payload.update(
+        commands_executed=[command],
+        git_dependencies=[{"kind": "source-discovery", "command": command, "reason": "Located source reads; judgments do not depend on staging."}],
+    )
     if remaining_findings:
-        payload = _payload(audit["dispatch"]["owned_paths"])
         payload.update(
             {
                 "status": "completed",
@@ -269,7 +280,7 @@ def test_external_staging_between_dispatch_and_compile_completes_without_rollbac
                 ],
             }
         )
-        _publish_worker_bytes(audit, json.dumps(payload).encode())
+    _publish_worker_bytes(audit, json.dumps(payload).encode())
     result = resume_after_external_metadata(request)
     assert result["original_source_state"] != result["current_source_state"]
     assert audit["node_id"] in result["preserved_node_ids"]

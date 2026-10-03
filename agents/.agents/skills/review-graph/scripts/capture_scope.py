@@ -457,6 +457,13 @@ def _scope_data(git: str, repo: Path, mode: str, base: str | None, pathspecs: Se
         "merge_base": merge_base,
         "repository_root": os.fspath(repo),
         "repository_path_fingerprints": repository_path_fingerprints,
+        # Symlink hashes bind link text, not bytes read through the link. Record
+        # traversal separately so later proof replay never consults the live tree.
+        "repository_symlink_paths": [
+            relative
+            for relative in sorted(repository_path_fingerprints)
+            if any((repo / component).is_symlink() for component in (Path(relative), *Path(relative).parents) if component != Path())
+        ],
         "repository_state_fingerprint": repository_state_fingerprint,
         "repository_state_format": SNAPSHOT_FORMAT,
         "requested_paths": list(pathspecs),

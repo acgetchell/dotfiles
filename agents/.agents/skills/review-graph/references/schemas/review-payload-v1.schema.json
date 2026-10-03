@@ -120,7 +120,22 @@
         ]
       }
     },
+    "git_dependencies": {
+      "description": "Explicit semantic Git dependencies. source-discovery attests that a plain local diff only located source reads and no judgment depends on its staging split; index, head, and history judgments require rechecking after metadata transitions. Omitted declarations retain conservative command classification.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {"enum": ["source-discovery", "index", "head", "history"]},
+          "command": {"type": "string", "minLength": 1},
+          "reason": {"type": "string", "minLength": 1}
+        },
+        "required": ["kind", "reason"]
+      }
+    },
     "git_sensitive": {
+      "description": "Legacy conservative override: true always requires metadata revalidation, even with source-discovery declarations.",
       "type": "boolean"
     },
     "changes": {

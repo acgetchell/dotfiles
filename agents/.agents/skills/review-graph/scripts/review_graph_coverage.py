@@ -2,7 +2,8 @@
 
 from typing import Any, cast
 
-from review_graph_integrity import digest_json
+from review_graph_git import intervening_metadata_blockers
+from review_graph_integrity import canonical_json, digest_json
 from review_graph_reuse import AuditInputIdentity, AuditReuseTransition, ReviewSourceSnapshot, verify_reuse_inputs
 
 
@@ -46,6 +47,11 @@ def coverage_decisions(
     decisions = []
     for unit in payload.get("coverage_units", []):
         reason = unit["dependency_uncertainty"]
+        metadata_blockers = intervening_metadata_blockers(
+            {**payload, "files_inspected": unit["owned_paths"], "nearby_contract_owners": unit["dependency_paths"]}, transition.metadata_transitions
+        )
+        if metadata_blockers:
+            reason = canonical_json(metadata_blockers)
         if not reason:
             unit_inputs = AuditInputIdentity(
                 tuple(unit["owned_paths"]), tuple(unit["owned_paths"]), tuple(unit["dependency_paths"]), inputs.instruction_digests

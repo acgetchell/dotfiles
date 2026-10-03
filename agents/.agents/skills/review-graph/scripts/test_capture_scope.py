@@ -173,7 +173,7 @@ def test_baseline_path_identities_detect_repeated_dirty_edits_without_inventing_
     assert first["index_fingerprint"] == second["index_fingerprint"]
 
 
-@pytest.mark.parametrize("field", ["repository_path_fingerprints", "captured_scope_paths", "requested_paths", "index_fingerprint"])
+@pytest.mark.parametrize("field", ["repository_path_fingerprints", "repository_symlink_paths", "captured_scope_paths", "requested_paths", "index_fingerprint"])
 def test_capture_fingerprint_binds_path_identity_and_context(tmp_path: Path, field: str) -> None:
     repo = tmp_path / "repo"
     _init_repo(repo)
@@ -183,6 +183,8 @@ def test_capture_fingerprint_binds_path_identity_and_context(tmp_path: Path, fie
     source_snapshot(capture).verify()
     if field == "repository_path_fingerprints":
         capture[field] = {"source.txt": "f" * 64}
+    elif field == "repository_symlink_paths":
+        capture[field] = ["source.txt"]
     elif field == "index_fingerprint":
         capture[field] = "f" * 64
     else:
@@ -305,6 +307,7 @@ def test_staged_line_bounds_use_head_and_index_not_unstaged_worktree(tmp_path: P
     identities = manifest["repository_path_fingerprints"]
     assert isinstance(identities, dict)
     assert {"added.txt", "deleted.txt", "linked.txt", "tracked.txt"} <= identities.keys()
+    assert manifest["repository_symlink_paths"] == ["linked.txt"]
 
 
 def test_branch_line_bounds_use_numeric_maximum_of_base_and_head(tmp_path: Path) -> None:
@@ -419,3 +422,20 @@ def test_repository_state_fingerprint_covers_submodule_index(tmp_path: Path) -> 
     unstaged = _capture(repo, "baseline")
 
     assert staged["repository_state_fingerprint"] != unstaged["repository_state_fingerprint"]
+
+
+def test_capture_records_symlink_traversal_in_parent_directories(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    directory = repo / "config"
+    directory.mkdir()
+    (directory / "context.toml").write_text('version = "1"\n')
+    _commit_all(repo)
+    external = tmp_path / "external"
+    directory.rename(external)
+    directory.symlink_to(external, target_is_directory=True)
+
+    capture = _capture(repo, "baseline")
+
+    assert capture["repository_symlink_paths"] == ["config", "config/context.toml"]
+    source_snapshot(capture).verify()

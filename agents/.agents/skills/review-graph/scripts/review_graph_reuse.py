@@ -10,7 +10,7 @@ from typing import Any
 from research_repo_tools.evidence import sha256
 from review_graph_integrity import canonical_json
 
-SNAPSHOT_FORMAT = "review-graph-path-snapshot-v2"
+SNAPSHOT_FORMAT = "review-graph-path-snapshot-v3"
 
 
 def regular_file_fingerprint(path: str, content: bytes, *, executable: bool = False) -> str:
@@ -46,6 +46,7 @@ class ReviewSourceSnapshot:
     repository_state_fingerprint: str
     index_fingerprint: str
     repository_path_fingerprints: tuple[tuple[str, str], ...]
+    repository_symlink_paths: tuple[str, ...]
 
     @property
     def source_state(self) -> tuple[str, str, str]:
@@ -66,11 +67,15 @@ class ReviewSourceSnapshot:
     def verify(self) -> None:
         """Reject unsupported or internally inconsistent capture identities."""
         if self.repository_state_format != SNAPSHOT_FORMAT:
-            msg = "audit reuse requires a content-bound v2 source snapshot"
+            msg = "audit reuse requires a content-bound v3 source snapshot; recapture required"
             raise ValueError(msg)
         paths = tuple(path for path, _ in self.repository_path_fingerprints)
         if paths != tuple(sorted(set(paths))) or any(not _repository_path(path) for path in paths):
             msg = "source snapshot requires unique sorted canonical repository paths"
+            raise ValueError(msg)
+        symlinks = self.repository_symlink_paths
+        if symlinks != tuple(sorted(set(symlinks))) or not set(symlinks) <= set(paths):
+            msg = "source snapshot requires unique sorted captured symlink paths"
             raise ValueError(msg)
         hashes = (*self.source_state, self.index_fingerprint, *(digest for _, digest in self.repository_path_fingerprints))
         if any(re.fullmatch(r"[0-9a-f]{64}", digest) is None for digest in hashes):
@@ -84,10 +89,10 @@ class ReviewSourceSnapshot:
 def source_snapshot(raw: dict[str, Any]) -> ReviewSourceSnapshot:
     """Parse a capture manifest or serialized snapshot without coercing values."""
     fields = dict(raw)
-    for field in ("requested_paths", "captured_scope_paths"):
+    for field in ("requested_paths", "captured_scope_paths", "repository_symlink_paths"):
         value = fields.get(field)
         if not isinstance(value, (list, tuple)) or any(not isinstance(path, str) for path in value):
-            msg = f"source snapshot {field} must contain strings"
+            msg = f"source snapshot {field} must contain strings; recapture required"
             raise ValueError(msg)
         fields[field] = tuple(value)
     identities = fields.get("repository_path_fingerprints")
@@ -99,7 +104,7 @@ def source_snapshot(raw: dict[str, Any]) -> ReviewSourceSnapshot:
         raise ValueError(msg)
     fields["repository_path_fingerprints"] = tuple(sorted(tuple(pair) for pair in pairs))
     for field in ReviewSourceSnapshot.__dataclass_fields__:
-        if field in {"requested_paths", "captured_scope_paths", "repository_path_fingerprints"}:
+        if field in {"requested_paths", "captured_scope_paths", "repository_path_fingerprints", "repository_symlink_paths"}:
             continue
         value = fields.get(field)
         if not isinstance(value, str) and not (field in {"base_ref", "merge_base", "branch"} and value is None):
@@ -206,6 +211,9 @@ def verify_reuse_inputs(origin: ReviewSourceSnapshot, target: ReviewSourceSnapsh
     after = dict(target.repository_path_fingerprints)
     if any(path not in before or path not in after or before[path] != after[path] for path in paths):
         msg = "audit reuse inspected paths or dependencies changed or are not captured"
+        raise ValueError(msg)
+    if any(paths.intersection(snapshot.repository_symlink_paths) for snapshot in (origin, target)):
+        msg = "audit reuse requires captured proof that inspected paths do not traverse symlinks"
         raise ValueError(msg)
     changed_instructions = (path for path in before.keys() | after.keys() if PurePosixPath(path).name == "AGENTS.md" and before.get(path) != after.get(path))
     if any(any(PurePosixPath(owned).is_relative_to(PurePosixPath(path).parent) for owned in inputs.owned_paths) for path in changed_instructions):

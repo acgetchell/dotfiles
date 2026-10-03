@@ -59,6 +59,11 @@ For a verified reused audit, its original planned validation digest can bind to
 the replacement validator when the complete execution identity is unchanged
 except for the captured source state. Reconciliation reports this runtime-derived
 `reuse_binding` without rewriting the audit or reusing old validation success.
+Reuse also checks semantic Git dependencies across intervening staging. A later
+content repair cannot revive an audit invalidated by that staging, even when its
+owned files stayed unchanged. This check applies to whole audits, coverage units,
+and replay of their immutable evidence. A fresh audit on the latest metadata
+state can be reused when its complete input proof still holds.
 Changed commands, directories, environment, toolchain, features, platform,
 artifacts, or mutation contracts still require explicit reconciliation.
 Per-node `reuse_decisions` explain disposition and reason code, distinguishing
@@ -97,6 +102,19 @@ to the complete proof and replays source, dependency, instruction, and finding
 provenance checks. Original typed context remains attributed to its evidence ID
 in `inherited_audit_context`; it is not a fresh worker assertion. Older inline
 coverage proofs remain readable under the existing native size limits.
+The coverage proof also retains `original_git_context`, verified against the
+original immutable artifact. Git dependencies and unclassified commands apply
+to every reused unit because the payload has no unit-specific Git attribution.
+Metadata decisions check reused reads and dependencies separately and attribute
+their reasons to the original evidence ID. Fresh reads of a rechecked unit
+cannot refresh a Git-sensitive judgment in a reused unit.
+When staging invalidates inherited coverage, the continuation drops that reuse
+context and dispatches the node's full owned surface for a fresh review. This
+also applies to in-flight partial audits before their payload is available.
+For invalidated whole-audit reuse, the continuation restores the original routed
+requirements as executable audit work and reconnects synthesis dependencies.
+Its decision records the replaced evidence IDs; the new audit receives a fresh
+identity, and original artifacts remain available as history.
 
 If an older runtime published a worker payload but failed compilation because
 the generated coverage proof exceeded a native section limit, retry
@@ -124,9 +142,60 @@ consumed.
 
 Follow the returned continuation paths. The review's original `source_state`
 remains its identity; actual before/after fingerprints and both snapshots are
-retained in `external_metadata_transitions`. In-flight content audits can
-compile across this verified transition. Mark `git_sensitive: true` when an
-audit judgment depends on the index or other Git metadata; command-dependent
-audits are also conservatively rechecked. Validators and synthesis restart on
-the new metadata state. Scheduling, workspace snapshots, and final proof accept
-only the latest verified capture. Never rewrite fingerprints or undo staging.
+retained in `external_metadata_transitions`. Declare semantic `git_dependencies`
+in audit payloads with `kind`, `reason`, and the exact `commands_executed` string
+in `command` when applicable:
+
+- `source-discovery`: a plain local `git diff` used to locate source reads.
+  Judgments must come from `files_inspected` and `nearby_contract_owners`,
+  independent of what was staged. This requires a matching command; supported
+  forms include `git --no-pager diff`, display flags, `--cached`/`--staged`,
+  optional `HEAD`, and repository-relative paths after `--`. Shell compounds,
+  other revisions/repositories, external diff tools, and unknown options cannot
+  claim this exemption.
+- `index`, `head`, `history`: judgments about staged content, commit metadata,
+  or release history. These conservatively require current-state review.
+  A dependency without a command still records a semantic judgment.
+
+For example, a worker that uses a diff for orientation and then reads the source
+can include:
+
+```json
+{
+  "commands_executed": ["git --no-pager diff -- src/lib.rs", "cat src/lib.rs"],
+  "git_dependencies": [{
+    "kind": "source-discovery",
+    "command": "git --no-pager diff -- src/lib.rs",
+    "reason": "Located changes; judgments use the inspected worktree file."
+  }]
+}
+```
+
+The compiler binds these declarations to the immutable payload and rejects
+missing ledger commands or unsupported discovery forms. Undeclared commands
+retain conservative classification; `git_sensitive: true` remains a legacy
+override even when discovery is declared. Do not reclassify a staging judgment
+as discovery to gain preservation.
+
+Accepted source-only audits survive when all recorded reads have unchanged
+captured identities. Reads outside the captured repository require rechecking.
+Captures bind `repository_symlink_paths`, including paths with symlinked parent
+directories. A link identity proves its target text, not the bytes read through
+it, so symlinked reads conservatively require rechecking. The v3 capture format
+requires this traversal information; older captures require recapture.
+The same restriction applies when reusing audit coverage across content repairs.
+The runtime reconciles discovery against the combined HEAD-to-worktree content
+identity, which is independent of the staged/unstaged split, retaining the
+original commands and both captures. It neither reruns the old diff nor claims
+its output is unchanged. In-flight audit dispatches survive provisionally; the
+compiler checks their actual payload dependencies and reads before accepting
+historical or transition-spanning captures. Unproven reads or semantic Git
+dependencies require review entirely on the latest state.
+
+`node_decisions` explains every preservation/recheck with exact dependency,
+command, or path reasons and discovery reconciliation. The compact receipt
+reports `node_counts` and `recheck_reason_counts`; its output artifact contains
+the full decisions. Independent fresh reviews, validators, and synthesis have
+separate explicit restart policies. Restarting these nodes does not invalidate
+unrelated source audit leaves. Scheduling, workspace snapshots, and final proof
+accept only the latest verified capture. Never rewrite fingerprints or undo staging.

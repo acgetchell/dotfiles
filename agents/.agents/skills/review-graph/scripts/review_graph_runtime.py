@@ -21,6 +21,7 @@ from research_repo_tools.process import ExecutableNotFoundError, format_exceptio
 from review_graph_bootstrap import bootstrap_document
 from review_graph_coverage import combined_findings, coverage_decisions, reused_paths, validate_coverage_units
 from review_graph_doi import captured_software_inputs, inspect_canonical_recheck
+from review_graph_git import audit_git_context, discovery_reconciliation, intervening_metadata_blockers, metadata_audit_blockers, validate_git_dependencies
 from review_graph_independent import CHECK_LABELS, SCHEMA as _INDEPENDENT_PAYLOAD_SCHEMA, render_independent_payload
 from review_graph_integrity import canonical_json, digest_bytes
 from review_graph_metrics import projected_waves, source_demand
@@ -54,6 +55,7 @@ from review_graph_plan import (
     ValidationUnit,
     WorkerBudget,
     WorkerNode,
+    _bind_worker_node_provenance,
     _file_identity_digest,
     _native_field_values,
     _native_fingerprint_proof_blockers,
@@ -79,6 +81,7 @@ from review_graph_plan import (
     assess_review_evidence,
     assess_validation_evidence,
     build_routing_projection,
+    coalesce_review_requirements,
     coalesce_validation_requirements,
     create_artifact_manifest,
     graph_plan_digest,
@@ -86,6 +89,7 @@ from review_graph_plan import (
     load_routing_catalog,
     plan_from_document,
     repository_review_proof_expectation,
+    review_requirements_from_routing,
     review_source_state_blockers,
     validation_evidence_expectation,
     validation_execution_result_blockers,
@@ -650,6 +654,7 @@ def _review_normalized_record(payload: dict[str, Any], expectation: ReviewEviden
         "changes": list(changes),
         "command_policy_attested": payload.get("command_policy_attested", False),
         **({"git_sensitive": payload["git_sensitive"]} if "git_sensitive" in payload else {}),
+        **({"git_dependencies": payload["git_dependencies"]} if "git_dependencies" in payload else {}),
         "commands_executed": list(_text_list(payload, "commands_executed")),
         "evidence_id": evidence.evidence_id,
         "files_inspected": list(_text_list(payload, "files_inspected")),
@@ -922,12 +927,13 @@ def _validate_review_coverage_partitions(dispatch: dict[str, Any], payload: dict
 
 def _validate_audit_caveats(dispatch: dict[str, Any], payload: dict[str, Any]) -> None:
     """Retain typed attestations and reject contradictions with dispatch facts."""
-    if not any(key in payload for key in ("execution_facts", "validation_limits", "unresolved_uncertainties")):
+    if not any(key in payload for key in ("execution_facts", "validation_limits", "unresolved_uncertainties", "git_dependencies")):
         return
     if dispatch.get("mode") != "audit":
         msg = "typed audit caveats apply only to audit payloads"
         raise ValueError(msg)
     require_schema(payload, _REVIEW_PAYLOAD_SCHEMA)
+    validate_git_dependencies(payload)
     facts = payload.get("execution_facts", [])
     policy = dispatch.get("command_policy")
     planned_commands = (
@@ -1053,13 +1059,7 @@ def compile_review(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  #
     evidence_id = _required_text(dispatch, "evidence_id")
     artifact_id = _required_text(dispatch, "artifact_id")
     fingerprints = _dispatch_fingerprints(dispatch)
-    if (
-        fingerprints.metadata_transitions
-        and _git_sensitive_review(payload)
-        and (before != after or after != fingerprints.metadata_transitions[-1].after.source_state)
-    ):
-        msg = "Git-sensitive audit must be rechecked entirely on the current metadata state"
-        raise ValueError(msg)
+    _verify_audit_metadata(payload, fingerprints, coverage_reuse)
     expectation = ReviewEvidenceExpectation(
         node_id=node_id,
         requirement_ids=requirement_ids,
@@ -2833,6 +2833,7 @@ def _load_evidence_source(  # noqa: C901, PLR0912, PLR0915
                     },
                     payload,
                 )
+                _verify_audit_metadata(payload, evidence.fingerprints, expectation.coverage_reuse)
                 if expectation.mode == "synthesis":
                     require_schema(payload, _SYNTHESIS_PAYLOAD_SCHEMA)
                     validate_synthesis(payload, expectation.predecessor_evidence_ids, metadata.get("synthesis_bundle"))
@@ -3035,14 +3036,18 @@ def _verified_reused_sources(plan: GraphPlan, source_state: tuple[str, str, str]
     snapshots = {item.source_state: item for item in plan.reuse_source_snapshots}
     for transition in plan.audit_reuse_transitions:
         source = {"artifact_path": transition.artifact_path, "metadata_path": transition.metadata_path}
-        _kind, expectation, evidence, _content, _record = _load_evidence_source(source, require_normalized=True)
+        _kind, expectation, evidence, _content, record = _load_evidence_source(source, require_normalized=True)
         if not isinstance(expectation, ReviewEvidenceExpectation) or not isinstance(evidence, ReviewEvidence):
             msg = "audit reuse source must contain review evidence"
             raise TypeError(msg)
         if evidence.evidence_id != transition.evidence_id or evidence.raw_result_digest != transition.artifact_digest:
             msg = "audit reuse source differs from its bound evidence identity"
             raise ValueError(msg)
-        blockers = review_source_state_blockers(plan, expectation, evidence, source_state)
+        blockers = list(review_source_state_blockers(plan, expectation, evidence, source_state))
+        blockers.extend(
+            "invalidated metadata dependency: " + canonical_json(blocker)
+            for blocker in intervening_metadata_blockers(record or {}, transition.metadata_transitions)
+        )
         if blockers:
             msg = f"audit reuse failed verification: {transition.evidence_id}: " + "; ".join(blockers)
             raise ValueError(msg)
@@ -3349,7 +3354,10 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
         "reconcile original validation needs/handoffs; do not claim fresh reads of reused paths. For broad fresh audits, use optional coverage_units when "
         "you can partition contracts with explicit dependencies and uncertainty: partition every owned path and every finding exactly once "
         "using one-based finding_indices, give each unit a unique unit_id, and account for every nearby_contract_owners path in dependency_paths. "
-        "Mark git_sensitive when judgments depend on Git metadata. "
+        "Declare git_dependencies with kind, reason, and the exact commands_executed command when applicable: source-discovery for a plain local git diff "
+        "used only to locate source reads, index/head/history for semantic Git judgments. Source-discovery judgments must come from the captured "
+        "files_inspected/nearby_contract_owners reads, independent of the staging split; undeclared commands remain conservative. "
+        "Legacy git_sensitive=true always requires rechecking. "
         'Put validator-owned nonexecution in execution_facts=["validators-not-executed"]; use source-captures-match and git-not-mutated only when true. '
         "Put platform/evidence caveats in validation_limits bound to an explicit validation_requirements entry: delegated means the validator still owes "
         "that evidence, unavailable/failed block reuse. Put unresolved semantic/dependency questions in unresolved_uncertainties (kind, reason), "
@@ -4187,6 +4195,10 @@ def _carry_forward_audits(  # noqa: C901, PLR0912, PLR0913, PLR0915 - preserve p
             instruction_digests=tuple((path, _file_identity_digest(path)) for path in instructions),
             metadata_transitions=_metadata_chain_from(document, origin.source_state),
         )
+        metadata_blockers = intervening_metadata_blockers(record, transition.metadata_transitions)
+        if metadata_blockers:
+            decision(node_id, "metadata-dependencies-changed", canonical_json(metadata_blockers))
+            continue
         try:
             verify_reuse_inputs(origin, target, inputs, transition)
         except ValueError as error:
@@ -4265,6 +4277,7 @@ def _verify_delta_context(context: dict[str, Any], dispatch: dict[str, Any]) -> 
         or context["artifact_digest"] != evidence.raw_result_digest
         or context.get("original_audit_context", {})
         != {key: record[key] for key in ("execution_facts", "validation_limits", "unresolved_uncertainties") if key in record}
+        or context.get("original_git_context", {}) != audit_git_context(record)
     ):
         msg = "delta coverage differs from original immutable findings or verified unit decisions"
         raise ValueError(msg)
@@ -4375,6 +4388,7 @@ def _plan_delta_audits(
                 "original_validation_requirements": record["validation_requirements"],
                 "original_handoffs": record["handoffs"],
                 "original_audit_context": {key: record[key] for key in ("execution_facts", "validation_limits", "unresolved_uncertainties") if key in record},
+                "original_git_context": audit_git_context(record),
                 "instruction_digests": list(transition.instruction_digests),
                 "metadata_transitions": [asdict(item) for item in chain],
             }
@@ -4382,12 +4396,17 @@ def _plan_delta_audits(
     return replace(candidate, audit_delta_reviews=tuple(contexts)), reviews
 
 
-def _git_sensitive_review(record: dict[str, Any]) -> bool:
-    """Unknown executed commands and explicit Git judgments require revalidation."""
-    return bool(record.get("git_sensitive", False)) or any(
-        not re.match(r"^(?:cat|rg|head|tail|wc|ls)\s", command) or bool(re.search(r"[;&|`$\n]|\bgit\b|--pre", command))
-        for command in record.get("commands_executed", [])
+def _verify_audit_metadata(payload: dict[str, Any], fingerprints: FingerprintEvidence, coverage_reuse: dict[str, Any] | None = None) -> None:
+    """Apply the same dependency/read proof at compilation and artifact verification."""
+    if not fingerprints.metadata_transitions:
+        return
+    latest = fingerprints.metadata_transitions[-1]
+    blockers = metadata_audit_blockers(
+        {**payload, "coverage_reuse": coverage_reuse}, latest, fresh_current=fingerprints.before == fingerprints.after == latest.after.source_state
     )
+    if blockers:
+        msg = "Audit must be rechecked entirely on the current metadata state: " + canonical_json(blockers)
+        raise ValueError(msg)
 
 
 def _metadata_chain_from(document: dict[str, Any], state: tuple[str, str, str]) -> tuple[ExternalMetadataTransition, ...]:
@@ -4410,11 +4429,127 @@ def _metadata_evidence_blockers(document: dict[str, Any], records: list[dict[str
     if not document.get("external_metadata_transitions"):
         return []
     current = _current_metadata_state(document)
+    transition = metadata_transition(document["external_metadata_transitions"][-1])
     return [
-        f"Git-sensitive evidence requires revalidation after external staging: {record['evidence_id']}"
+        f"Evidence requires revalidation after external staging: {record['evidence_id']}: {canonical_json(reasons)}"
         for record in records
-        if (record.get("mode") != "audit" or _git_sensitive_review(record)) and tuple(record.get("observed_source_state", ())) != current
+        if tuple(record.get("observed_source_state", ())) != current
+        if (reasons := _metadata_node_reasons(record.get("mode", "validation"), (), record, transition))
     ]
+
+
+def _metadata_node_reasons(mode: str, predecessors: tuple[str, ...], record: dict[str, Any], transition: ExternalMetadataTransition) -> list[dict[str, str]]:
+    """Keep fresh review, execution, and synthesis policies separate from audit dependencies."""
+    policies = {
+        "independent-review": "Fresh independent review must inspect the current change target.",
+        "validation": "Validation execution and workspace evidence must bind to the current metadata state.",
+        "synthesis": "Synthesis must consume the current accepted evidence bundle.",
+    }
+    if mode != "audit" or predecessors:
+        return [{"reason_code": f"{mode}-policy", "reason": policies.get(mode, "Dependent evidence requires a current-state review.")}]
+    return metadata_audit_blockers(record, transition)
+
+
+def _metadata_resume_decisions(
+    plan: GraphPlan, lifecycle: dict[str, str], records: dict[str, dict[str, Any]], transition: ExternalMetadataTransition
+) -> list[dict[str, Any]]:
+    """Explain both preserved evidence and work awaiting a current-state execution."""
+    decisions = []
+    inherited = {context["node_id"]: {"coverage_reuse": context} for context in plan.audit_delta_reviews}
+    for node in plan.actual_worker_nodes:
+        record = records.get(node.node_id, inherited.get(node.node_id, {}))
+        reasons = _metadata_node_reasons(node.mode, node.predecessors, record, transition)
+        status = lifecycle.get(node.node_id, "pending")
+        if status not in {"accepted", "in-flight"}:
+            reasons.append({"reason_code": "no-active-evidence", "reason": f"Node lifecycle is {status}; no accepted or active review to preserve."})
+        decisions.append(
+            {
+                "node_id": node.node_id,
+                "mode": node.mode,
+                "prior_status": status,
+                "disposition": "recheck" if reasons else "preserved",
+                "reasons": reasons
+                or [
+                    {
+                        "reason_code": "pending-payload-verification" if status == "in-flight" else "unchanged-source-inputs",
+                        "reason": "Compiler will verify actual dependencies and reads."
+                        if status == "in-flight"
+                        else "Source reads and combined content are unchanged.",
+                    }
+                ],
+                **({"discovery_reconciliation": discovery_reconciliation(record, transition)} if not reasons and record else {}),
+            }
+        )
+    return decisions
+
+
+def _restart_reused_metadata_audits(
+    plan: GraphPlan, records: list[dict[str, Any]], transition: ExternalMetadataTransition, catalog_path: Path
+) -> tuple[GraphPlan, list[dict[str, Any]]]:
+    """Turn invalidated non-executable audit reuse back into routed review work."""
+    reused_ids = {evidence_id for _requirement_id, evidence_id in plan.exact_reused_review_evidence}
+    stale = {
+        record["evidence_id"]: reasons
+        for record in records
+        if record["evidence_id"] in reused_ids
+        if (reasons := _metadata_node_reasons(record.get("mode", "validation"), (), record, transition))
+    }
+    if not stale:
+        return plan, []
+    routing = tuple(replace(item, disposition="selected", evidence_id=None) if item.evidence_id in stale else item for item in plan.routing_decisions)
+    requirement_sources = {requirement_id: evidence_id for requirement_id, evidence_id in plan.exact_reused_review_evidence if evidence_id in stale}
+    selected = tuple(item for item in routing if item.requirement_id in requirement_sources)
+    catalog = load_routing_catalog(catalog_path, skill_roots=(DEFAULT_SKILL_ROOT,))
+    requirements = review_requirements_from_routing(catalog, selected)
+    if {item.requirement_id for item in requirements} != set(requirement_sources):
+        msg = "external metadata resume cannot restore the invalidated reused review routing; replan required"
+        raise ValueError(msg)
+    reserved = tuple(node.node_id for node in plan.actual_worker_nodes) + tuple(evidence_id.removeprefix("review:") for evidence_id in reused_ids)
+    fresh, mappings = coalesce_review_requirements(requirements, reserved_node_ids=reserved)
+    fresh = tuple(_bind_worker_node_provenance(node) for node in fresh)
+    connected = []
+    for node in plan.actual_worker_nodes:
+        if node.mode == "synthesis":
+            restored = tuple(
+                audit.node_id
+                for audit in fresh
+                if node.skill_id == "repository-production-review"
+                or any(item.synthesis_dependency == node.node_id and item.requirement_id in audit.requirement_ids for item in selected)
+            )
+            node = replace(node, predecessors=tuple(dict.fromkeys((*node.predecessors, *restored))))
+        connected.append(node)
+    nodes = _schedule_nodes((*connected, *fresh))
+    epochs = _partition_execution_epochs(nodes, WorkerBudget(plan.worker_budget, plan.recovery_finalization_reserve)) if plan.execution_epochs else ()
+    updated = replace(
+        plan,
+        actual_worker_nodes=nodes,
+        complete_node_count=len(nodes),
+        selected_review_requirements=tuple(sorted({*plan.selected_review_requirements, *requirement_sources})),
+        requirement_to_node=tuple(sorted((*plan.requirement_to_node, *mappings))),
+        routing_decisions=routing,
+        exact_reused_review_evidence=tuple(item for item in plan.exact_reused_review_evidence if item[1] not in stale),
+        reused_review_identities=tuple(item for item in plan.reused_review_identities if item.evidence_id not in stale),
+        audit_reuse_transitions=tuple(item for item in plan.audit_reuse_transitions if item.evidence_id not in stale),
+        execution_epochs=epochs,
+        current_epoch_node_ids=epochs[0].node_ids if epochs else (),
+        requires_continuation=len(epochs) > 1,
+    )
+    decisions = [
+        {
+            "node_id": node.node_id,
+            "mode": node.mode,
+            "prior_status": "reused",
+            "disposition": "recheck",
+            "replaced_evidence_ids": sorted({requirement_sources[requirement] for requirement in node.requirement_ids}),
+            "reasons": [
+                {**reason, "evidence_id": evidence_id}
+                for evidence_id in sorted({requirement_sources[requirement] for requirement in node.requirement_ids})
+                for reason in stale[evidence_id]
+            ],
+        }
+        for node in fresh
+    ]
+    return updated, decisions
 
 
 def resume_after_external_metadata(document: dict[str, Any]) -> dict[str, Any]:
@@ -4429,6 +4564,8 @@ def resume_after_external_metadata(document: dict[str, Any]) -> dict[str, Any]:
     events, lifecycle, _head = read_execution_journal(Path(document["journal_path"]), plan=plan, source_state=state)
     sources, records = _accepted_journal_sources(plan, state, events, entries, include_blocked=True)
     by_node = {record["node_id"]: record for record in records}
+    for context in plan.audit_delta_reviews:
+        _verify_delta_context(context, entries[context["node_id"]]["dispatch"])
     for node in plan.actual_worker_nodes:
         dispatch = entries[node.node_id]["dispatch"]
         current_instructions = _applicable_instruction_paths(Path(transition.after.repository_root), node.coverage, node.instruction_paths)
@@ -4440,14 +4577,12 @@ def resume_after_external_metadata(document: dict[str, Any]) -> dict[str, Any]:
         ):
             msg = "external metadata resume requires unchanged applicable instructions, skills, and references"
             raise ValueError(msg)
-    preserved = {
-        node.node_id: entries[node.node_id]
-        for node in plan.actual_worker_nodes
-        if node.mode == "audit"
-        and not node.predecessors
-        and lifecycle.get(node.node_id) in {"accepted", "in-flight"}
-        and not _git_sensitive_review(by_node.get(node.node_id, {}))
-    }
+    decisions = _metadata_resume_decisions(plan, lifecycle, by_node, transition)
+    preserved = {item["node_id"]: entries[item["node_id"]] for item in decisions if item["disposition"] == "preserved"}
+    discarded_coverage = {item["node_id"] for item in decisions if any("evidence_id" in reason for reason in item["reasons"])}
+    plan = replace(plan, audit_delta_reviews=tuple(context for context in plan.audit_delta_reviews if context["node_id"] not in discarded_coverage))
+    plan, restarted = _restart_reused_metadata_audits(plan, records, transition, Path(document.get("routing_catalog_path", DEFAULT_ROUTING_CATALOG)))
+    decisions.extend(restarted)
     transitions = [*_records(document, "external_metadata_transitions"), asdict(transition)]
     continuation = json.loads(canonical_json({"plan": asdict(plan), "source_state": list(state), "external_metadata_transitions": transitions}))
     root = Path(document["artifact_store"]).resolve()
@@ -4457,7 +4592,7 @@ def resume_after_external_metadata(document: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(msg)
     materialized = materialize_dispatches(
         {
-            "plan": document["plan"],
+            "plan": continuation["plan"],
             "source_state": list(state),
             "external_metadata_transitions": transitions,
             "artifact_store": str(root),
@@ -4487,7 +4622,15 @@ def resume_after_external_metadata(document: dict[str, Any]) -> dict[str, Any]:
         "original_source_state": list(state),
         "current_source_state": list(transition.after.source_state),
         "preserved_node_ids": sorted(preserved),
-        "recheck_node_ids": sorted(set(entries) - set(preserved)),
+        "recheck_node_ids": sorted({node.node_id for node in plan.actual_worker_nodes} - set(preserved)),
+        "discarded_coverage_node_ids": sorted(discarded_coverage),
+        "node_decisions": decisions,
+        "node_counts": {
+            "preserved": len(preserved),
+            "recheck": len(plan.actual_worker_nodes) - len(preserved),
+            "in_flight_pending_verification": sum(item["disposition"] == "preserved" and item["prior_status"] == "in-flight" for item in decisions),
+        },
+        "recheck_reason_counts": dict(Counter(reason["reason_code"] for item in decisions if item["disposition"] == "recheck" for reason in item["reasons"])),
         **{key: str(path) for key, path in paths.items()},
     }
 
@@ -6483,13 +6626,18 @@ def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace)
     before_state = _capture_source_state(args.before_capture)
     after_state = _capture_source_state(args.after_capture)
     states = metadata_states(source_state, tuple(metadata_transition(item) for item in _records(document, "external_metadata_transitions")))
-    if before_state not in states or after_state != states[-1]:
-        msg = "compile-node capture differs from the plan-bound source state"
-        raise ValueError(msg)
     raw_dispatch = entry.get("dispatch")
     if not isinstance(raw_dispatch, dict):
         msg = f"materialized node has no dispatch object: {args.node_id}"
         raise TypeError(msg)
+    if (
+        before_state not in states
+        or after_state not in states
+        or states.index(before_state) > max(ordinal for ordinal, state in enumerate(states) if state == after_state)
+        or (raw_dispatch.get("mode") != "audit" and after_state != states[-1])
+    ):
+        msg = "compile-node capture differs from the plan-bound source state"
+        raise ValueError(msg)
     dispatch = {
         **raw_dispatch,
         "after_state": list(after_state),

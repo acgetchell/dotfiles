@@ -137,10 +137,10 @@ follow returned continuations. `next-ready --output-dir` creates immutable gener
 Reconcile accepted handoffs before expansion; only new triggers reroute. After an authorized repair use
 `advance-after-mutation` to record the serialized repair epoch, recapture once,
 move stale nodes to `awaiting-replan`, and materialize the replacement graph.
-For external staging with unchanged
-content, use `resume-after-external-metadata` and its returned continuation;
-preserve both Git captures and the user's index. See the runtime contract for
-partition dependencies, Git-sensitive revalidation, and source provenance.
+For external staging with unchanged content, use `resume-after-external-metadata`.
+Declare semantic `git_dependencies` to preserve source-discovery audits; follow
+its continuation and [state transitions](references/state-transitions.md).
+Retain both Git captures and the user's index.
 Run `finalize-proof` with the signed dispatch set and journal after every
 applicable review and validation requirement has accepted non-stale evidence.
 It derives the mappings, manifest, and `RepositoryReviewProof`; report complete
