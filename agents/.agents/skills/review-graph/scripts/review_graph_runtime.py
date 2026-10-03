@@ -20,6 +20,7 @@ from typing import Any, cast
 from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics, run_command_bytes
 from review_graph_bootstrap import bootstrap_document
 from review_graph_coverage import combined_findings, coverage_decisions, reused_paths, validate_coverage_units
+from review_graph_doi import inspect_canonical_recheck
 from review_graph_independent import CHECK_LABELS, SCHEMA as _INDEPENDENT_PAYLOAD_SCHEMA, render_independent_payload
 from review_graph_integrity import canonical_json, digest_bytes
 from review_graph_metrics import projected_waves, source_demand
@@ -5366,6 +5367,22 @@ def _late_validation_quality_blockers(requirement: ValidationRequirement, *, rep
     return tuple(blockers)
 
 
+def _software_doi_recheck_ids(document: dict[str, Any], records: list[dict[str, Any]], additions: tuple[ValidationRequirement, ...]) -> set[str]:
+    """Bind requested canonical follow-ups to accepted failed executions."""
+    doi_rechecks = _records(document, "software_doi_rechecks")
+    recheck_ids: set[str] = set()
+    for recheck in doi_rechecks:
+        requirement_id = _required_text(recheck, "requirement_id")
+        original = next((record for record in records if record["evidence_id"] == recheck["evidence_id"]), None)
+        addition = next((item for item in additions if item.requirement_id == requirement_id), None)
+        if original is None or addition is None or requirement_id in recheck_ids or len(addition.commands) != 1:
+            msg = "software DOI recheck requires accepted original evidence and one new canonical command"
+            raise ValueError(msg)
+        inspect_canonical_recheck(original, recheck, addition.commands[0], addition.working_directories[0])
+        recheck_ids.add(requirement_id)
+    return recheck_ids
+
+
 def _expanded_validation_plan(
     document: dict[str, Any], plan: GraphPlan, records: list[dict[str, Any]], repository_root: Path, *, authorization: str
 ) -> GraphPlan:
@@ -5375,6 +5392,7 @@ def _expanded_validation_plan(
     for raw in raw_requirements:
         require_schema_definition(raw, _PLANNING_INPUT_SCHEMA, "validationRequirement")
     additions = validation_requirements_from_document({"validation_requirements": list(raw_requirements)}, repository_root)
+    pending.update(_software_doi_recheck_ids(document, records, additions))
     existing = {requirement for unit in plan.coalesced_validation_units for requirement in unit.requirement_ids}
     source_state = _state(document, "source_state")
     for item in additions:
@@ -5445,6 +5463,9 @@ def reconcile_validation_requirements(document: dict[str, Any], args: argparse.N
     entries = _dispatches_by_node(_read_json_object(args.dispatches), plan=plan, source_state=source_state)
     sources, records = _accepted_journal_sources(plan, source_state, events, entries)
     reconciliation = _validation_reconciliation(plan, records)
+    if document.get("software_doi_rechecks") and not document.get("validation_requirements"):
+        msg = "software DOI rechecks require new canonical validation requirements"
+        raise ValueError(msg)
     if not document.get("validation_requirements") and not document.get("user_exclusions"):
         return {"schema_version": 1, "status": "requires-expansion" if reconciliation["blockers"] else "resolved", **reconciliation}
     if any(status in {"in-flight", "blocked", "awaiting-replan"} for status in state.values()):
@@ -6078,6 +6099,9 @@ def finalize_proof(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, P
         "proof": asdict(proof),
         "repository_validation_status": repository_validation_status,
         "repository_readiness": final_record.get("readiness_verdict", "blocked") if final_record and not blockers else "blocked",
+        "software_doi_resolutions": [item for item in final_record.get("validation_reconciliation", []) if "software_doi_resolution" in item]
+        if final_record and not blockers
+        else [],
         "reviewed_source_state": list(source_state),
         "current_source_state": list(current_source_state),
         "external_metadata_transitions": document.get("external_metadata_transitions", []),

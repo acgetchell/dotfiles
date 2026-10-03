@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Validate DOI metadata against Markdown bibliography entries.
 
-The checker is intentionally dependency-free. It verifies that DOI labels resolve
+The default checker is dependency-free; --citation-cff additionally uses PyYAML.
+It verifies that DOI labels resolve
 through DOI content negotiation and compares resolved titles, authors, and years
 with the local bibliography text, catching the common trust failure where a live
 DOI points to an unrelated paper.
@@ -15,8 +16,10 @@ import ssl
 import sys
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import date
 from enum import StrEnum
+from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -71,6 +74,76 @@ class DoiEntry:
     entry: str
     badge_only: bool = False
 
+    @property
+    def context_only(self) -> bool:
+        """Recognize links and citation pointers without discarding unknown prose."""
+        text = re.sub(r"\[!\[[^\]]*\]\([^\n]*?\)\]\(https?://[^\s]+\)", "", self.entry)
+        text = re.sub(r"\[([^\]]*)\]\([^\s]+\)", r"\1", text)
+        text = text.replace(f"https://doi.org/{self.doi.value}", "").replace(self.doi.value, "")
+        text = re.sub(r"CITATION\.cff", "", text, flags=re.IGNORECASE)
+        # A deliberately small vocabulary: unknown names, dates, and titles must
+        # go through the ordinary bibliography checks, never a canonical bypass.
+        pointer_words = {"doi", "see", "for", "the", "this", "software", "project", "citation", "canonical", "metadata", "in", "and", "version", "concept"}
+        return set(re.findall(r"\w+", text.casefold())) <= pointer_words
+
+
+def identity_text(value: str) -> str:
+    """Normalize punctuation and case without dropping identity-bearing words."""
+    return re.sub(r"\W+", " ", value.casefold()).strip()
+
+
+@dataclass(frozen=True, slots=True)
+class SoftwareCitation:
+    """Complete canonical software identity and the exact CFF bytes used."""
+
+    path: str
+    digest: str
+    doi: Doi
+    title: str
+    authors: tuple[str, ...]
+    year: str
+
+    @classmethod
+    def load(cls, path: Path) -> SoftwareCitation:
+        """Parse only root software metadata, never preferred-citation/references."""
+        try:
+            import yaml  # noqa: PLC0415
+        except ImportError as exc:
+            msg = "--citation-cff requires PyYAML; use uv run --with PyYAML"
+            raise ValueError(msg) from exc
+        content = path.read_bytes()
+        try:
+            raw = yaml.safe_load(content)
+        except yaml.YAMLError as exc:
+            msg = f"invalid CITATION.cff YAML: {exc}"
+            raise ValueError(msg) from exc
+        if not isinstance(raw, dict) or raw.get("type", "software") != "software":
+            msg = "CITATION.cff must contain root software metadata"
+            raise ValueError(msg)
+        title, doi = raw.get("title"), raw.get("doi")
+        if not isinstance(title, str) or not identity_text(title) or not isinstance(doi, str):
+            msg = "CITATION.cff requires a title and root DOI"
+            raise ValueError(msg)
+        released = raw.get("date-released")
+        if isinstance(released, str):
+            released = date.fromisoformat(released)
+        if type(released) is not date:
+            msg = "CITATION.cff requires a date-released calendar date"
+            raise ValueError(msg)
+        authors = raw.get("authors")
+        if not isinstance(authors, list) or not authors:
+            msg = "CITATION.cff requires authors"
+            raise ValueError(msg)
+        names = tuple(author.get("family-names") or author.get("name") if isinstance(author, dict) else None for author in authors)
+        if any(not isinstance(name, str) or not identity_text(name) for name in names):
+            msg = "CITATION.cff authors require family-names or entity names"
+            raise ValueError(msg)
+        return cls(str(path.resolve()), "sha256:" + sha256(content).hexdigest(), Doi.parse(doi), title, tuple(str(name) for name in names), str(released.year))
+
+    def to_json_object(self) -> dict[str, object]:
+        """Expose the checked identity alongside its file digest."""
+        return {"path": self.path, "digest": self.digest, "doi": self.doi.value, "title": self.title, "authors": list(self.authors), "year": self.year}
+
 
 @dataclass(frozen=True, slots=True)
 class CslMetadata:
@@ -109,10 +182,12 @@ class DoiResult:
     resolved_container: str | None
     resolved_authors: tuple[str, ...]
     message: str
+    local_status: AuditStatus | None = None
+    canonical_software: SoftwareCitation | None = None
 
     def to_json_object(self) -> dict[str, object]:
         """Return a JSON-serializable report object."""
-        return {
+        result: dict[str, object] = {
             "doi": self.doi,
             "line": self.line,
             "status": self.status.value,
@@ -124,6 +199,11 @@ class DoiResult:
             "resolved_authors": list(self.resolved_authors),
             "message": self.message,
         }
+        if self.local_status is not None:
+            result["local_status"] = self.local_status.value
+        if self.canonical_software is not None:
+            result["canonical_software"] = self.canonical_software.to_json_object()
+        return result
 
 
 def parse_positive_timeout(raw: str) -> float:
@@ -323,10 +403,18 @@ def author_score(author_names: Iterable[str], entry: str) -> float | None:
     return len(author_tokens & entry_tokens) / len(author_tokens)
 
 
-def validate_entry(entry: DoiEntry, timeout: float, min_title_score: float, fetcher: Callable[[Doi, float], dict[str, Any]] = fetch_csl_json) -> DoiResult:
+def validate_entry(
+    entry: DoiEntry,
+    timeout: float,
+    min_title_score: float,
+    fetcher: Callable[[Doi, float], dict[str, Any]] = fetch_csl_json,
+    *,
+    citation: SoftwareCitation | None = None,
+) -> DoiResult:
     """Validate one DOI and compare metadata with the bibliography entry."""
     try:
-        metadata = CslMetadata.parse(fetcher(entry.doi, timeout))
+        raw = fetcher(entry.doi, timeout)
+        metadata = CslMetadata.parse(raw)
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError, TypeError, ValueError, json.JSONDecodeError, ssl.SSLError) as exc:
         return DoiResult(
             doi=entry.doi.value,
@@ -341,8 +429,8 @@ def validate_entry(entry: DoiEntry, timeout: float, min_title_score: float, fetc
             message=f"{type(exc).__name__}: {exc}",
         )
 
-    if entry.badge_only:
-        return DoiResult(
+    if entry.context_only:
+        result = DoiResult(
             doi=entry.doi.value,
             line=entry.line,
             status=AuditStatus.INSUFFICIENT_CONTEXT,
@@ -352,8 +440,9 @@ def validate_entry(entry: DoiEntry, timeout: float, min_title_score: float, fetc
             resolved_year=metadata.year,
             resolved_container=metadata.container,
             resolved_authors=metadata.author_families,
-            message="DOI resolves, but this badge supplies no bibliographic context; compare its identity with CITATION.cff or primary metadata",
+            message="DOI resolves, but this link supplies no bibliographic context; compare its identity with CITATION.cff or primary metadata",
         )
+        return reconcile_software(result, metadata, raw, citation) if citation is not None else result
 
     resolved_title_score = title_score(metadata.title, entry.entry)
     resolved_author_score = author_score(metadata.author_families, entry.entry)
@@ -381,8 +470,41 @@ def validate_entry(entry: DoiEntry, timeout: float, min_title_score: float, fetc
     )
 
 
+def reconcile_software(result: DoiResult, metadata: CslMetadata, raw: dict[str, Any], citation: SoftwareCitation) -> DoiResult:
+    """Check canonical identity only for entries without bibliographic claims."""
+    resolved_doi = raw.get("DOI")
+    problems = []
+    if result.doi.casefold() != citation.doi.value.casefold():
+        problems.append("linked DOI differs from canonical software DOI")
+    if isinstance(resolved_doi, str):
+        try:
+            same_doi = Doi.parse(resolved_doi).value.casefold() == citation.doi.value.casefold()
+        except ValueError:
+            same_doi = False
+        if not same_doi:
+            problems.append("resolved DOI differs from canonical software DOI")
+    if identity_text(metadata.title) != identity_text(citation.title):
+        problems.append("resolved title differs from canonical software title")
+    if metadata.author_families and {identity_text(name) for name in metadata.author_families} != {identity_text(name) for name in citation.authors}:
+        problems.append("resolved authors differ from canonical software authors")
+    if metadata.year is not None and metadata.year != citation.year:
+        problems.append("resolved year differs from canonical software year")
+    if problems:
+        status, message = AuditStatus.MISMATCH, "; ".join(problems)
+    elif not isinstance(resolved_doi, str) or not metadata.author_families or metadata.year is None:
+        status, message = AuditStatus.INSUFFICIENT_CONTEXT, "resolved software metadata lacks DOI, authors, or year"
+    else:
+        status, message = AuditStatus.OK, "software identity matches explicit CITATION.cff metadata"
+    return replace(result, status=status, message=message, local_status=result.status, canonical_software=citation)
+
+
 def validate_entries(
-    entries: Iterable[DoiEntry], timeout: float, min_title_score: float, fetcher: Callable[[Doi, float], dict[str, Any]] = fetch_csl_json
+    entries: Iterable[DoiEntry],
+    timeout: float,
+    min_title_score: float,
+    fetcher: Callable[[Doi, float], dict[str, Any]] = fetch_csl_json,
+    *,
+    citation: SoftwareCitation | None = None,
 ) -> list[DoiResult]:
     """Validate parsed DOI entries."""
     cache: dict[str, dict[str, Any]] = {}
@@ -392,7 +514,7 @@ def validate_entries(
             cache[doi.value] = fetcher(doi, request_timeout)
         return cache[doi.value]
 
-    return [validate_entry(entry, timeout, min_title_score, cached_fetcher) for entry in entries]
+    return [validate_entry(entry, timeout, min_title_score, cached_fetcher, citation=citation) for entry in entries]
 
 
 def print_text_report(results: Sequence[DoiResult]) -> None:
@@ -417,6 +539,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-title-score", type=parse_unit_interval, default=0.45, help="minimum resolved-title token overlap for OK")
     parser.add_argument("--allow-empty", action="store_true", help="exit successfully when no DOI references are found")
     parser.add_argument("--json", action="store_true", help="emit JSON instead of text")
+    parser.add_argument("--citation-cff", type=Path, help="explicit canonical software metadata for DOI badges and bare links (requires PyYAML)")
     return parser
 
 
@@ -425,9 +548,11 @@ def run(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     try:
-        markdown = args.markdown.read_text(encoding="utf-8")
-    except OSError as exc:
-        print(f"failed to read {args.markdown}: {exc}", file=sys.stderr)
+        markdown_bytes = args.markdown.read_bytes()
+        markdown = markdown_bytes.decode("utf-8")
+        citation = SoftwareCitation.load(args.citation_cff) if args.citation_cff else None
+    except (OSError, UnicodeError, ValueError) as exc:
+        print(f"failed to read audit input: {exc}", file=sys.stderr)
         return 2
 
     entries = extract_entries(markdown)
@@ -442,10 +567,12 @@ def run(argv: Sequence[str] | None = None) -> int:
         print(message, file=sys.stderr)
         return 2
 
-    results = validate_entries(entries, args.timeout, args.min_title_score)
+    options = {"citation": citation} if citation else {}
+    results = validate_entries(entries, args.timeout, args.min_title_score, **options)
 
     if args.json:
-        json.dump([result.to_json_object() for result in results], sys.stdout, indent=2, sort_keys=True)
+        source = {"path": str(args.markdown.resolve()), "digest": "sha256:" + sha256(markdown_bytes).hexdigest()}
+        json.dump([{**result.to_json_object(), "source": source} for result in results], sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
     else:
         print_text_report(results)
