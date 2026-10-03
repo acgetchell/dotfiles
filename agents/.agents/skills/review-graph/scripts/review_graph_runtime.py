@@ -20,7 +20,7 @@ from typing import Any, cast
 from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics, run_command_bytes
 from review_graph_bootstrap import bootstrap_document
 from review_graph_coverage import combined_findings, coverage_decisions, reused_paths, validate_coverage_units
-from review_graph_doi import inspect_canonical_recheck
+from review_graph_doi import captured_software_inputs, inspect_canonical_recheck
 from review_graph_independent import CHECK_LABELS, SCHEMA as _INDEPENDENT_PAYLOAD_SCHEMA, render_independent_payload
 from review_graph_integrity import canonical_json, digest_bytes
 from review_graph_metrics import projected_waves, source_demand
@@ -2072,8 +2072,8 @@ def _validation_reuse_body(unit: ValidationUnit, evidence: ValidationEvidence, c
     return "\n".join(bodies) or "none"
 
 
-def _validation_normalized_record(payload: dict[str, Any], evidence: ValidationEvidence) -> dict[str, Any]:
-    return {
+def _validation_normalized_record(payload: dict[str, Any], evidence: ValidationEvidence, capture: dict[str, Any] | None = None) -> dict[str, Any]:
+    record = {
         "observed_source_state": list(evidence.fingerprints.after),
         "artifact_digest": evidence.raw_result_digest,
         "artifact_id": evidence.raw_result_artifact_id,
@@ -2096,6 +2096,10 @@ def _validation_normalized_record(payload: dict[str, Any], evidence: ValidationE
             {"evidence_id": evidence.evidence_id, "requirement_id": requirement_id, "status": evidence.status} for requirement_id in evidence.requirement_ids
         ],
     }
+    inputs = captured_software_inputs(record, capture) if capture is not None else {}
+    if inputs:
+        record["captured_software_inputs"] = inputs
+    return record
 
 
 def _workspace_path(path: str, repository_root: Path) -> Path:
@@ -2505,12 +2509,14 @@ def compile_validation(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]
     if blockers:
         msg = "compiled validation artifact failed verification: " + "; ".join(blockers)
         raise ValueError(msg)
+    normalized = _validation_normalized_record(payload, evidence, dispatch.get("source_capture"))
     return content, {
         "expectation": asdict(expectation),
         "evidence": asdict(evidence),
         "payload_digest": digest_bytes(canonical_payload.encode()),
         "artifact_digest": evidence.raw_result_digest,
-        "normalized_record": _validation_normalized_record(payload, evidence),
+        "normalized_record": normalized,
+        **({"source_capture": dispatch["source_capture"]} if "captured_software_inputs" in normalized else {}),
         "workspace_audit": workspace_audit,
     }
 
@@ -2844,7 +2850,7 @@ def _load_evidence_source(  # noqa: C901, PLR0912, PLR0915
             if metadata.get("payload_digest") != payload_digest:
                 msg = f"worker payload digest does not match compiled artifact: {artifact_path}"
                 raise ValueError(msg)
-            recomputed = _validation_normalized_record(payload, evidence)
+            recomputed = _validation_normalized_record(payload, evidence, metadata.get("source_capture"))
         if normalized != recomputed:
             msg = f"normalized record does not match compiled artifact: {metadata_path}"
             raise ValueError(msg)
@@ -6503,6 +6509,7 @@ def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace)
         raise ValueError(msg)
     payload_bytes = payload_path.read_bytes()
     if contract == "compact-validation":
+        dispatch["source_capture"] = _read_json_object(args.after_capture)
         if args.workspace_before is None or args.workspace_after is None:
             msg = "validation compile-node requires --workspace-before and --workspace-after"
             raise ValueError(msg)

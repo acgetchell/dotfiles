@@ -46,7 +46,8 @@ and release year to match. Missing resolved fields still require review.
 
 JSON rows retain resolved metadata and a Markdown path/content digest. Canonical
 rows additionally retain `local_status: INSUFFICIENT_CONTEXT` and
-`canonical_software` with the CFF path, content digest, and checked identity.
+`canonical_software` with the CFF path, content digest, checked identity, and
+exact bytes in `content_base64` for verification against the source capture.
 A successful canonical check is a new execution; it never rewrites an earlier
 nonzero result. In review-graph, preserve both reports as declared validation
 artifacts and follow

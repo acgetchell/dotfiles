@@ -373,7 +373,7 @@
               "requirement_id": {"type": "string", "minLength": 1},
               "evidence_id": {"type": "string", "minLength": 1},
               "execution_index": {"type": "integer", "minimum": 0},
-              "original_report": {"type": "string", "minLength": 1}
+              "original_report": {"type": "string", "minLength": 1, "pattern": "^(?:/|[A-Za-z]:[/\\\\]|\\\\\\\\[^\\\\/]+[/\\\\][^\\\\/]+(?:[/\\\\]|$))[^\\r\\n]*$"}
             }
           }
         },

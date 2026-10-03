@@ -9,6 +9,7 @@ DOI points to an unrelated paper.
 """
 
 import argparse
+import base64
 import json
 import math
 import re
@@ -102,6 +103,7 @@ class SoftwareCitation:
     title: str
     authors: tuple[str, ...]
     year: str
+    content: bytes
 
     @classmethod
     def load(cls, path: Path) -> SoftwareCitation:
@@ -138,11 +140,21 @@ class SoftwareCitation:
         if any(not isinstance(name, str) or not identity_text(name) for name in names):
             msg = "CITATION.cff authors require family-names or entity names"
             raise ValueError(msg)
-        return cls(str(path.resolve()), "sha256:" + sha256(content).hexdigest(), Doi.parse(doi), title, tuple(str(name) for name in names), str(released.year))
+        return cls(
+            str(path.resolve()), "sha256:" + sha256(content).hexdigest(), Doi.parse(doi), title, tuple(str(name) for name in names), str(released.year), content
+        )
 
     def to_json_object(self) -> dict[str, object]:
         """Expose the checked identity alongside its file digest."""
-        return {"path": self.path, "digest": self.digest, "doi": self.doi.value, "title": self.title, "authors": list(self.authors), "year": self.year}
+        return {
+            "path": self.path,
+            "digest": self.digest,
+            "doi": self.doi.value,
+            "title": self.title,
+            "authors": list(self.authors),
+            "year": self.year,
+            "content_base64": base64.b64encode(self.content).decode("ascii"),
+        }
 
 
 @dataclass(frozen=True, slots=True)

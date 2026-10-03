@@ -1,7 +1,9 @@
 """Content-bound capture identities and immutable audit reuse transitions."""
 
+import os
 import re
 from dataclasses import asdict, dataclass
+from hashlib import sha256 as sha256_hash
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -9,6 +11,17 @@ from research_repo_tools.evidence import sha256
 from review_graph_integrity import canonical_json
 
 SNAPSHOT_FORMAT = "review-graph-path-snapshot-v2"
+
+
+def regular_file_fingerprint(path: str, content: bytes, *, executable: bool = False) -> str:
+    """Reconstruct capture_scope's path identity from retained regular-file bytes."""
+    digest = sha256_hash()
+    for label, value in ((b"path", os.fsencode(path)), (b"mode", b"100755" if executable else b"100644"), (b"file-content", content)):
+        digest.update(len(label).to_bytes(8, "big"))
+        digest.update(label)
+        digest.update(len(value).to_bytes(8, "big"))
+        digest.update(value)
+    return digest.hexdigest()
 
 
 def _repository_path(path: str) -> bool:
