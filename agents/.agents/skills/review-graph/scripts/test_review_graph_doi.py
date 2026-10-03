@@ -2,6 +2,7 @@
 
 import base64
 import json
+import shlex
 from argparse import Namespace
 from copy import deepcopy
 from hashlib import sha256
@@ -280,6 +281,50 @@ def test_cff_binding_uses_actual_capture_after_current_file_is_removed(tmp_path:
     assert captured_software_inputs(verified, capture) == {str(repo / "CITATION.cff"): "sha256:" + sha256(CFF_CONTENT).hexdigest()}
 
 
+@pytest.mark.parametrize("redirect", [">", "1>", None, "unbound"])
+def test_canonical_compilation_preserves_results_with_unrelated_reports(tmp_path: Path, redirect: str | None) -> None:
+    _original, verified, _resolution = _fixture(tmp_path)
+    report = Path(verified["artifacts"][0]["path"])
+    canonical = _save_report(tmp_path / "canonical report.json", json.loads(report.read_bytes()))
+    unrelated = _save_report(tmp_path / "summary.json", [{"summary": "check completed"}])
+    verified["artifacts"] = [canonical] if redirect == "unbound" else [unrelated, canonical]
+    execution = verified["executions"][0]
+    execution["artifact_paths"] = [artifact["path"] for artifact in verified["artifacts"]]
+    if redirect is not None:
+        target = "missing.json" if redirect == "unbound" else canonical["path"] if redirect == "1>" else "canonical report.json"
+        execution["command"] += f" {'>' if redirect == 'unbound' else redirect} {shlex.quote(target)}"
+    planning = _sparse_plan_document()
+    planning["validation_requirements"] = [_requirement(verified, baseline=True)]
+    plan = plan_from_document(planning, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=SKILL_ROOT.parents[2])
+    lifecycle = {"plan": _json_plan(plan), "source_state": verified["observed_source_state"]}
+    materialized = materialize_dispatches(
+        {
+            **lifecycle,
+            "artifact_store": str(tmp_path / "artifacts"),
+            "authorization": "review-only",
+            "repository_root": str(SKILL_ROOT.parents[2]),
+            "state_verification_command": "capture_scope.py --mode baseline",
+        }
+    )
+    entry = next(item for item in materialized["dispatches"] if item["result_contract"] == "compact-validation")
+    source = _compile_validator(entry, lifecycle, tmp_path / "journal.json", verified)
+    record = json.loads(Path(source["metadata_path"]).read_bytes())["normalized_record"]
+    assert record["status"] == "passed"
+    assert record["executions"] == verified["executions"]
+    if redirect in {">", "1>"}:
+        assert record["captured_software_inputs"] == {str(tmp_path / "CITATION.cff"): "sha256:" + sha256(CFF_CONTENT).hexdigest()}
+    else:
+        assert "captured_software_inputs" not in record
+
+
+def test_identified_canonical_report_still_requires_unchanged_bytes(tmp_path: Path) -> None:
+    _original, verified, _resolution = _fixture(tmp_path)
+    verified["executions"][0]["command"] += " > verified.json"
+    Path(verified["artifacts"][0]["path"]).write_text("changed report")
+    with pytest.raises(ValueError, match="report bytes changed"):
+        captured_software_inputs(verified, _source_capture(tmp_path))
+
+
 @pytest.mark.parametrize(
     "defect",
     [
@@ -406,14 +451,13 @@ def _requirement(record: dict[str, Any], *, baseline: bool) -> dict[str, Any]:
             "requires_isolation": True,
             "isolation_root": record["executions"][0]["working_directory"],
             "expected_workspace_effects": [],
-            "allowed_artifacts": [{"path": record["artifacts"][0]["path"], "kind": "report", "repository_status": "outside-repository"}],
+            "allowed_artifacts": [{"path": artifact["path"], "kind": "report", "repository_status": "outside-repository"} for artifact in record["artifacts"]],
         }
     )
     return requirement
 
 
 def _compile_validator(entry: dict[str, Any], lifecycle: dict[str, Any], journal: Path, record: dict[str, Any]) -> dict[str, str]:
-    artifact = record["artifacts"][0]
     dispatch = {
         **entry["dispatch"],
         "before_state": lifecycle["source_state"],
@@ -422,6 +466,7 @@ def _compile_validator(entry: dict[str, Any], lifecycle: dict[str, Any], journal
         "workspace_before": [],
         "workspace_after": [
             {"path": artifact["path"], "digest": artifact["artifact_digest"], "snapshot_mode": "content-sha256-v1", "status": "outside-repository"}
+            for artifact in record["artifacts"]
         ],
     }
     content, metadata = compile_validation(

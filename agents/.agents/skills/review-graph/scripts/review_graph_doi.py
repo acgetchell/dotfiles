@@ -153,6 +153,17 @@ def _captured_cff_digest(canonical: dict[str, Any], cff: Path, capture: ReviewSo
     return "sha256:" + sha256(content).hexdigest()
 
 
+def _canonical_report_path(record: dict[str, Any], execution: dict[str, Any]) -> str | None:
+    candidates: list[str] = [
+        artifact["path"] for artifact in record["artifacts"] if artifact["kind"] == "report" and artifact["path"] in execution.get("artifact_paths", [])
+    ]
+    words = shlex.split(execution["command"])
+    if len(words) >= 2 and words[-2] in {">", "1>"}:
+        output = str((Path(execution["working_directory"]) / words[-1]).resolve())
+        candidates = [path for path in candidates if path == output]
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def _canonical_rows(record: dict[str, Any]) -> list[tuple[Path, dict[str, Any]]]:
     rows = []
     for execution in record["executions"]:
@@ -164,13 +175,13 @@ def _canonical_rows(record: dict[str, Any]) -> list[tuple[Path, dict[str, Any]]]
             continue  # Other validators do not supply canonical software evidence.
         if cff is None:
             continue
-        for artifact in record["artifacts"]:
-            if artifact["kind"] != "report" or artifact["path"] not in execution.get("artifact_paths", []):
-                continue
-            for row in _report(record, execution, artifact["path"]).values():
-                canonical = row.get("canonical_software")
-                if isinstance(canonical, dict):
-                    rows.append((cff, canonical))
+        report_path = _canonical_report_path(record, execution)
+        if report_path is None:
+            continue
+        for row in _report(record, execution, report_path).values():
+            canonical = row.get("canonical_software")
+            if isinstance(canonical, dict):
+                rows.append((cff, canonical))
     return rows
 
 

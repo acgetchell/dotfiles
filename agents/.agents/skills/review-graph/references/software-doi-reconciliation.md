@@ -41,6 +41,9 @@ requirement must contain exactly one checker command for the original Markdown
 input, adding `--citation-cff` and keeping `--json`. Use explicit argument values
 and absolute working directories; an optional final `> <report-path>` is
 supported. Shell pipelines and compound commands are not reconciliation inputs.
+The compiler selects the declared report at that stdout path, or the execution's
+sole report artifact when no redirection is present. If neither identifies a
+report, validation remains complete but no CFF binding is retained.
 Declare output artifacts and isolation according to the existing validator
 contract; when running in an isolated output directory, pass absolute paths to
 the original Markdown and CFF. Keep both inputs in the captured source state.
