@@ -1,0 +1,14 @@
+name: Retired token cannot return to the approval workflow
+on: workflow_dispatch
+jobs:
+  example:
+    runs-on: ubuntu-latest
+    steps:
+      - run: gh api user
+        env:
+          # ruleid: dotfiles.github-actions.no-retired-coderabbit-token
+          GH_TOKEN: ${{ secrets.CODERABBIT_REVIEW_TOKEN }}
+      - run: gh api user
+        env:
+          # ok: dotfiles.github-actions.no-retired-coderabbit-token
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

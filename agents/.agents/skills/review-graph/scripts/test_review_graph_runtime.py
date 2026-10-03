@@ -856,7 +856,7 @@ def test_mutation_delta_uses_immediately_prior_capture_for_already_dirty_files(t
 
 
 def _mutation_with_audit_source(
-    tmp_path: Path, *, nearby_contract_owners: tuple[str, ...] = (), limitations: tuple[str, ...] = ()
+    tmp_path: Path, *, nearby_contract_owners: tuple[str, ...] = (), limitations: tuple[str, ...] = (), reference_planned_validation: bool = False
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, str]]:
     request = _mutation_request(tmp_path)
     materialized = materialize_dispatches(
@@ -884,6 +884,17 @@ def _mutation_with_audit_source(
         "status": "no-findings",
         "validation_requirements": [],
     }
+    if reference_planned_validation:
+        planned = dispatch["command_policy"]["planned_validation_units"][0]
+        payload["validation_requirements"] = [
+            {
+                "requirement_id": planned["requirement_ids"][0],
+                "planned_validation_digest": planned["planned_validation_digest"],
+                "owner": dispatch["skill_id"],
+                "reason": "Audit requires the planned validation",
+                "expected_evidence": "Required checks pass",
+            }
+        ]
     content, metadata = compile_review({"dispatch": dispatch, "payload": _typed_synthesis_payload(dispatch, payload)})
     artifact_path = Path(entry["artifact_path"])
     metadata_path = Path(entry["metadata_path"])

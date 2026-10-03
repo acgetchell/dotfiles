@@ -3,6 +3,7 @@
 #
 # Keep this file small and project-specific. Broad default/community rules
 # duplicate CodeRabbit, actionlint, zizmor, Ruff, ty, ShellCheck, and gitleaks.
+# Zizmor owns SHA pinning; workflow-allowlist-check reads the Actions policy JSON.
 
 rules:
   - id: dotfiles.docs.check-before-fix-command-order
@@ -25,56 +26,6 @@ rules:
       - pattern-regex: '(?ms)^\s*(?:@echo\s+"?\s*)?just\s+python-fix\b[^\n]*(?:\n\s*(?:#[^\n]*)?)*?\n\s*(?:@echo\s+"?\s*)?just\s+python-check\b'
       - pattern-regex: '(?ms)^\s*(?:@echo\s+"?\s*)?just\s+yaml-fix\b[^\n]*(?:\n\s*(?:#[^\n]*)?)*?\n\s*(?:@echo\s+"?\s*)?just\s+yaml-check\b'
 
-  - id: dotfiles.github-actions.external-action-sha-pinned
-    languages:
-      - regex
-    severity: WARNING
-    message: "Pin external GitHub Actions to a full 40-character commit SHA."
-    metadata:
-      category: security
-      rationale: "Moving tags can change workflow behavior without review."
-    paths:
-      include:
-        - "/.github/workflows/**/*.yml"
-        - "/.github/workflows/**/*.yaml"
-        - "/tests/semgrep/.github/workflows/**/*.yml"
-        - "/tests/semgrep/.github/workflows/**/*.yaml"
-    patterns:
-      - pattern-regex: '(?m)^\s*uses:\s*(?!\./)(?!docker://)[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)?@(?![a-fA-F0-9]{40}(?:\s+#|$))[^\s#]+'
-
-  - id: dotfiles.github-actions.external-action-approved-allowlist
-    languages:
-      - regex
-    severity: WARNING
-    message: "Use only approved external GitHub Actions, or update the repository allowlist deliberately."
-    metadata:
-      category: security
-      rationale: "A small allowlist catches disallowed Actions locally before GitHub rejects the workflow."
-    paths:
-      include:
-        - "/.github/workflows/**/*.yml"
-        - "/.github/workflows/**/*.yaml"
-        - "/tests/semgrep/.github/workflows/**/*.yml"
-        - "/tests/semgrep/.github/workflows/**/*.yaml"
-    patterns:
-      - pattern-regex: |-
-          (?mx)
-          ^\s*uses:\s*
-          (?!\./)
-          (?!docker://)
-          (?!
-            (?:
-              actions/checkout
-              |actions/setup-python
-              |actions/cache
-              |astral-sh/setup-uv
-              |github/codeql-action/upload-sarif
-              |taiki-e/cache-cargo-install-action
-              |zizmorcore/zizmor-action
-            )@
-          )
-          [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)?@
-
   - id: dotfiles.github-actions.external-action-version-comment
     languages:
       - regex
@@ -90,7 +41,11 @@ rules:
         - "/tests/semgrep/.github/workflows/**/*.yml"
         - "/tests/semgrep/.github/workflows/**/*.yaml"
     patterns:
-      - pattern-regex: '(?m)^\s*uses:\s*(?!\./)(?!docker://)[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)?@[a-fA-F0-9]{40}\s*$'
+      - pattern-regex: |-
+          (?mx)^[ \t]*(?:-[ \t]+)?uses:[ \t]*["']?
+          (?!\./)(?!docker://)
+          [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*
+          @[a-fA-F0-9]{40}["']?[ \t]*$
 
   - id: dotfiles.github-actions.checkout-persist-credentials-false
     languages:
@@ -137,7 +92,10 @@ rules:
         - "/.github/workflows/**/*.yaml"
         - "/tests/semgrep/.github/workflows/**/*.yml"
         - "/tests/semgrep/.github/workflows/**/*.yaml"
-    pattern-regex: '(?m)^\s*pull_request_target\s*:'
+    pattern-either:
+      - pattern-regex: '(?m)^[ \t]*(?:-[ \t]+)?["'']?pull_request_target["'']?[ \t]*(?::|(?:#.*)?$)'
+      - pattern-regex: '(?m)^[ \t]*["'']?on["'']?[ \t]*:[ \t]*["'']?pull_request_target["'']?[ \t]*(?:#.*)?$'
+      - pattern-regex: '(?m)^[ \t]*["'']?on["'']?[ \t]*:[ \t]*\[[^\]]*\bpull_request_target\b[^\]]*\]'
 
   - id: dotfiles.github-actions.github-script-no-expression-interpolation
     languages:
@@ -173,7 +131,7 @@ rules:
         - "/tests/semgrep/.github/workflows/**/*.yml"
         - "/tests/semgrep/.github/workflows/**/*.yaml"
     patterns:
-      - pattern-regex: '(?m)^\s*(?:run:\s*)?uv\s+sync\b(?![^\n]*\s--locked\b)[^\n]*$'
+      - pattern-regex: '(?m)^[ \t]*(?:-[ \t]+)?(?:run:[ \t]*)?uv\s+sync\b(?![^\n]*\s--locked\b)[^\n]*$'
 
   - id: dotfiles.tooling.uv-run-locked
     languages:
@@ -190,10 +148,13 @@ rules:
         - "/.github/workflows/**/*.yml"
         - "/.github/workflows/**/*.yaml"
         - "/tests/semgrep/tooling/**/*.sh"
+        - "/tests/semgrep/.github/workflows/**/*.yml"
+        - "/tests/semgrep/.github/workflows/**/*.yaml"
     pattern-regex: |-
       (?mx)
-      ^\s*
-      (?:run:\s*)?
+      ^[ \t]*
+      (?:-[ \t]+)?
+      (?:run:[ \t]*)?
       (?:
         [A-Za-z_][A-Za-z0-9_]*=
         (?:"[^"\n]*"|'[^'\n]*'|[^\s\n]+)
@@ -218,38 +179,35 @@ rules:
         - "/tests/semgrep/.github/workflows/**/*.yml"
         - "/tests/semgrep/.github/workflows/**/*.yaml"
     pattern-regex: |-
-      (?mx)^\s*(?:run:\s*)?gh\s+pr\s+merge\b
+      (?mx)^[ \t]*(?:-[ \t]+)?(?:run:[ \t]*)?gh\s+pr\s+merge\b
       (?=[^\n]*\s--auto\b)
       (?!(?=[^\n]*\s--squash\b)(?=[^\n]*\s--match-head-commit\b))
       [^\n]*$
 
-  - id: dotfiles.github-actions.coderabbit-token-confined
+  - id: dotfiles.github-actions.no-retired-coderabbit-token
     languages:
       - regex
     severity: WARNING
-    message: "Use CODERABBIT_REVIEW_TOKEN only in the reviewed Dependabot auto-merge workflow."
+    message: "CODERABBIT_REVIEW_TOKEN is retired; the shared approval workflow uses GITHUB_TOKEN."
     metadata:
       category: security
-      rationale: "The user PAT should not spread to unrelated workflow triggers or jobs."
+      rationale: "No workflow should reintroduce the retired personal approval token."
     paths:
       include:
         - "/.github/workflows/**/*.yml"
         - "/.github/workflows/**/*.yaml"
         - "/tests/semgrep/.github/workflows/**/*.yml"
         - "/tests/semgrep/.github/workflows/**/*.yaml"
-      exclude:
-        - "/.github/workflows/dependabot-auto-merge.yml"
-        - "/.github/workflows/dependabot-auto-merge.yaml"
     pattern-regex: '\bCODERABBIT_REVIEW_TOKEN\b'
 
   - id: dotfiles.brewfile.no-cargo-installed-tools
     languages:
       - regex
     severity: WARNING
-    message: "Install dprint, just, and zizmor through cargo, not Homebrew."
+    message: "Install dprint and just through Cargo; zizmor belongs to the locked Python environment."
     metadata:
       category: maintainability
-      rationale: "Bootstrap pins these Rust tools with cargo install --locked, matching the other Rust repos."
+      rationale: "Cargo owns dprint and just; pyproject.toml and uv.lock own zizmor. Homebrew must not introduce competing installations."
     paths:
       include:
         - "/Brewfile"

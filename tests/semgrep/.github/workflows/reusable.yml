@@ -1,0 +1,9 @@
+name: Reusable workflow version comments
+on: workflow_dispatch
+jobs:
+  reusable-without-version:
+    # ruleid: dotfiles.github-actions.external-action-version-comment
+    uses: acgetchell/research-repo-tools/.github/workflows/dependabot-approve.yml@0a02204d4a889dfc97f55286c008397ced05d6ad
+  reusable-with-version:
+    # ok: dotfiles.github-actions.external-action-version-comment
+    uses: acgetchell/research-repo-tools/.github/workflows/dependabot-approve.yml@0a02204d4a889dfc97f55286c008397ced05d6ad # v0.1.7

@@ -439,12 +439,13 @@ def test_blocked_commandless_validation_and_absent_outputs_compile(tmp_path: Pat
     )
     unit = replace(original, commands=(), working_directories=(), canonical_recipe=None, allowed_artifacts=(artifact,))
     owner = next(node for node in plan.actual_worker_nodes if node.node_id == unit.node_id)
-    assert _validation_nodes((unit,), skill_path=owner.skill_path, skill_digest=owner.skill_digest, reference_digests=owner.reference_digests)[0].coverage == ()
-    nodes = tuple(replace(node, coverage=()) if node.node_id == unit.node_id else node for node in plan.actual_worker_nodes)
+    validation_node = _validation_nodes((unit,), skill_path=owner.skill_path, skill_digest=owner.skill_digest, reference_digests=owner.reference_digests)[0]
+    assert validation_node.coverage == unit.captured_paths
+    nodes = tuple(validation_node if node.node_id == unit.node_id else node for node in plan.actual_worker_nodes)
     plan = replace(plan, coalesced_validation_units=(unit,), actual_worker_nodes=nodes)
     dispatches = materialize_dispatches({**document, "artifact_store": str(tmp_path / "blocked"), "plan": _json_plan(plan)})
     entry = next(item for item in dispatches["dispatches"] if item["node_id"] == unit.node_id)
-    assert entry["dispatch"]["owned_paths"] == []
+    assert entry["dispatch"]["owned_paths"] == list(unit.captured_paths)
     snapshot = [
         {
             "path": artifact.path,

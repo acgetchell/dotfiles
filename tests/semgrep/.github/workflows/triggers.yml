@@ -1,0 +1,27 @@
+# ruleid: dotfiles.github-actions.no-pull-request-target
+on: [push, pull_request_target]
+---
+# ok: dotfiles.github-actions.no-pull-request-target
+on: [push, pull_request]
+---
+# ruleid: dotfiles.github-actions.no-pull-request-target
+on: pull_request_target
+---
+# ok: dotfiles.github-actions.no-pull-request-target
+on: pull_request
+---
+on:
+  # ruleid: dotfiles.github-actions.no-pull-request-target
+  - pull_request_target
+---
+on:
+  # ok: dotfiles.github-actions.no-pull-request-target
+  - pull_request
+---
+"on":
+  # ruleid: dotfiles.github-actions.no-pull-request-target
+  "pull_request_target":
+---
+"on":
+  # ok: dotfiles.github-actions.no-pull-request-target
+  "pull_request":
