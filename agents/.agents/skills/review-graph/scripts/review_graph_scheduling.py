@@ -1,6 +1,8 @@
 """Capacity-aware lane selection without creating workers or changing coverage."""
 
-from typing import Any
+from typing import Any, cast
+
+_PARALLEL_MODES = frozenset({"audit", "independent-review", "synthesis"})
 
 
 def _capacity_state(capacity: dict[str, Any] | None, occupied_workers: int) -> tuple[str, int]:
@@ -33,11 +35,36 @@ def _failure_action(failure: dict[str, Any] | None, capacity_state: str) -> str 
     return "coordinator-fallback"
 
 
+def _preflight_blocked_nodes(document: dict[str, Any], modes: dict[str, str], ready: dict[str, Any]) -> list[dict[str, str]]:
+    """Keep unstarted validator execution holds separate from slot reservations."""
+    # The operation schema checks field types; enforce graph semantics here.
+    holds = cast("list[dict[str, str]]", document.get("preflight_blocked_nodes", []))
+    held_ids = [item["node_id"] for item in holds]
+    unavailable = {
+        node_id
+        for key in ("accepted_node_ids", "in_flight_node_ids", "blocked_node_ids", "awaiting_replan_node_ids")
+        for node_id in ready["lifecycle"].get(key, [])
+    }
+    if (
+        len(held_ids) != len(set(held_ids))
+        or any(modes.get(node_id) != "validation" or node_id in unavailable for node_id in held_ids)
+        or any(not item["reason"].strip() for item in holds)
+    ):
+        msg = "preflight_blocked_nodes requires unique unstarted planned validators and concrete reasons"
+        raise ValueError(msg)
+    if set(held_ids) & set(document.get("reserved_node_ids", [])):
+        msg = "preflight-blocked validators must not occupy reserved_node_ids"
+        raise ValueError(msg)
+    return holds
+
+
 def select_execution_lanes(  # noqa: C901, PLR0912 - one selection preserves reservations, capacity, and serialization together.
     document: dict[str, Any], *, modes: dict[str, str], entries: dict[str, dict[str, Any]], ready: dict[str, Any]
 ) -> dict[str, Any]:
     """Reserve one adaptive coordinator lane and only available worker lanes."""
     ready_ids = ready["ready_node_ids"]
+    preflight_blocked = _preflight_blocked_nodes(document, modes, ready)
+    held_ids = {item["node_id"] for item in preflight_blocked}
     in_flight = ready["lifecycle"]["in_flight_node_ids"]
     occupied_workers = sum(entries[node_id]["dispatch"]["execution_location"] == "worker" for node_id in in_flight)
     capacity_state, free_workers = _capacity_state(document.get("worker_capacity"), occupied_workers)
@@ -60,8 +87,8 @@ def select_execution_lanes(  # noqa: C901, PLR0912 - one selection preserves res
     reserved_workers = sum(entries[node_id]["dispatch"]["execution_location"] == "worker" for node_id in reserved)
     free_workers = max(0, free_workers - reserved_workers)
     coordinator_busy = any(entries[node_id]["dispatch"]["execution_location"] == "coordinator" for node_id in (*in_flight, *reserved))
-    serial_busy = any(modes[node_id] not in {"audit", "independent-review"} for node_id in (*in_flight, *reserved))
-    candidates = [node_id for node_id in ready_ids if node_id not in reserved]
+    serial_busy = any(modes[node_id] not in _PARALLEL_MODES for node_id in (*in_flight, *reserved))
+    candidates = [node_id for node_id in ready_ids if node_id not in reserved and node_id not in held_ids]
     coordinator_id = None
     workers: list[str] = []
     if not coordinator_busy and not serial_busy:
@@ -80,7 +107,7 @@ def select_execution_lanes(  # noqa: C901, PLR0912 - one selection preserves res
         parallel = [
             node_id
             for node_id in candidates
-            if modes[node_id] in {"audit", "independent-review"} and entries[node_id]["dispatch"]["execution_location"] == "worker" and node_id != failed_id
+            if modes[node_id] in _PARALLEL_MODES and entries[node_id]["dispatch"]["execution_location"] == "worker" and node_id != failed_id
         ]
         workers.extend(parallel[:free_workers])
         if not workers and coordinator_id is None and not in_flight and not reserved:
@@ -98,6 +125,7 @@ def select_execution_lanes(  # noqa: C901, PLR0912 - one selection preserves res
         "worker_node_ids": workers,
         "reserved_node_ids": reservations,
         "deferred_node_ids": [node_id for node_id in ready_ids if node_id not in selected],
+        "preflight_blocked_nodes": preflight_blocked,
         "creation_failure": failure,
         "creation_failure_action": action,
         "retry_after_seconds": 30 if action == "bounded-retry" else 0,

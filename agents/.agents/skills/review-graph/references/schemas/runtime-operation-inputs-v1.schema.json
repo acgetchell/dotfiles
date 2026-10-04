@@ -187,6 +187,18 @@
         "artifact_store": {"type": "string", "minLength": 1},
         "external_metadata_transitions": {"type": "array", "items": {"type": "object"}},
         "reserved_node_ids": {"$ref": "#/$defs/stringArray"},
+        "preflight_blocked_nodes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["node_id", "reason"],
+            "properties": {
+              "node_id": {"type": "string", "minLength": 1},
+              "reason": {"type": "string", "minLength": 1}
+            }
+          }
+        },
         "worker_capacity": {
           "type": "object",
           "additionalProperties": false,

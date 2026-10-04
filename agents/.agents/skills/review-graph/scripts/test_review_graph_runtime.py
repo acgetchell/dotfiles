@@ -2983,7 +2983,16 @@ def test_exact_overlap_leaves_share_only_trusted_read_only_observations(tmp_path
     assert all("shared_inspection_evidence" not in entry["dispatch"] for entry in independent["dispatches"])
 
 
-def test_positive_independent_payload_persists_compiles_and_journals_verbatim(tmp_path: Path) -> None:
+def _completed_independent_example(entry: dict[str, Any]) -> dict[str, Any]:
+    example = entry["dispatch"]["payload_schema"]["completed_example"]
+    content = Path(example["path"]).read_bytes()
+    assert example["digest"] == "sha256:" + hashlib.sha256(content).hexdigest()
+    payload = json.loads(content)
+    require_schema(payload, SCHEMA_ROOT / "independent-payload-v1.schema.json")
+    return payload
+
+
+def test_completed_independent_caveats_publish_compile_and_journal_on_first_attempt(tmp_path: Path) -> None:
     git = shutil.which("git")
     assert git is not None
     repository = SKILL_ROOT.parents[2]
@@ -3007,6 +3016,8 @@ def test_positive_independent_payload_persists_compiles_and_journals_verbatim(tm
     )
     entry = next(item for item in materialized["dispatches"] if item["dispatch"].get("mode") == "independent-review")
     payload = _compact_independent_payload(entry["dispatch"])
+    payload["tests"] = _completed_independent_example(entry)["tests"]
+    payload["branches"] = "Inspected the complete fixture transition and confirmed it has no platform-dependent source branches."
     payload["status"] = "completed"
     payload["findings"] = [
         {
@@ -3023,7 +3034,10 @@ def test_positive_independent_payload_persists_compiles_and_journals_verbatim(tm
         {"catalog_id": "rust.errors", "observed_trigger": "Fixture error contract", "reason": "Specialist inspection required", "scope": [STATE_FIXTURE]}
     ]
     native = json.dumps(payload).encode()
-    _publish_worker_bytes(entry, native)
+    published = subprocess.run(  # noqa: S603 - runtime-bound public publish command and fixture bytes.
+        entry["dispatch"]["worker_payload_persistence"]["publish_command"], input=native, capture_output=True, check=True, timeout=30
+    )
+    assert json.loads(published.stdout)["worker_payload_digest"] == "sha256:" + hashlib.sha256(native).hexdigest()
     lifecycle_path = tmp_path / "lifecycle.json"
     dispatches_path = tmp_path / "dispatches.json"
     capture_path = tmp_path / "capture.json"
@@ -3070,8 +3084,12 @@ def test_positive_independent_payload_persists_compiles_and_journals_verbatim(tm
     assert metadata["normalized_record"]["findings"][0]["severity"] == "P2"
     assert metadata["normalized_record"]["handoffs"][0]["catalog_id"] == "rust.errors"
     assert _canonical_worker_payload(compiled) == payload
+    assert payload["tests"].encode() in compiled
+    assert payload["commands_executed"] == []
+    assert payload["limitations"] == []
     assert events[-1]["status"] == "accepted"
     assert state[entry["node_id"]] == "accepted"
+    assert all(state.get(node.node_id) != "accepted" for node in plan.actual_worker_nodes if node.mode == "validation")
 
 
 @pytest.mark.parametrize("writer", ["direct", "atomic"])

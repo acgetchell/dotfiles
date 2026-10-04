@@ -1355,7 +1355,10 @@ def _compile_independent_native(document: dict[str, Any], native_content: bytes)
         msg = "blocked independent review requires one concrete limitation"
         raise ValueError(msg)
     if status != "blocked" and limitations:
-        msg = "accepted independent review must not contain limitations"
+        msg = (
+            "accepted independent review must not contain limitations; incomplete inspection or unresolved semantic uncertainty requires blocked status. "
+            "Record only non-blocking validation execution context in tests"
+        )
         raise ValueError(msg)
     sections = _independent_input_sections(native_content)
     node_id = _required_text(dispatch, "node_id")
@@ -3340,6 +3343,13 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
         return (
             "Perform only the dispatched repository-independent-review in fresh context. Publish the structured JSON payload from "
             "dispatch.payload_schema and its template. Supply substantive evidence and inspected_paths for each dispatched stable check_id. "
+            "Use dispatch.payload_schema.completed_example for field placement, replacing its illustrative observations with actual evidence. "
+            "Put test inspection, delegated/unexecuted validator commands, and pending hosted/platform checks in tests; put inspected source branches "
+            "and source-level platform observations in branches (or the platform adversarial check). Do not describe pending or delegated checks as passed. "
+            "commands_executed lists only commands actually run. limitations contains incomplete owned inspection, unresolved semantic uncertainty, "
+            "or unclassified caveats; any such limitation requires status=blocked. Completed inspection uses limitations=[] and status=completed "
+            "with findings, or status=no-findings without findings, even when validator-owned execution remains pending. Never hide an inspection gap "
+            "or semantic uncertainty in tests/branches to obtain acceptance. "
             "Record observed before_state/after_state and truthful mutation and command attestations. The compiler renders native headings, "
             "labels and graph identities; never supply an unperformed check or borrow other reviewers' conclusions. "
             f"Command policy: {command_policy}{persistence_text}"
@@ -3656,6 +3666,8 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
     independent_schema = _schema_reference(_INDEPENDENT_PAYLOAD_SCHEMA)
     template_path = _SCHEMA_ROOT.parent / "independent-payload-template.json"
     independent_schema["template"] = {"path": str(template_path), "digest": _file_identity_digest(str(template_path))}
+    example_path = _SCHEMA_ROOT.parent / "independent-payload-completed-example.json"
+    independent_schema["completed_example"] = {"path": str(example_path), "digest": _file_identity_digest(str(example_path))}
     catalog_path = Path(document.get("routing_catalog_path", DEFAULT_ROUTING_CATALOG)).resolve()
     if not catalog_path.is_file():
         msg = f"routing catalog does not exist: {catalog_path}"
@@ -5310,7 +5322,11 @@ def _schedule_ready_locked(document: dict[str, Any], args: argparse.Namespace) -
         dispatch_set = {**dispatch_set, "dispatches": [entries[entry["node_id"]] for entry in dispatch_set["dispatches"]], "scheduling_lineage": lineage}
         dispatch_set.pop("dispatch_set_digest")
         dispatch_set["dispatch_set_digest"] = digest_bytes(canonical_json(dispatch_set).encode())
-    lifecycle = {key: value for key, value in document.items() if key not in {"artifact_store", "worker_capacity", "creation_failure", "reserved_node_ids"}}
+    lifecycle = {
+        key: value
+        for key, value in document.items()
+        if key not in {"artifact_store", "worker_capacity", "creation_failure", "reserved_node_ids", "preflight_blocked_nodes"}
+    }
     paths = {
         "dispatches_path": str(store / "dispatches.json"),
         "lifecycle_input_path": str(store / "lifecycle.json"),
@@ -5319,7 +5335,12 @@ def _schedule_ready_locked(document: dict[str, Any], args: argparse.Namespace) -
         "current_capture_path": str(args.current_capture.resolve()),
     }
     selected_ids = [*selection["worker_node_ids"], *([coordinator_id] if coordinator_id is not None else [])]
-    schedule_input = {**lifecycle, "artifact_store": document["artifact_store"], "reserved_node_ids": selection["reserved_node_ids"]}
+    schedule_input = {
+        **lifecycle,
+        "artifact_store": document["artifact_store"],
+        "reserved_node_ids": selection["reserved_node_ids"],
+        "preflight_blocked_nodes": selection["preflight_blocked_nodes"],
+    }
     failure = selection["creation_failure"]
     if failure is not None and failure["node_id"] not in selected_ids:
         schedule_input["creation_failure"] = failure
