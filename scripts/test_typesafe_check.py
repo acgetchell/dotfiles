@@ -2,6 +2,7 @@
 
 import io
 from email.message import Message
+from http.client import BadStatusLine, IncompleteRead
 from typing import TYPE_CHECKING
 from urllib.error import HTTPError, URLError
 
@@ -84,6 +85,8 @@ def test_success_uses_injected_key_without_printing_it(monkeypatch: pytest.Monke
         b'{"models": [{"name": 123}]}',
         HTTPError(typesafe_check.MODELS_URL, 401, "private-response-marker", Message(), io.BytesIO(b"private-response-marker")),
         URLError("private-response-marker"),
+        BadStatusLine("private-response-marker"),
+        IncompleteRead(b"private-response-marker"),
     ],
 )
 def test_failures_do_not_echo_response_or_exception_details(

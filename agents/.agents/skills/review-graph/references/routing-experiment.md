@@ -23,8 +23,23 @@ just typesafe-local 'op://<vault>/<item>/<field>' \
 In a cloud environment that already supplies `TYPESAFE_API_KEY`, use
 `just review-routing-experiment --live` directly. The client honors the HTTPS
 proxy. It neither follows redirects nor persists credentials or raw responses.
-Each invocation gets a new external artifact directory. There are no automatic
-retries; a failed attempt is recorded and ordinary graph routing continues.
+Each invocation gets a new external artifact directory. Retries default to zero;
+a failed attempt is recorded and ordinary graph routing continues.
+
+Live runs reserve their worst-case budget before sending any request. Configure
+`--max-requests`, `--max-retries` (0–3 per case), `--max-input-tokens`, and
+`--max-cost-usd`; defaults are 12 attempts, zero retries, 768,000 input tokens,
+and $1. The token reservation uses the published 64,000-token request maximum,
+including every possible retry. It is not a tokenizer estimate or a smaller
+per-request context limit. Over-budget suites fail before inference. Each
+failed/interrupted attempt retains its reservation because billing may be unknown.
+`budget.json` retains limits and the dated rate card. Limits apply to one
+invocation; account for earlier invocations separately when sharing a budget.
+
+Optional retries apply only to timeouts, connection failures, rate limits, and
+HTTP 500/502/503/504, with bounded exponential waits. Every attempt has its own
+result and ledger entry. The final result never erases failed attempts. Protocol
+errors, malformed/partial answers, or a changed model are not retried.
 
 The portable skill entrypoint is
 `uv run python "$SKILLS_ROOT/review-graph/scripts/review_graph_routing_experiment.py"`.
@@ -60,18 +75,77 @@ review remain graph-owned. The packet retains catalog and skill digests, prompt
 version, exact request, baseline, labels, and response model. Baseline judgments
 and expected answers are never sent to Jev.
 
-Probabilities at or below 0.2 are provisional negatives, at or above 0.8 provisional
-positives, and others uncertain. These thresholds are uncalibrated. Incomplete
-context makes every decision uncertain, regardless of its probability. Failures
-also remain uncertain. The comparison reports disagreements and a stable 20%
-agreement sample for adjudication. Omitted labels are unknown. The pilot's sparse
-labels and frozen coordinator baseline are provisional and share an author; they
-cannot establish independent recall or cost savings.
+The primary report includes every candidate at or above
+`--inclusion-threshold` (default **0.5**) and lists selected catalog IDs and
+disagreements with known baseline decisions. It separately retains a descriptive
+probability band: at/below 0.2, at/above 0.8, or ambiguous between them. The band
+does not override the inclusion cutoff. Neither is calibrated or correctness
+evidence. Incomplete context, stale response bindings, failed or partial answers
+leave all selections unknown, including in threshold sweeps; unknown is not a
+negative selection. Failure reasons distinguish timeouts, rate limits, transport,
+protocol, and response-validation problems without exposing response text.
+
+The comparison includes a stable 20% agreement sample for adjudication. Omitted
+or null expected labels are unknown; null labels retain unresolved ownership.
+The original synthetic pilot labels and baseline share an author and remain
+provisional. Later independent labels must retain their provenance separately
+instead of rewriting the original evidence or claiming held-out accuracy.
 
 Quality counts separately compare Jev, the supplied baseline, and deterministic
 path projection alone against available labels. Unresolved required labels reduce
 the reported recall lower bound. These are partial-label pilot metrics; the path
 projection is only one component of the ordinary selector, not its full judgment.
+
+## Evaluate A Coordinator Assessment Band
+
+Use an explicit candidate policy when evaluating higher inclusion thresholds:
+
+```sh
+just review-routing-experiment --input <frozen-suite.json> --split held-out \
+  --inclusion-threshold 0.7 --coordinator-floor 0.5
+```
+
+This prepares an offline experiment. Add `--live` only for an authorized service
+run with the desired budget limits. Scores at or above 0.7 are advisory
+suggestions; scores at or above 0.5 and below 0.7 require coordinator assessment.
+The lower boundary is inclusive and the upper boundary exclusive. Other scores
+are not suggested by this experimental policy. Ordinary routing remains
+authoritative for every required reviewer, regardless of these scores.
+
+The primary selection and quality fields still report the pure inclusion cutoff.
+`coordinator_assessment` separately records the combined advisory decisions,
+pending IDs, and label-relative quality. Pending or explicitly unresolved
+coordinator decisions remain null, never negative. Unusable service evidence
+leaves every advisory decision unknown; coordinator input cannot rehabilitate a
+failed, stale, or partial response.
+
+After the call, give a fresh coordinator the frozen source, relevant skill
+context, and borderline candidate identities. Withhold expected labels and model
+probabilities until its decisions are frozen. Preserve its reads, elapsed work,
+reasoning, and unavailable token/cost measurements. The assessment JSON must copy
+the exact `packet_digest`, `result_digest`, `inclusion_threshold`, and
+`coordinator_floor` from the report's `coordinator_assessment.binding`. It must
+include `decisions` mapping every borderline ID to true, false, or null, and
+`reasons` mapping those same IDs to nonempty explanations. Extra or omitted IDs,
+changed bindings, and changed thresholds are rejected.
+
+Apply those judgments offline into a new report:
+
+```sh
+just review-routing-experiment --replay-case <saved-case> \
+  --inclusion-threshold 0.7 --coordinator-floor 0.5 \
+  --coordinator-assessment <frozen-assessment.json>
+```
+
+Changing a threshold after inspecting labels is tuning. Freeze the new policy
+before collecting fresh cases and labels, retain the original development
+results, and evaluate the candidate once on the reserved cases. Report accuracy,
+precision, missed applicable concerns, unnecessary selections, and unresolved
+labels separately. A high accuracy dominated by irrelevant candidates does not
+demonstrate useful coverage; threshold changes do not reduce the cost of already
+batched API questions. Promotion still requires evidence of complete review value.
+
+## Replay And Threshold Sweeps
 
 The report also sweeps inclusion cutoffs of 0.1, 0.2, 0.35, 0.5, 0.65, and 0.8.
 Each cutoff includes every skill at or above that probability. Compare selection
