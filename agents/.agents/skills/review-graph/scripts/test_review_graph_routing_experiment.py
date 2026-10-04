@@ -3,7 +3,9 @@
 import copy
 import io
 import json
+import sys
 from email.message import Message
+from http.client import BadStatusLine
 from pathlib import Path
 from typing import Any, Self
 from urllib.error import HTTPError, URLError
@@ -16,6 +18,7 @@ from review_graph_plan import DEFAULT_ROUTING_CATALOG, load_routing_catalog
 from review_graph_usage import finish_request, measure_call, measurements, parse_json, read_json, start_request, summarize
 
 FIXTURE = Path(__file__).parent / "fixtures" / "routing_pilot.json"
+EVALUATION_FIXTURE = Path(__file__).parent / "fixtures" / "routing_evaluation.json"
 
 
 @pytest.fixture
@@ -38,8 +41,21 @@ def test_every_leaf_is_asked_and_labels_do_not_leak(case: dict[str, Any], packet
     assert experiment.prepare(altered)["packet_digest"] != packet["packet_digest"]
 
 
+@pytest.mark.parametrize("evaluation_case", read_json(EVALUATION_FIXTURE)["cases"], ids=lambda case: case["id"])
+def test_independently_labeled_source_fixtures_prepare_offline(evaluation_case: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    def forbidden(*_args: object) -> None:
+        pytest.fail("fixture preparation must not construct an HTTP client")
+
+    monkeypatch.setattr(experiment, "build_opener", forbidden)
+    packet = experiment.prepare(evaluation_case)
+    assert set(packet["expected"]) == set(packet["request"]["questions"])
+    report = experiment.compare(packet, {"status": "not-run", "probabilities": {}})
+    assert not report["selected_catalog_ids"]
+    assert len(report["uncertain"]) == len(packet["catalog"])
+
+
 def test_multiple_skills_and_failure_never_change_execution(packet: dict[str, Any]) -> None:
-    result = {"probabilities": dict.fromkeys(packet["request"]["questions"], 0.95)}
+    result = {"status": "succeeded", "probabilities": dict.fromkeys(packet["request"]["questions"], 0.95)}
     report = experiment.compare(packet, result)
     assert all(row["jev"] == "applicable" for row in report["rows"])
     assert not report["execution_routing_changed"]
@@ -55,7 +71,7 @@ def test_incomplete_context_cannot_become_a_negative(case: dict[str, Any], scope
     case["scope"]["complete"] = scope_complete
     case["scope"]["files"][0]["complete"] = file_complete
     packet = experiment.prepare(case)
-    report = experiment.compare(packet, {"probabilities": dict.fromkeys(packet["request"]["questions"], 0.0)})
+    report = experiment.compare(packet, {"status": "succeeded", "probabilities": dict.fromkeys(packet["request"]["questions"], 0.0)})
     assert len(report["uncertain"]) == len(packet["catalog"])
 
 
@@ -274,7 +290,7 @@ def test_endpoint_redirect_is_not_followed() -> None:
 def test_threshold_sweep_is_monotone_and_includes_half(packet: dict[str, Any]) -> None:
     probabilities = dict.fromkeys(packet["request"]["questions"], 0.0)
     probabilities.update({"python.scientific": 0.5, "python.parse": 0.499})
-    rows = experiment.threshold_sweep(packet, {"probabilities": probabilities})
+    rows = experiment.threshold_sweep(packet, {"status": "succeeded", "probabilities": probabilities})
     assert [row["selected_count"] for row in rows] == sorted([row["selected_count"] for row in rows], reverse=True)
     half = next(row for row in rows if row["include_at_or_above"] == 0.5)
     assert half["selected_count"] == 1
@@ -295,3 +311,278 @@ def test_replay_detects_modified_packet_and_makes_no_network_request(case: dict[
     (directory / "packet.json").write_text(json.dumps(packet))
     with pytest.raises(ValueError, match="digest mismatch"):
         experiment.replay_case(directory)
+
+
+def test_primary_cutoff_reports_selected_ids_and_disagreements(packet: dict[str, Any]) -> None:
+    probabilities = dict.fromkeys(packet["request"]["questions"], 0.0)
+    probabilities.update({"python.scientific": 0.5, "python.parse": 0.499, "python.cli": 0.6})
+    report = experiment.compare(packet, {"status": "succeeded", "probabilities": probabilities})
+    assert set(report["selected_catalog_ids"]) == {"python.scientific", "python.cli"}
+    assert set(report["disagreements"]) == {"python.parse", "python.cli"}
+    row = next(row for row in report["rows"] if row["catalog_id"] == "python.scientific")
+    assert row["selected"] is True
+    assert row["probability_band"] == "ambiguous"
+    assert report["thresholds"]["calibrated"] is False
+
+
+def test_borderline_assessment_is_explicit_bound_and_advisory(packet: dict[str, Any]) -> None:
+    probabilities = dict.fromkeys(packet["request"]["questions"], 0.0)
+    probabilities.update({"python.scientific": 0.7, "python.parse": 0.5, "python.cli": 0.699, "repo.tooling": 0.499})
+    result = {"status": "succeeded", "probabilities": probabilities, "request_digest": packet["request_digest"], "response_model": experiment.MODEL}
+    result["result_digest"] = experiment.digest(result)
+    original = copy.deepcopy(packet)
+    pending = experiment.compare(packet, result, inclusion_threshold=0.7, coordinator_floor=0.5)
+    triage = pending["coordinator_assessment"]
+    assert pending["selected_catalog_ids"] == ["python.scientific"]
+    assert triage["borderline_catalog_ids"] == ["python.cli", "python.parse"]
+    assert triage["pending_catalog_ids"] == triage["borderline_catalog_ids"]
+    assert triage["quality"]["unresolved_positive"] == 1
+    assert triage["quality"]["false_negative"] == 0
+    assessment: dict[str, Any] = {
+        **triage["binding"],
+        "decisions": {"python.parse": True, "python.cli": False},
+        "reasons": {"python.parse": "Input values become a validated domain value.", "python.cli": "No application CLI contract is owned."},
+    }
+    accepted = experiment.compare(packet, result, inclusion_threshold=0.7, coordinator_floor=0.5, assessment=assessment)
+    assert set(accepted["coordinator_assessment"]["selected_catalog_ids"]) == {"python.scientific", "python.parse"}
+    assert accepted["coordinator_assessment"]["pending_catalog_ids"] == []
+    assert not accepted["execution_routing_changed"]
+    assert not accepted["promotion_allowed"]
+    assert packet == original
+    for key in triage["binding"]:
+        stale = {**assessment, key: "wrong-binding"}
+        with pytest.raises(ValueError, match="stale"):
+            experiment.compare(packet, result, inclusion_threshold=0.7, coordinator_floor=0.5, assessment=stale)
+    assessment["decisions"] = {"python.parse": None, "python.cli": False}
+    unresolved = experiment.compare(packet, result, inclusion_threshold=0.7, coordinator_floor=0.5, assessment=assessment)
+    assert unresolved["coordinator_assessment"]["pending_catalog_ids"] == ["python.parse"]
+    assert unresolved["coordinator_assessment"]["quality"]["unresolved_positive"] == 1
+    result["probabilities"]["python.parse"] = 0.6
+    with pytest.raises(ValueError, match="stale"):
+        experiment.compare(packet, result, inclusion_threshold=0.7, coordinator_floor=0.5, assessment=assessment)
+
+
+@pytest.mark.parametrize("floor", [-0.1, 0.7, 0.8, float("nan"), float("inf")])
+def test_invalid_coordinator_band_rejects_before_network_or_artifacts(case: dict[str, Any], tmp_path: Path, floor: float) -> None:
+    output = tmp_path / "not-created"
+    with pytest.raises(ValueError, match="policy"):
+        experiment.run_case(case, output, live=True, policy={"inclusion_threshold": 0.7, "coordinator_floor": floor})
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("kind", ["missing", "extra", "invalid-decision", "missing-reason", "empty-reason"])
+def test_coordinator_cannot_silently_omit_or_expand_assessment(packet: dict[str, Any], kind: str) -> None:
+    result = {
+        "status": "succeeded",
+        "probabilities": dict.fromkeys(packet["request"]["questions"], 0.0),
+        "request_digest": packet["request_digest"],
+        "response_model": experiment.MODEL,
+    }
+    result["probabilities"]["python.parse"] = 0.6
+    result["result_digest"] = experiment.digest(result)
+    binding = experiment.compare(packet, result, inclusion_threshold=0.7, coordinator_floor=0.5)["coordinator_assessment"]["binding"]
+    assessment: dict[str, Any] = {**binding, "decisions": {"python.parse": True}, "reasons": {"python.parse": "Boundary parser is owned."}}
+    if kind == "missing":
+        assessment["decisions"].clear()
+    elif kind == "extra":
+        assessment["decisions"]["python.cli"] = True
+    elif kind == "invalid-decision":
+        assessment["decisions"] = {"python.parse": "yes"}
+    elif kind == "missing-reason":
+        assessment["reasons"].clear()
+    else:
+        assessment["reasons"]["python.parse"] = " "
+    with pytest.raises(ValueError, match=r"coordinator|decisions"):
+        experiment.compare(packet, result, inclusion_threshold=0.7, coordinator_floor=0.5, assessment=assessment)
+
+
+def test_cli_replays_bound_coordinator_assessment_without_network(packet: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    saved = tmp_path / "saved"
+    saved.mkdir()
+    experiment.write_json(saved / "packet.json", packet)
+    probabilities = dict.fromkeys(packet["request"]["questions"], 0.0)
+    probabilities.update({"python.scientific": 0.7, "python.parse": 0.56})
+    result = {"status": "succeeded", "probabilities": probabilities, "request_digest": packet["request_digest"], "response_model": experiment.MODEL}
+    result["result_digest"] = experiment.digest(result)
+    experiment.write_json(saved / "result.json", result)
+    assessment_path = tmp_path / "assessment.json"
+    experiment.write_json(
+        assessment_path,
+        {
+            "packet_digest": packet["packet_digest"],
+            "result_digest": result["result_digest"],
+            "inclusion_threshold": 0.7,
+            "coordinator_floor": 0.5,
+            "decisions": {"python.parse": True},
+            "reasons": {"python.parse": "The owned input parser needs a boundary review."},
+        },
+    )
+
+    def forbidden(*_args: object) -> None:
+        pytest.fail("replaying an assessment must not construct an HTTP client")
+
+    monkeypatch.setattr(experiment, "build_opener", forbidden)
+    output = tmp_path / "replayed"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "routing-experiment",
+            "--replay-case",
+            str(saved),
+            "--output-dir",
+            str(output),
+            "--inclusion-threshold",
+            "0.7",
+            "--coordinator-floor",
+            "0.5",
+            "--coordinator-assessment",
+            str(assessment_path),
+        ],
+    )
+    assert experiment.main() == 0
+    report = read_json(output / "comparison.json")
+    assert report["new_api_requests"] == 0
+    assert report["selected_catalog_ids"] == ["python.scientific"]
+    assert set(report["coordinator_assessment"]["selected_catalog_ids"]) == {"python.scientific", "python.parse"}
+    assert report["coordinator_assessment"]["pending_catalog_ids"] == []
+    assert not (output / "usage.jsonl").exists()
+
+
+@pytest.mark.parametrize("failure", ["failed", "cancelled", "not-run", "partial", "stale", "model"])
+def test_unusable_evidence_never_supplies_selections_or_sweep_negatives(packet: dict[str, Any], failure: str) -> None:
+    result = {"status": "succeeded", "probabilities": dict.fromkeys(packet["request"]["questions"], 0.99)}
+    if failure == "partial":
+        result["probabilities"].pop(next(iter(result["probabilities"])))
+    elif failure == "stale":
+        result["request_digest"] = "changed-source-request"
+    elif failure == "model":
+        result["response_model"] = "jev-0.0.0"
+    else:
+        result["status"] = failure
+    original = copy.deepcopy(packet)
+    report = experiment.compare(packet, result, inclusion_threshold=0.7, coordinator_floor=0.5)
+    assert packet == original
+    assert not report["selected_catalog_ids"]
+    assert not report["disagreements"]
+    assert len(report["uncertain"]) == len(packet["catalog"])
+    assert all(row["unknown_count"] == len(packet["catalog"]) for row in report["inclusion_threshold_sweep"])
+    assert len(report["coordinator_assessment"]["unknown_catalog_ids"]) == len(packet["catalog"])
+    assert report["coordinator_assessment"]["selected_catalog_ids"] == []
+
+
+def test_no_match_and_unresolved_ownership_labels_remain_distinct(packet: dict[str, Any]) -> None:
+    packet["expected"] = {"python.parse": None, "python.cli": False}
+    report = experiment.compare(packet, {"status": "succeeded", "probabilities": dict.fromkeys(packet["request"]["questions"], 0.0)})
+    assert report["selected_catalog_ids"] == []
+    assert report["quality_by_method"]["jev"]["unresolved_labels"] == 1
+    assert report["quality_by_method"]["jev"]["true_negative"] == 1
+
+
+@pytest.mark.parametrize(
+    ("error", "reason"),
+    [
+        (TimeoutError("secret-response"), "timeout"),
+        (URLError(TimeoutError("secret-response")), "timeout"),
+        (BadStatusLine("secret-response"), "protocol-error"),
+        (HTTPError(experiment.ENDPOINT, 429, "secret-response", Message(), io.BytesIO(b"secret-response")), "rate-limited"),
+    ],
+)
+def test_explicit_failure_reasons_remain_redacted(
+    packet: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: Exception, reason: str
+) -> None:
+    monkeypatch.setenv("TYPESAFE_API_KEY", "fixture-key")
+
+    class Opener:
+        def open(self, *_args: object, **_kwargs: object) -> None:
+            raise error
+
+    monkeypatch.setattr(experiment, "build_opener", lambda *_: Opener())
+    result = experiment.call_jev(packet, tmp_path / "usage.jsonl")
+    assert result["error"] == reason
+    assert not experiment.compare(packet, result)["selected_catalog_ids"]
+    assert "secret-response" not in json.dumps(result) + (tmp_path / "usage.jsonl").read_text()
+
+
+@pytest.mark.parametrize(
+    "limit", [{"max_requests": 1}, {"max_input_tokens": 127_999}, {"max_cost_usd": 0.005}, {"max_retries": -1}, {"max_cost_usd": float("nan")}]
+)
+def test_budget_reserves_all_attempts_including_unknown_failures(limit: dict[str, Any]) -> None:
+    policy: dict[str, Any] = {"cases": 2, "max_requests": 2, "max_retries": 0, "max_input_tokens": 128_000, "max_cost_usd": 1.0}
+    with pytest.raises(ValueError, match=r"budget|limit|retr"):
+        experiment.budget_manifest(**(policy | limit))
+    budget = experiment.budget_manifest(**policy)
+    assert budget["reserved_requests"] == 2
+    assert budget["reserved_cost_usd"] == pytest.approx(0.005376)
+
+
+def test_retry_is_bounded_and_each_attempt_is_retained(case: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TYPESAFE_API_KEY", "fixture-key")
+    calls = []
+
+    class Opener:
+        def open(self, *_args: object, **_kwargs: object) -> None:
+            calls.append(1)
+            raise TimeoutError
+
+    monkeypatch.setattr(experiment, "build_opener", lambda *_: Opener())
+    monkeypatch.setattr(experiment.time, "sleep", lambda _: None)
+    output = tmp_path / "retry"
+    experiment.run_case(case, output, live=True, policy={"max_retries": 1})
+    assert len(calls) == 2
+    assert len(list(output.glob("attempt-*.json"))) == 2
+    assert summarize([output / "usage.jsonl"])["groups"][0]["unknown_cost_attempts"] == 2
+    assert read_json(output / "result.json")["retries"] == 1
+
+
+def test_cli_budget_rejection_precedes_all_network_and_output_creation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def forbidden(*_args: object) -> None:
+        pytest.fail("budget rejection must precede network access")
+
+    monkeypatch.setattr(experiment, "build_opener", forbidden)
+    output = tmp_path / "uncreated"
+    monkeypatch.setattr(experiment.sys, "argv", ["experiment", "--live", "--max-requests", "0", "--output-dir", str(output)])
+    assert experiment.main() == 2
+    assert not output.exists()
+
+
+def test_retry_success_does_not_hide_unknown_earlier_cost(case: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TYPESAFE_API_KEY", "fixture-key")
+    case["baseline"]["usage"] = {"cost_usd": 0.1, "cost_basis": "measured", "measurement_source": "fixture"}
+    calls = []
+
+    class Opener:
+        def open(self, request: Any, **_kwargs: object) -> Response:
+            calls.append(1)
+            if len(calls) == 1:
+                raise TimeoutError
+            body = json.loads(request.data)
+            return Response(
+                {"model": experiment.MODEL, "answers": {k: {"type": "noul", "noul": 0.9} for k in body["questions"]}, "usage": {"input_tokens": 1000}}
+            )
+
+    monkeypatch.setattr(experiment, "build_opener", lambda *_: Opener())
+    monkeypatch.setattr(experiment.time, "sleep", lambda _: None)
+    output = tmp_path / "retry-success"
+    experiment.run_case(case, output, live=True, policy={"max_retries": 1})
+    report = read_json(output / "comparison.json")
+    assert report["accounting"]["groups"][0]["unknown_cost_attempts"] == 1
+    assert not report["cost_comparison_complete"]
+
+
+def test_failed_shadow_run_preserves_the_normal_plan_and_required_coverage(case: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    plan = {
+        "routing_catalog_closed": True,
+        "routing_decisions": [{"catalog_id": "python.scientific", "disposition": "selected"}],
+        "required_node_ids": ["scientific", "independent", "validation", "synthesis"],
+        "routing_overrides": [],
+    }
+    original = copy.deepcopy(plan)
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    summary = experiment.run_case(case, tmp_path / "failure", live=True, plan=plan)
+    assert summary["status"] == "failed"
+    assert plan == original
+    report = read_json(tmp_path / "failure" / "comparison.json")
+    assert report["baseline_selected_catalog_ids"] == ["python.scientific"]
+    assert not report["execution_routing_changed"]
+    assert not report["promotion_allowed"]

@@ -3,6 +3,7 @@
 import json
 import os
 import sys
+from http.client import HTTPException
 from typing import TYPE_CHECKING, override
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -61,7 +62,8 @@ def main() -> int:
         print(f"TypeSafe authentication check failed (HTTP {error.code}); response details withheld.", file=sys.stderr)
         error.close()
         return 1
-    except URLError, OSError:
+    # Semgrep 1.178 requires parentheses for three or more exception types.
+    except (URLError, OSError, HTTPException):  # fmt: skip
         print("Could not connect to TypeSafe; check network access, certificates, and proxy settings.", file=sys.stderr)
         return 1
     except TypeError, ValueError:

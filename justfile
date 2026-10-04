@@ -9,7 +9,7 @@ python_fixture_paths := "tests/semgrep"
 python_primary_paths := "agents/.agents/skills scripts"
 cargo_update_version := "22.1.1"
 cargo_version_pattern := '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?'
-dprint_version := "0.59.0"
+dprint_version := "0.60.1"
 just_version := "1.58.0"
 rumdl_version := "0.2.78"
 # Bootstrap without Python; pyproject.toml is the single uv pin authority.
