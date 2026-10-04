@@ -37,8 +37,21 @@ Return `compact-independent-review` JSON matching
 `dispatch.adversarial_check_ids` entry, supply `{check_id, evidence, inspected_paths}`
 with substantive observations. Stable IDs are `fallback`, `platform`,
 `parser-errors`, `unexpected-exceptions`, and `test-boundaries`; only dispatched
-checks are required. Do not invent checks or observations. Return `blocked` with
-limitations when inspection is incomplete.
+checks are required. Do not invent checks or observations.
+
+Record test inspection, delegated or unexecuted validator commands, and pending
+hosted/platform checks in `tests`. Record inspected source branches and
+source-level platform observations in `branches` or the `platform` adversarial
+check. List only commands actually run in `commands_executed`. Pending validation
+does not imply passed checks or incomplete source inspection.
+
+Reserve `limitations` for incomplete owned inspection, unresolved semantic
+uncertainty, and unclassified caveats; these require `status: blocked`. Do not
+move those blockers into `tests` or `branches`. When inspection is complete,
+use `limitations: []` with `completed` if there are findings, or `no-findings`
+otherwise. The digest-bound `dispatch.payload_schema.completed_example` shows
+delegated validation and pending hosted checks in a schema-valid completed
+payload. Its observations are illustrative; replace them with actual evidence.
 
 Publish once through the dispatch's `publish_command` and return its receipt.
 The compiler validates substantive evidence fields before publication, renders

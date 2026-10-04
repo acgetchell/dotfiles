@@ -28,10 +28,22 @@ explicitly canceled reservations. Journal-bound started/accepted work drops out
 automatically. Refresh capacity in a new request each time; the generated input
 omits the prior snapshot rather than assuming it remains current.
 
+Use `preflight_blocked_nodes` for unstarted validators whose execution preflight
+is blocked. These holds persist in the continuation and receipt, consume no
+capacity, and keep independent audits eligible. They cannot overlap reservations.
+See [validation preflight](validation-preflight.md) for release and recovery.
+
 A reservation is not a creation receipt: append `in-flight` only after a worker
 actually starts, or immediately before the selected coordinator audit starts.
-At most one coordinator lane runs. Validators, syntheses, and fixes remain
-serialized; when no work is active and host slots remain full, they may execute
+At most one coordinator lane runs. Dependency-ready, read-only syntheses share
+available worker slots with other read-only nodes. Each surface synthesis waits
+for its own predecessors; repository synthesis waits for every required surface
+result. Reservations and in-flight syntheses consume capacity without a shared
+execution lock. Their bound payloads and journal acceptance retain the ordinary
+provenance checks.
+
+Validators and fixes remain serialized against all other work. When no work is
+active and host slots remain full, synthesis, validation, or fixes may execute
 on the coordinator too. Independent review stays on a worker.
 
 Scheduling preserves every node, dependency, command policy, source identity,

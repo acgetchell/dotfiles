@@ -63,6 +63,7 @@ def stage_receipt(operation: str, output_path: Path, output: dict[str, Any]) -> 
         "worker_node_ids",
         "reserved_node_ids",
         "deferred_node_ids",
+        "preflight_blocked_nodes",
         "creation_failure_action",
         "retry_after_seconds",
         "node_counts",

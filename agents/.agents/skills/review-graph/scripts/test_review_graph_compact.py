@@ -171,6 +171,18 @@ def test_bad_independent_evidence_cannot_replace_published_payload(materialized:
     assert target.read_bytes() == before
 
 
+@pytest.mark.parametrize(("field", "value"), [("files_inspected", []), ("limitations", ["The inspected fallback contract remains semantically unresolved."])])
+def test_incomplete_independent_inspection_blocks_publication_and_compilation(materialized: dict[str, Any], field: str, value: list[str]) -> None:
+    entry = _independent_entry(materialized)
+    payload = {**_compact_independent_payload(entry["dispatch"]), field: value}
+    with pytest.raises(ValueError, match=r"files_inspected|limitations"):
+        _publish(entry, payload)
+    assert not Path(entry["worker_payload_path"]).exists()
+    dispatch = {**entry["dispatch"], "before_state": materialized["source_state"], "after_state": materialized["source_state"]}
+    with pytest.raises(ValueError, match=r"files_inspected|limitations"):
+        runtime.compile_independent_payload({"dispatch": dispatch, "payload": payload})
+
+
 @pytest.mark.parametrize("findings", [[], [{"severity": "urgent", "summary": "Missing evidence must not be synthesized."}]])
 def test_invalid_completed_findings_cannot_replace_published_payload(materialized: dict[str, Any], findings: list[dict[str, str]]) -> None:
     entry = _independent_entry(materialized)

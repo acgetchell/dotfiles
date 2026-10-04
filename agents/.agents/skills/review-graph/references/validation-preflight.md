@@ -28,3 +28,15 @@ findings. Resolve blockers or preserve blocked evidence and continue independent
 authorized audits. The preflight report is not validation evidence and cannot
 make a failed or blocked attempt pass. Keep its report beside the immutable
 attempt and follow the runtime's continuation configuration after recovery.
+
+For an unstarted grouped/mixed validator blocked by preflight, add
+`preflight_blocked_nodes: [{"node_id": "<validator node>", "reason": "<concrete preflight blocker>"}]`
+to `schedule-ready`. This holds execution without reserving a worker or taking
+the serial lane, so authorized audits can continue. Do not put a held validator
+in `reserved_node_ids`, append `in-flight`, or claim validation evidence.
+The compact receipt and `schedule_input_path` preserve the hold and reason.
+After resolving the blocker and rerunning preflight, explicitly remove that
+entry from a new scheduling request. The validator then becomes eligible;
+dependent synthesis and final proof still require its accepted evidence.
+Already-started or compiled blocked attempts use the recovery workflow in
+[state transitions](state-transitions.md).

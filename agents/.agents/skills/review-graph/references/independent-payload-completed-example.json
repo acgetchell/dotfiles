@@ -1,0 +1,32 @@
+{
+  "status": "completed",
+  "files_inspected": ["src/parser.py", "tests/test_parser.py"],
+  "branches": "Illustrative inspection: traced integer parsing, suffix rejection, and the shared platform-independent return path.",
+  "boundary_cases": "Illustrative inspection: checked empty input, a valid integer, and an integer followed by a suffix.",
+  "tests": "Illustrative inspection: read parser tests. The planned aggregate was not executed by this reviewer; execution is delegated to the separate validator. Hosted Linux, macOS, and Windows checks remain pending. No execution result is claimed.",
+  "findings": [{
+    "severity": "P2",
+    "location": "src/parser.py:12",
+    "summary": "Illustrative finding: parser accepts an unexpected suffix.",
+    "evidence": "The example parser returns the integer prefix without checking the remaining characters.",
+    "impact": "Malformed input can be accepted as a valid integer.",
+    "owner": "python.parse",
+    "remediation": "Require the parser to consume the entire input and cover the suffix case."
+  }],
+  "no_finding_evidence": [],
+  "adversarial_checks": [
+    {"check_id": "fallback", "evidence": "Illustrative observation: this parser has no external fallback.", "inspected_paths": ["src/parser.py"]},
+    {"check_id": "platform", "evidence": "Illustrative observation: the inspected parser has no platform-specific branches; hosted execution remains pending as recorded in tests.", "inspected_paths": ["src/parser.py"]},
+    {"check_id": "parser-errors", "evidence": "Illustrative observation: empty input rejects, but the suffix branch returns a prefix; reported above.", "inspected_paths": ["src/parser.py"]},
+    {"check_id": "unexpected-exceptions", "evidence": "Illustrative observation: conversion errors propagate without a broad catch.", "inspected_paths": ["src/parser.py"]},
+    {"check_id": "test-boundaries", "evidence": "Illustrative observation: the tests cover empty and valid input but omit the suffix case.", "inspected_paths": ["tests/test_parser.py"]}
+  ],
+  "handoffs": [],
+  "before_state": ["EXAMPLE_SCOPE_FROM_CAPTURE", "EXAMPLE_WORKTREE_FROM_CAPTURE", "EXAMPLE_REPOSITORY_FROM_CAPTURE"],
+  "after_state": ["EXAMPLE_SCOPE_FROM_CAPTURE", "EXAMPLE_WORKTREE_FROM_CAPTURE", "EXAMPLE_REPOSITORY_FROM_CAPTURE"],
+  "source_mutated": false,
+  "git_mutated": false,
+  "command_policy_attested": true,
+  "commands_executed": [],
+  "limitations": []
+}
