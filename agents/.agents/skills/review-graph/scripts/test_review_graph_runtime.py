@@ -1946,7 +1946,7 @@ def test_routing_projection_is_complete_compact_and_hashed() -> None:
     assert projection["projection_digest"].startswith("sha256:")
 
 
-def test_routing_regression_fixtures_enforce_guarded_docs_and_scripts_test_paths() -> None:
+def test_routing_regression_fixtures_enforce_selected_and_excluded_ownership() -> None:
     fixture = Path(__file__).with_name("fixtures") / "routing_regressions.json"
     cases = json.loads(fixture.read_text(encoding="utf-8"))["cases"]
 
@@ -1957,6 +1957,88 @@ def test_routing_regression_fixtures_enforce_guarded_docs_and_scripts_test_paths
         projected = {entry["catalog_id"]: entry for entry in projection["entries"]}
         for catalog_id, expected_matches in case["expected_matches"].items():
             assert projected[catalog_id]["matched_paths"] == expected_matches, case["id"]
+        catalog = load_routing_catalog(ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
+        decisions = expand_compact_routing(catalog, consulted_routers=case["consulted_routers"], captured_paths=case["paths"], overrides=[])
+        decisions_by_id = {decision.catalog_id: decision for decision in decisions}
+        # Projection fixtures deliberately consult extra routers to test exclusions.
+        assert set(decisions_by_id) == {entry.catalog_id for entry in catalog if entry.router_id in case["consulted_routers"]}
+        for catalog_id, expected_matches in case["expected_matches"].items():
+            decision = decisions_by_id[catalog_id]
+            assert decision.review_surface == tuple(expected_matches), case["id"]
+            assert decision.disposition == ("selected" if expected_matches else "not-applicable"), case["id"]
+
+
+@pytest.mark.parametrize(
+    ("paths", "router"),
+    [
+        (["justfile", "README.md"], "docs-review-orchestrator"),
+        (["justfile", "CMakePresets.json"], "cpp-review-orchestrator"),
+        (["tooling/examples.toml", "README.md"], "docs-review-orchestrator"),
+    ],
+)
+@pytest.mark.parametrize("explicit_scope", [False, True])
+def test_tooling_scope_combines_classifier_and_projection_unless_overridden(paths: list[str], router: str, explicit_scope: bool) -> None:
+    catalog = load_routing_catalog(ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
+    reason = "Targeted tooling scope; shared contracts have their own selected specialist"
+    overrides = (
+        [{"catalog_id": "repo.tooling", "disposition": "selected", "reason": reason, "applicability_evidence": [reason], "review_surface": paths[:1]}]
+        if explicit_scope
+        else []
+    )
+    routers = ["review-graph", router]
+    decisions = expand_compact_routing(catalog, consulted_routers=routers, captured_paths=paths, overrides=overrides)
+    tooling = next(decision for decision in decisions if decision.catalog_id == "repo.tooling")
+    expected = paths[:1] if explicit_scope else paths
+    assert tooling.disposition == "selected"
+    assert set(tooling.review_surface) == set(expected)
+    assert len(tooling.review_surface) == len(expected)
+    assert validate_routing_ledger(catalog, decisions, consulted_routers=routers).feasible
+
+
+@pytest.mark.parametrize(
+    ("catalog_id", "path", "reason"),
+    [
+        ("python.cli", "tests/fixtures/generate_ess.py", "Fixture utility exposes substantial argument validation and a versioned JSON output contract"),
+        (
+            "docs.scientific-software",
+            "benches/diagnostic_backends/Cargo.lock",
+            "Changed numerical backend dependency is evidence for a documented precision claim",
+        ),
+    ],
+)
+def test_projection_exclusions_preserve_semantic_overrides(catalog_id: str, path: str, reason: str) -> None:
+    catalog = load_routing_catalog(ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
+    language_router = "python-review-orchestrator" if path.endswith(".py") else "rust-review-orchestrator"
+    routers = ["review-graph", language_router, "docs-review-orchestrator"]
+    decisions = expand_compact_routing(
+        catalog,
+        consulted_routers=routers,
+        captured_paths=[path, "README.md"],
+        overrides=[{"catalog_id": catalog_id, "disposition": "selected", "reason": reason, "applicability_evidence": [reason], "review_surface": [path]}],
+    )
+    decision = next(item for item in decisions if item.catalog_id == catalog_id)
+    assert decision.disposition == "selected"
+    assert decision.review_surface == (path,)
+    assert validate_routing_ledger(catalog, decisions, consulted_routers=routers).feasible
+
+
+@pytest.mark.parametrize("document", [[], None, True, 123, "catalog"])
+def test_catalog_rejects_non_object_root(document: object, tmp_path: Path) -> None:
+    path = tmp_path / "catalog.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    with pytest.raises(ValueError, match="routing catalog must be an object"):
+        load_routing_catalog(path, skill_roots=(SKILL_ROOT,))
+
+
+@pytest.mark.parametrize("patterns", ["**/*.lock", [""], [None], [123], {}])
+@pytest.mark.parametrize("field", ["path_patterns", "excluded_path_patterns"])
+def test_catalog_rejects_malformed_projection_patterns(patterns: object, field: str, tmp_path: Path) -> None:
+    document = json.loads(ROUTING_CATALOG.read_text(encoding="utf-8"))
+    document["entries"][0][field] = patterns
+    path = tmp_path / "catalog.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    with pytest.raises(ValueError, match=field):
+        load_routing_catalog(path, skill_roots=(SKILL_ROOT,))
 
 
 def test_baseline_plan_assigns_references_markdown_to_citation_audit() -> None:

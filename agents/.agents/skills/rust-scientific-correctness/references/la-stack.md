@@ -1,6 +1,6 @@
 # la-stack Scientific Correctness
 
-Use this reference when applying `rust-scientific-correctness` to `la-stack` or closely related fixed-size linear-algebra code. Read the repository's `AGENTS.md`, limitations, API documentation, and benchmark guidance first; they override stale details here.
+Use this reference when applying `rust-scientific-correctness` to `la-stack` or closely related fixed-size linear-algebra code. Always read applicable `AGENTS.md`, required reviewer guidance, and the assumptions, limitations, and API contracts for the reviewed operation; current repository contracts override stale details here. Load benchmark guidance when reviewing benchmark workloads, comparisons, or performance claims. Load exact-conversion, factorization, or error-bound background when the changed operation or a nearby dependency owns that contract. Trace shared arithmetic helpers and broaden context when their effect on other operations is uncertain; retain the complete scientific checklist and independent evidence.
 
 ## Scientific Contracts
 

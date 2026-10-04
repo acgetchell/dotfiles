@@ -87,7 +87,13 @@ Check:
 Keep fast local checks, full CI, slow/performance checks, release checks, and fixers distinct. Do not make every local workflow run the slowest path unless the repository explicitly wants that.
 
 Treat each aggregate recipe as a set of underlying validators and test
-selections. Do not run overlapping tiers in sequence when they would replay
+selections, with an execution order. Check for avoidable late static failures
+before expensive execution, preserving prerequisites and coalescing; see the
+[Justfile example](references/justfile.md#fail-fast-dependency-order).
+Fix canonical recipes; dispatched workers must not add out-of-scope checks or
+reorder validator-owned commands.
+
+Do not run overlapping tiers in sequence when they would replay
 tests whose source/build/configuration state has not changed. Choose the
 broader tier initially or add only the evidence missing from completed focused
 checks. Post-fix reruns, materially different configurations, nondeterminism

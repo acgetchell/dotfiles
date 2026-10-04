@@ -1,6 +1,12 @@
 {
   "cases": [
     {
+      "id": "declarative-tooling-config-only",
+      "mode": "branch",
+      "paths": ["tooling/examples.toml", "tooling/notebooks/expectations.toml"],
+      "expected_surfaces": ["tooling"]
+    },
+    {
       "id": "rust-source-api-tests",
       "mode": "branch",
       "paths": ["src/lib.rs", "tests/api.rs"],

@@ -1,9 +1,10 @@
 # Compact Review Routing Handoff
 
 Use this compatibility reference when a surface orchestrator is explicitly
-asked for `graph-routing`. New `review-graph` execution normally reads the
-surface's `references/check-routing.md` directly and sends sparse semantic
-overrides to the planner.
+asked for `graph-routing`. Normal `review-graph` execution uses
+`routing-projection` and sends sparse semantic overrides to the planner. Read a
+surface's `references/check-routing.md` only when the projection leaves shared
+ownership or applicability ambiguous.
 
 ## Contract
 
@@ -44,6 +45,8 @@ The planner:
 
 - applies the conservative repository classifier
 - selects every projection-matched leaf unless explicitly overridden
+- applies catalog `excluded_path_patterns` to default projection matches only;
+  semantic overrides can still select an excluded path with concrete evidence
 - selects required repository and consulted-surface syntheses
 - selects independent review for a concrete change target
 - expands unmatched, untriggered omissions to `not-applicable`
