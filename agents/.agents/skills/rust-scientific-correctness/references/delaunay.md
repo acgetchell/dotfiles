@@ -1,6 +1,6 @@
 # delaunay Scientific Correctness
 
-Use this reference when applying `rust-scientific-correctness` to `delaunay` or closely related computational-geometry code. Read `AGENTS.md`, current limitations, and the geometry, topology, invariant, and validation documentation first; they override stale details here.
+Use this reference when applying `rust-scientific-correctness` to `delaunay` or closely related computational-geometry code. Always read applicable `AGENTS.md`, required reviewer guidance, and current assumptions and limitations for the reviewed model; current repository contracts override stale details here. Select geometry and predicate background for numerical/backend changes, topology and invariant background for connectivity or mutation changes, and validation-layer documentation for changed validation claims or their dependencies. Shared predicates, repair paths, or unclear layer boundaries require broader context. Retain the complete scientific checklist and independent evidence for every applicable layer.
 
 ## Scientific Contracts
 

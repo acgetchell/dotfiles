@@ -34,7 +34,7 @@ When these concerns conflict, preserve the scientific contract before optimizing
 
 ## Crate Guidance
 
-Read repository-local instructions, public documentation, limitations, and current source first. Use them to establish the active contract; when they disagree, report a scientific-contract inconsistency rather than choosing one silently. Load only the matching crate reference, or the smallest set needed for an explicit cross-crate review:
+Read applicable `AGENTS.md`, required reviewer guidance, and scientific assumptions for the reviewed contracts first. Select documentation, limitations, and source by changed contracts and nearby invariant owners. Report conflicting contracts rather than silently choosing one. Load only the matching crate reference, or the smallest set needed for an explicit cross-crate review:
 
 - [`references/la-stack.md`](references/la-stack.md) for fixed-size linear algebra, determinant and solve paths, exact arithmetic, conversions, and numerical error contracts
 - [`references/delaunay.md`](references/delaunay.md) for robust predicates, validation layers, geometric backends, topology, degeneracy, construction, and repair
@@ -42,6 +42,8 @@ Read repository-local instructions, public documentation, limitations, and curre
 - [`references/causal-triangulations.md`](references/causal-triangulations.md) for CDT foliation, topology, local moves, action conventions, ensembles, and simulation claims
 
 When no reference matches, apply the portable workflow below and derive concrete invariants from the target repository. Keep API names, supported dimensions, model identities, fixture expectations, and repository commands in crate guidance rather than generalizing them here.
+
+Select background without narrowing the checklist or independent-evidence requirements. Trace shared helpers, callers, and changed assumptions; broaden reads when contract boundaries are unclear and record why. Use the [fixture procedure](references/context-selection-fixtures.md) only when testing background-selection instructions.
 
 ## Scope And Review Mode
 

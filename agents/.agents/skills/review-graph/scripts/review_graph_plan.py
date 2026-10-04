@@ -241,6 +241,7 @@ class RoutingCatalogEntry:
     path_patterns: tuple[str, ...] = ()
     classifier_guarded_path_patterns: tuple[tuple[str, tuple[str, ...]], ...] = ()
     semantic_triggers: tuple[str, ...] = ()
+    excluded_path_patterns: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1132,11 +1133,19 @@ def _resolve_checked_skill_path(raw_path: str, skill_id: str, skill_roots: Seque
     return resolved
 
 
+def _catalog_path_patterns(raw: Mapping[str, Any], key: str) -> tuple[str, ...]:
+    patterns = raw.get(key, [])
+    if not isinstance(patterns, list) or any(not isinstance(pattern, str) or not pattern for pattern in patterns):
+        msg = f"{key} must be an array of non-empty path patterns"
+        raise ValueError(msg)
+    return tuple(str(pattern) for pattern in patterns)
+
+
 def load_routing_catalog(path: Path, *, skill_roots: Sequence[Path] = (DEFAULT_SKILL_ROOT,)) -> tuple[RoutingCatalogEntry, ...]:
     """Load and validate the portable machine-readable routing catalog."""
     document = json.loads(path.read_text(encoding="utf-8"))
-    if document.get("version") != 1 or not isinstance(document.get("entries"), list):
-        msg = "routing catalog must have version 1 and an entries list"
+    if not isinstance(document, Mapping) or document.get("version") != 1 or not isinstance(document.get("entries"), list):
+        msg = "routing catalog must be an object with version 1 and an entries list"
         raise ValueError(msg)
     entries: list[RoutingCatalogEntry] = []
     for raw in document["entries"]:
@@ -1175,9 +1184,10 @@ def load_routing_catalog(path: Path, *, skill_roots: Sequence[Path] = (DEFAULT_S
             default_priority=str(raw["default_priority"]),
             synthesis_dependency=(str(raw["synthesis_dependency"]) if raw.get("synthesis_dependency") is not None else None),
             required_static_references=tuple(str(_resolve_skill_root_path(str(item), skill_roots)) for item in raw.get("required_static_references", [])),
-            path_patterns=tuple(str(item) for item in raw.get("path_patterns", [])),
+            path_patterns=_catalog_path_patterns(raw, "path_patterns"),
             classifier_guarded_path_patterns=tuple(guarded_patterns),
             semantic_triggers=tuple(str(item) for item in raw.get("semantic_triggers", [])),
+            excluded_path_patterns=_catalog_path_patterns(raw, "excluded_path_patterns"),
         )
         if entry.layer not in ROUTING_LAYERS:
             msg = f"unknown routing layer for {entry.catalog_id}: {entry.layer}"
@@ -1437,7 +1447,7 @@ def classify_repository_paths(paths: Sequence[str], *, release_readiness: bool =
         if basename in {"CMakeLists.txt", "CMakePresets.json", "vcpkg.json", "vcpkg-configuration.json"} or path.startswith("cmake/"):
             add("cpp", path, "C++ build semantics")
             add("tooling", path, "shared build configuration")
-        if basename in {"Cargo.toml", "Cargo.lock", "pyproject.toml", "uv.lock"}:
+        if basename in {"Cargo.toml", "Cargo.lock", "pyproject.toml", "uv.lock"} or (path.startswith("tooling/") and path.endswith(".toml")):
             add("tooling", path, "shared dependency or command configuration")
         if basename in {"justfile", "Makefile", "Brewfile"} or path.startswith(".github/workflows/"):
             add("tooling", path, "repository command or CI surface")
@@ -1559,10 +1569,10 @@ def expand_compact_routing(  # noqa: C901, PLR0912, PLR0913, PLR0915
             raise ValueError(msg)
 
         default_surface: tuple[str, ...] = ()
-        if selected_by_projection:
+        if selected_by_classifier and entry.target_kind == "leaf":
+            default_surface = tuple(dict.fromkeys((*matched_paths, *signal_paths.get(entry.surface, ()))))
+        elif selected_by_projection:
             default_surface = matched_paths
-        elif selected_by_classifier and entry.target_kind == "leaf":
-            default_surface = signal_paths.get(entry.surface, ())
         elif selected_independent:
             default_surface = normalized_paths
         review_surface = tuple(str(value) for value in override.get("review_surface", default_surface)) if override is not None else default_surface
@@ -1622,12 +1632,20 @@ def _catalog_path_matches(path: str, pattern: str) -> bool:
 
 
 def _catalog_matched_paths(entry: RoutingCatalogEntry, normalized_paths: Sequence[str], classifier_signals: Mapping[str, Sequence[str]]) -> tuple[str, ...]:
-    """Match unconditional paths plus paths guarded by a repository-surface signal."""
+    """Match default paths and guards, excluding file kinds owned elsewhere.
+
+    Exclusions affect projection only; explicit semantic overrides remain valid.
+    """
     active_patterns = [*entry.path_patterns]
     for classifier_surface, patterns in entry.classifier_guarded_path_patterns:
         if classifier_surface in classifier_signals:
             active_patterns.extend(patterns)
-    return tuple(path for path in normalized_paths if any(_catalog_path_matches(path, pattern) for pattern in active_patterns))
+    return tuple(
+        path
+        for path in normalized_paths
+        if any(_catalog_path_matches(path, pattern) for pattern in active_patterns)
+        and not any(_catalog_path_matches(path, pattern) for pattern in entry.excluded_path_patterns)
+    )
 
 
 def build_routing_projection(catalog: Sequence[RoutingCatalogEntry], *, consulted_routers: Sequence[str], captured_paths: Sequence[str]) -> dict[str, Any]:

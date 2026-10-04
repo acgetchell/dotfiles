@@ -1,6 +1,6 @@
 # causal-triangulations Scientific Correctness
 
-Use this reference when applying `rust-scientific-correctness` to `causal-triangulations` or related CDT simulation code. Read the repository's `AGENTS.md`, scientific basis, foliation, move, Metropolis, and limitation documentation first; they override stale details here.
+Use this reference when applying `rust-scientific-correctness` to `causal-triangulations` or related CDT simulation code. Always read applicable `AGENTS.md`, required reviewer guidance, and relevant scientific-basis assumptions and model limitations; current repository contracts override stale details here. Load foliation/topology guidance for slice or connectivity changes, move guidance for local edits and action deltas, and Metropolis/ensemble guidance for proposal probabilities, acceptance, or sampling claims. Follow nearby dependencies across those boundaries; local moves that affect proposal-site counts require both move and Metropolis context. Broaden uncertain scope while retaining the complete scientific checklist and independent evidence.
 
 ## Scientific Contracts
 

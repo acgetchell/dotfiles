@@ -9,9 +9,55 @@ Use this reference for `justfile` changes, command-surface docs, and recipes tha
 - Recipe names should describe maintainer intent, not the implementation tool, unless the recipe is a direct tool wrapper such as `action-lint` or `toml-fmt-check`.
 - Separate fixers from checks. A recipe named `check` or `ci` should not mutate tracked files; a recipe named `fix` should make mutations explicit.
 - Separate fast local checks from full CI and slow/performance/release checks.
+- Trace the execution order of canonical aggregate gates, including nested dependencies and recipe-body calls. Flag avoidable expensive execution before inexpensive static failures; account for true generation/setup prerequisites before moving a check earlier.
 - Preserve recipe composability. Prefer recipes that call other recipes over copy-pasted command sequences when the same workflow appears in multiple places.
 - Ensure aggregate recipes do not execute the same underlying test selection more than once through overlapping dependencies or nested recipe calls. A broader recipe should add distinct evidence, not replay already completed checks.
 - Give policy-mandated aggregate gates component recipes or reliable selection/exclusion controls so an orchestrator can run only evidence absent from its ledger. An indivisible gate that forces already-passing tests to run again is a command-surface defect.
+
+## Fail-Fast Dependency Order
+
+For ordinary sequential dependencies, this graph reaches notebook lint only
+after the Python tests finish:
+
+```just
+ci: python-tests notebook-check
+notebook-check: notebook-lint
+    uv run jupyter execute analysis.ipynb
+```
+
+Move the cheap check into the canonical aggregate's early dependencies while
+retaining it on the standalone notebook gate:
+
+```just
+ci: notebook-lint python-tests notebook-check
+notebook-check: notebook-lint
+    uv run jupyter execute analysis.ipynb
+```
+
+Within this invocation, Just coalesces the shared `notebook-lint` dependency
+with the same arguments: lint runs once, before tests, and `notebook-check`
+executes the notebook afterward. A separate `just notebook-lint` process in a
+recipe body does not share that dependency execution state. Inspect arguments,
+separate invocations, and parallel attributes before claiming coalescing or a
+guaranteed order.
+
+Preserve real prerequisites: if lint needs an exported notebook module or
+generated stubs, keep that generation before lint. Expensive integration tests
+that produce no lint input are an avoidable predecessor. Do not move a check
+ahead of setup it needs or drop execution checks to make feedback faster.
+
+The executable examples in
+[`scripts/fixtures/late-static.just`](../scripts/fixtures/late-static.just) and
+[`scripts/fixtures/early-static.just`](../scripts/fixtures/early-static.just)
+use harmless markers and an injectable lint failure. Their tests verify early
+failure, one shared lint execution, and the required export-before-lint order,
+including success and failure of the standalone notebook gate.
+
+Change the repository's canonical recipe rather than adding a review-only
+precheck. Report an ordering need to the validator owner when dispatch commands
+are already fixed. After a repair, reuse successful evidence only after the
+existing exact identity/dependency checks; resume affected and unexecuted
+components without replaying unaffected tests.
 
 ## Tool Install Recipes
 

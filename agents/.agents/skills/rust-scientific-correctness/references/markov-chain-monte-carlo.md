@@ -1,6 +1,30 @@
 # markov-chain-monte-carlo Scientific Correctness
 
-Use this reference when applying `rust-scientific-correctness` to `markov-chain-monte-carlo` or related Metropolis-Hastings code. Read the repository's `AGENTS.md`, scientific basis, proposal validation, checkpoint, and reviewer guidance first; they override stale details here.
+Use this reference when applying `rust-scientific-correctness` to `markov-chain-monte-carlo` or related Metropolis-Hastings code. Always read applicable `AGENTS.md`, required reviewer guidance, and the scientific-basis assumptions relevant to the reviewed contracts. Current repository contracts override stale details here; report contradictions rather than silently choosing one.
+
+## Select Background By Contract
+
+Use the changed behavior and nearby dependencies, not just filenames, to choose background:
+
+| Reviewed contract | Required background |
+| --- | --- |
+| Target weights, acceptance, proposal ratios, support, rollback, or delayed commit | Proposal validation (including `docs/VALIDATING_PROPOSALS.md` when present), the concrete proposal workflow, and its target/transition assumptions. |
+| Snapshot, serialization, resume, cached target values, counters, or RNG continuation | Checkpoint and continuation documentation (including the relevant `src/lib.rs` sections), checkpoint validation, and state/RNG ownership. Load proposal validation if resume changes proposal state or transition identity. |
+| Adaptation, warm-up, tuning, or update schedules | Adaptation and stationarity assumptions, freeze/update boundaries, and affected proposal or diagnostic contracts. |
+| Pooled ranks, R-hat, ESS, MCSE, diagnostic exports, or timing | Diagnostic definitions, sample layout, ties, normalization, finite-sample and non-finite behavior, and reference-oracle assumptions. For timing, include the measured diagnostic workload and correctness checks outside the timed region. |
+| Seeds, streams, parallel chains, chunking, reproducibility claims, or seeded fixtures | The promised reproducibility boundary and relevant RNG/stream contracts; add checkpoint guidance for resumed/chunked equivalence. |
+
+A rank-only change does not by itself require proposal or checkpoint background.
+A proposal-only change does not by itself require diagnostic or checkpoint
+background. A checkpoint-only change requires continuation and reproducibility
+context, but proposal validation is conditional on its dependencies. Read the
+relevant sections even when unrelated contracts share the same file.
+
+If the boundary is uncertain, trace callers and shared state/helpers and load the
+additional contracts needed to resolve it. Missing or contradictory assumptions
+require broader context or an explicit finding, never an unsupported exclusion.
+Keep the complete scientific checklist and independent-evidence requirements;
+record the reason for each additional background dependency.
 
 ## Scientific Contracts
 

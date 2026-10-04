@@ -1,6 +1,39 @@
 {
   "cases": [
     {
+      "id": "fixture-generator-tooling-config-and-nested-diagnostic-lockfile",
+      "consulted_routers": ["review-graph", "python-review-orchestrator", "rust-review-orchestrator", "docs-review-orchestrator"],
+      "paths": ["tests/fixtures/generate_ess.py", "tooling/examples.toml", "benches/diagnostic_backends/Cargo.lock"],
+      "expected_matches": {
+        "python.support-scripts": ["tests/fixtures/generate_ess.py"],
+        "python.cli": [],
+        "repo.tooling": ["tooling/examples.toml", "benches/diagnostic_backends/Cargo.lock"],
+        "rust.build": ["benches/diagnostic_backends/Cargo.lock"],
+        "rust.cargo": ["benches/diagnostic_backends/Cargo.lock"],
+        "rust.scientific": [],
+        "docs.scientific-software": []
+      }
+    },
+    {
+      "id": "nested-fixture-utility-keeps-support-and-scientific-ownership",
+      "consulted_routers": ["review-graph", "python-review-orchestrator"],
+      "paths": ["tests/fixtures/ess/generate.py", "src/tool/cli.py"],
+      "expected_matches": {
+        "python.support-scripts": ["tests/fixtures/ess/generate.py"],
+        "python.cli": ["src/tool/cli.py"],
+        "python.scientific": ["tests/fixtures/ess/generate.py", "src/tool/cli.py"]
+      }
+    },
+    {
+      "id": "scientific-source-and-contracts-survive-lockfile-exclusion",
+      "consulted_routers": ["review-graph", "rust-review-orchestrator", "docs-review-orchestrator"],
+      "paths": ["benches/diagnostic_backends/main.rs", "examples/diagnostics.rs", "docs/diagnostics.md", "benches/diagnostic_backends/expected.csv", "benches/diagnostic_backends/uv.lock", "docs/diagnostics/package-lock.json", "examples/diagnostics/pnpm-lock.yaml"],
+      "expected_matches": {
+        "rust.scientific": ["benches/diagnostic_backends/main.rs", "examples/diagnostics.rs", "benches/diagnostic_backends/expected.csv"],
+        "docs.scientific-software": ["benches/diagnostic_backends/main.rs", "examples/diagnostics.rs", "docs/diagnostics.md", "benches/diagnostic_backends/expected.csv"]
+      }
+    },
+    {
       "id": "release-tooling-change-keeps-readme-citation-ownership-without-bibliography-changes",
       "consulted_routers": ["review-graph", "docs-review-orchestrator", "python-review-orchestrator", "rust-review-orchestrator"],
       "paths": ["README.md", "docs/BENCHMARKING.md", "docs/RELEASING.md", "docs/code_organization.md", "docs/dev/rust.md", "scripts/update_release_version.py"],
