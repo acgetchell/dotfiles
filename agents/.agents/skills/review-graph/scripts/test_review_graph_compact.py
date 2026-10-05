@@ -71,6 +71,35 @@ def test_unsupported_discovery_fails_before_publication_with_conservative_altern
     assert not Path(entry["worker_payload_path"]).exists()
 
 
+@pytest.mark.parametrize("command", [None, "", "git diff other-base -- src/module_0.py"])
+def test_independent_head_dependency_requires_executed_command(materialized: dict[str, Any], command: str | None) -> None:
+    entry = _independent_entry(materialized)
+    payload = _compact_independent_payload(entry["dispatch"])
+    dependency = {"kind": "head", "reason": "The judgment depends on the comparison base."}
+    if command is not None:
+        dependency["command"] = command
+    payload["git_dependencies"] = [dependency]
+    payload["commands_executed"] = ["git diff origin/main -- src/module_0.py"]
+    with pytest.raises(ValueError, match="command"):
+        _publish(entry, payload)
+    assert not Path(entry["worker_payload_path"]).exists()
+    dispatch = {**entry["dispatch"], "before_state": materialized["source_state"], "after_state": materialized["source_state"]}
+    with pytest.raises(ValueError, match="command"):
+        runtime.compile_independent_payload({"dispatch": dispatch, "payload": payload})
+
+
+@pytest.mark.parametrize("kind", ["index", "history"])
+def test_independent_commandless_metadata_dependency_remains_valid(materialized: dict[str, Any], kind: str) -> None:
+    entry = _independent_entry(materialized)
+    payload = _compact_independent_payload(entry["dispatch"])
+    payload["git_dependencies"] = [{"kind": kind, "reason": "The judgment depends on supplied Git metadata."}]
+    receipt = _publish(entry, payload)
+    assert receipt["worker_payload_digest"] == _digest(Path(entry["worker_payload_path"]).read_bytes())
+    dispatch = {**entry["dispatch"], "before_state": materialized["source_state"], "after_state": materialized["source_state"]}
+    _, metadata = runtime.compile_independent_payload({"dispatch": dispatch, "payload": payload})
+    assert metadata["evidence"]["status"] == "no-findings"
+
+
 @pytest.mark.parametrize("damage", ["context-in-owned", "owned-in-context", "duplicate-context", "context-only-check", "unattested-context"])
 def test_independent_context_does_not_expand_owned_scope(materialized: dict[str, Any], damage: str) -> None:
     entry = _independent_entry(materialized)

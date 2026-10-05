@@ -11,13 +11,26 @@
     "git_dependencies": {
       "type": "array",
       "items": {
-        "type": "object", "additionalProperties": false,
-        "required": ["kind", "reason"],
-        "properties": {
-          "kind": {"enum": ["source-discovery", "index", "head", "history"]},
-          "command": {"$ref": "#/$defs/text"},
-          "reason": {"$ref": "#/$defs/text"}
-        }
+        "oneOf": [
+          {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "command", "reason"],
+            "properties": {
+              "kind": {"const": "head"},
+              "command": {"$ref": "#/$defs/text"},
+              "reason": {"$ref": "#/$defs/text"}
+            }
+          },
+          {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "reason"],
+            "properties": {
+              "kind": {"enum": ["source-discovery", "index", "history"]},
+              "command": {"$ref": "#/$defs/text"},
+              "reason": {"$ref": "#/$defs/text"}
+            }
+          }
+        ]
       }
     },
     "branches": {"$ref": "#/$defs/text", "description": "Inspected source branches and source-level platform observations; execution evidence belongs in tests."},
