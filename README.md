@@ -1,6 +1,7 @@
 # My Dotfiles
 
-Personal macOS dotfiles managed with [GNU Stow](https://www.gnu.org/software/stow/) and [Homebrew Bundle](https://github.com/Homebrew/homebrew-bundle).
+Personal macOS dotfiles managed with [GNU Stow](https://www.gnu.org/software/stow/) and [Homebrew Bundle](https://github.com/Homebrew/homebrew-bundle),
+plus Linux cloud/HPC development and review tooling installed in user-owned directories.
 
 This repo is intended to remain public. Committed files define reproducible, non-secret defaults; machine-specific values live in local ignored files such as `~/.zshrc.local`, `~/.gitconfig.local`, and `Brewfile.local`.
 
@@ -32,7 +33,23 @@ dotfiles/
         └── */SKILL.md
 ```
 
-## Fresh-machine setup
+## Platform scope
+
+| Environment | Scope | Verification status |
+| --- | --- | --- |
+| macOS | Desktop dotfiles, Homebrew, Stow, full repository checks | Existing native CI; new Linux installer is separate |
+| Linux x86_64, glibc >= 2.28 | User-space review tools and full portable checks | Ubuntu 24.04 CI configured; passing evidence for this change pending |
+| Linux aarch64, glibc >= 2.28 | Same provisioning candidate | Native validation unverified |
+| Cara's cloud computer | Site-approved Linux tooling, optional TypeSafe access | Actual host and end-to-end run unverified |
+| HPC | Site modules, scratch, authorized execution placement | Cluster configuration and native execution unverified |
+| Windows | Portable timing helper | Timing CI only; full tooling setup unsupported |
+
+Linux support covers development/review tooling. The macOS shell, Git dotfile,
+desktop preferences, and Homebrew setup have not been ported to Linux.
+See the [Linux/cloud/HPC guide](docs/linux-review-environment.md) for prerequisites,
+offline execution, evidence, and separate cloud/cluster verification.
+
+## Fresh macOS setup
 
 ```sh
 mkdir -p ~/projects
@@ -58,11 +75,31 @@ just setup
 
 `just setup` runs `bin/bootstrap.sh` with `DOTFILES_DIR` pointed at the current checkout, then syncs the uv-managed developer tools.
 
-The repository's exact host-tool pins for `cargo-update`, `dprint`, `just`, `rumdl`, `uv`, and
-`zizmor` live in `justfile`. Bootstrap and CI use
+The repository's exact host-tool pins for `cargo-update`, `dprint`, `just`, and `rumdl`
+live in `justfile`; `pyproject.toml` owns the exact uv pin and the locked Python tools,
+including zizmor. Bootstrap and CI use
 `bin/resolve-just-version.sh` only for the pre-`just` bootstrap step; after
 `just` is available, consumers resolve pins with
 `just --evaluate <tool>_version` (use `cargo_update_version` for `cargo-update`).
+
+## Linux review setup
+
+From a checkout on a connected, site-approved Linux provisioning host:
+
+```sh
+bash bin/linux-review.sh setup
+bash bin/linux-review.sh check
+bash bin/linux-review.sh smoke
+```
+
+Setup reuses matching site tools or installs checksum-verified, pinned release
+binaries and locked Python dependencies under `~/.local/share/dotfiles-review`.
+It requires the base tools documented in the guide and can be rerun. It does
+not require root, Homebrew, Docker, or system Python changes.
+After setup, `just linux-setup`, `just linux-check`, `just linux-smoke`, and
+the explicit live `just linux-probe` expose the same commands when the pinned
+Just is on PATH. `bin/linux-review.sh exec just --list` uses the provisioned PATH
+without changing shell startup files.
 
 ## Day-to-day stow commands
 
@@ -111,7 +148,7 @@ After applying or restowing packages, `just stow-verify` (backed by `scripts/sto
 ## Brewfile workflow
 
 `Brewfile` is intentionally foundational: core CLI tools, developer casks, and apps expected on every machine.
-Homebrew owns `pkgx`, `rustup`, and the `justfile`-pinned `uv`; Cargo owns the
+On macOS, Homebrew owns `pkgx`, `rustup`, and the `pyproject.toml`-pinned `uv`; Cargo owns the
 `justfile`-pinned, directly invokable `dprint`, `just`, `rumdl`, and `zizmor`
 binaries, plus `cargo-update`, which provides `cargo-install-update`.
 Repository-scoped build tools, formatters, linters, and occasional maintenance

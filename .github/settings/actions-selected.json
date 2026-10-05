@@ -4,6 +4,7 @@
   "patterns_allowed": [
     "actions/checkout@*",
     "actions/setup-python@*",
+    "actions/upload-artifact@*",
     "actions/cache@*",
     "astral-sh/setup-uv@*",
     "github/codeql-action/upload-sarif@*",
