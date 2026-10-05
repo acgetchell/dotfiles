@@ -1,5 +1,12 @@
 # TypeSafe Shadow Routing Evaluation
 
+**Current disposition:** production adoption was declined and
+[#74](https://github.com/acgetchell/dotfiles/issues/74) is closed as not planned.
+The opt-in harness and records are retained for a future pinned revision under
+[#75](https://github.com/acgetchell/dotfiles/issues/75). The upstream agent skill
+is no longer vendored here. The cases below are historical regression and
+development data; a new adoption decision requires fresh held-out evidence.
+
 This records the bounded follow-up to [issue #73](https://github.com/acgetchell/dotfiles/issues/73)
 and [PR #94](https://github.com/acgetchell/dotfiles/pull/94), evaluated on
 2026-10-03 after the graph overhead fixes in #87 and #89 merged.
@@ -250,7 +257,7 @@ benefit remains unknown and production adoption stays outside this evaluation.
 | Representative source fixtures | Two real and five synthetic scopes retained with source text and dependency context. |
 | Request, token, retry, and cost limits | Configurable preflight reservation; each failed or retried attempt retained. Unknown earlier costs prevent a complete cost comparison. |
 | Repeat after overhead fixes | Fresh real-scope baselines, all seven live routing requests, and the separate scripted protocol benchmark complete. |
-| Full review cost and recall | Unknown; no new downstream paired graph. Adoption-specific evaluation belongs to #74. |
+| Full review cost and recall | Unknown; no new downstream paired graph. The conditional adoption proposal #74 was subsequently closed as not planned; #75 tracks future reevaluation. |
 | Held-out evaluation | Not triggered in this first phase; the subsequent threshold evaluation freezes a policy before eight new cases. |
 | Original evidence retention | Routing records and status receipts retained; full original downstream proofs unavailable. Archival acceptance remains qualified. |
 | Adoption | Confirmed after the repeat: retain shadow mode. No automatic additions or pruning. |
