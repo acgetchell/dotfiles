@@ -1,5 +1,26 @@
 # TypeSafe Routing Experiment
 
+## Current Disposition
+
+The completed [shadow evaluation](../../../../../docs/typesafe-shadow-evaluation.md)
+and [threshold evaluation](../../../../../docs/typesafe-threshold-evaluation.md)
+did not justify adoption. [#74](https://github.com/acgetchell/dotfiles/issues/74)
+is closed as not planned. The opt-in harness and records remain available for
+a future pinned model or question revision under
+[#75](https://github.com/acgetchell/dotfiles/issues/75); the upstream TypeSafe
+agent skill is no longer vendored.
+
+Existing cases and their original split labels are historical regression and
+development data. For a new adoption evaluation, freeze the candidate, questions,
+thresholds, budgets, and comparative success rule before collecting fresh source
+scopes and independently reviewed held-out labels. Freeze ordinary coordinator
+decisions before candidate inference, compare the same source and catalog, and
+disclose differences in instruction context. Ordinary CI stays offline; live
+calls require explicit authorization. Semantic evidence acceptance needs its
+own evaluation before any model judgment can influence acceptance.
+
+## Experiment Workflow
+
 Use this workflow when a TypeSafe applicability comparison is requested. Jev
 runs in shadow mode: ordinary routing, mandatory nodes, validation, and proof
 acceptance continue to control execution. No experimental response is a routing

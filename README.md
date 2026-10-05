@@ -314,19 +314,32 @@ including symlinked skill directories. See the
 Other agents can use the same `SKILL.md` format; discovery locations vary by
 agent, so configure or link its skill directory to the shared skill folder.
 
-### TypeSafe
+### Optional TypeSafe evaluation
 
-The [TypeSafe skill](agents/.agents/skills/typesafe-ai/SKILL.md) is vendored from
-[typesafe-ai/skills at revision `65a39f3`](https://github.com/typesafe-ai/skills/tree/65a39f393687675ce170e6094757de20370365b9/skills/typesafe-ai).
-Its `SKILL.md` and MIT `LICENSE` are unchanged; `agents/openai.yaml` adds
-Codex UI metadata. The instructions are agent-neutral and consult live
-TypeSafe documentation for current API details.
+The completed [routing evaluations](docs/typesafe-threshold-evaluation.md) did
+not justify adoption. [#74](https://github.com/acgetchell/dotfiles/issues/74) is
+closed as not planned; [#75](https://github.com/acgetchell/dotfiles/issues/75)
+tracks a future evaluation of a pinned model or question revision. Ordinary
+coordinator routing and evidence acceptance remain authoritative.
 
-Run `just stow-check agents` and `just stow-apply agents` to install it.
-Invoke it with `$typesafe-ai` in Codex, or ask an agent that has loaded it to
-"use the TypeSafe skill". If it does not appear, restart the agent. API use
-requires a separately configured `TYPESAFE_API_KEY`; keep credentials out of
-this public repository. Installing the skill does not make API calls.
+The opt-in shadow harness, fixtures, offline replay, budget controls, and
+evaluation records are retained. Run `just review-routing-experiment` to prepare
+the fixtures offline; see the [experiment guide](agents/.agents/skills/review-graph/references/routing-experiment.md)
+for replay and explicitly authorized live evaluations. The existing cases are
+historical regression and development data; future adoption decisions require
+fresh held-out cases and a prospectively frozen success rule.
+
+The upstream TypeSafe agent skill is no longer vendored. API use requires a
+separately configured `TYPESAFE_API_KEY`; keep credentials out of this public
+repository.
+
+After updating a directory-link installation, run `just stow-restow agents`
+followed by `just stow-verify`. For an older file-level installation where
+`~/.agents/skills/typesafe-ai` is a real directory, inspect it first. Unlink only
+dangling symlinks whose resolved targets lie inside this checkout's removed
+`agents/.agents/skills/typesafe-ai/` tree, preserving real files and links to
+other installations. Remove only directories that become empty, then run the
+same restow and verification commands.
 
 Store the API key in a 1Password item. Enable the desktop app's CLI integration,
 then use a secret reference to inject the key for one command:
@@ -365,13 +378,6 @@ The cloud process receives a placeholder; its HTTPS proxy supplies the real
 credential for the allowed destination. The local 1Password session is not
 needed for cloud runs. See the official
 [cloud environment secret configuration](https://learn.chatgpt.com/docs/environments/cloud-environments#configure-environment-variables-and-network-secrets).
-
-To update, review and replace the complete upstream `skills/typesafe-ai/`
-directory, including any references and its license, while preserving the
-local `agents/openai.yaml`. Update the pinned revision above, then run
-`just skill-check agents/.agents/skills/typesafe-ai` and `just markdown-check`.
-Use this manual-copy method consistently to avoid duplicate installations;
-see [TypeSafe's installation guide](https://docs.typesafe.ai/agent-skill#installation).
 
 ## Codex config
 

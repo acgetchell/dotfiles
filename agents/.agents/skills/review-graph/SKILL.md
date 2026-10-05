@@ -55,9 +55,8 @@ which owns catalog/router/rule IDs, skill paths, priorities, and synthesis depen
 Every applicable leaf remains required. Resolve late handoffs before dependent
 validation or synthesis.
 
-For requested TypeSafe comparisons, follow
-[the shadow experiment](references/routing-experiment.md). Freeze ordinary routing
-first; preserve its decisions and proof gates.
+Run the dormant [TypeSafe experiment](references/routing-experiment.md) only when
+requested. Freeze ordinary routing first; preserve its decisions and proof gates.
 
 ## Execute Review Nodes
 

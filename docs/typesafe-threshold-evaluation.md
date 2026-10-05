@@ -1,5 +1,12 @@
 # TypeSafe Threshold And Coordinator Evaluation
 
+**Current disposition:** production adoption was declined and
+[#74](https://github.com/acgetchell/dotfiles/issues/74) is closed as not planned.
+The opt-in harness and records are retained for a future pinned revision under
+[#75](https://github.com/acgetchell/dotfiles/issues/75). The upstream agent skill
+is no longer vendored here. The cases below are historical regression and
+development data; a new adoption decision requires fresh held-out evidence.
+
 This is the prospective follow-up to the [first shadow routing evaluation](typesafe-shadow-evaluation.md)
 for [issue #73](https://github.com/acgetchell/dotfiles/issues/73). The first seven
 cases became development data. On 2026-10-03, before selecting new cases or
@@ -151,8 +158,9 @@ On the original development cases, moving from 0.50 to 0.70 reduced labeled
 unnecessary selections from 17 to six but missed one of 21 applicable concerns.
 That tradeoff motivated evaluating the coordinator band. The new result shows
 why those already-seen cases could not establish general accuracy or justify a
-default change. Any further tuning needs another held-out evaluation. Production
-adoption and complete-review benefit remain the separate scope of #74.
+default change. Any further tuning needs another held-out evaluation. The
+conditional adoption proposal #74 was subsequently closed as not planned;
+#75 tracks future reevaluation. Complete-review benefit remains unmeasured.
 
 ## Reproduce offline and validation
 
