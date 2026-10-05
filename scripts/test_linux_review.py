@@ -57,7 +57,8 @@ def linux_boundary(tmp_path: Path) -> dict[str, str]:
     releases = tmp_path / "releases"
     binaries.mkdir()
     releases.mkdir()
-    for name in ("git", "bash", "tar", "unzip", "sed", "head", "awk", "mkdir", "mktemp", "chmod", "cp", "mv", "rm", "dirname"):
+    # GNU tar invokes gzip through PATH when reading compressed release archives.
+    for name in ("git", "bash", "tar", "gzip", "unzip", "sed", "head", "awk", "mkdir", "mktemp", "chmod", "cp", "mv", "rm", "dirname"):
         tool = shutil.which(name)
         assert tool
         (binaries / name).symlink_to(tool)
