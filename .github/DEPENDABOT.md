@@ -28,17 +28,18 @@ chain and its changed paths, statuses, and blob IDs match the original Dependabo
 update exactly. Dependency conflict resolutions require manual review or a fresh
 Dependabot rebase. Approval names the current head; a changed head requires a
 fresh approval and stale reviews must be dismissed. Native squash auto-merge
-still waits for strict `verify` and `CodeRabbit` checks and resolved threads.
+still waits for strict `verify`, `CodeRabbit`, and `Linux portable review`
+checks and resolved threads.
 The optional approval job must never become an ordinary PR's required check.
 
 ## Deploy and verify settings
 
 Merge the caller and CI dispatch change to `main` before rollout. These payloads
-are the desired settings captured from dotfiles on September 26, 2026, not a
-live-state claim. Read the live settings again before applying them; preserve
-any intervening changes. `main-ruleset.json` changes only the approval count
-from zero to one and stale dismissal from false to true, retaining all other
-rules, checks, strictness, thread resolution, and bypass actors.
+record the desired settings, not a live-state claim. Read the live settings
+again before applying them; preserve any intervening changes.
+`main-ruleset.json` requires one approval, stale review dismissal, resolved
+threads, and strict `verify`, `CodeRabbit`, and `Linux portable review` checks,
+while preserving the existing deletion, force-push, and bypass policies.
 
 ```sh
 gh api repos/acgetchell/dotfiles/actions/permissions

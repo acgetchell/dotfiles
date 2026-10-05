@@ -67,4 +67,5 @@ def test_main_ruleset_preserves_merge_gates_and_bypass_policy() -> None:
     assert rules["required_status_checks"]["required_status_checks"] == [
         {"context": "verify", "integration_id": 15368},
         {"context": "CodeRabbit", "integration_id": 347564},
+        {"context": "Linux portable review", "integration_id": 15368},
     ]
