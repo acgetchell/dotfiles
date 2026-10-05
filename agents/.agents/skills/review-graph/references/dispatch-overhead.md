@@ -39,6 +39,92 @@ workers receive raw source only. No actual model review,
 validator commands, or synthesis runs in this protocol benchmark; no semantic
 recall or model latency is inferred from seeded transcripts.
 
+## Fail-Fast Validation And Worker Provenance (#116, #117)
+
+The 2026-10-05 local measurement used macOS arm64, Python 3.14.7, uv 0.12.23,
+a pre-existing locked environment, and a warm cache with `UV_OFFLINE=1`.
+No installation or setup time is included. The checked-in baseline was
+`2b585b3b3a5d45dcd4cfa7a5ae8923a018fac968`.
+
+For skill checks, three alternating before/after trials ran the baseline
+`check-skills` recipe extracted with `git show` and the new recipe against the
+same final validator and 66 skill entrypoints. The baseline recipe was stored
+outside the checkout and invoked with `just --justfile <baseline.just>
+--working-directory "$PWD" check-skills`; nested single-skill checks used the
+unchanged `skill-check` recipe. Separate PATH-wrapper traces counted launches;
+elapsed samples had no tracing. These counts cover the named launchers, not
+every OS process. Both source and Git-state digests matched before and after.
+The source manifest digest, before adding this measurement note, was
+`8defae54928448656ee390fbd593b5dd5e5dc322c2e228d8c2bc99a2fa802c36`.
+
+| Skill-check boundary | Before | After |
+| --- | ---: | ---: |
+| `just` launches, including outer recipe | 67 | 1 |
+| `uv run` launches | 66 | 1 |
+| `uv --version` probes | 67 | 1 |
+| Validator Python launches | 66 | 1 |
+| Median wall time, seconds | 8.463 | 0.196 |
+
+`just ci` now orders the 17 prompt/routing guards before static checks, batched
+skill checks, and the remaining Python tests. Just's dependency deduplication
+runs the guard recipe once; complementary pytest markers keep the two execution
+sets disjoint and exhaustive. `just test-python` uses the same two phases.
+Collection tests verify their union, and a temporary launcher injects an actual
+budget assertion failure to prove the original diagnostic stops phase two.
+Fixtures live outside the reviewed checkout; batch tests also verify unchanged
+Git status/index entries and ignored, deleted, untracked, and nested scope.
+
+Keep these elapsed boundaries separate:
+
+- The standalone contract gate's three-trial median was 0.698 seconds, including
+  Just, uv, pytest startup, collection, and execution.
+- A separate static-only run took 25.429 seconds: shell/Git configuration,
+  Just/TOML/YAML/Markdown, GitHub Actions, Semgrep and fixtures, and Python
+  format/lint/type checks. It excluded skill validation and pytest execution.
+- The full CI run took 512.90 seconds externally. Pytest reported 0.42 seconds
+  for 17 guards and 470.29 seconds for the remaining phase: 1,238 passed and two
+  native-platform skips. The final focused rerun passed 99 tests in 10.97 seconds.
+  These separately measured boundaries must not be summed or used to infer a
+  full-suite before/after speedup.
+
+For dispatch transport, `just review-workflow-benchmark HEAD 3` compared the
+baseline and final runtime on the same 265-file fixture and 15-node plan. Its
+source identity was
+`sha256:dbb4bb61f2f4505faafdcaf82618c32c0aef2fa358aeceb105ac7ed0d6e620de`;
+the final runtime digest was
+`sha256:72e4868511755dc3713eaad0c4f043645d86c097038302eb471d4da3b9bbae96`.
+Current planner, dependencies, and skill templates were held constant.
+
+| Dispatch replay boundary | Before | After |
+| --- | ---: | ---: |
+| Total worker-input bytes | 318,640 | 335,871 |
+| Worker-prompt bytes, included above | 32,293 | 38,474 |
+| Independent scripted publication attempts | 1 | 1 |
+| Independent formatting retries | 0 | 0 |
+| Median materialization seconds | 0.215 | 0.194 |
+| Median protocol seconds | 0.359 | 0.329 |
+| Seeded findings preserved | 4 | 4 |
+
+The extra bytes carry owned/context read fragments, exact command declarations,
+conservative branch-diff guidance, and the distinction between payload writes
+and authorized capture/proof writes. Existing prompt budgets remain unchanged.
+Native publication/compiler regression tests replay the emitted audit and
+independent fragments successfully on their first attempt and reject unsupported
+or compound discovery declarations, false scope expansion, and context-only
+adversarial checks. These are scripted outcomes, not measured model retry rates.
+
+A separate fresh live worker inspected `tool.py`, nearby `state.rs`, and
+`git diff origin/main -- tool.py` in a temporary Git fixture. It published on
+attempt one with zero environment approval requests or tool failures. Native
+`compile-node` verified equal before/after captures and exact sealed bytes and
+journaled acceptance. An earlier setup used macOS path aliases inconsistently;
+compilation rejected that capture. Rebuilding with resolved paths fixed the
+fixture without weakening the fingerprint check.
+
+Model token counts, inference cost, and attributable retry latency were
+unavailable. No token savings, semantic recall improvement, or reliable protocol
+speedup is inferred from source bytes or these small timing differences.
+
 ## Compact Receipt And Evidence Replay (#87)
 
 Three paired trials against `da0e045d420a890d53a1e0993a0ecdfee5057c72` (the merged

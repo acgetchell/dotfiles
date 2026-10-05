@@ -74,7 +74,11 @@ def validate_git_dependencies(payload: dict[str, Any]) -> None:
                 raise ValueError(msg)
             declared.add(command)
         if dependency["kind"] == "source-discovery" and (command is None or not _source_discovery_command(command)):
-            msg = "source-discovery requires a plain local git diff command; declare other Git dependencies conservatively"
+            msg = (
+                "source-discovery requires a plain local git diff command (optional HEAD, --cached/--staged, and -- relative/path); "
+                "split compound invocations into separate command ledger entries. For a branch/revision diff such as git diff origin/main, "
+                "declare kind=head with the exact executed command and a reason; use index/history for those semantic dependencies"
+            )
             raise ValueError(msg)
 
 

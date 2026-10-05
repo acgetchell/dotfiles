@@ -1849,6 +1849,7 @@ def test_isolated_validation_workspace_audit_binds_artifacts_and_changes_to_root
         )
 
 
+@pytest.mark.review_contract
 def test_sparse_routing_expands_to_exhaustive_catalog_records() -> None:
     catalog = load_routing_catalog(ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
     decisions = expand_compact_routing(
@@ -1880,6 +1881,7 @@ def test_sparse_routing_expands_to_exhaustive_catalog_records() -> None:
     assert by_id["rust.synthesis"].disposition == "selected"
 
 
+@pytest.mark.review_contract
 def test_sparse_routing_rejects_catalog_owned_identity_fields() -> None:
     catalog = load_routing_catalog(ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
     with pytest.raises(ValueError, match="catalog-owned fields"):
@@ -1929,6 +1931,7 @@ def test_synthesis_bundle_rejects_caller_authored_records() -> None:
         build_synthesis_bundle({"records": [{"evidence_id": "review:untrusted"}], "source_state": ["scope", "worktree", "repository"]})
 
 
+@pytest.mark.review_contract
 def test_routing_projection_is_complete_compact_and_hashed() -> None:
     captured_path = "src/lib.rs"
     projection = build_routing_projection_document(
@@ -1946,6 +1949,7 @@ def test_routing_projection_is_complete_compact_and_hashed() -> None:
     assert projection["projection_digest"].startswith("sha256:")
 
 
+@pytest.mark.review_contract
 def test_routing_regression_fixtures_enforce_selected_and_excluded_ownership() -> None:
     fixture = Path(__file__).with_name("fixtures") / "routing_regressions.json"
     cases = json.loads(fixture.read_text(encoding="utf-8"))["cases"]
@@ -1977,6 +1981,7 @@ def test_routing_regression_fixtures_enforce_selected_and_excluded_ownership() -
     ],
 )
 @pytest.mark.parametrize("explicit_scope", [False, True])
+@pytest.mark.review_contract
 def test_tooling_scope_combines_classifier_and_projection_unless_overridden(paths: list[str], router: str, explicit_scope: bool) -> None:
     catalog = load_routing_catalog(ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
     reason = "Targeted tooling scope; shared contracts have their own selected specialist"
@@ -2006,6 +2011,7 @@ def test_tooling_scope_combines_classifier_and_projection_unless_overridden(path
         ),
     ],
 )
+@pytest.mark.review_contract
 def test_projection_exclusions_preserve_semantic_overrides(catalog_id: str, path: str, reason: str) -> None:
     catalog = load_routing_catalog(ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
     language_router = "python-review-orchestrator" if path.endswith(".py") else "rust-review-orchestrator"
@@ -5073,6 +5079,7 @@ def test_awaiting_replan_is_terminal_for_stale_dispatch_set(tmp_path: Path) -> N
     assert any("fresh plan" in blocker for blocker in ready["blockers"])
 
 
+@pytest.mark.review_contract
 def test_ordinary_validator_and_all_surface_prompt_budgets() -> None:
     review_prompt = (
         SKILL_ROOT / "repo-review" / "SKILL.md",
@@ -5096,6 +5103,7 @@ def test_ordinary_validator_and_all_surface_prompt_budgets() -> None:
     assert all_surface_words <= ALL_SURFACE_PROMPT_WORD_BUDGET, f"all-surface prompt proxy is {all_surface_words} words"
 
 
+@pytest.mark.review_contract
 def test_trace_prioritized_rust_leaf_prompt_budgets() -> None:
     for skill_id, budget in TRACE_PRIORITIZED_RUST_LEAF_BUDGETS.items():
         entrypoint = SKILL_ROOT / skill_id / "SKILL.md"
@@ -5104,6 +5112,7 @@ def test_trace_prioritized_rust_leaf_prompt_budgets() -> None:
         assert words <= budget, f"{skill_id} graph/orchestrator entrypoint is {words} words"
 
 
+@pytest.mark.review_contract
 def test_trace_prioritized_documentation_prompt_budgets() -> None:
     for skill_id, budget in TRACE_PRIORITIZED_DOCUMENTATION_SKILL_BUDGETS.items():
         entrypoint = SKILL_ROOT / skill_id / "SKILL.md"
@@ -5112,6 +5121,7 @@ def test_trace_prioritized_documentation_prompt_budgets() -> None:
         assert words <= budget, f"{skill_id} graph/orchestrator entrypoint is {words} words"
 
 
+@pytest.mark.review_contract
 def test_trace_prioritized_python_prompt_budgets() -> None:
     for skill_id, budget in TRACE_PRIORITIZED_PYTHON_SKILL_BUDGETS.items():
         entrypoint = SKILL_ROOT / skill_id / "SKILL.md"
@@ -5120,6 +5130,7 @@ def test_trace_prioritized_python_prompt_budgets() -> None:
         assert words <= budget, f"{skill_id} graph/orchestrator entrypoint is {words} words"
 
 
+@pytest.mark.review_contract
 def test_trace_prioritized_shared_prompt_budgets() -> None:
     for skill_id, budget in TRACE_PRIORITIZED_SHARED_SKILL_BUDGETS.items():
         entrypoint = SKILL_ROOT / skill_id / "SKILL.md"

@@ -28,9 +28,11 @@ Before publishing a worker payload, pass its exact bytes over standard input to
 the dispatch-bound review command. The runtime validates the schema and semantics
 without an artifact write. For audits, `scope_limitations` must equal the omitted
 `owned_paths`; `nearby_contract_owners` is inspected context provenance, not
-omitted scope, and narrative `limitations` never expand the write set. Only the
-published payload path is a durable artifact target; atomic publication uses a
+omitted scope, and narrative `limitations` never expand the write set. For payload
+publication, only the published payload path is a durable artifact target; atomic publication uses a
 runtime-owned temporary sibling. The stdin contract contains no candidate path.
+Source captures and other workflow proof artifacts remain authorized under the
+external temporary store; the payload restriction does not prohibit those writes.
 Legacy `--payload` inputs retain a separate candidate-bearing schema for saved
 dispatches. New audit contracts include a digest-bound compiler preflight so
 generated native output that exceeds section limits fails before publication.
@@ -135,6 +137,12 @@ and substantive evidence with inspected paths for each dispatched stable check I
 Required checks vary with scope. Never fill an unperformed check to satisfy the
 schema; return blocked with truthful limitations. Nonblank evidence is a
 structural requirement, not a machine proof that the judgment is correct.
+
+Keep `files_inspected` exactly dispatch-owned. Record necessary dependency/context
+reads in optional `nearby_contract_owners`; adversarial `inspected_paths` remain
+owned-only. `git_dependencies` uses the same
+exact-command and conservative classification rules as audits. The canonical
+payload retains this provenance. Independent inputs remain conclusion-blind.
 
 Before publication, the bound compiler preflight rejects missing/duplicate/unknown
 checks, empty evidence, scope errors, mismatched captures, and prohibited commands.

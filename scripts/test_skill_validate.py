@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Tests for skill_validate.py."""
 
+import shutil
+import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
@@ -44,6 +46,65 @@ def test_validate_skill_rejects_missing_skill_file(tmp_path: Path) -> None:
 
     assert not valid
     assert message == "SKILL.md not found"
+
+
+@pytest.mark.parametrize("case", ["valid", "malformed", "missing-metadata", "removed", "invalid-encoding"])
+def test_batch_matches_single_and_reports_every_failure(tmp_path: Path, capsys: pytest.CaptureFixture[str], case: str) -> None:
+    """Batch validation retains single-skill semantics and continues after errors."""
+    skills = [tmp_path / name for name in ("first-skill", "second-skill")]
+    singles = []
+    for skill in skills:
+        write_skill(skill, f"name: {skill.name}\ndescription: Use for tests.", include_openai_metadata=case != "missing-metadata")
+        if case == "malformed":
+            (skill / "SKILL.md").write_text("---\nname: [\n---\n", encoding="utf-8")
+        elif case == "removed":
+            (skill / "SKILL.md").unlink()
+        elif case == "invalid-encoding":
+            (skill / "SKILL.md").write_bytes(b"\xff")
+        singles.append((skill_validate.main([str(skill)]), capsys.readouterr()))
+
+    assert skill_validate.main([str(skill) for skill in skills]) == max(code for code, _output in singles)
+    batch = capsys.readouterr()
+    for skill, (_code, output) in zip(skills, singles, strict=True):
+        assert f"{skill}: {output.out or output.err}" in (batch.out or batch.err)
+
+
+def test_repository_batch_preserves_inventory_and_git_state(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Deleted/ignored/nested entrypoints are omitted, while every selected error is reported."""
+    git = shutil.which("git")
+    assert git is not None
+
+    def run_git(*args: str) -> bytes:
+        return subprocess.run([git, "-C", str(tmp_path), *args], check=True, capture_output=True).stdout  # noqa: S603 - isolated fixture Git.
+
+    run_git("init", "-q")
+    root = tmp_path / "agents/.agents/skills"
+    root.mkdir(parents=True)
+    for name in ("tracked", "removed"):
+        write_skill(root / name, f"name: {name}\ndescription: Fixture.")
+    run_git("add", ".")
+    (root / "removed/SKILL.md").unlink()
+    (tmp_path / ".gitignore").write_text("ignored/\n", encoding="utf-8")
+    for name in ("untracked", "ignored", "malformed", "missing-metadata"):
+        write_skill(root / name, f"name: {name}\ndescription: Fixture.", include_openai_metadata=name != "missing-metadata")
+    (root / "malformed/SKILL.md").write_text("No frontmatter", encoding="utf-8")
+    write_skill(root / "tracked/nested", "name: nested\ndescription: Fixture.")
+    before = (run_git("status", "--porcelain=v1", "-z"), run_git("ls-files", "--stage", "-z"))
+    assert skill_validate.main(["--repository", str(tmp_path)]) == 1
+    output = capsys.readouterr()
+    assert output.out.count("Skill is valid!") == 2
+    assert f"{root / 'malformed'}: No YAML frontmatter found" in output.err
+    assert f"{root / 'missing-metadata'}: agents/openai.yaml not found" in output.err
+    assert all(name not in output.out + output.err for name in ("removed", "ignored", "nested"))
+    assert before == (run_git("status", "--porcelain=v1", "-z"), run_git("ls-files", "--stage", "-z"))
+
+
+def test_repository_inventory_failure_is_not_empty_success(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """A directory outside Git cannot silently pass as an empty skill inventory."""
+    assert skill_validate.main(["--repository", str(tmp_path)]) == 1
+    output = capsys.readouterr()
+    assert output.err.startswith("failed to inventory skills:")
+    assert not output.out
 
 
 def test_validate_skill_rejects_malformed_closing_delimiter(tmp_path: Path) -> None:

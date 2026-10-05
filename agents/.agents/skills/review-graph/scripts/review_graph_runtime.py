@@ -15,7 +15,7 @@ import tomllib
 from collections import Counter
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics, run_command_bytes
 from review_graph_bootstrap import bootstrap_document
@@ -111,6 +111,9 @@ from review_graph_scheduling import select_execution_lanes
 from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
 from review_graph_synthesis import synthesis_fields, validate_synthesis
 from review_graph_usage import digest as usage_digest, measure_call
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 _READ_ONLY_MODES = frozenset({"audit", "revalidation", "synthesis"})
 _REVIEW_MODES = _READ_ONLY_MODES | {"fix"}
@@ -3277,6 +3280,26 @@ def _inspection_groups(plan: GraphPlan, source_state: tuple[str, str, str], arti
     return output
 
 
+def _worker_provenance_examples(dispatch: dict[str, Any], captured_paths: Iterable[str]) -> dict[str, Any]:
+    """Supply illustrative fragments, never prefilled claims of performed work."""
+    owned = dispatch["owned_paths"][0]
+    context = next((path for path in captured_paths if path not in dispatch["owned_paths"]), dispatch["skill_path"])
+    local_diff = shlex.join(["git", "diff", "HEAD", "--", owned])
+    branch_diff = shlex.join(["git", "diff", "origin/main", "--", owned])
+    return {
+        "owned_read": {"files_inspected": [owned], "commands_executed": [shlex.join(["cat", "--", owned])]},
+        "context_read": {"nearby_contract_owners": [context], "commands_executed": [shlex.join(["cat", "--", context])]},
+        "local_diff": {
+            "commands_executed": [local_diff],
+            "git_dependencies": [{"kind": "source-discovery", "command": local_diff, "reason": "Located reads; judgments use captured source, not staging."}],
+        },
+        "branch_diff": {
+            "commands_executed": [branch_diff],
+            "git_dependencies": [{"kind": "head", "command": branch_diff, "reason": "Comparison depends on the base revision."}],
+        },
+    }
+
+
 def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
     schema = dispatch.get("payload_schema")
     schema_text = (
@@ -3305,7 +3328,7 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
             "it validates, reviews, and atomically publishes the identical bytes. "
             "Return only its receipt, not a second copy of the payload. Keep the bytes for any approved retry with --approval-identity; "
             "do not rewrite evidence to obtain approval. "
-            "Only the bound worker_payload_path is a write target; paths within evidence are not write targets."
+            "For payload publication, only the bound worker_payload_path is a write target; paths within evidence are read provenance."
         )
     elif persistence.get("input_mode") == "stdin" and review_command:
         persistence_text = (
@@ -3313,7 +3336,7 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
             f"safety-review command unchanged: {shlex.join(review_command)}. It validates the bound contract at {persistence_input} before any artifact write "
             "and returns an approval_identity. Then stream the identical bytes to the persistence command "
             f"{shlex.join(persistence_command)} with --approval-identity <reviewed identity>. "
-            f"Only {worker_payload_path} is an artifact write target; path strings "
+            f"For payload publication, only {worker_payload_path} is an artifact write target; path strings "
             "inside the payload are evidence. If publication is blocked and the user approves that identity, retry identical bytes and the same command; never "
             f"rewrite evidence to obtain approval. Only after the runtime atomically publishes {worker_payload_path} may you return those same bytes. "
             "Serialize payload_bytes once and retain them for both calls and any retry. Python example (dispatch is the supplied dispatch object):\n"
@@ -3332,13 +3355,27 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
             f" Before returning, write the exact result bytes to temporary sibling {persistence_candidate}, then invoke the runtime-owned "
             f"persistence command unchanged: {shlex.join(persistence_command)}. "
             f"Its bound input is {persistence_input} and candidate is {persistence_candidate}. "
-            f"Only {persistence_candidate} and {worker_payload_path} are artifact write targets; path strings inside the payload are evidence. "
+            f"For payload publication, only {persistence_candidate} and {worker_payload_path} are write targets; path strings inside the payload are evidence. "
             "The persistence receipt or a publication-block diagnostic supplies an approval_identity bound to the exact bytes and both paths. "
             "If publication is blocked and the user approves that identity, preserve the candidate bytes and retry the same command with "
             "--approval-identity <approved identity>; "
             "never rewrite evidence to obtain approval. "
             f"Only after it atomically publishes {worker_payload_path} may you return those same bytes."
         )
+    persistence_text += (
+        " Source captures and other graph proof artifacts still belong under the workflow's authorized external temporary store; "
+        "this payload restriction does not prohibit those writes."
+    )
+    provenance_text = (
+        " dispatch.provenance_examples contains illustrative fragments, not performed work: merge only actual reads/commands, "
+        "account for owned scope under the dispatch contract, and replace origin/main with the captured base when applicable. "
+        "files_inspected is owned-only; nearby_contract_owners records inspected dependency/context paths. "
+        "Record each Git invocation separately and bind git_dependencies.command to its exact commands_executed entry. "
+        "source-discovery supports plain git diff with optional HEAD, --cached/--staged, and -- relative/path; "
+        "other revisions use conservative head (or index/history for those judgments). Never classify a compound command as source-discovery."
+        if dispatch.get("mode") in {"audit", "independent-review"}
+        else ""
+    )
     if contract == "compact-independent-review":
         return (
             "Perform only the dispatched repository-independent-review in fresh context. Publish the structured JSON payload from "
@@ -3352,20 +3389,18 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
             "or semantic uncertainty in tests/branches to obtain acceptance. "
             "Record observed before_state/after_state and truthful mutation and command attestations. The compiler renders native headings, "
             "labels and graph identities; never supply an unperformed check or borrow other reviewers' conclusions. "
-            f"Command policy: {command_policy}{persistence_text}"
+            f"Command policy: {command_policy}{provenance_text}{persistence_text}"
         )
     validation_text = (
         " Omit artifacts: the runtime captures workspace status and artifact digests before and after execution." if contract == "compact-validation" else ""
     )
     audit_scope_text = (
-        " For audit payloads, files_inspected names dispatch-owned reads; nearby_contract_owners names inspected read-only dependency/context provenance and "
-        "may be outside dispatch ownership; scope_limitations is reserved exclusively for omitted dispatch-owned paths and must equal owned_paths minus "
+        " For audits, scope_limitations is reserved exclusively for omitted dispatch-owned paths and must equal owned_paths minus "
         "files_inspected and runtime-proved reused paths. When coverage_reuse is present, inspect only recheck units, preserve their prior findings and "
         "reconcile original validation needs/handoffs; do not claim fresh reads of reused paths. For broad fresh audits, use optional coverage_units when "
         "you can partition contracts with explicit dependencies and uncertainty: partition every owned path and every finding exactly once "
         "using one-based finding_indices, give each unit a unique unit_id, and account for every nearby_contract_owners path in dependency_paths. "
-        "Declare git_dependencies with kind, reason, and the exact commands_executed command when applicable: source-discovery for a plain local git diff "
-        "used only to locate source reads, index/head/history for semantic Git judgments. Source-discovery judgments must come from the captured "
+        "Source-discovery judgments must come from the captured "
         "files_inspected/nearby_contract_owners reads, independent of the staging split; undeclared commands remain conservative. "
         "Legacy git_sensitive=true always requires rechecking. "
         'Put validator-owned nonexecution in execution_facts=["validators-not-executed"]; use source-captures-match and git-not-mutated only when true. '
@@ -3379,7 +3414,7 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
         f"Publish the canonical {contract} payload using field names from {schema_text}. "
         "Every field shown in payload_schema.required_shape is required whenever its parent object is present. "
         "Do not author fingerprints, evidence IDs, artifact IDs, or digests. Copy supplied evidence/finding IDs only into schema-defined reference fields. "
-        f"Command policy: {command_policy}{validation_text}{audit_scope_text}{persistence_text}{shared_text}"
+        f"Command policy: {command_policy}{validation_text}{provenance_text}{audit_scope_text}{persistence_text}{shared_text}"
     )
 
 
@@ -3872,6 +3907,8 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             else:
                 common["payload_schema"] = synthesis_schema if node.mode == "synthesis" else review_schema
                 contract = "compact-review"
+        if node.mode in {"audit", "independent-review"} and common["owned_paths"]:
+            common["provenance_examples"] = _worker_provenance_examples(common, line_bounds)
         persistence_contract = {
             **({"coverage_reuse": common["coverage_reuse"]} if "coverage_reuse" in common else {}),
             "mode": node.mode,
