@@ -103,6 +103,55 @@ jobs:
       - name: Run CI checks
         run: just ci
 
+  linux-review:
+    name: Linux portable review
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Configure user-owned review directories
+        run: |
+          {
+            printf 'DOTFILES_REVIEW_PREFIX=%s/dotfiles-review/install\n' "$RUNNER_TEMP"
+            printf 'DOTFILES_REVIEW_CACHE=%s/dotfiles-review/cache\n' "$RUNNER_TEMP"
+            printf 'DOTFILES_REVIEW_TMP=%s/dotfiles-review/tmp\n' "$RUNNER_TEMP"
+            printf 'DOTFILES_REVIEW_SKILLS_DIR=%s/dotfiles-review/skills\n' "$RUNNER_TEMP"
+            printf 'DOTFILES_REVIEW_ARTIFACTS=%s/target/linux-review\n' "$GITHUB_WORKSPACE"
+          } >> "$GITHUB_ENV"
+
+      # Only base host prerequisites use the runner image's package manager.
+      # The installer itself has no privilege or package-manager requirement.
+      - name: Provide base Linux executor tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y bash curl git tar unzip zsh stow
+
+      - name: Provision unprivileged pinned tools and locked Python
+        run: bash bin/linux-review.sh setup
+
+      - name: Rerun setup to verify idempotence
+        run: bash bin/linux-review.sh setup
+
+      - name: Run offline portable suite including native timing tests
+        run: bash bin/linux-review.sh check
+
+      - name: Run timed graph publication and final proof smoke
+        run: bash bin/linux-review.sh smoke
+
+      - name: Publish platform, timing, and graph evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linux-review-${{ github.sha }}
+          path: target/linux-review/
+          retention-days: 14
+          if-no-files-found: warn
+
   validation-timing:
     name: Validation timing (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}

@@ -284,6 +284,26 @@ setup:
     just python-sync
     just tools-sync
 
+# Linux review tooling only; directories are configured with DOTFILES_REVIEW_*.
+linux-setup:
+    bash bin/linux-review.sh setup
+
+# Offline portable checks, with exact command and platform/timing artifacts.
+linux-check:
+    bash bin/linux-review.sh check
+
+# Bounded scripted graph: native timing, publication, compilation, final proof.
+linux-smoke:
+    bash bin/linux-review.sh smoke
+
+# Explicit live authentication probe; receives credentials only from the environment.
+linux-probe:
+    bash bin/linux-review.sh probe
+
+# The same protocol fixture is useful on macOS without Linux provisioning.
+review-environment-smoke: _ensure-uv
+    uv run --locked python scripts/linux_review.py smoke
+
 _preflight-stable-uv: (_shared-deps "check-uv")
 
 # Select Homebrew uv for both the launcher and the shared command's subprocesses.
@@ -347,7 +367,7 @@ update-python-dependencies: _preflight-stable-uv
     "$uv_executable" sync --locked --group dev
 
 shell-check:
-    bash -n bin/bootstrap.sh bin/macos-defaults.sh bin/resolve-just-version.sh bin/restow-agents.sh bin/verify.sh
+    bash -n bin/bootstrap.sh bin/linux-review.sh bin/macos-defaults.sh bin/resolve-just-version.sh bin/restow-agents.sh bin/verify.sh
 
 skill-check skill: _ensure-uv
     uv run --locked python scripts/skill_validate.py "{{ skill }}"
