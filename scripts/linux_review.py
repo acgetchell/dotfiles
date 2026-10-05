@@ -75,7 +75,7 @@ def inventory() -> dict[str, object]:
         executable = shutil.which(name)
         lines = command_output([executable, "--version"]).splitlines() if executable else []
         identity = next(iter(lines), "unavailable")
-        match = re.search(r"\d+\.\d+\.\d+", identity)
+        match = re.search(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", identity)
         tools[name] = {
             "executable": executable,
             "identity": identity,

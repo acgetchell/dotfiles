@@ -1,18 +1,20 @@
 ---
 name: project-tooling-review
-description: "Review and fix repository tooling: just recipes, GitHub Actions, CI command drift, repository-owned static analysis, tool versions, installers, linters, formatters, type checks, support scripts, and command documentation. Use for tooling workflow correctness and maintainer ergonomics; route application behavior to the appropriate language reviewer."
+description: "Review and fix just recipes, GitHub Actions, CI drift, Clippy/Semgrep usefulness and coverage, tool versions, installers, linters, formatters, type checks, support scripts, and command docs. Use for tooling correctness and static-analysis policy maintenance; route application behavior and test quality to language reviewers."
 ---
 
 # project-tooling-review
 
 Rust-orchestrator passes use the shared [execution-v1 contract](../rust-review-orchestrator/references/execution-v1.md).
 
-Review the project command layer: the recipes, workflows, version pins, and docs that let maintainers run the right checks without remembering every underlying tool.
+Review repository commands, workflows, pins, and docs. Evaluate whether static
+checks protect relevant policies, detect violations, and run on intended code.
+Keep, add, adjust, or remove checks based on evidence and requested scope.
 
 ## Ground Rules
 
 - Do not perform git state mutations. Do not stage, commit, push, tag, checkout, reset, or stash unless the user explicitly asks in the current turn.
-- Do not install or uninstall unrelated tools unless the user explicitly asks. When the requested scope includes tool-version currentness, update drift, or "latest" tooling review, update stale tools through the repository's existing manager and reconcile tracked pins.
+- Do not install or uninstall unrelated tools. When requested scope includes tool-version currentness, update drift, or "latest" tooling review, update stale tools through the existing manager and reconcile tracked pins.
 - Respect repository-local agent instructions before editing. If the repository documents development commands, read that guidance before changing recipes or workflows.
 - Honor an exact scope supplied by a parent coordinator instead of rediscovering
   a narrower staged or worktree-only scope.
@@ -39,12 +41,12 @@ workflow.
 
 ## Scope Routing
 
-After identifying changed files, load only the references that apply:
+Use the requested surface and scope to load only the references that apply:
 
-- [`references/justfile.md`](references/justfile.md) for `justfile`, command recipes, local validator tiers, recipe naming, and docs that describe `just` commands.
+- [`references/justfile.md`](references/justfile.md) for recipes, validator tiers, naming, and command docs.
 - [`references/github-actions.md`](references/github-actions.md) for `.github/workflows/**`, Actions permissions/triggers/caches/matrices, CI use of `just`, and workflow validation.
 - [`references/tool-versions.md`](references/tool-versions.md) for `Brewfile`, `uv`, `cargo install`, `rustup`, lockfiles, action versions, language toolchains, and version drift.
-- [`references/static-analysis.md`](references/static-analysis.md) for repository-owned Semgrep rules, fixtures, path scoping, and validation.
+- [`references/static-analysis.md`](references/static-analysis.md) for Clippy/Semgrep selection, usefulness, retirement, suppressions, fixtures, and coverage, including policy audits without changed files.
 - [`references/delaunay.md`](references/delaunay.md) in the `delaunay` repository for its Semgrep fixture harness, notebook execution policy, and generated-asset
   ownership.
 
@@ -52,7 +54,7 @@ If multiple surfaces changed, review them in this order:
 
 1. Tool versions and installers, so commands use the intended tools.
 2. `justfile` recipes and local command contracts.
-3. Repository-owned static-analysis rules, fixtures, and scan scope.
+3. Static-analysis policy, lint and rule effectiveness, fixtures, and scan scope.
 4. GitHub Actions and remote CI wiring.
 5. Docs and handoff summaries that describe the command surface.
 
@@ -109,6 +111,9 @@ rather than counting it twice.
 
 When tooling changes alter Rust or Python validation behavior, identify the affected language surface and call out whether `rust-review-orchestrator` or `python-review-orchestrator` should also run. Do not duplicate their source-code review inside this skill.
 
-For Python packaging changes, own recipe, workflow, installer, validator, and tool-version mechanics here. Route wheel/sdist contents, package discovery, installed imports, entry points, extras, runtime/platform matrices, and external-consumer behavior through `python-review-orchestrator` to `python-build-portability`.
+For Python packaging, own tooling mechanics here. Route distribution contents,
+package discovery, installed imports, entry points, extras, runtime/platform
+matrices, and external-consumer behavior through `python-review-orchestrator`
+to `python-build-portability`.
 
 When command, release, or process changes affect a wider documentation suite, hand off navigation, cross-document consistency, generated-document ownership, and any applicable specialist documentation to `docs-review-orchestrator`. Keep command truth in this skill; do not absorb the broader documentation review here.

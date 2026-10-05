@@ -1372,6 +1372,32 @@ def test_repository_classifier_detects_nested_language_manifests_for_shared_work
     assert any("ci.yml" in item for item in signals["python"])
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "clippy.toml",
+        "crates/core/.clippy.toml",
+        "semgrep.yaml",
+        ".semgrep.yml",
+        ".semgrepignore",
+        "tooling/.semgrep/security.yml",
+        "semgrep/policy.yaml",
+        "tests/semgrep/Brewfile",
+    ],
+)
+def test_static_analysis_changes_require_tooling_review(path: str) -> None:
+    """Configuration-only changes cannot bypass the tooling ownership floor."""
+    signals = classify_repository_paths((path,))
+    assert any(path in item for item in signals["tooling"])
+    if Path(path).name in {"clippy.toml", ".clippy.toml"}:
+        assert "rust" in signals
+    catalog = load_routing_catalog(ROUTING_CATALOG)
+    decisions = _closed_rust_routing_decisions()
+    result = assess_repository_classifier_floor(catalog, decisions, signals)
+    assert not result.feasible
+    assert any("repo.tooling is not-applicable" in blocker for blocker in result.blockers)
+
+
 def test_repository_classifier_floor_rejects_router_conflict() -> None:
     catalog = load_routing_catalog(ROUTING_CATALOG)
     decisions = _closed_rust_routing_decisions()

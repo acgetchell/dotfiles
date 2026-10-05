@@ -50,7 +50,8 @@ for tool in git bash zsh stow; do
 done
 
 tool_version() {
-  "$1" --version 2>/dev/null | sed -nE 's/^[^0-9]*([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' | head -1
+  local version_pattern='[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?'
+  "$1" --version 2>/dev/null | sed -nE "s/^[^0-9]*(${version_pattern}).*/\1/p" | head -1
 }
 
 install_release() {

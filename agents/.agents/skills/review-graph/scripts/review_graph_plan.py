@@ -1440,15 +1440,40 @@ def classify_repository_paths(paths: Sequence[str], *, release_readiness: bool =
         basename = PurePosixPath(path).name
         if path.endswith((".cc", ".cpp", ".cxx", ".hh", ".hpp", ".hxx", ".ixx", ".cppm")):
             add("cpp", path, "C++ source or contract")
-        if path.endswith(".rs") or basename in {"Cargo.toml", "Cargo.lock", "rust-toolchain", "rust-toolchain.toml", "clippy.toml", "rustfmt.toml"}:
+        if path.endswith(".rs") or basename in {
+            "Cargo.toml",
+            "Cargo.lock",
+            "rust-toolchain",
+            "rust-toolchain.toml",
+            "clippy.toml",
+            ".clippy.toml",
+            "rustfmt.toml",
+        }:
             add("rust", path, "Rust source, package, or toolchain surface")
         if path.endswith((".py", ".ipynb")) or basename in {"pyproject.toml", "uv.lock"}:
             add("python", path, "Python source, notebook, package, or lock surface")
         if basename in {"CMakeLists.txt", "CMakePresets.json", "vcpkg.json", "vcpkg-configuration.json"} or path.startswith("cmake/"):
             add("cpp", path, "C++ build semantics")
             add("tooling", path, "shared build configuration")
-        if basename in {"Cargo.toml", "Cargo.lock", "pyproject.toml", "uv.lock"} or (path.startswith("tooling/") and path.endswith(".toml")):
-            add("tooling", path, "shared dependency or command configuration")
+        if (
+            basename
+            in {
+                "Cargo.toml",
+                "Cargo.lock",
+                "pyproject.toml",
+                "uv.lock",
+                "clippy.toml",
+                ".clippy.toml",
+                "semgrep.yml",
+                "semgrep.yaml",
+                ".semgrep.yml",
+                ".semgrep.yaml",
+                ".semgrepignore",
+            }
+            or (path.startswith("tooling/") and path.endswith(".toml"))
+            or any(part in {"semgrep", ".semgrep"} for part in PurePosixPath(path).parts[:-1])
+        ):
+            add("tooling", path, "shared dependency, command, or static-analysis configuration and fixtures")
         if basename in {"justfile", "Makefile", "Brewfile"} or path.startswith(".github/workflows/"):
             add("tooling", path, "repository command or CI surface")
             if has_cpp:

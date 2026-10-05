@@ -52,9 +52,14 @@ jobs:
           resolve_version() {
             local name="$1"
             local value
+            local version_pattern
             value="$(just --evaluate "$name")"
-            if [[ ! "$value" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              echo "::error::Invalid $name in justfile: ${value:-missing}"
+            version_pattern="$(just --evaluate cargo_version_pattern)"
+            if [[ "$name" == uv_version ]]; then
+              version_pattern='[0-9]+\.[0-9]+\.[0-9]+'
+            fi
+            if [[ ! "$value" =~ ^${version_pattern}$ ]]; then
+              echo "::error::Invalid $name in justfile: ${value:-missing}" >&2
               return 1
             fi
             printf '%s\n' "$value"
