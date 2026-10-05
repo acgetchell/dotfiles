@@ -217,6 +217,7 @@ testpaths = ["agents/.agents/skills", "scripts"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+markers = ["review_contract: cheap prompt budgets and routing contracts, before graph execution"]
 
 [dependency-groups]
 dev = [

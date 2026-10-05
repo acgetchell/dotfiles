@@ -3,12 +3,15 @@
 
 import argparse
 import re
+import subprocess
 import sys
 from collections.abc import Hashable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import yaml
+from research_repo_tools.process import ExecutableNotFoundError
+from research_repo_tools.selection import select_files
 from yaml.constructor import ConstructorError
 from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
@@ -239,22 +242,34 @@ def validate_description(description_value: object) -> tuple[bool, str]:
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description=__doc__, suggest_on_error=True, color=False)
-    parser.add_argument("skill", type=Path)
-    return parser.parse_args(argv)
+    parser.add_argument("skills", type=Path, nargs="*")
+    parser.add_argument("--repository", type=Path, help="Validate all tracked/nonignored skill entrypoints in one process")
+    args = parser.parse_args(argv)
+    if bool(args.skills) == bool(args.repository):
+        parser.error("supply skill directories or --repository, exclusively")
+    return args
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run skill validation."""
     args = parse_args(sys.argv[1:] if argv is None else argv)
-    try:
-        valid, message = validate_skill(args.skill)
-    except (OSError, UnicodeError) as exc:
-        print(f"failed to validate skill: {exc}", file=sys.stderr)
-        return 1
-
-    output = sys.stdout if valid else sys.stderr
-    print(message, file=output)
-    return 0 if valid else 1
+    skills = args.skills
+    if args.repository is not None:
+        try:
+            skills = [args.repository / Path(path).parent for path in select_files(args.repository, include=(":(glob)agents/.agents/skills/*/SKILL.md",))]
+        except (ExecutableNotFoundError, OSError, ValueError, subprocess.SubprocessError) as exc:
+            print(f"failed to inventory skills: {exc}", file=sys.stderr)
+            return 1
+    failed = False
+    for skill in skills:
+        try:
+            valid, message = validate_skill(skill)
+        except (OSError, UnicodeError) as exc:
+            valid, message = False, f"failed to validate skill: {exc}"
+        prefix = f"{skill}: " if args.repository is not None or len(skills) > 1 else ""
+        print(prefix + message, file=sys.stdout if valid else sys.stderr)
+        failed |= not valid
+    return int(failed)
 
 
 if __name__ == "__main__":

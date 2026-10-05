@@ -1,6 +1,8 @@
 {
   "status": "completed",
   "files_inspected": ["src/parser.py", "tests/test_parser.py"],
+  "nearby_contract_owners": ["pyproject.toml"],
+  "git_dependencies": [{"kind": "head", "command": "git diff origin/main -- src/parser.py tests/test_parser.py", "reason": "Illustrative comparison depends on the base revision; substitute the actual captured base."}],
   "branches": "Illustrative inspection: traced integer parsing, suffix rejection, and the shared platform-independent return path.",
   "boundary_cases": "Illustrative inspection: checked empty input, a valid integer, and an integer followed by a suffix.",
   "tests": "Illustrative inspection: read parser tests. The planned aggregate was not executed by this reviewer; execution is delegated to the separate validator. Hosted Linux, macOS, and Windows checks remain pending. No execution result is claimed.",
@@ -27,6 +29,6 @@
   "source_mutated": false,
   "git_mutated": false,
   "command_policy_attested": true,
-  "commands_executed": [],
+  "commands_executed": ["cat src/parser.py tests/test_parser.py pyproject.toml", "git diff origin/main -- src/parser.py tests/test_parser.py"],
   "limitations": []
 }

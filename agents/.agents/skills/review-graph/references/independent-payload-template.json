@@ -1,6 +1,8 @@
 {
   "status": "blocked",
   "files_inspected": [],
+  "nearby_contract_owners": [],
+  "git_dependencies": [],
   "branches": "Not inspected yet.",
   "boundary_cases": "Not inspected yet.",
   "tests": "Not inspected yet.",

@@ -104,24 +104,11 @@ brew-cleanup-preview: _ensure-brew
 brew-install: _ensure-brew
     brew bundle install --file="$PWD/Brewfile"
 
-check: shell-check git-config-check justfile-fmt-check toml-check yaml-check markdown-check github-actions-check check-skills semgrep semgrep-test python-ci
+check: test-review-contracts shell-check git-config-check justfile-fmt-check toml-check yaml-check markdown-check github-actions-check check-skills semgrep semgrep-test python-ci
     @echo "Checks complete!"
 
 check-skills: _ensure-uv
-    #!/usr/bin/env bash
-    set -euo pipefail
-    failed=0
-    while IFS= read -r skill_file; do
-        skill_dir="${skill_file%/SKILL.md}"
-        if ! just skill-check "$skill_dir"; then
-            failed=1
-        fi
-    done < <(find agents/.agents/skills -mindepth 2 -maxdepth 2 -name SKILL.md -print | sort)
-    if (( failed )); then
-        echo "One or more skill checks failed." >&2
-        exit 1
-    fi
-    echo "Skill checks complete!"
+    uv run --locked python scripts/skill_validate.py --repository .
 
 ci: check
     @echo "CI checks complete!"
@@ -457,8 +444,12 @@ stow-restow-all:
 stow-verify: _ensure-uv
     DOTFILES_DIR="$PWD" uv run --locked python scripts/stow_verify.py
 
-test-python: _ensure-uv
-    uv run --locked pytest
+# Cheap instruction/routing guards run once before graph execution, including in ci.
+test-review-contracts: _ensure-uv
+    uv run --locked pytest -m review_contract
+
+test-python: test-review-contracts
+    uv run --locked pytest -m 'not review_contract'
 
 # Standard-library tests also run on Windows without installing POSIX-only tools.
 test-validation-timing: _ensure-uv

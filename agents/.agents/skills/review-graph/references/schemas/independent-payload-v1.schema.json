@@ -6,7 +6,33 @@
   "required": ["status", "files_inspected", "branches", "boundary_cases", "tests", "findings", "no_finding_evidence", "adversarial_checks", "handoffs", "before_state", "after_state", "source_mutated", "git_mutated", "command_policy_attested", "commands_executed", "limitations"],
   "properties": {
     "status": {"enum": ["blocked", "completed", "no-findings"]},
-    "files_inspected": {"$ref": "#/$defs/strings"},
+    "files_inspected": {"$ref": "#/$defs/strings", "description": "Exact dispatch-owned reads only; dependency/context reads belong in nearby_contract_owners."},
+    "nearby_contract_owners": {"$ref": "#/$defs/strings", "description": "Optional inspected dependency/context paths outside dispatch ownership, never additional owned scope or write targets."},
+    "git_dependencies": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "command", "reason"],
+            "properties": {
+              "kind": {"const": "head"},
+              "command": {"$ref": "#/$defs/text"},
+              "reason": {"$ref": "#/$defs/text"}
+            }
+          },
+          {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "reason"],
+            "properties": {
+              "kind": {"enum": ["source-discovery", "index", "history"]},
+              "command": {"$ref": "#/$defs/text"},
+              "reason": {"$ref": "#/$defs/text"}
+            }
+          }
+        ]
+      }
+    },
     "branches": {"$ref": "#/$defs/text", "description": "Inspected source branches and source-level platform observations; execution evidence belongs in tests."},
     "boundary_cases": {"$ref": "#/$defs/text"},
     "tests": {"$ref": "#/$defs/text", "description": "Test inspection and execution context, including delegated/unexecuted validation and pending hosted/platform checks. Pending execution alone does not block completed inspection and never means the checks passed."},
@@ -26,7 +52,7 @@
         "properties": {
           "check_id": {"enum": ["fallback", "platform", "parser-errors", "unexpected-exceptions", "test-boundaries"]},
           "evidence": {"$ref": "#/$defs/text"},
-          "inspected_paths": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/text"}}
+          "inspected_paths": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/text"}, "description": "Dispatch-owned paths from files_inspected; dependency/context provenance stays in nearby_contract_owners."}
         }
       }
     },

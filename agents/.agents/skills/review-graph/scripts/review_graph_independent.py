@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from review_graph_git import validate_git_dependencies
 from review_graph_schema import require_schema, require_schema_definition
 
 SCHEMA = Path(__file__).resolve().parents[1] / "references/schemas/independent-payload-v1.schema.json"
@@ -14,6 +15,12 @@ CHECK_LABELS = {
     "unexpected-exceptions": "unexpected exception types",
     "test-boundaries": "changed tests and boundary cases",
 }
+
+
+def _context_blockers(context: list[str], owned: list[str]) -> list[str]:
+    if len(context) != len(set(context)) or set(context) & set(owned):
+        return ["$.nearby_contract_owners must contain unique dependency/context paths outside dispatch ownership"]
+    return []
 
 
 def _evidence_blockers(payload: dict[str, Any], dispatch: dict[str, Any]) -> list[str]:
@@ -34,6 +41,8 @@ def _evidence_blockers(payload: dict[str, Any], dispatch: dict[str, Any]) -> lis
         blockers.append("$.files_inspected must equal the exact dispatched paths without duplicates")
     if not paths <= set(dispatch["planned_paths"]):
         blockers.append("$.files_inspected contains paths outside the dispatch")
+    context = payload.get("nearby_contract_owners", [])
+    blockers.extend(_context_blockers(context, dispatch["planned_paths"]))
     for index, check in enumerate(payload["adversarial_checks"]):
         if len(check["inspected_paths"]) != len(set(check["inspected_paths"])):
             blockers.append(f"$.adversarial_checks[{index}].inspected_paths contains duplicate paths")
@@ -50,6 +59,7 @@ def _evidence_blockers(payload: dict[str, Any], dispatch: dict[str, Any]) -> lis
 def render_independent_payload(payload: dict[str, Any], dispatch: dict[str, Any]) -> bytes:
     """Render supplied judgments only; neither infer missing checks nor repair evidence."""
     require_schema(payload, SCHEMA)
+    validate_git_dependencies(payload)
     require_schema_definition(dispatch, SCHEMA, "dispatch")
     if blockers := _evidence_blockers(payload, dispatch):
         raise ValueError("; ".join(blockers))
@@ -60,6 +70,7 @@ def render_independent_payload(payload: dict[str, Any], dispatch: dict[str, Any]
         (
             f"- Change target: {dispatch['change_target']}",
             f"- Files: {', '.join(rendered_paths) or 'none'}",
+            *((f"- Dependency/context reads: {', '.join(payload['nearby_contract_owners'])}",) if payload.get("nearby_contract_owners") else ()),
             *(f"- {label}: {payload[key]}" for label, key in (("Branches", "branches"), ("Boundary cases", "boundary_cases"), ("Tests", "tests"))),
         )
     )

@@ -33,6 +33,94 @@ def _publish(entry: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     return runtime.publish_worker_payload_bytes(contract, json.dumps(payload).encode())
 
 
+@pytest.mark.parametrize("mode", ["audit", "independent-review"])
+@pytest.mark.parametrize("diff_example", ["branch_diff", "local_diff"])
+def test_dispatch_provenance_examples_publish_and_compile_first_time(materialized: dict[str, Any], mode: str, diff_example: str) -> None:
+    """Replay emitted fragments with complete scripted evidence through native gates."""
+    entry = next(item for item in materialized["dispatches"] if item["dispatch"].get("mode") == mode)
+    dispatch = entry["dispatch"]
+    examples = dispatch["provenance_examples"]
+    payload = _compact_independent_payload(dispatch) if mode == "independent-review" else _compact_audit_payload(entry)
+    payload["nearby_contract_owners"] = examples["context_read"]["nearby_contract_owners"]
+    payload["git_dependencies"] = examples[diff_example]["git_dependencies"]
+    payload["commands_executed"] = [command for key in ("owned_read", "context_read", diff_example) for command in examples[key]["commands_executed"]]
+    receipt = _publish(entry, payload)
+    sealed = Path(entry["worker_payload_path"]).read_bytes()
+    assert receipt["worker_payload_digest"] == _digest(sealed)
+    assert json.loads(sealed) == payload
+    compiler = runtime.compile_independent_payload if mode == "independent-review" else runtime.compile_review
+    content, metadata = compiler(
+        {"dispatch": {**dispatch, "before_state": materialized["source_state"], "after_state": materialized["source_state"]}, "payload": payload}
+    )
+    assert metadata["evidence"]["status"] == "no-findings"
+    assert metadata["evidence"]["fingerprints"]["after"] == tuple(materialized["source_state"])
+    assert payload["nearby_contract_owners"][0].encode() in content
+    assert set(payload["files_inspected"]) == set(dispatch["owned_paths"])
+    assert not set(payload["nearby_contract_owners"]) & set(payload["files_inspected"])
+    assert Path(entry["worker_payload_path"]).read_bytes() == sealed
+
+
+@pytest.mark.parametrize("mode", ["audit", "independent-review"])
+@pytest.mark.parametrize("command", ["git diff origin/main -- src/module_0.py", "git diff HEAD && git diff --cached"])
+def test_unsupported_discovery_fails_before_publication_with_conservative_alternative(materialized: dict[str, Any], mode: str, command: str) -> None:
+    entry = next(item for item in materialized["dispatches"] if item["dispatch"].get("mode") == mode)
+    payload = _compact_independent_payload(entry["dispatch"]) if mode == "independent-review" else _compact_audit_payload(entry)
+    payload.update(commands_executed=[command], git_dependencies=[{"kind": "source-discovery", "command": command, "reason": "Located source."}])
+    with pytest.raises(ValueError, match=r"split compound invocations.*kind=head"):
+        _publish(entry, payload)
+    assert not Path(entry["worker_payload_path"]).exists()
+
+
+@pytest.mark.parametrize("command", [None, "", "git diff other-base -- src/module_0.py"])
+def test_independent_head_dependency_requires_executed_command(materialized: dict[str, Any], command: str | None) -> None:
+    entry = _independent_entry(materialized)
+    payload = _compact_independent_payload(entry["dispatch"])
+    dependency = {"kind": "head", "reason": "The judgment depends on the comparison base."}
+    if command is not None:
+        dependency["command"] = command
+    payload["git_dependencies"] = [dependency]
+    payload["commands_executed"] = ["git diff origin/main -- src/module_0.py"]
+    with pytest.raises(ValueError, match="command"):
+        _publish(entry, payload)
+    assert not Path(entry["worker_payload_path"]).exists()
+    dispatch = {**entry["dispatch"], "before_state": materialized["source_state"], "after_state": materialized["source_state"]}
+    with pytest.raises(ValueError, match="command"):
+        runtime.compile_independent_payload({"dispatch": dispatch, "payload": payload})
+
+
+@pytest.mark.parametrize("kind", ["index", "history"])
+def test_independent_commandless_metadata_dependency_remains_valid(materialized: dict[str, Any], kind: str) -> None:
+    entry = _independent_entry(materialized)
+    payload = _compact_independent_payload(entry["dispatch"])
+    payload["git_dependencies"] = [{"kind": kind, "reason": "The judgment depends on supplied Git metadata."}]
+    receipt = _publish(entry, payload)
+    assert receipt["worker_payload_digest"] == _digest(Path(entry["worker_payload_path"]).read_bytes())
+    dispatch = {**entry["dispatch"], "before_state": materialized["source_state"], "after_state": materialized["source_state"]}
+    _, metadata = runtime.compile_independent_payload({"dispatch": dispatch, "payload": payload})
+    assert metadata["evidence"]["status"] == "no-findings"
+
+
+@pytest.mark.parametrize("damage", ["context-in-owned", "owned-in-context", "duplicate-context", "context-only-check", "unattested-context"])
+def test_independent_context_does_not_expand_owned_scope(materialized: dict[str, Any], damage: str) -> None:
+    entry = _independent_entry(materialized)
+    payload = _compact_independent_payload(entry["dispatch"])
+    context = entry["dispatch"]["provenance_examples"]["context_read"]["nearby_contract_owners"]
+    payload["nearby_contract_owners"] = context
+    if damage == "context-in-owned":
+        payload["files_inspected"] += context
+    elif damage == "owned-in-context":
+        payload["nearby_contract_owners"] = payload["files_inspected"][:1]
+    elif damage == "duplicate-context":
+        payload["nearby_contract_owners"] *= 2
+    elif damage == "context-only-check":
+        payload["adversarial_checks"][0]["inspected_paths"] = context
+    else:
+        payload["adversarial_checks"][0]["inspected_paths"] = ["unattested.py"]
+    with pytest.raises(ValueError, match=r"files_inspected|nearby_contract_owners|inspected_paths"):
+        _publish(entry, payload)
+    assert not Path(entry["worker_payload_path"]).exists()
+
+
 def test_default_cli_receipt_binds_full_artifact_and_explicit_full_output(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     document = benchmark_fixture(tmp_path / "repository", scale=3)
     request, output = tmp_path / "input.json", tmp_path / "dispatches.json"

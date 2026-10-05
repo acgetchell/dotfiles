@@ -19,6 +19,17 @@ caveats: distinguish diff-based `source-discovery` from `index`, `head`, or
 `history` judgments. See [state transitions](state-transitions.md) for the
 command binding, unchanged-read proof, and conservative legacy behavior.
 
+Materialized audit and independent inputs provide `provenance_examples` fragments
+using owned and context paths. They are illustrative, never evidence of performed
+work. Merge actual reads and commands, covering every owned path; replace the
+illustrative `origin/main` with the captured base. Keep each Git invocation in a
+separate `commands_executed` entry, and copy its exact text into the declaration.
+Plain `git diff`, optionally with `HEAD`, `--cached`/`--staged`, and
+`-- relative/path`, supports `source-discovery` when judgments depend only on
+captured source reads. Other revision diffs, such as `git diff origin/main`, use
+conservative `head`; use `index` or `history` for those semantic dependencies.
+Compound commands cannot be declared `source-discovery`.
+
 Unknown execution facts are rejected. `validators-not-executed` cannot coexist
 with a ledger entry for a dispatched validator command. The ledger still records
 inspection and artifact-publication commands; these facts neither supply

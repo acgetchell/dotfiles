@@ -523,7 +523,14 @@ just stow-check agents
 just stow-apply agents
 ```
 
-Run `just check-skills` to validate every skill in `agents/.agents/skills/`.
+Run `just check-skills` to validate tracked and nonignored skills in one Python
+process, with per-skill diagnostics and an aggregate exit status. Removed
+entrypoints are omitted; explicitly checking a missing skill still fails.
+
+`just test-review-contracts` runs cheap prompt-budget and routing guards.
+`just test-python` runs that gate followed by the remaining tests, and `just ci`
+runs it before static checks and graph execution. Each guard runs once in either
+aggregate. Direct `uv run --locked pytest` still collects the complete suite.
 
 Review the changed skill files separately before including them in a commit.
 
