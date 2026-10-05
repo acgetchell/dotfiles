@@ -137,6 +137,9 @@ def validation_payload(entry: dict[str, Any], output: Path) -> dict[str, Any]:
         msg = "Native smoke validation exceeded its deadline; interruption evidence retained."
         raise ValueError(msg) from None
     events = [json.loads(line) for line in receipt.read_text().splitlines()]
+    if not events:
+        msg = "Native smoke validation failed; timing receipt is empty."
+        raise ValueError(msg)
     finished = events[-1]
     if code != 0 or finished["status"] != "completed" or finished["exit_code"] != 0:
         msg = "Native smoke validation failed; no successful graph proof will be claimed."

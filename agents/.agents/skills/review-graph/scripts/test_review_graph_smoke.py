@@ -41,6 +41,21 @@ def test_smoke_does_not_replace_prior_artifacts(tmp_path: Path) -> None:
     assert marker.read_text() == "preserve"
 
 
+@pytest.mark.parametrize("exit_code", [0, 74])
+def test_main_rejects_empty_timing_receipts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], exit_code: int) -> None:
+    def run(argv: list[str]) -> int:
+        Path(argv[argv.index("--receipt") + 1]).write_bytes(b"")
+        return exit_code
+
+    monkeypatch.setattr(review_graph_smoke, "run_validation", run)
+    output = tmp_path / "smoke"
+    assert review_graph_smoke.main(["--output", str(output)]) == 2
+    assert "timing receipt is empty" in capsys.readouterr().err
+    assert (output / "validation-timing.jsonl").read_bytes() == b""
+    assert not (output / "final-proof.json").exists()
+    assert not (output / "smoke.json").exists()
+
+
 @pytest.mark.skipif(os.name != "posix", reason="Linux/macOS smoke uses POSIX process groups")
 def test_validation_timeout_stops_the_child_and_retains_interruption(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(review_graph_smoke, "VALIDATION_TIMEOUT_SECONDS", 2)
