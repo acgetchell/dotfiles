@@ -38,9 +38,9 @@ dotfiles/
 | Environment | Scope | Verification status |
 | --- | --- | --- |
 | macOS | Desktop dotfiles, Homebrew, Stow, full repository checks | Existing native CI; new Linux installer is separate |
-| Linux x86_64, glibc >= 2.28 | User-space review tools and full portable checks | Ubuntu 24.04 CI configured; passing evidence for this change pending |
+| Linux x86_64, glibc >= 2.28 | User-space review tools and full portable checks | Ubuntu 24.04 CI and Debian 13.6 cloud checks passed; other distributions unverified |
 | Linux aarch64, glibc >= 2.28 | Same provisioning candidate | Native validation unverified |
-| Cara's cloud computer | Site-approved Linux tooling, optional TypeSafe access | Actual host and end-to-end run unverified |
+| Cara's cloud computer | Debian 13.6 x86_64 portable review environment | Setup, repeat setup, full checks, scripted smoke, and fresh restore verified; actual coordinator/worker review outstanding |
 | HPC | Site modules, scratch, authorized execution placement | Cluster configuration and native execution unverified |
 | Windows | Portable timing helper | Timing CI only; full tooling setup unsupported |
 
@@ -48,6 +48,14 @@ Linux support covers development/review tooling. The macOS shell, Git dotfile,
 desktop preferences, and Homebrew setup have not been ported to Linux.
 See the [Linux/cloud/HPC guide](docs/linux-review-environment.md) for prerequisites,
 offline execution, evidence, and separate cloud/cluster verification.
+The guide records the [2026-10-05 verification evidence](docs/linux-review-environment.md#evidence-and-verification-status)
+and the remaining actual-cloud review criterion, transferred from
+[#95](https://github.com/acgetchell/dotfiles/issues/95) to
+[#123](https://github.com/acgetchell/dotfiles/issues/123). Scripted graph smoke
+does not establish a completed multi-agent review. TypeSafe access is not an
+environment acceptance requirement following the no-go decision in
+[#74](https://github.com/acgetchell/dotfiles/issues/74) and skill removal in
+[#118](https://github.com/acgetchell/dotfiles/pull/118).
 
 ## Fresh macOS setup
 
@@ -96,10 +104,11 @@ Setup reuses matching site tools or installs checksum-verified, pinned release
 binaries and locked Python dependencies under `~/.local/share/dotfiles-review`.
 It requires the base tools documented in the guide and can be rerun. It does
 not require root, Homebrew, Docker, or system Python changes.
-After setup, `just linux-setup`, `just linux-check`, `just linux-smoke`, and
-the explicit live `just linux-probe` expose the same commands when the pinned
-Just is on PATH. `bin/linux-review.sh exec just --list` uses the provisioned PATH
-without changing shell startup files.
+After setup, `just linux-setup`, `just linux-check`, and `just linux-smoke`
+expose the same commands when the pinned Just is on PATH.
+`bin/linux-review.sh exec just --list` uses the provisioned PATH without changing
+shell startup files. The retained `just linux-probe` is only for a separately
+authorized optional TypeSafe evaluation; it is not part of environment acceptance.
 
 ## Day-to-day stow commands
 

@@ -7,9 +7,10 @@ Cloud and cluster verification remain separate, even when their OS versions matc
 ## Supported candidates and base tools
 
 The installer accepts Linux x86_64 or aarch64 with glibc >= 2.28. Ubuntu 24.04
-x86_64 is the CI target. Other distributions and aarch64 remain unverified until
-their native checks pass. musl, older glibc, other architectures, and Windows
-full setup fail with actionable diagnostics. macOS continues to use `just setup`.
+x86_64 is the CI target. Native evidence is recorded below for Ubuntu 24.04 CI
+and the Debian 13.6 x86_64 cloud executor. Other distributions and aarch64 remain
+unverified until their native checks pass. musl, older glibc, other architectures,
+and Windows full setup fail with actionable diagnostics. macOS continues to use `just setup`.
 The [README support matrix](../README.md#platform-scope) records current scope.
 
 The host must provide Bash, Git, Zsh, and GNU Stow. Zsh is required by the native
@@ -108,8 +109,13 @@ programs. Live routing, vulnerability advisory refreshes, online workflow audits
 and authentication require separate connected authorization and access. Their
 absence is not evidence that those capabilities passed.
 
-Inject `TYPESAFE_API_KEY` using the environment's approved secret provider, then
-explicitly run:
+TypeSafe access is not a portable-environment acceptance requirement. Production
+adoption was declined in [#74](https://github.com/acgetchell/dotfiles/issues/74),
+and [#118](https://github.com/acgetchell/dotfiles/pull/118) removed the vendored
+skill. No live probe was run for the verification recorded below. The dormant
+probe remains available only for a separately authorized optional evaluation.
+For that evaluation, inject `TYPESAFE_API_KEY` using the environment's approved
+secret provider, then explicitly run:
 
 ```sh
 bash bin/linux-review.sh probe
@@ -145,8 +151,9 @@ scripts in local/site configuration. This public repository has no scheduler
 assumption, privileged service, container requirement, or cluster-specific paths.
 
 For each actual target, retain the job/allocation receipt and exit status along
-with the generated evidence. Run the bounded probe on an authorized connected
-path if required; report API access as unavailable on disconnected compute nodes.
+with the generated evidence. If a separate optional evaluation needs TypeSafe,
+run the bounded probe only on its authorized connected path; report API access
+as unavailable on disconnected compute nodes.
 A passing connected probe does not prove the compute environment has API access.
 
 ## Evidence and verification status
@@ -174,9 +181,43 @@ operation described in [the settings guide](../.github/DEPENDABOT.md).
 
 | Target | Status for this implementation | Remaining evidence |
 | --- | --- | --- |
-| Native Ubuntu 24.04 CI | Configured; result pending publication | Successful fresh/rerun setup, full suite, smoke, artifact link at the changed commit |
-| Cara's cloud computer | Unverified; target access not provided | Host inventory, bounded probe, actual end-to-end review graph and final proof references |
+| Native Ubuntu 24.04 x86_64 CI | Passed [run 37267493289](https://github.com/acgetchell/dotfiles/actions/runs/37267493289): fresh/repeated setup, offline suite, scripted smoke, artifact publication | New changes still require their own CI |
+| Cara's cloud computer: Debian 13.6 x86_64, glibc 2.41 | Setup, repeat setup, full portable suite, scripted smoke, and fresh restore verified on 2026-10-05 | Actual coordinator/worker end-to-end review and its final proof remain outstanding in [#123](https://github.com/acgetchell/dotfiles/issues/123) |
 | HPC system | Unverified; site execution path not provided | Discovered modules/scheduler/allocation policy, authorized native smoke/check job receipt and artifacts |
+| Other Linux distributions and aarch64 | Unverified | Native setup, repeated setup, checks, and smoke on each claimed target |
+
+The Ubuntu run's `Linux portable review` job completed every provisioning,
+validation, smoke, and evidence-publication step. Its retained artifact is
+`linux-review-93679252ec83824fbc0e92e1b40eb08824746917`; artifact retention is
+bounded by the workflow's 14-day policy.
+
+Cloud preparation at commit `2b585b3b3a5d45dcd4cfa7a5ae8923a018fac968`
+recorded setup, repeated setup, check, and smoke exit codes of zero. The full
+portable suite passed 1,236 Python tests with one native Windows shell test
+skipped. All 66 current skill links resolved correctly. Operator-retained
+`validation/REPORT.txt` and `validation/results.json` identify the installed
+tools and evidence under `target/linux-review/`: `setup-niwrytdj`,
+`setup-z0her5ao`, `check-shfssnil`, and `smoke-_iffmsaw`. The smoke's
+`graph/final-proof.json` records a complete scripted protocol proof, not a
+coordinator/worker review.
+
+A separate fresh task observed the prepared Stow launcher, extracted base
+tools, installation, caches, skill links, and receipts before any setup or
+repair. Versions, locked dependencies, all 66 current links, seven clean
+repository identities, and the recorded source content digest matched.
+The supported `exec` invocation passed its offline dependency check; uv
+refreshed an existing interpreter-cache entry and lock/directory metadata,
+so this verification was not strictly zero-write. No paths were added or
+removed, and the checkout, receipts, binaries, and skill links were unchanged.
+The stale home link for the removed TypeSafe skill was deliberately retained
+and was not counted among the 66 current skills.
+
+The approved [#95 closeout](https://github.com/acgetchell/dotfiles/issues/95)
+separates completed portable-environment work from the remaining real cloud
+review. Its TypeSafe probe criterion is superseded by the no-go decision;
+actual coordinator/worker review remains in
+[#123](https://github.com/acgetchell/dotfiles/issues/123). HPC remains explicitly
+unverified, as permitted by the original issue's acceptance criteria.
 
 Record cloud and HPC results separately, including source identity, artifact URI,
 job/workflow identifiers, command outcomes, and limitations. Update this table
