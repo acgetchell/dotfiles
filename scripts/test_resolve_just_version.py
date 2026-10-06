@@ -1,10 +1,14 @@
-"""Tests for the pre-just version resolver."""
+"""Test bootstrap and workflow consumers of repository tool-version pins."""
 
+import os
+import re
+import shutil
 import subprocess
 from pathlib import Path
 from shutil import which
 
 import pytest
+import yaml
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 RESOLVER = REPOSITORY_ROOT / "bin" / "resolve-just-version.sh"
@@ -57,3 +61,30 @@ def test_missing_or_invalid_pin_fails(tmp_path: Path, declaration: str) -> None:
 
     assert result.returncode == 1
     assert "Invalid or missing just_version" in result.stderr
+
+
+@pytest.mark.parametrize("cargo_version", ["1.2.3", "2.0.0-rc.1+build.2", "latest"])
+def test_ci_resolver_preserves_supported_cargo_versions(tmp_path: Path, cargo_version: str) -> None:
+    """Run the actual workflow step against candidate Just pins, without installs."""
+    source = (REPOSITORY_ROOT / "justfile").read_text()
+    for tool in ("dprint", "rumdl"):
+        source = re.sub(rf'^{tool}_version := "[^"]+"', f'{tool}_version := "{cargo_version}"', source, flags=re.MULTILINE)
+    (tmp_path / "justfile").write_text(source)
+    shutil.copy2(REPOSITORY_ROOT / "pyproject.toml", tmp_path)
+    workflow = yaml.safe_load((REPOSITORY_ROOT / ".github/workflows/ci.yml").read_text())
+    step = next(item for item in workflow["jobs"]["verify"]["steps"] if item.get("id") == "tool_versions")
+    outputs = tmp_path / "outputs"
+
+    result = subprocess.run(  # noqa: S603 - actual workflow code with temporary pins and output file.
+        [BASH, "-c", step["run"]], cwd=tmp_path, env={**os.environ, "GITHUB_OUTPUT": str(outputs)}, capture_output=True, text=True, check=False
+    )
+
+    if cargo_version == "latest":
+        assert result.returncode != 0
+        assert "Invalid dprint_version" in result.stderr
+        assert not outputs.exists()
+    else:
+        assert result.returncode == 0, result.stderr
+        values = dict(line.split("=", 1) for line in outputs.read_text().splitlines())
+        assert values["dprint_version"] == cargo_version
+        assert values["rumdl_version"] == cargo_version

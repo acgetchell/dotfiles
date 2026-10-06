@@ -10,6 +10,11 @@ review by default and whole-repository baseline mode only when explicitly
 requested. Honor a supplied parent scope rather than rediscovering a narrower
 staged or worktree-only surface.
 
+A direct request to evaluate or maintain Clippy lints or Semgrep rules selects
+that policy surface even when the working tree is clean. Inspect its configured
+checks, command owners, and relevant source and fixtures within the requested
+repository or subsystem; do not expand it into a general source-code audit.
+
 ## Review Trace
 
 When a caller supplies an established scope, begin with a handoff receipt

@@ -257,6 +257,38 @@ def test_empty_version_output_is_an_unavailable_tool(monkeypatch: pytest.MonkeyP
     assert all(not tool["available"] for tool in tools.values())
 
 
+@pytest.mark.parametrize("identity", ["1.2.3", "1.2.3-rc.1+build.2"])
+def test_version_probe_preserves_cargo_suffixes(tmp_path: Path, identity: str) -> None:
+    """Exercise the installer's actual probe without provisioning host tools."""
+    tool = tmp_path / "tool"
+    executable(tool, f"echo tool {identity}")
+    source = (REPOSITORY / "bin/linux-review.sh").read_text()
+    probe = "tool_version() {" + source.split("tool_version() {", 1)[1].split("\ninstall_release()", 1)[0]
+    result = subprocess.run(  # noqa: S603 - isolated binary and the repository's read-only version probe.
+        ["/bin/bash", "-c", probe + '\ntool_version "$1"', "probe", str(tool)], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == identity
+
+
+@pytest.mark.parametrize("actual", ["1.2.3", "1.2.3-rc.1+build.2", "1.2.3-rc.2+build.2"])
+def test_inventory_compares_the_complete_tool_version(monkeypatch: pytest.MonkeyPatch, actual: str) -> None:
+    expected = "1.2.3-rc.1+build.2"
+    original = linux_review.command_output
+
+    def output(argv: list[str]) -> str:
+        if argv[-2:] == ["--evaluate", "dprint_version"]:
+            return expected
+        if Path(argv[0]).name == "dprint" and argv[-1] == "--version":
+            return f"dprint {actual}"
+        return original(argv)
+
+    monkeypatch.setattr(linux_review, "command_output", output)
+    tools = linux_review.inventory()["tools"]
+    assert isinstance(tools, dict)
+    assert tools["dprint"]["pin_matches"] is (actual == expected)
+
+
 @pytest.mark.skipif(os.name != "posix", reason="POSIX byte filenames and newline filenames")
 @pytest.mark.parametrize(
     "name",

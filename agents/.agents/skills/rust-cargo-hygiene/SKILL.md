@@ -13,6 +13,10 @@ Manifest mistakes break downstream builds quietly: an unintended `default-featur
 
 This skill owns declaration and release hygiene. Route source-level `cfg` agreement, feature/target matrix compilation, build scripts, generated code, cross-compilation, `no_std`, WASM, FFI/linking, and external-consumer proof to `rust-build-portability`; route workflow mechanics to `project-tooling-review`.
 
+Route Clippy/Semgrep usefulness, overlap, rule retirement, and effective
+static-analysis coverage to `project-tooling-review`; retain declaration and
+release-compatibility checks here.
+
 ## Scope
 
 Focus on newly added or modified files such as:

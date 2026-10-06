@@ -81,6 +81,10 @@ Run selected skills in this order. Conditions below are independent within each 
 
 Select both only when manifest decisions and demonstrated configuration behavior change together. Route recipes, CI jobs, caches, runner setup, and command wiring to `project-tooling-review`.
 
+Also route Clippy/Semgrep policy usefulness, overlapping or obsolete checks, and
+static-analysis coverage to `project-tooling-review`. Keep application test
+quality under `rust-test-quality`.
+
 ### 2. Public Surface and Usage
 
 - Use `rust-api-design` for material changes to public modules, types, traits, functions, constructors, adapters, wrappers, aliases, cross-crate boundaries, canonical workflows, concept ownership, or compatibility. Do not select it for documentation-only, re-export-only, or private implementation changes.

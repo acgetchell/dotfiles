@@ -71,7 +71,7 @@ git clone https://github.com/acgetchell/dotfiles.git ~/projects/dotfiles
 2. runs `brew bundle install --file=Brewfile`;
 3. installs Oh My Zsh if missing, preserving existing shell configuration;
 4. stows `git`, `zsh`, and `agents`;
-5. installs pinned Cargo tools: `cargo-update`, `dprint`, `just`, `rumdl`, and `zizmor`;
+5. installs pinned Cargo tools: `cargo-update`, `dprint`, `just`, and `rumdl`;
 6. runs `bin/verify.sh`.
 
 After bootstrap, the equivalent discoverable setup entry point is:
@@ -158,8 +158,9 @@ After applying or restowing packages, `just stow-verify` (backed by `scripts/sto
 
 `Brewfile` is intentionally foundational: core CLI tools, developer casks, and apps expected on every machine.
 On macOS, Homebrew owns `pkgx`, `rustup`, and the `pyproject.toml`-pinned `uv`; Cargo owns the
-`justfile`-pinned, directly invokable `dprint`, `just`, `rumdl`, and `zizmor`
-binaries, plus `cargo-update`, which provides `cargo-install-update`.
+`justfile`-pinned, directly invokable `dprint`, `just`, and `rumdl` binaries,
+plus `cargo-update`, which provides `cargo-install-update`. Zizmor belongs to
+the repository's locked Python environment.
 Repository-scoped build tools, formatters, linters, and occasional maintenance
 tools should be supplied ephemerally through pkgx or the repository's
 language-specific environment rather than added here.
@@ -333,7 +334,10 @@ Expected symlink shape:
 Install and authenticate the CodeRabbit CLI separately, then run:
 
 ```sh
-# Review committed branch changes and local edits against main (the default).
+# Review committed branch changes and local edits against verified origin/main.
+just review
+
+# Explicitly use a local comparison base instead.
 just review main
 
 # Review only staged, unstaged, and non-ignored untracked files.
@@ -341,9 +345,10 @@ just review-uncommitted
 ```
 
 Both recipes emit structured findings and pass `AGENTS.md` and `.coderabbit.yaml`
-as review instructions. `just review <base>` requires a locally available commit
-or reference; choose the intended comparison base explicitly when it differs
-from `main`. CodeRabbit reviews are opt-in and are separate from `just ci`.
+as review instructions. The default `origin/main` must match the remote branch;
+refresh a stale remote-tracking reference before retrying. An explicit
+`just review <base>` uses a locally available commit or reference without that
+remote freshness check. CodeRabbit reviews are opt-in and separate from `just ci`.
 
 ## Dependabot approvals
 

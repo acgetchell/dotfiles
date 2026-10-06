@@ -12,8 +12,8 @@
       "target_kind": "leaf",
       "default_priority": "supporting-quality",
       "synthesis_dependency": "repository-synthesis",
-      "path_patterns": ["justfile", "Makefile", ".github/workflows/**", "Brewfile", "**/pyproject.toml", "**/uv.lock", "**/Cargo.toml", "**/Cargo.lock", "CMakeLists.txt", "tooling/**/*.toml", "docs/**"],
-      "semantic_triggers": ["Repository commands, CI, tool versions, validation configuration, or maintainer workflow are in scope."]
+      "path_patterns": ["justfile", "Makefile", ".github/workflows/**", "Brewfile", "**/pyproject.toml", "**/uv.lock", "**/Cargo.toml", "**/Cargo.lock", "CMakeLists.txt", "tooling/**/*.toml", "docs/**", "**/clippy.toml", "**/.clippy.toml", "**/semgrep.yml", "**/semgrep.yaml", "**/.semgrep.yml", "**/.semgrep.yaml", "**/.semgrepignore", "**/semgrep/**", "**/.semgrep/**"],
+      "semantic_triggers": ["Repository commands, CI, tool versions, validation configuration, Clippy/Semgrep usefulness or coverage, or maintainer workflow are in scope."]
     },
     {
       "catalog_id": "repo.cpp",

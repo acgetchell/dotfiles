@@ -67,14 +67,14 @@ rules:
       - pattern-regex: |-
           (?mx)
           ^[ \t]*(?:-[ \t]*)?
-          uses:[ \t]*actions/checkout@[a-fA-F0-9]{40}[^\n]*
+          uses:[ \t]*["']?actions/checkout@[a-fA-F0-9]{40}["']?[^\n]*
           (?:
             \n
-            (?![ \t]*-[ \t]+[A-Za-z_-]+:)
-            (?![ \t]*persist-credentials:[ \t]*false\b)
+            (?![ \t]*-(?:[ \t]+[A-Za-z_-]+:|[ \t]*(?:\#.*)?$))
+            (?![ \t]*persist-credentials:[ \t]*["']?false["']?[ \t]*(?:\#.*)?$)
             [^\n]*
           )*
-          (?=\n[ \t]*-[ \t]+[A-Za-z_-]+:|\z)
+          (?=\n[ \t]*-(?:[ \t]+[A-Za-z_-]+:|[ \t]*(?:\#.*)?$)|\z)
 
   - id: dotfiles.github-actions.no-pull-request-target
     languages:
@@ -204,15 +204,15 @@ rules:
     languages:
       - regex
     severity: WARNING
-    message: "Install dprint and just through Cargo; zizmor belongs to the locked Python environment."
+    message: "Install cargo-update, dprint, just, and rumdl through Cargo; zizmor belongs to the locked Python environment."
     metadata:
       category: maintainability
-      rationale: "Cargo owns dprint and just; pyproject.toml and uv.lock own zizmor. Homebrew must not introduce competing installations."
+      rationale: "Cargo owns cargo-update, dprint, just, and rumdl; pyproject.toml and uv.lock own zizmor. Avoid competing Homebrew installations."
     paths:
       include:
         - "/Brewfile"
         - "/tests/semgrep/Brewfile"
-    pattern-regex: '(?m)^brew\s+"(?:dprint|just|zizmor)"(?:\s|$)'
+    pattern-regex: '(?m)^brew\s+"(?:cargo-update|dprint|just|rumdl|zizmor)"(?:\s|$)'
 
   - id: dotfiles.portability.no-user-home-paths
     languages:
