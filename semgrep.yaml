@@ -70,11 +70,11 @@ rules:
           uses:[ \t]*["']?actions/checkout@[a-fA-F0-9]{40}["']?[^\n]*
           (?:
             \n
-            (?![ \t]*-[ \t]+[A-Za-z_-]+:)
+            (?![ \t]*-(?:[ \t]+[A-Za-z_-]+:|[ \t]*(?:\#.*)?$))
             (?![ \t]*persist-credentials:[ \t]*["']?false["']?[ \t]*(?:\#.*)?$)
             [^\n]*
           )*
-          (?=\n[ \t]*-[ \t]+[A-Za-z_-]+:|\z)
+          (?=\n[ \t]*-(?:[ \t]+[A-Za-z_-]+:|[ \t]*(?:\#.*)?$)|\z)
 
   - id: dotfiles.github-actions.no-pull-request-target
     languages:

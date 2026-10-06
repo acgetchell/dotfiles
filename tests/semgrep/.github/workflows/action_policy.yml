@@ -81,6 +81,32 @@ jobs:
         with:
           persist-credentials: "false"
 
+      - name: Unsafe checkout before a standalone step marker
+        # ruleid: dotfiles.github-actions.checkout-persist-credentials-false
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # Preserve the standalone dash for step-boundary regression coverage.
+      # pretty-yaml-ignore
+      -
+        name: Safe checkout after a standalone step marker
+        # ok: dotfiles.github-actions.checkout-persist-credentials-false
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Unsafe checkout before a commented standalone step marker
+        # ruleid: dotfiles.github-actions.checkout-persist-credentials-false
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: true
+
+      - # Standalone step markers may carry comments.
+        name: Safe checkout after a commented standalone step marker
+        # ok: dotfiles.github-actions.checkout-persist-credentials-false
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: "false"
+
       - name: Allowed setup-uv action
         # ok: dotfiles.github-actions.external-action-version-comment
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
