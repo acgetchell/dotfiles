@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 from capture_scope import _scope_data
 from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics, run_command_bytes
 from review_graph_coverage import coverage_reference
+from review_graph_executor import executor_permissions
 from review_graph_integrity import digest_bytes, digest_json
 from review_graph_provenance import review_scope_body
 from review_graph_reuse import AuditInputIdentity, AuditReuseTransition, ExternalMetadataTransition, ReviewSourceSnapshot, metadata_states, verify_reuse_inputs
@@ -1882,6 +1883,7 @@ def coalesce_validation_requirements(
     _validate_unique_ids((item.requirement_id for item in requirements), label="validation requirement")
     groups: dict[tuple[object, ...], list[ValidationRequirement]] = {}
     for item in requirements:
+        executor_permissions(item.features)
         if len(item.source_state) != 3:
             msg = f"validation requirement {item.requirement_id} must name three source fingerprints"
             raise ValueError(msg)

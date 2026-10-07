@@ -38,6 +38,7 @@ from review_graph_runtime import (
     JournalEventRequest,
     _argument_parser,
     _canonical_worker_payload,
+    _expected_evidence_id,
     _git_path_status,
     _graph_plan,
     _late_validation_quality_blockers,
@@ -336,13 +337,18 @@ def _dispatch(*, mode: str = "audit") -> dict[str, object]:
 def _typed_synthesis_payload(dispatch: dict[str, Any], payload: dict[str, Any], plan: GraphPlan | None = None) -> dict[str, Any]:
     if dispatch.get("mode") != "synthesis":
         return payload
-    requirements = (
-        {f"{'validation' if node.mode == 'validation' else 'review'}:{node.node_id}": list(node.requirement_ids) for node in plan.actual_worker_nodes}
+    requirements = {_expected_evidence_id(node, plan): list(node.requirement_ids) for node in plan.actual_worker_nodes} if plan else {}
+    reused = {key for _requirement, key in plan.exact_reused_review_evidence} if plan else set()
+    platforms = (
+        {
+            _expected_evidence_id(node, plan): unit.platform
+            for node in plan.actual_worker_nodes
+            for unit in plan.coalesced_validation_units
+            if unit.node_id == node.node_id
+        }
         if plan
         else {}
     )
-    reused = {key for _requirement, key in plan.exact_reused_review_evidence} if plan else set()
-    platforms = {f"validation:{unit.node_id}": unit.platform for unit in plan.coalesced_validation_units} if plan else {}
     if plan:
         for requirement, evidence_id in plan.exact_reused_review_evidence:
             requirements.setdefault(evidence_id, []).append(requirement)

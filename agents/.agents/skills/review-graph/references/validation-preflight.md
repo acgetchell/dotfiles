@@ -15,6 +15,16 @@ describe the current executor; they cannot certify a different sandbox's
 permissions or toolchain. See the `preflight-validation` definition in
 [operation schemas](schemas/runtime-operation-inputs-v1.schema.json).
 
+Declare a required permission mode in the validation requirement's `features`
+as `executor-permissions=require_escalated` or `executor-permissions=use_default`.
+This reserved feature is parsed, coalesced, and digest-bound with the environment;
+omitting it preserves legacy default-executor identities. The runtime projects
+it to `executor_requirements.sandbox_permissions` in dispatches, compact receipts,
+and preflight results. Set each prerequisite's `sandbox_permissions` to the
+selected execution-tool mode; a mismatch blocks readiness. Missing selections
+default to `use_default`. A preflight observation does not grant escalation:
+the worker must apply the tool setting and honor its approval result.
+
 For inspected `uv run --locked` commands, including nested Just recipes, use
 the validated prerequisite template in
 [operation examples](runtime-operation-examples-v1.json#/preflight-validation).

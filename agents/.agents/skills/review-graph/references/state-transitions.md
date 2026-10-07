@@ -26,6 +26,8 @@ when unchanged). Use observed launch diagnostics to justify the classification;
 short elapsed time alone is insufficient. At least the environment or permission
 must change. Environment text records the binding; the executor must actually
 apply the stated remedy before running commands.
+When permissions change, also supply `executor_permissions` (`use_default` or
+`require_escalated`) so the replacement dispatch binds the required tool mode.
 
 Recovery requires compiled blocked evidence, unchanged source/workspace, and
 quiescent execution without active or source-mutated nodes. Unrelated blocked
@@ -42,6 +44,47 @@ Keep historical artifacts available; altered or missing evidence blocks reuse.
 History and continuation files publish atomically, with the continuation
 manifest last. An interrupted publication can retry the identical request
 without leaving partial final files or overwriting existing evidence.
+
+For an executor permission denial **after checks start**, use the separate
+`recover-validation-execution` operation with the same CLI file arguments.
+Its [input example](runtime-operation-examples-v1.json#/recover-validation-execution)
+requires `checks_started: true`, `failure_kind: executor-permission`, a concrete
+causal `reason`, `remedy`, replacement `environment`, non-`none` `permission_change`,
+and `executor_permissions` (`use_default` or `require_escalated`). Explain why
+the failure comes from the execution environment; an ordinary assertion failure,
+short run, or desire to rerun is insufficient. Permission text never grants
+approval; use the actual execution tool's permission mechanism.
+
+This bounded path accepts a **single failed command**, including an aggregate
+such as `just ci` whose internal tests passed before socket binding failed.
+It requires accepted failed owner evidence, unchanged source captures, and
+quiescent execution. Multi-command units are ineligible: the runtime does not
+splice ledgers or replay separately passed commands. Other successful units
+remain accepted and retain their dispatches. The pre-launch and execution
+paths share one recovery allowance per node/source; another failed attempt
+remains failed evidence and cannot trigger an automatic retry loop.
+
+`failure_evidence` supplies the original `before_capture`, `after_capture`,
+`workspace_before`, and `workspace_after` file paths, the exact declared
+`log_path`, and a permission-denial `diagnostic` present in both the immutable
+execution evidence and log. The log must be a recorded `kind: log` file artifact
+with a content digest; directory-only or missing logs cannot prove this recovery.
+The runtime verifies log bytes, snapshot node/source bindings, artifact identities,
+and the compiled workspace audit. Approved cache/output changes are permitted;
+unexpected source changes are not. Existing compiled artifacts can use their
+original snapshots without republishing a payload.
+
+Recovery archives the log bytes, both captures, both workspace snapshots,
+original plan, journal, and dispatches, and binds the failed report, metadata,
+and sealed payload by digest. Reusable output paths may subsequently change;
+the archived failure log remains immutable. The new attempt has distinct
+runtime-owned evidence and artifact IDs and a changed executor identity. It
+retains the logical validation node and requirements, so the early gate remains
+pending until the replacement passes. Final partial proofs and synthesis retain
+the original failure under `validation_recoveries`; a successful replacement
+satisfies the active requirement without erasing that history. Follow the
+returned continuation paths together. Never alter source or Git metadata to
+unlock a retry, and never delete failure evidence to manufacture a clean result.
 
 Run `reconcile-handoffs` before expansion. Selected, exactly reused, or user-excluded
 catalog entries resolve handoffs; only `new_routing_triggers` expand routing.

@@ -134,7 +134,11 @@ def test_default_cli_receipt_binds_full_artifact_and_explicit_full_output(tmp_pa
     assert receipt["node_count"] == len(document["plan"]["actual_worker_nodes"])
     assert len(stdout.encode()) < output.stat().st_size / 5
     for entry in receipt["dispatches"]:
-        assert set(entry) == {"node_id", "result_contract", "execution_location", "worker_input"}
+        expected = {"node_id", "result_contract", "execution_location", "worker_input"}
+        if entry["result_contract"] == "compact-validation":
+            expected.add("executor_requirements")
+            assert entry["executor_requirements"] == {"sandbox_permissions": "use_default"}
+        assert set(entry) == expected
         assert entry["worker_input"]["digest"] == _digest(Path(entry["worker_input"]["path"]).read_bytes())
     saved = output.read_bytes()
     assert runtime.main([*args, "--full-output"]) == 0
