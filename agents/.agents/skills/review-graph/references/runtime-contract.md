@@ -116,7 +116,7 @@ paths require one `scope_limitations` reason each; inspected paths must be uniqu
 and owned. Publication and compilation enforce both scope and optional coverage
 partitions: unique unit IDs, every owned path/finding assigned exactly once
 (one-based indices), and nearby dependencies in `dependency_paths`. Rejection
-names missing dependencies before writing.
+names missing dependencies before writing; see [publication bindings](publication-bindings.md).
 
 For typed audit caveats, see [audit-context.md](audit-context.md).
 

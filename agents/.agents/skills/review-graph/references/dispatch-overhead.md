@@ -226,3 +226,32 @@ telemetry, record worker source reads and coordinator invocations, and measure
 elapsed time and adjudicated findings under the same four-slot budget. Compare
 blocked and recovered attempts separately from successful validation. Keep the
 independent reviewer blind to specialist conclusions and shared packets.
+
+## Publication Contract Preflight
+
+The #126/#130/#131 follow-up was replayed against
+`9304d0b` with the same 265-path, 15-worker fixture and one paired sample.
+The new dispatches expose only the optional coverage shape, exact artifact-root
+rules, and synthesis binding examples; the synthesis plan is a shared hashed
+runtime sidecar. Independent dispatches receive no additional context.
+
+| Scripted measurement | Before | After |
+| --- | ---: | ---: |
+| Total worker input bytes | 335,871 | 352,748 |
+| Audit input bytes (nine workers) | 188,108 | 192,869 |
+| Validator input bytes (three workers) | 73,244 | 74,084 |
+| Synthesis input bytes (two workers) | 29,687 | 40,963 |
+| Independent input bytes | 44,832 | 44,832 |
+| Worker prompt bytes | 38,474 | 42,718 |
+| Audits using optional coverage partitions | 0 | 9 |
+| Audit publication attempts | 9 | 9 |
+| Formatting-only retries | 0 | 0 |
+| Coordinator API operations | 21 | 21 |
+
+Each partitioned audit published and compiled on its first attempt, preserving
+all four seeded findings. Input bytes increased 5.0%; the optional shape itself
+is under 400 compact JSON bytes per audit. These are deterministic protocol
+measurements, not observed model retry rates or speedups. Regression fixtures
+also verify reference-only corrections, shared validators, distinct hosted
+evidence, required unexecuted platforms, and unchanged evidence across repair
+epochs; no platform checks are executed by this benchmark.

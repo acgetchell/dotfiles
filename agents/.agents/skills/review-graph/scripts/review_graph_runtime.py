@@ -2003,6 +2003,11 @@ def _validation_executions_body(
 ) -> tuple[str, tuple[str, ...]]:
     raw_executions = _records(payload, "executions")
     artifact_by_path = {artifact.path: artifact for artifact in artifacts}
+    blockers = _validation_artifact_reference_blockers(
+        payload, tuple(artifact_by_path), tuple(path for path, artifact in artifact_by_path.items() if artifact.artifact_digest_mode == "absent-v1")
+    )
+    if blockers:
+        raise ValueError("; ".join(blockers))
     results: list[str] = []
     bodies: list[str] = []
     for ordinal, raw in enumerate(raw_executions, start=1):
@@ -2011,10 +2016,6 @@ def _validation_executions_body(
             msg = f"validation execution {ordinal} has invalid result {result}"
             raise ValueError(msg)
         result_artifacts = _text_list(raw, "artifact_paths")
-        unknown_artifacts = sorted(set(result_artifacts) - set(artifact_by_path))
-        if unknown_artifacts:
-            msg = f"validation execution {ordinal} references unknown artifacts: {', '.join(unknown_artifacts)}"
-            raise ValueError(msg)
         artifact_references = (
             json.dumps(
                 [
@@ -2054,6 +2055,23 @@ def _validation_executions_body(
             )
         )
     return "\n".join(bodies) or "none", tuple(results)
+
+
+def _validation_artifact_reference_blockers(payload: dict[str, Any], permitted_paths: tuple[str, ...], absent_paths: tuple[str, ...] = ()) -> tuple[str, ...]:
+    """Use exact declared roots for typed references; narrative child paths are evidence."""
+    blockers: list[str] = []
+    for index, execution in enumerate(payload["executions"]):
+        references = set(execution["artifact_paths"])
+        unknown = sorted(references - set(permitted_paths))
+        absent = sorted(references & set(absent_paths))
+        if unknown:
+            blockers.append(
+                f"$.executions[{index}].artifact_paths references unknown artifacts: {', '.join(unknown)}; "
+                f"permitted roots (exact paths only, no generated children): {', '.join(permitted_paths) or 'none'}"
+            )
+        if absent:
+            blockers.append(f"$.executions[{index}].artifact_paths references absent outputs: {', '.join(absent)}; omit absent output references")
+    return tuple(blockers)
 
 
 def _validation_reuse_body(unit: ValidationUnit, evidence: ValidationEvidence, command_digest: str, environment_digest: str) -> str:
@@ -3147,7 +3165,7 @@ def _schema_reference(path: Path) -> dict[str, object]:
     if path.name != match.group(0):
         msg = f"payload schema filename does not match its canonical $id: {path.name} != {match.group(0)}"
         raise ValueError(msg)
-    return {
+    reference: dict[str, object] = {
         "digest": _file_identity_digest(str(path)),
         "id": schema_id,
         "path": str(path),
@@ -3155,6 +3173,9 @@ def _schema_reference(path: Path) -> dict[str, object]:
         "required_shape": _required_schema_shape(raw),
         "version": int(match.group("version")),
     }
+    if path == _REVIEW_PAYLOAD_SCHEMA:
+        reference["optional_shapes"] = {"coverage_units": _required_schema_shape(raw["properties"]["coverage_units"])}
+    return reference
 
 
 def _applicable_instruction_paths(repository_root: Path, owned_paths: tuple[str, ...], declared: tuple[str, ...]) -> tuple[str, ...]:
@@ -3300,6 +3321,32 @@ def _worker_provenance_examples(dispatch: dict[str, Any], captured_paths: Iterab
     }
 
 
+def _synthesis_examples(dispatch: dict[str, Any]) -> dict[str, Any]:
+    """Show reference placement without asserting execution or runtime reuse."""
+    examples = {
+        "fresh_coverage": {"evidence_id": "validation:local", "requirement_ids": ["repository-gate"], "disposition": "accepted"},
+        "proved_reuse_coverage": {"evidence_id": "review:prior-audit", "requirement_ids": ["python.parse"], "disposition": "reused"},
+        "shared_validator": {
+            "evidence_id": "validation:local",
+            "requirement_ids": ["repository-gate"],
+            "result": "passed",
+            "platform": "copy bound validator platform",
+            "execution_mode": "native",
+        },
+        "unexecuted_platform": {"limitations": ["Hosted Linux/macOS matrix has no separate accepted evidence."], "cross_surface_risks": []},
+    }
+    planned = dispatch["command_policy"].get("planned_validation_units", [])
+    if planned:
+        examples["merged_need"] = {
+            "requirement_id": planned[0]["requirement_ids"][0],
+            "planned_validation_digest": planned[0]["planned_validation_digest"],
+            "owner": "reviewer-a; reviewer-b",
+            "reason": "review:a needs boundary checks; review:b needs regression checks",
+            "expected_evidence": "Retain both source requests and consume the shared validator's actual results.",
+        }
+    return examples
+
+
 def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
     schema = dispatch.get("payload_schema")
     schema_text = (
@@ -3392,7 +3439,11 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
             f"Command policy: {command_policy}{provenance_text}{persistence_text}"
         )
     validation_text = (
-        " Omit artifacts: the runtime captures workspace status and artifact digests before and after execution." if contract == "compact-validation" else ""
+        " Omit artifacts: the runtime captures workspace status and artifact digests before and after execution. "
+        "executions[].artifact_paths names only exact validation_unit.allowed_artifacts[].path roots, never generated child files. "
+        "Use [] for no output or absent outputs. Child file paths may appear in evidence text; publication checks references before writing."
+        if contract == "compact-validation"
+        else ""
     )
     audit_scope_text = (
         " For audits, scope_limitations is reserved exclusively for omitted dispatch-owned paths and must equal owned_paths minus "
@@ -3400,6 +3451,7 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
         "reconcile original validation needs/handoffs; do not claim fresh reads of reused paths. For broad fresh audits, use optional coverage_units when "
         "you can partition contracts with explicit dependencies and uncertainty: partition every owned path and every finding exactly once "
         "using one-based finding_indices, give each unit a unique unit_id, and account for every nearby_contract_owners path in dependency_paths. "
+        'See payload_schema.optional_shapes.coverage_units; dependency_uncertainty="" means no uncertainty, and [] means no findings/dependencies. '
         "Source-discovery judgments must come from the captured "
         "files_inspected/nearby_contract_owners reads, independent of the staging split; undeclared commands remain conservative. "
         "Legacy git_sensitive=true always requires rechecking. "
@@ -3410,11 +3462,24 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
         if dispatch.get("mode") == "audit"
         else ""
     )
+    synthesis_text = (
+        " Use dispatch.synthesis_examples for field placement, replacing illustrative IDs/claims with accepted bundle evidence. "
+        "synthesis_plan_reference/synthesis_sources are runtime-only preflight inputs. predecessor_coverage has one row per dispatched evidence ID; "
+        "validation_reconciliation has one row per accepted validator ID, even when several reviewers share it. Fresh evidence is accepted; "
+        "reused requires runtime proof across source states. Merge inherited validation needs by unique requirement_id, retaining each source "
+        "evidence ID, owner and reason in reason/expected_evidence. Different IDs remain separate. A platform without its own accepted evidence "
+        "belongs in limitations/cross_surface_risks; genuine required unexecuted validators remain blockers. Publication verifies predecessor "
+        "artifacts and reports binding errors together. Keep every failed diagnostic; repair metadata without rerunning validators. "
+        "Schema mismatches permit one diagnostic-guided retry. Semantic binding errors separately permit one consolidated correction; "
+        "a second failure of either kind blocks the node. Neither counter resets the other."
+        if dispatch.get("mode") == "synthesis"
+        else ""
+    )
     return (
         f"Publish the canonical {contract} payload using field names from {schema_text}. "
         "Every field shown in payload_schema.required_shape is required whenever its parent object is present. "
         "Do not author fingerprints, evidence IDs, artifact IDs, or digests. Copy supplied evidence/finding IDs only into schema-defined reference fields. "
-        f"Command policy: {command_policy}{validation_text}{provenance_text}{audit_scope_text}{persistence_text}{shared_text}"
+        f"Command policy: {command_policy}{validation_text}{provenance_text}{audit_scope_text}{synthesis_text}{persistence_text}{shared_text}"
     )
 
 
@@ -3422,8 +3487,8 @@ def _review_payload_schema(dispatch: dict[str, Any]) -> Path:
     return _SYNTHESIS_PAYLOAD_SCHEMA if dispatch.get("mode") == "synthesis" else _REVIEW_PAYLOAD_SCHEMA
 
 
-def _preflight_audit_payload(contract: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any] | None:
-    """Dry-compile against a bound dispatch before authorizing payload publication."""
+def _publication_dispatch(contract: dict[str, Any]) -> dict[str, Any] | None:
+    """Reload the immutable dispatch bound to publication, never worker-authored context."""
     reference = contract.get("compiler_preflight")
     if reference is None:
         # Saved contracts remain usable; compile-node applies the current verifier.
@@ -3434,11 +3499,42 @@ def _preflight_audit_payload(contract: dict[str, Any], payload: dict[str, Any]) 
         raise ValueError(msg)
     entry = json.loads(content)
     dispatch = entry["dispatch"]
-    if contract.get("mode") not in {"audit", "independent-review"} or any(
-        dispatch.get(key) != contract.get(key) for key in ("mode", "node_id", "owned_paths", "worker_payload_path", "coverage_reuse")
-    ):
+    if any(dispatch.get(key) != contract.get(key) for key in ("mode", "node_id", "owned_paths", "worker_payload_path", "coverage_reuse")):
         msg = "compiler preflight dispatch differs from its publication contract"
         raise ValueError(msg)
+    return dispatch
+
+
+def _synthesis_publication_bundle(dispatch: dict[str, Any]) -> dict[str, Any]:
+    """Verify compiled predecessor artifacts with the immutable materialized plan."""
+    reference = dispatch["synthesis_plan_reference"]
+    content = _read_regular_file_no_follow(Path(reference["path"]))
+    if digest_bytes(content) != reference["digest"]:
+        msg = "synthesis publication plan digest differs from its bound dispatch"
+        raise ValueError(msg)
+    return build_synthesis_bundle({**json.loads(content), "sources": dispatch["synthesis_sources"]})
+
+
+def _preflight_audit_payload(contract: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Preflight references or dry-compile before authorizing payload publication."""
+    dispatch = _publication_dispatch(contract)
+    if dispatch is None:
+        if contract.get("mode") == "synthesis":
+            validate_synthesis(payload, tuple(item["evidence_id"] for item in payload["predecessor_coverage"]))
+        return None
+    if contract.get("mode") == "validation":
+        unit = _validation_unit(dispatch["validation_unit"])
+        paths = tuple(artifact.path for artifact in unit.allowed_artifacts)
+        root = Path(dispatch["repository_root"])
+        absent = tuple(path for path in paths if not _workspace_path(path, root).exists(follow_symlinks=False))
+        blockers = _validation_artifact_reference_blockers(payload, paths, absent)
+        if blockers:
+            raise ValueError("worker payload failed execution-artifact validation before publication: " + "; ".join(blockers))
+        return None
+    if contract.get("mode") == "synthesis":
+        bundle = _synthesis_publication_bundle(dispatch)
+        validate_synthesis(payload, _text_list(dispatch, "predecessor_evidence_ids"), bundle)
+        dispatch = {**dispatch, "synthesis_bundle": bundle}
     # These are hypothetical equal captures, never published as evidence. The
     # actual compile still requires independently supplied before/after captures.
     try:
@@ -3762,6 +3858,12 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
                 "execution_summary": _validation_identity_summary(identity),
             }
         )
+    synthesis_plan_reference = None
+    if plan.synthesis_nodes:
+        plan_bytes = canonical_json({"plan": asdict(plan), "source_state": list(source_state)}).encode()
+        plan_path = artifact_store / "synthesis-publication-plan.json"
+        _queue_materialized_write(pending_writes, plan_path, plan_bytes, mode=0o444)
+        synthesis_plan_reference = {"path": str(plan_path), "digest": digest_bytes(plan_bytes)}
     dispatches: list[dict[str, Any]] = []
     for node in plan.actual_worker_nodes:
         if preserved_entries is not None and node.node_id in preserved_entries:
@@ -3813,6 +3915,7 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             "handoff_catalog_ids": catalog_ids,
             "instruction_digests": [[path, _file_identity_digest(path)] for path in instruction_paths],
             "instruction_paths": list(instruction_paths),
+            "mode": node.mode,
             "node_id": node.node_id,
             "owned_paths": list(node.coverage),
             "reference_paths": list(node.static_references),
@@ -3907,6 +4010,24 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             else:
                 common["payload_schema"] = synthesis_schema if node.mode == "synthesis" else review_schema
                 contract = "compact-review"
+            if node.mode == "synthesis":
+                common["synthesis_plan_reference"] = synthesis_plan_reference
+                common["synthesis_sources"] = [
+                    {
+                        "artifact_path": (
+                            preserved_entries[predecessor]["artifact_path"]
+                            if preserved_entries is not None and predecessor in preserved_entries
+                            else str(artifact_store / f"{predecessor}.{'validation' if predecessor in validation_units else 'review'}.md")
+                        ),
+                        "metadata_path": (
+                            preserved_entries[predecessor]["metadata_path"]
+                            if preserved_entries is not None and predecessor in preserved_entries
+                            else str(artifact_store / f"{predecessor}.evidence.json")
+                        ),
+                    }
+                    for predecessor in node.predecessors
+                ]
+                common["synthesis_examples"] = _synthesis_examples(common)
         if node.mode in {"audit", "independent-review"} and common["owned_paths"]:
             common["provenance_examples"] = _worker_provenance_examples(common, line_bounds)
         persistence_contract = {
@@ -3933,7 +4054,7 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             "worker_prompt": _worker_prompt(contract, common),
         }
         worker_input_bytes = (json.dumps(entry, indent=2, sort_keys=True) + "\n").encode()
-        if node.mode == "audit" or contract == "compact-independent-review":
+        if node.mode in {"audit", "synthesis", "validation"} or contract == "compact-independent-review":
             persistence_contract["compiler_preflight"] = {"worker_input_path": str(worker_input_path), "digest": digest_bytes(worker_input_bytes)}
         _queue_materialized_write(
             pending_writes, worker_payload_contract_path, (json.dumps(persistence_contract, indent=2, sort_keys=True) + "\n").encode(), mode=0o444

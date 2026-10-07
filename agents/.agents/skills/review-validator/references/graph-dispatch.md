@@ -85,10 +85,13 @@ Publish one JSON object:
 finite, nonnegative elapsed seconds, optionally with units. `not-run` requires `null` or
 `"none"` for both fields. `blocked` allows unavailable timing and a nonzero or
 unavailable exit code, with a concrete limitation. `reused` and `not-applicable`
-contain no executions. Reference only dispatched artifact paths; the runtime
-resolves their identities.
+contain no executions. `artifact_paths` names exact
+`validation_unit.allowed_artifacts[].path` roots, including external logs.
+Children belong in evidence text; absent outputs use `[]`. Publication names
+permitted roots on rejection. Correct references without reruns; runtime owns
+identities/snapshots.
 
-The coordinator invokes `compile-node` with the persisted payload and runtime
-snapshots. The compiler derives all identities, mappings, ledger export, and
-canonical evidence, then checks native and envelope acceptance. For low-level
-`compile-validation` diagnosis, consult the runtime's `--help` and operation examples.
+`compile-node` consumes the persisted payload and runtime snapshots, derives
+identities, mappings, ledger export and canonical evidence, and checks
+native/envelope acceptance. For `compile-validation` diagnosis, consult runtime
+`--help` and operation examples.

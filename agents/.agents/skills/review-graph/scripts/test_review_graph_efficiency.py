@@ -45,6 +45,7 @@ def test_benchmark_preserves_catalog_independence_findings_and_measures_reads(tm
     assert metrics["default_cli_output_bytes"] == metrics["coordinator_result_bytes"] < metrics["full_result_bytes"]
     assert metrics["repeated_validation_identity_bytes"] == 0
     assert metrics["independent_protocol_replay"] == {"publication_attempts": 1, "formatting_only_retries": 0, "coordinator_api_operations": 2}
+    assert metrics["optional_coverage_protocol_replay"] == {"partitioned_workers": 9, "publication_attempts": 9, "formatting_only_retries": 0}
     telemetry = manifest["dispatches"]["telemetry"]
     assert telemetry["source_demand"]["distinct_paths"] == 18
     assert telemetry["source_demand"]["repeated_file_reads"] > 0

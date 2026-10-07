@@ -4440,8 +4440,8 @@ def test_late_validation_expansion_rejects_wrong_identity_or_active_workers(tmp_
 
 
 def test_bundle_only_synthesis_persists_and_compiles_without_reading_source(tmp_path: Path) -> None:
-    _document, materialized = _worker_input_fixture(tmp_path)
-    entry = next(entry for entry in materialized["dispatches"] if entry["dispatch"].get("mode") == "synthesis")
+    plan, _sources = _compile_materialized_evidence(tmp_path)
+    entry = json.loads((tmp_path / "rust-synthesis.worker-input.json").read_bytes())
     assert entry["dispatch"]["owned_paths"] == []
     payload = {
         "status": "no-findings",
@@ -4456,9 +4456,9 @@ def test_bundle_only_synthesis_persists_and_compiles_without_reading_source(tmp_
         "limitations": [],
         "scope_limitations": [],
     }
-    payload = _typed_synthesis_payload(entry["dispatch"], payload)
+    payload = _typed_synthesis_payload(entry["dispatch"], payload, plan)
     _publish_worker_bytes(entry, json.dumps(payload).encode())
-    dispatch = {**entry["dispatch"], "before_state": materialized["source_state"], "after_state": materialized["source_state"]}
+    dispatch = {**entry["dispatch"], "before_state": entry["dispatch"]["source_state"], "after_state": entry["dispatch"]["source_state"]}
     content, metadata = compile_review({"dispatch": dispatch, "payload": json.loads(Path(entry["worker_payload_path"]).read_text())})
     assert metadata["normalized_record"]["files_inspected"] == []
     assert metadata["evidence"]["predecessor_evidence_ids"] == tuple(dispatch["predecessor_evidence_ids"])
