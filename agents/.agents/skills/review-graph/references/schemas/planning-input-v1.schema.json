@@ -26,6 +26,7 @@
     "head": {"type": "string"},
     "instruction_paths": {"$ref": "#/$defs/stringArray"},
     "merge_base": {"type": ["string", "null"]},
+    "pre_review_validation_requirement_ids": {"$ref": "#/$defs/stringArray"},
     "recovery_finalization_reserve": {"minimum": 0, "type": "integer"},
     "release_readiness": {"type": "boolean"},
     "repository_root": {"type": "string"},

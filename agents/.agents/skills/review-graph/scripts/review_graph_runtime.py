@@ -11,6 +11,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
 from collections import Counter
 from dataclasses import asdict, dataclass, replace
@@ -25,6 +26,7 @@ from review_graph_git import audit_git_context, discovery_reconciliation, interv
 from review_graph_independent import CHECK_LABELS, SCHEMA as _INDEPENDENT_PAYLOAD_SCHEMA, render_independent_payload
 from review_graph_integrity import canonical_json, digest_bytes
 from review_graph_metrics import projected_waves, source_demand
+from review_graph_phases import pending_validation_barrier, phase_accounting, require_validation_barrier, validate_validation_barrier
 from review_graph_plan import (
     _COMPACT_ROUTING_OVERRIDE_FIELDS,
     DEFAULT_ROUTING_CATALOG,
@@ -68,7 +70,7 @@ from review_graph_plan import (
     _normalized_repository_paths,
     _partition_execution_epochs,
     _review_native_result_blockers,
-    _schedule_nodes,
+    _schedule_with_validation_barrier,
     _synthesis_reused_evidence_ids,
     _validation_environment_identity,
     _validation_ledger_expected_fields,
@@ -2615,7 +2617,7 @@ def _graph_plan(raw: dict[str, Any]) -> GraphPlan:
     validation_mappings = _records(raw, "validation_evidence_mapping")
     routing_decisions = _records(raw, "routing_decisions")
     reuse_identities = _records(raw, "reused_review_identities")
-    return GraphPlan(
+    plan = GraphPlan(
         execution_profile=_required_text(raw, "execution_profile"),
         worker_budget=_required_int(raw, "worker_budget"),
         recovery_finalization_reserve=_required_int(raw, "recovery_finalization_reserve"),
@@ -2672,6 +2674,7 @@ def _graph_plan(raw: dict[str, Any]) -> GraphPlan:
         reuse_source_snapshots=tuple(source_snapshot(item) for item in _records(raw, "reuse_source_snapshots")),
         audit_delta_reviews=_records(raw, "audit_delta_reviews"),
         validation_recoveries=_records(raw, "validation_recoveries"),
+        pre_review_validation_nodes=_text_list(raw, "pre_review_validation_nodes"),
         validation_exclusions=tuple(
             ValidationExclusion(
                 originating_evidence_id=_required_text(item, "originating_evidence_id"),
@@ -2682,6 +2685,8 @@ def _graph_plan(raw: dict[str, Any]) -> GraphPlan:
             for item in _records(raw, "validation_exclusions")
         ),
     )
+    validate_validation_barrier(plan)
+    return plan
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:
@@ -4103,7 +4108,9 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         "source_demand": source_demand([asdict(node) for node in plan.actual_worker_nodes], repository_root_path.resolve()),
         "concurrent_worker_limit": document.get("concurrent_worker_limit"),
         "projected_waves": (
-            projected_waves([asdict(node) for node in plan.actual_worker_nodes], document["concurrent_worker_limit"])
+            projected_waves(
+                [asdict(node) for node in plan.actual_worker_nodes], document["concurrent_worker_limit"], early_validation=plan.pre_review_validation_nodes
+            )
             if "concurrent_worker_limit" in document
             else None
         ),
@@ -4148,6 +4155,7 @@ def _epoch_scoped_plan(plan: GraphPlan, epoch: int) -> GraphPlan:
         execution_epochs=tuple(replace(item, node_ids=tuple(node_ids[node_id] for node_id in item.node_ids)) for item in plan.execution_epochs),
         requirement_to_node=tuple((requirement_id, node_ids[node_id]) for requirement_id, node_id in plan.requirement_to_node),
         selected_validation_units=tuple(node_ids[node_id] for node_id in plan.selected_validation_units),
+        pre_review_validation_nodes=tuple(node_ids[node_id] for node_id in plan.pre_review_validation_nodes),
         synthesis_nodes=tuple(node_ids[node_id] for node_id in plan.synthesis_nodes),
         validation_evidence_mapping=tuple(
             replace(mapping, validation_unit_id=node_ids[mapping.validation_unit_id]) for mapping in plan.validation_evidence_mapping
@@ -4774,7 +4782,7 @@ def _restart_reused_metadata_audits(
             )
             node = replace(node, predecessors=tuple(dict.fromkeys((*node.predecessors, *restored))))
         connected.append(node)
-    nodes = _schedule_nodes((*connected, *fresh))
+    nodes = _schedule_with_validation_barrier((*connected, *fresh), plan.pre_review_validation_nodes)
     epochs = _partition_execution_epochs(nodes, WorkerBudget(plan.worker_budget, plan.recovery_finalization_reserve)) if plan.execution_epochs else ()
     updated = replace(
         plan,
@@ -4806,6 +4814,38 @@ def _restart_reused_metadata_audits(
         for node in fresh
     ]
     return updated, decisions
+
+
+def _preserve_metadata_barrier_history(
+    path: Path, continuation: dict[str, Any], events: tuple[dict[str, Any], ...], preserved: dict[str, dict[str, Any]]
+) -> None:
+    """Retain the verified history that admitted preserved audits, including prior resets."""
+    plan = _graph_plan(continuation["plan"])
+    keep = set(plan.pre_review_validation_nodes) | set(preserved)
+    migrated: list[dict[str, Any]] = []
+    state: dict[str, str] = {}
+    for original in events:
+        if original["node_id"] not in keep:
+            continue
+        event = {
+            **original,
+            "affected_node_ids": list(_apply_journal_transition(plan, state, node_id=original["node_id"], status=original["status"])),
+            "plan_digest": _plan_digest(plan),
+            "previous_event_digest": migrated[-1]["event_digest"] if migrated else None,
+            "sequence": len(migrated) + 1,
+        }
+        event.pop("event_digest")
+        event["event_digest"] = digest_bytes(canonical_json(event).encode())
+        migrated.append(event)
+    _fold_execution_journal(plan, _state(continuation, "source_state"), tuple(migrated))
+    _write_text_once(path, "".join(canonical_json(event) + "\n" for event in migrated))
+    for node_id in plan.pre_review_validation_nodes:
+        if state.get(node_id) in {"accepted", "blocked", "in-flight"}:
+            append_journal_event(
+                path,
+                continuation,
+                JournalEventRequest(node_id, "invalidated", reason="External metadata changed; historical pre-review validation must be rerun."),
+            )
 
 
 def resume_after_external_metadata(document: dict[str, Any]) -> dict[str, Any]:
@@ -4867,10 +4907,13 @@ def resume_after_external_metadata(document: dict[str, Any]) -> dict[str, Any]:
     }
     for field, value in (("lifecycle_input_path", continuation), ("dispatches_path", materialized), ("capture_path", document["new_capture"])):
         _write_text_once(paths[field], json.dumps(value, indent=2, sort_keys=True) + "\n")
-    _write_text_once(paths["journal_path"], "")
-    for node_id in preserved:
-        request = JournalEventRequest(node_id, lifecycle[node_id], source=sources.get(node_id))
-        append_journal_event(paths["journal_path"], continuation, request)
+    if plan.pre_review_validation_nodes:
+        _preserve_metadata_barrier_history(paths["journal_path"], continuation, events, preserved)
+    else:
+        _write_text_once(paths["journal_path"], "")
+        for node_id in preserved:
+            request = JournalEventRequest(node_id, lifecycle[node_id], source=sources.get(node_id))
+            append_journal_event(paths["journal_path"], continuation, request)
     return {
         "status": "resumed",
         "transition_kind": "observed-external-git-metadata",
@@ -5168,8 +5211,11 @@ def _apply_journal_transition(plan: GraphPlan, state: dict[str, str], *, node_id
 def _validated_journal_record(
     event: dict[str, Any], *, expected_sequence: int, plan: GraphPlan, source_state: tuple[str, str, str], previous_digest: str | None
 ) -> tuple[str, str]:
-    if set(event) != _JOURNAL_EVENT_KEYS:
+    if set(event) - {"recorded_at_unix_ns"} != _JOURNAL_EVENT_KEYS:
         msg = f"journal event {expected_sequence} has unexpected fields"
+        raise ValueError(msg)
+    if "recorded_at_unix_ns" in event and (type(event["recorded_at_unix_ns"]) is not int or event["recorded_at_unix_ns"] < 0):
+        msg = "journal timestamp must be a nonnegative integer"
         raise ValueError(msg)
     if _required_int(event, "schema_version") != 1 or _required_int(event, "sequence") != expected_sequence:
         msg = f"journal event sequence is invalid at record {expected_sequence}"
@@ -5201,11 +5247,13 @@ def _validated_journal_record(
 
 def _fold_execution_journal(plan: GraphPlan, source_state: tuple[str, str, str], events: tuple[dict[str, Any], ...]) -> tuple[dict[str, str], str | None]:
     state: dict[str, str] = {}
+    latest: dict[str, dict[str, Any]] = {}
     previous_digest: str | None = None
     for expected_sequence, event in enumerate(events, start=1):
         node_id, status = _validated_journal_record(
             event, expected_sequence=expected_sequence, plan=plan, source_state=source_state, previous_digest=previous_digest
         )
+        require_validation_barrier(plan, state, latest, node_id=node_id, status=status)
         affected = _apply_journal_transition(plan, state, node_id=node_id, status=status)
         if _text_list(event, "affected_node_ids") != affected:
             msg = f"journal event {expected_sequence} has incorrect affected nodes"
@@ -5217,6 +5265,7 @@ def _fold_execution_journal(plan: GraphPlan, source_state: tuple[str, str, str],
             msg = f"journal event {expected_sequence} digest does not match its content"
             raise ValueError(msg)
         previous_digest = event_digest
+        latest[node_id] = event
     return state, previous_digest
 
 
@@ -5311,6 +5360,7 @@ def _prepare_journal_event(
         msg = f"invalid journal status {request.status}"
         raise ValueError(msg)
     evidence, limitations = _new_journal_evidence(request, plan=plan, node=node, source_state=source_state)
+    require_validation_barrier(plan, state, {event["node_id"]: event for event in events}, node_id=request.node_id, status=request.status)
     affected = _apply_journal_transition(plan, state, node_id=request.node_id, status=request.status)
     event: dict[str, Any] = {
         "affected_node_ids": list(affected),
@@ -5319,6 +5369,7 @@ def _prepare_journal_event(
         "plan_digest": events[0]["plan_digest"] if events else _plan_digest(plan),
         "previous_event_digest": head_digest,
         "reason": _new_journal_reason(request, limitations),
+        "recorded_at_unix_ns": time.time_ns(),
         "schema_version": 1,
         "sequence": len(events) + 1,
         "source_state": list(source_state),
@@ -5482,9 +5533,15 @@ def next_ready_nodes(document: dict[str, Any], *, journal_events: tuple[dict[str
     invalidated = {node_id for node_id, lifecycle in state.items() if lifecycle == "invalidated"}
     awaiting_replan = {node_id for node_id, lifecycle in state.items() if lifecycle == "awaiting-replan"}
     in_flight = {node_id for node_id, lifecycle in state.items() if lifecycle == "in-flight"}
+    latest = {event["node_id"]: event for event in journal_events}
     blockers = ["blocked nodes prevent completion: " + ", ".join(sorted(blocked))] if blocked else []
     blockers.extend(validation_reconciliation["blockers"])
     blockers.extend(metadata_blockers)
+    failed_early = [
+        node_id for node_id in plan.pre_review_validation_nodes if (latest.get(node_id, {}).get("evidence") or {}).get("evidence_status") == "failed"
+    ]
+    if failed_early:
+        blockers.append("pre-review validation failed: " + ", ".join(failed_early))
     pending_validation = sorted(
         {item["validation_unit_id"] for item in validation_reconciliation["requirements"] if item["resolution"] == "planned"} - accepted
     )
@@ -5494,6 +5551,10 @@ def next_ready_nodes(document: dict[str, Any], *, journal_events: tuple[dict[str
     waiting: list[dict[str, Any]] = []
     for node in plan.actual_worker_nodes:
         if node.node_id in accepted | awaiting_replan | blocked | in_flight:
+            continue
+        barrier = pending_validation_barrier(plan, state, latest, node.node_id)
+        if barrier:
+            waiting.append({"node_id": node.node_id, "pre_review_validation_blockers": list(barrier)})
             continue
         if node.mode == "synthesis" and (validation_reconciliation["blockers"] or pending_validation):
             waiting.append({"node_id": node.node_id, "validation_blockers": validation_reconciliation["blockers"], "missing_validators": pending_validation})
@@ -5521,6 +5582,7 @@ def next_ready_nodes(document: dict[str, Any], *, journal_events: tuple[dict[str
         "reused_evidence_ids": [item.evidence_id for item in plan.audit_reuse_transitions],
         "reused_sources": list(reused_sources),
         "schema_version": 1,
+        **({"phase_accounting": phase_accounting(plan, journal_events, dispatches)} if plan.pre_review_validation_nodes else {}),
         "validation_reconciliation": validation_reconciliation,
         "waiting": waiting,
     }
@@ -5871,14 +5933,15 @@ def _expanded_validation_plan(
         msg = "validation expansion requires the existing baseline validator"
         raise ValueError(msg)
     added_nodes = _validation_nodes(units, skill_path=validator.skill_path, skill_digest=validator.skill_digest, reference_digests=validator.reference_digests)
-    nodes = _schedule_nodes(
+    nodes = _schedule_with_validation_barrier(
         (
             *(
                 replace(node, predecessors=(*node.predecessors, *(unit.node_id for unit in units))) if node.mode == "synthesis" else node
                 for node in plan.actual_worker_nodes
             ),
             *added_nodes,
-        )
+        ),
+        plan.pre_review_validation_nodes,
     )
     epochs = _partition_execution_epochs(nodes, WorkerBudget(plan.worker_budget, plan.recovery_finalization_reserve)) if plan.execution_epochs else ()
     expanded = replace(
@@ -5995,6 +6058,7 @@ def _publish_validation_continuation(  # noqa: PLR0913, PLR0917
             "sequence": len(migrated) + 1,
             "source_state": list(source_state),
             "status": previous["status"],
+            **({"recorded_at_unix_ns": previous["recorded_at_unix_ns"]} if "recorded_at_unix_ns" in previous else {}),
         }
         event["event_digest"] = digest_bytes(canonical_json(event).encode())
         migrated.append(event)
@@ -6355,6 +6419,12 @@ def finalize_proof(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, P
         loaded[evidence.evidence_id] = (kind, record_expectation, evidence, content, normalized)
     preblockers = list(_text_list(document, "lifecycle_blockers"))
     normalized_records = [record for *_rest, record in loaded.values() if record is not None]
+    successful_validation = {
+        record["node_id"] for record in normalized_records if record.get("mode") == "validation" and record["status"] in {"passed", "reused"}
+    }
+    preblockers.extend(
+        f"pre-review validation has not passed: {node_id}" for node_id in plan.pre_review_validation_nodes if node_id not in successful_validation
+    )
     synthesis_bundle = {"records": normalized_records, "plan_context": _synthesis_plan_context(plan, normalized_records)}
     for _kind, record_expectation, evidence, content, _record in loaded.values():
         if isinstance(record_expectation, ReviewEvidenceExpectation) and record_expectation.mode == "synthesis":

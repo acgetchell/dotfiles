@@ -42,7 +42,9 @@ and signals.
 Before fanout, run `preflight-validation --input <preflight.json> --output <report.json>`.
 Follow [preflight inputs](validation-preflight.md) for recipe policy, executor,
 cache, native-environment, and output checks. Resolve blockers or preserve blocked
-evidence and continue independent authorized audits. Preflight is not validation.
+evidence and continue independent authorized audits when no validation barrier
+holds them. Preflight is not validation. At repair boundaries, follow
+[repair validation](repair-validation.md) to plan cheap checks before fanout.
 
 `materialize-dispatches` binds plan, source triple, repository root, authorization,
 state command, and external artifact store to exact dispatches. Send each

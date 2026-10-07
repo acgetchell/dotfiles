@@ -7,7 +7,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def projected_waves(nodes: list[dict[str, Any]], concurrent_worker_limit: int) -> list[list[str]]:
+def projected_waves(nodes: list[dict[str, Any]], concurrent_worker_limit: int, *, early_validation: tuple[str, ...] = ()) -> list[list[str]]:
     """Schedule unit-duration waves without dropping dependencies or serial validators."""
     if isinstance(concurrent_worker_limit, bool) or not isinstance(concurrent_worker_limit, int) or concurrent_worker_limit < 1:
         msg = "concurrent_worker_limit must be a positive integer"
@@ -16,7 +16,12 @@ def projected_waves(nodes: list[dict[str, Any]], concurrent_worker_limit: int) -
     completed: set[str] = set()
     waves: list[list[str]] = []
     while remaining:
-        ready = [node for node in remaining.values() if set(node["predecessors"]) <= completed]
+        ready = [
+            node
+            for node in remaining.values()
+            if set(node["predecessors"]) <= completed
+            and set(early_validation[: early_validation.index(node["node_id"])] if node["node_id"] in early_validation else early_validation) <= completed
+        ]
         # Validation/fix work shares the repository mutation boundary.
         serial = next((node for node in ready if node["mode"] in {"validation", "fix"}), None)
         wave = [serial["node_id"]] if serial else [node["node_id"] for node in ready[:concurrent_worker_limit]]

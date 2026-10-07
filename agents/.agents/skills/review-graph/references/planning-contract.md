@@ -180,6 +180,13 @@ isolated-only may not.
 
 ## Node And Validation Identity
 
+Optional `pre_review_validation_requirement_ids` selects complete coalesced
+validator units in declared order before semantic fanout. The plan retains their
+IDs as `pre_review_validation_nodes`; this scheduling barrier is digest-bound
+and separate from semantic predecessors. All selected units must pass through
+the ordinary evidence gates. See [repair validation](repair-validation.md) for
+aggregate coverage, stop-on-failure, and exact final-evidence reuse.
+
 Keep these concepts separate:
 
 - routing catalog candidate
