@@ -342,6 +342,22 @@ def _validation_identity_metrics(entries: list[dict[str, Any]]) -> dict[str, Any
     }
 
 
+def _partition_payload(entry: dict[str, Any], payload: dict[str, Any]) -> bool:
+    """Replay the optional shape only when the runtime exposes it to workers."""
+    if "coverage_units" not in entry["dispatch"]["payload_schema"].get("optional_shapes", {}):
+        return False
+    payload["coverage_units"] = [
+        {
+            "unit_id": "scripted-contract",
+            "owned_paths": payload["files_inspected"],
+            "dependency_paths": payload["nearby_contract_owners"],
+            "dependency_uncertainty": "",
+            "finding_indices": list(range(1, len(payload["findings"]) + 1)),
+        }
+    ]
+    return True
+
+
 def _trial(module: types.ModuleType, document: dict[str, Any], store: Path) -> dict[str, Any]:
     started = time.perf_counter()
     input_path, output_path = store.with_suffix(".input.json"), store.with_suffix(".output.json")
@@ -361,10 +377,12 @@ def _trial(module: types.ModuleType, document: dict[str, Any], store: Path) -> d
     read_seconds = time.perf_counter() - read_started
     findings: list[dict[str, Any]] = []
     receipts: list[dict[str, Any]] = []
+    partitioned_workers = 0
     operations = 1  # Materialization, followed by actual review/persist/compile API calls.
     publish_started = time.perf_counter()
     for ordinal, entry in enumerate(item for item in entries if item["dispatch"].get("mode") == "audit"):
         payload = _payload(entry, ordinal)
+        partitioned_workers += _partition_payload(entry, payload)
         content = json.dumps(payload).encode()
         contract = json.loads(Path(entry["worker_payload_contract_path"]).read_bytes())
         if hasattr(module, "publish_worker_payload_bytes"):
@@ -401,6 +419,11 @@ def _trial(module: types.ModuleType, document: dict[str, Any], store: Path) -> d
             "per_worker_input_bytes": {item["node_id"]: Path(item["worker_input_path"]).stat().st_size for item in entries},
             **_validation_identity_metrics(entries),
             "independent_protocol_replay": independent_replay,
+            "optional_coverage_protocol_replay": {
+                "partitioned_workers": partitioned_workers,
+                "publication_attempts": len(receipts),
+                "formatting_only_retries": 0,
+            },
             "worker_input_bytes": sum(Path(item["worker_input_path"]).stat().st_size for item in entries),
             "worker_prompt_bytes": sum(len(item["worker_prompt"].encode()) for item in entries),
             "scripted_reads": reads,

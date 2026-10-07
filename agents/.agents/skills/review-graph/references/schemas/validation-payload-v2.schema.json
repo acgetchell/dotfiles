@@ -35,7 +35,11 @@
       "items": {
         "additionalProperties": false,
         "properties": {
-          "artifact_paths": {"items": {"type": "string"}, "type": "array"},
+          "artifact_paths": {
+            "description": "Exact validation_unit.allowed_artifacts[].path roots only; never generated children or absent outputs. Child paths may appear in evidence text. Runtime owns identities and snapshot verification.",
+            "items": {"type": "string"},
+            "type": "array"
+          },
           "command": {"type": "string"},
           "elapsed": {"type": ["string", "number", "null"]},
           "evidence": {"type": "string"},

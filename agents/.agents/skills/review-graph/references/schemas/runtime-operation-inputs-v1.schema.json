@@ -288,6 +288,7 @@
         "repository_root": {"minLength": 1, "type": "string"},
         "routing_catalog_path": {"minLength": 1, "type": "string"},
         "source_state": {"$ref": "#/$defs/sourceState"},
+        "sources": {"items": {"$ref": "#/$defs/sourceRecord"}, "type": "array"},
         "state_verification_command": {"minLength": 1, "type": "string"}
       },
       "required": ["artifact_store", "authorization", "plan", "repository_root", "source_state", "state_verification_command"],
