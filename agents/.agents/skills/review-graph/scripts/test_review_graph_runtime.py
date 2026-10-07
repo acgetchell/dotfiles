@@ -3969,6 +3969,7 @@ def _compile_materialized_evidence(  # noqa: PLR0913
     late_requirements: list[dict[str, Any]] | None = None,
     reference_planned_validation: bool = False,
     audit_findings: list[dict[str, Any]] | None = None,
+    reused_sources: list[dict[str, str]] | None = None,
 ) -> tuple[GraphPlan, list[dict[str, str]]]:
     plan = plan or _sparse_plan()
     materialized = materialize_dispatches(
@@ -3976,6 +3977,7 @@ def _compile_materialized_evidence(  # noqa: PLR0913
             "artifact_store": str(tmp_path),
             "authorization": "review-only",
             "plan": _json_plan(plan),
+            "sources": reused_sources or [],
             "repository_root": str(SKILL_ROOT.parents[2]),
             "source_state": ["scope", "worktree", "repository"],
             "state_verification_command": "capture_scope.py --mode baseline",

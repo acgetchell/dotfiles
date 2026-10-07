@@ -38,7 +38,12 @@ gets its own ID and bound platform.
 Publication reloads the immutable dispatch, verifies predecessor compiler
 artifacts using a shared hashed plan sidecar, and reports synthesis binding
 errors together before writing. The plan/source references are runtime inputs,
-not additional worker reading. Native compilation and final proof still recheck
+not additional worker reading. When routing reuses audits from the same source
+state, the coordinator supplies their compiler `artifact_path`/`metadata_path`
+pairs in `materialize-dispatches.sources`. Materialization verifies those
+artifacts and binds the needed references in the sidecar; continuations retain
+them. Cross-state audit reuse continues to use planner-bound transitions.
+Native compilation and final proof still recheck
 acceptance and current captures. Preserve every failed diagnostic: schema
 failures allow one schema retry; semantic binding failures separately allow one
 consolidated metadata correction. A second failure of either kind blocks the

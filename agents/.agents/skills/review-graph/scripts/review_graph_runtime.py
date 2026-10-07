@@ -2060,8 +2060,8 @@ def _validation_executions_body(
 def _validation_artifact_reference_blockers(payload: dict[str, Any], permitted_paths: tuple[str, ...], absent_paths: tuple[str, ...] = ()) -> tuple[str, ...]:
     """Use exact declared roots for typed references; narrative child paths are evidence."""
     blockers: list[str] = []
-    for index, execution in enumerate(payload["executions"]):
-        references = set(execution["artifact_paths"])
+    for index, execution in enumerate(_records(payload, "executions")):
+        references = set(_text_list(execution, "artifact_paths"))
         unknown = sorted(references - set(permitted_paths))
         absent = sorted(references & set(absent_paths))
         if unknown:
@@ -3505,14 +3505,30 @@ def _publication_dispatch(contract: dict[str, Any]) -> dict[str, Any] | None:
     return dispatch
 
 
-def _synthesis_publication_bundle(dispatch: dict[str, Any]) -> dict[str, Any]:
-    """Verify compiled predecessor artifacts with the immutable materialized plan."""
+def _synthesis_publication_plan(dispatch: dict[str, Any]) -> dict[str, Any]:
+    """Reload the immutable plan and coordinator-bound reuse source references."""
     reference = dispatch["synthesis_plan_reference"]
     content = _read_regular_file_no_follow(Path(reference["path"]))
     if digest_bytes(content) != reference["digest"]:
         msg = "synthesis publication plan digest differs from its bound dispatch"
         raise ValueError(msg)
-    return build_synthesis_bundle({**json.loads(content), "sources": dispatch["synthesis_sources"]})
+    return json.loads(content)
+
+
+def _synthesis_publication_bundle(dispatch: dict[str, Any]) -> dict[str, Any]:
+    """Verify compiled predecessor artifacts with the immutable materialized plan."""
+    plan = _synthesis_publication_plan(dispatch)
+    return build_synthesis_bundle({**plan, "sources": [*_records(plan, "sources"), *dispatch["synthesis_sources"]]})
+
+
+def _continuation_synthesis_sources(entries: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Retain explicit reuse bindings when a continuation rematerializes synthesis."""
+    sources: dict[tuple[str, str], dict[str, Any]] = {}
+    for entry in entries.values():
+        if "synthesis_plan_reference" in entry["dispatch"]:
+            for source in _records(_synthesis_publication_plan(entry["dispatch"]), "sources"):
+                sources[(_required_text(source, "artifact_path"), _required_text(source, "metadata_path"))] = source
+    return list(sources.values())
 
 
 def _preflight_audit_payload(contract: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any] | None:
@@ -3860,7 +3876,13 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         )
     synthesis_plan_reference = None
     if plan.synthesis_nodes:
-        plan_bytes = canonical_json({"plan": asdict(plan), "source_state": list(source_state)}).encode()
+        reused_ids = {evidence_id for _requirement, evidence_id in plan.exact_reused_review_evidence}
+        reuse_sources = []
+        for source in _records(document, "sources"):
+            _kind, _expectation, evidence, _content, _record = _load_evidence_source(source, require_normalized=True)
+            if evidence.evidence_id in reused_ids:
+                reuse_sources.append(source)
+        plan_bytes = canonical_json({"plan": asdict(plan), "source_state": list(source_state), "sources": reuse_sources}).encode()
         plan_path = artifact_store / "synthesis-publication-plan.json"
         _queue_materialized_write(pending_writes, plan_path, plan_bytes, mode=0o444)
         synthesis_plan_reference = {"path": str(plan_path), "digest": digest_bytes(plan_bytes)}
@@ -4769,6 +4791,7 @@ def resume_after_external_metadata(document: dict[str, Any]) -> dict[str, Any]:
             "repository_root": transition.after.repository_root,
             "authorization": first_entry["dispatch"]["authorization"],
             "state_verification_command": first_entry["dispatch"]["state_verification_command"],
+            "sources": _continuation_synthesis_sources(entries),
         },
         preserved_entries=preserved,
     )
@@ -5309,6 +5332,28 @@ def _dispatches_by_node(dispatch_set: dict[str, Any], *, plan: GraphPlan, source
     return entries
 
 
+def _explicit_synthesis_reuse_sources(
+    plan: GraphPlan, source_state: tuple[str, str, str], entries: dict[str, dict[str, Any]]
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    """Verify same-state source bindings for journal-driven consumers too."""
+    reused_ids = {evidence_id for _requirement, evidence_id in plan.exact_reused_review_evidence}
+    reused_ids -= {transition.evidence_id for transition in plan.audit_reuse_transitions}
+    sources = []
+    for source in _continuation_synthesis_sources(entries):
+        _kind, expectation, evidence, _content, record = _load_evidence_source(source, require_normalized=True)
+        if evidence.evidence_id not in reused_ids:
+            continue
+        if not isinstance(evidence, ReviewEvidence) or evidence.mode != "audit" or evidence.status not in {"completed", "no-findings"}:
+            msg = "explicit synthesis reuse requires completed audit evidence"
+            raise ValueError(msg)
+        if expectation.source_state != source_state:
+            msg = "explicit synthesis reuse requires the same source state or a planner-bound audit reuse transition"
+            raise ValueError(msg)
+        if record is not None:
+            sources.append((source, record))
+    return sources
+
+
 def _accepted_journal_sources(
     plan: GraphPlan,
     source_state: tuple[str, str, str],
@@ -5339,6 +5384,9 @@ def _accepted_journal_sources(
         _kind, _expectation, _evidence, _content, record = _load_evidence_source(source, require_normalized=True)
         if record is not None:
             records.append(record)
+    for source, record in _explicit_synthesis_reuse_sources(plan, source_state, entries):
+        sources[record["node_id"]] = source
+        records.append(record)
     return sources, records
 
 
@@ -5850,6 +5898,7 @@ def _publish_validation_continuation(  # noqa: PLR0913, PLR0917
             "repository_root": sample["repository_root"],
             "source_state": list(source_state),
             "state_verification_command": sample["state_verification_command"],
+            "sources": _continuation_synthesis_sources(entries),
         },
         preserved_entries=retained,
     )

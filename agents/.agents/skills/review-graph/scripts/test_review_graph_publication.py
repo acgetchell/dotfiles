@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 import review_graph_runtime as runtime
 from review_graph_benchmark import benchmark_fixture
-from review_graph_plan import ValidationArtifact, plan_from_document
+from review_graph_plan import GraphPlan, ValidationArtifact, plan_from_document
 from test_review_graph_compact import _publish
 from test_review_graph_runtime import (
     ROUTING_CATALOG,
@@ -19,7 +19,9 @@ from test_review_graph_runtime import (
     _compile_materialized_evidence,
     _execution_payload,
     _json_plan,
+    _late_handoff_replan,
     _run_test_git,
+    _source_by_node,
     _sparse_plan,
     _sparse_plan_document,
     _worker_input_fixture,
@@ -161,6 +163,20 @@ def test_validation_artifact_references_agree_before_and_after_publication(tmp_p
         }
 
 
+@pytest.mark.parametrize("omitted", ["executions", "artifact_paths"])
+def test_direct_validation_compiler_preserves_optional_array_defaults(tmp_path: Path, omitted: str) -> None:
+    entry, dispatch = _validation_fixture(tmp_path)
+    payload = _execution_payload(entry, "passed", 0, "1s")
+    if omitted == "executions":
+        del payload["executions"]
+        payload.update(status="blocked", limitations=["Executor unavailable before checks started"])
+    else:
+        del payload["executions"][0]["artifact_paths"]
+    _content, metadata = runtime.compile_validation({"dispatch": dispatch, "payload": payload})
+    assert metadata["evidence"]["status"] == payload["status"]
+    assert metadata["normalized_record"]["executions"] == payload.get("executions", [])
+
+
 def _synthesis_fixture(tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     _plan, _sources = _compile_materialized_evidence(tmp_path / "proof", reference_planned_validation=True)
     entry = json.loads((tmp_path / "proof" / "rust-synthesis.worker-input.json").read_bytes())
@@ -190,6 +206,9 @@ def test_shared_validator_and_inherited_needs_publish_once(tmp_path: Path) -> No
 
 def test_synthesis_reports_all_binding_diagnostics_and_corrects_metadata_only(tmp_path: Path) -> None:
     entry, bundle, valid = _synthesis_fixture(tmp_path)
+    before = {
+        Path(source[key]): Path(source[key]).read_bytes() for source in entry["dispatch"]["synthesis_sources"] for key in ("artifact_path", "metadata_path")
+    }
     invalid = deepcopy(valid)
     invalid["validation_requirements"] *= 2
     invalid["validation_reconciliation"] *= 2
@@ -201,9 +220,7 @@ def test_synthesis_reports_all_binding_diagnostics_and_corrects_metadata_only(tm
     assert "duplicate or unknown evidence" in diagnostic
     assert "disposition=accepted" in diagnostic
     assert not Path(entry["worker_payload_path"]).exists()
-    before = {
-        Path(source[key]): Path(source[key]).read_bytes() for source in entry["dispatch"]["synthesis_sources"] for key in ("artifact_path", "metadata_path")
-    }
+    assert all(path.read_bytes() == content for path, content in before.items())
     _publish(entry, valid)
     assert all(path.read_bytes() == content for path, content in before.items())
     runtime.compile_review(
@@ -234,6 +251,156 @@ def test_synthesis_publication_plan_cannot_be_replaced(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="plan digest differs"):
         _publish(entry, payload)
     assert not Path(entry["worker_payload_path"]).exists()
+
+
+@pytest.mark.parametrize("kind", ["artifact_path", "metadata_path"])
+def test_synthesis_publication_rejects_tampered_predecessor(tmp_path: Path, kind: str) -> None:
+    entry, _bundle, payload = _synthesis_fixture(tmp_path)
+    path = Path(entry["dispatch"]["synthesis_sources"][0][kind])
+    original = path.read_bytes()
+    if kind == "artifact_path":
+        path.write_bytes(original + b"\nTampered predecessor.\n")
+        diagnostic = "digest"
+    else:
+        metadata = json.loads(original)
+        metadata["normalized_record"]["status"] = "completed"
+        path.write_text(json.dumps(metadata))
+        diagnostic = "normalized record does not match"
+    with pytest.raises(ValueError, match=diagnostic):
+        _publish(entry, payload)
+    assert not Path(entry["worker_payload_path"]).exists()
+    path.write_bytes(original)
+    _publish(entry, payload)
+
+
+def _compile_reused_syntheses_and_finalize(tmp_path: Path, plan: GraphPlan, reused: list[dict[str, str]]) -> None:
+    materialized = runtime.materialize_dispatches(
+        {
+            "plan": _json_plan(plan),
+            "source_state": ["scope", "worktree", "repository"],
+            "repository_root": str(SKILL_ROOT.parents[2]),
+            "artifact_store": str(tmp_path / "replan"),
+            "authorization": "review-only",
+            "state_verification_command": "capture_scope.py --mode baseline",
+            "sources": reused,
+        }
+    )
+    state = materialized["source_state"]
+    lifecycle = {"plan": _json_plan(plan), "source_state": state}
+    lifecycle_path, dispatches_path, capture_path, journal = (
+        tmp_path / name for name in ("lifecycle.json", "dispatches.json", "capture.json", "journal.jsonl")
+    )
+    lifecycle_path.write_text(json.dumps(lifecycle))
+    dispatches_path.write_text(json.dumps(materialized))
+    capture_path.write_text(json.dumps(dict(zip(("scope_fingerprint", "captured_worktree_fingerprint", "repository_state_fingerprint"), state, strict=True))))
+    for entry in materialized["dispatches"]:
+        if entry["dispatch"].get("mode") == "synthesis":
+            Path(entry["artifact_path"]).unlink()
+            Path(entry["metadata_path"]).unlink()
+        else:
+            source = {key: entry[key] for key in ("artifact_path", "metadata_path")}
+            runtime.append_journal_event(journal, lifecycle, runtime.JournalEventRequest(entry["node_id"], "accepted", source=source))
+    for entry in materialized["dispatches"]:
+        if entry["dispatch"].get("mode") != "synthesis":
+            continue
+        bundle = runtime._synthesis_publication_bundle(entry["dispatch"])
+        payload = _synthesis_payload(entry["dispatch"], bundle)
+        for row in payload["predecessor_coverage"]:
+            if row["evidence_id"] in {"review:audit-001", "review:audit-002"}:
+                row["disposition"] = "reused"
+        _publish(entry, payload)
+        assert (
+            runtime.main(
+                [
+                    "compile-node",
+                    "--input",
+                    str(lifecycle_path),
+                    "--dispatches",
+                    str(dispatches_path),
+                    "--node-id",
+                    entry["node_id"],
+                    "--before-capture",
+                    str(capture_path),
+                    "--after-capture",
+                    str(capture_path),
+                    "--journal",
+                    str(journal),
+                    "--output",
+                    str(tmp_path / f"{entry['node_id']}.compiled.json"),
+                ]
+            )
+            == 0
+        )
+    proof_path = tmp_path / "proof.json"
+    assert (
+        runtime.main(
+            [
+                "finalize-proof",
+                "--input",
+                str(lifecycle_path),
+                "--dispatches",
+                str(dispatches_path),
+                "--journal",
+                str(journal),
+                "--current-capture",
+                str(capture_path),
+                "--output",
+                str(proof_path),
+            ]
+        )
+        == 0
+    )
+    assert json.loads(proof_path.read_text())["graph_proof_status"] == "complete"
+
+
+@pytest.mark.parametrize("node_id", ["rust-synthesis", "repository-synthesis"])
+def test_same_state_reused_audits_publish_in_synthesis(tmp_path: Path, node_id: str) -> None:
+    _initial, initial_sources = _compile_materialized_evidence(tmp_path / "initial", handoff_catalog_id="python.notebook")
+    by_node = _source_by_node(initial_sources)
+    reused = [by_node["audit-001"], by_node["audit-002"]]
+    before = {Path(source[key]): Path(source[key]).read_bytes() for source in reused for key in ("artifact_path", "metadata_path")}
+    plan = _late_handoff_replan()
+    _plan, fresh = _compile_materialized_evidence(tmp_path / "replan", plan=plan, reused_sources=reused)
+    entry = json.loads((tmp_path / "replan" / f"{node_id}.worker-input.json").read_bytes())
+    bundle = runtime._synthesis_publication_bundle(entry["dispatch"])
+    reused_ids = {"review:audit-001", "review:audit-002"}
+    assert reused_ids <= {record["evidence_id"] for record in bundle["records"]}
+    payload = _synthesis_payload(entry["dispatch"], bundle)
+    for row in payload["predecessor_coverage"]:
+        if row["evidence_id"] in reused_ids:
+            row["disposition"] = "reused"
+    artifact = Path(reused[0]["artifact_path"])
+    artifact.write_bytes(before[artifact] + b"\nTampered reused audit.\n")
+    with pytest.raises(ValueError, match="artifact digest"):
+        _publish(entry, payload)
+    assert not Path(entry["worker_payload_path"]).exists()
+    artifact.write_bytes(before[artifact])
+    _publish(entry, payload)
+    state = entry["dispatch"]["source_state"]
+    content, metadata = runtime.compile_review(
+        {"dispatch": {**entry["dispatch"], "before_state": state, "after_state": state, "synthesis_bundle": bundle}, "payload": payload}
+    )
+    Path(entry["artifact_path"]).write_bytes(content)
+    Path(entry["metadata_path"]).write_text(json.dumps(metadata))
+    proof = runtime.finalize_proof({"plan": _json_plan(plan), "source_state": state, "current_source_state": state, "sources": [*reused, *fresh]})
+    assert proof["status"] == "complete", proof["blockers"]
+    entries = {path.name.removesuffix(".worker-input.json"): json.loads(path.read_bytes()) for path in (tmp_path / "replan").glob("*.worker-input.json")}
+    continued = runtime.materialize_dispatches(
+        {
+            "plan": _json_plan(plan),
+            "source_state": state,
+            "repository_root": str(SKILL_ROOT.parents[2]),
+            "artifact_store": str(tmp_path / "continuation"),
+            "authorization": "review-only",
+            "state_verification_command": "capture_scope.py --mode baseline",
+            "sources": runtime._continuation_synthesis_sources(entries),
+        },
+        preserved_entries={key: value for key, value in entries.items() if key != node_id},
+    )
+    replacement = next(item for item in continued["dispatches"] if item["node_id"] == node_id)
+    _publish(replacement, payload)
+    _compile_reused_syntheses_and_finalize(tmp_path, plan, reused)
+    assert all(path.read_bytes() == original for path, original in before.items())
 
 
 @pytest.mark.parametrize("unexecuted", [False, True])
