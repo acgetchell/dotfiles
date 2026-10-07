@@ -48,7 +48,9 @@ catalog entries resolve handoffs; only `new_routing_triggers` expand routing.
 Final proof classification uses typed catalog mappings reparsed from accepted
 evidence, never caller-provided resolved IDs.
 
-After authorized repairs, run `advance-after-mutation` with the immediately
+After authorized repairs, apply the repository formatter where it is part of
+the fix before final capture. Plan [early checks](repair-validation.md) in the
+replacement template, then run `advance-after-mutation` with the immediately
 preceding `previous_capture`, `new_capture`, and their exact `changed_paths`
 content delta. Invalidation follows owners and downstream dependencies. Supply
 accepted `sources` for verified unchanged-input audit reuse; validators,

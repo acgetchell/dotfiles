@@ -60,14 +60,13 @@ requested. Freeze ordinary routing first; preserve its decisions and proof gates
 
 ## Execute Review Nodes
 
-Dispatch selected leaves with exact skills and owned paths. Workers stream
-`ReviewPayload` audit bytes or `SynthesisPayload` synthesis bytes through dispatch-bound review and persistence
-commands; the runtime validates before writing, binds approval retries, and
-atomically publishes. They return the publication receipt; `compile-node` reads
-the bound bytes without a second conversational copy. Audit and synthesis workers do not author
-fingerprints, digests, evidence IDs, execution metadata, canonical Markdown,
-or machine-evidence JSON. Materialize dispatch bases from the accepted plan
-with `review_graph_runtime.py materialize-dispatches`; never reconstruct planner-owned fields.
+Dispatch selected leaves with exact skills and owned paths. Workers publish
+`ReviewPayload` audits or `SynthesisPayload` syntheses through dispatch-bound
+commands. The runtime validates, binds approval retries, and atomically persists
+their bytes. Return publication receipts; `compile-node` reads persisted payloads.
+Workers never author fingerprints, digests, evidence IDs, execution metadata,
+canonical Markdown, or machine-evidence JSON. Use
+`review_graph_runtime.py materialize-dispatches` for planner-owned dispatches.
 
 The materialized command policy is authoritative. Review nodes attest to every
 command and do not execute validator-owned commands without an exact duplicate
@@ -89,10 +88,13 @@ conclusion-blind. It supplies structured judgments and observed fingerprints;
 the compiler renders native sections and verifies them through `compile-node`.
 Never send it specialist findings or synthesis context.
 
-Fix nodes are serialized. Batch compatible fixes, recapture once per batch,
-invalidate affected evidence, reroute changed surfaces, and rerun only stale or
-newly applicable work. The default repair budget remains two source-mutating
+Serialize compatible fixes; apply authorized repository formatting before the
+batch's final capture. Invalidate affected evidence, reroute changed surfaces,
+and rerun stale or newly applicable work. Default to two source-mutating repair
 epochs after the initial review barrier.
+
+At repair boundaries, follow [repair validation](references/repair-validation.md)
+to schedule cheap canonical checks before affected review fanout.
 
 ## Validate Once
 
@@ -133,9 +135,9 @@ raw artifacts in the proof store.
 Journal verified lifecycle events with `journal-append`. With a current capture,
 use `schedule-ready` for grouped/mixed lanes or `next-ready` for isolated dispatches;
 follow returned continuations. `next-ready --output-dir` creates immutable generations.
-Reconcile accepted handoffs before expansion; only new triggers reroute. After an authorized repair use
-`advance-after-mutation` to record the serialized repair epoch, recapture once,
-move stale nodes to `awaiting-replan`, and materialize the replacement graph.
+Reconcile accepted handoffs before expansion; only new triggers reroute. Use
+`advance-after-mutation` after authorized repairs to recapture, invalidate stale
+nodes, and materialize the replacement graph.
 For external staging with unchanged content, use `resume-after-external-metadata`.
 Declare semantic `git_dependencies` to preserve source-discovery audits; follow
 its continuation and [state transitions](references/state-transitions.md).

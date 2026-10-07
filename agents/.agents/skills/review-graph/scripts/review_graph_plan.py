@@ -532,6 +532,7 @@ class GraphPlan:
     validation_exclusions: tuple[ValidationExclusion, ...] = ()
     audit_delta_reviews: tuple[dict[str, Any], ...] = ()
     validation_recoveries: tuple[dict[str, Any], ...] = ()
+    pre_review_validation_nodes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -2033,6 +2034,36 @@ def _validation_nodes(
     )
 
 
+def _pre_review_validation_nodes(units: Sequence[ValidationUnit], requirement_ids: Sequence[str]) -> tuple[str, ...]:
+    """Promote complete coalesced units, preserving the explicitly planned order."""
+    _validate_unique_ids(requirement_ids, label="pre-review validation requirement")
+    by_requirement = {requirement_id: unit for unit in units for requirement_id in unit.requirement_ids}
+    selected: list[str] = []
+    for requirement_id in requirement_ids:
+        unit = by_requirement.get(requirement_id)
+        if unit is None:
+            msg = f"pre-review validation references an unknown requirement: {requirement_id}"
+            raise ValueError(msg)
+        if not unit.required or not unit.commands or unit.dependency_policy != "stop-on-failure" or unit.execution_strategy != "sequential":
+            msg = f"pre-review validation requires a required, executable, sequential stop-on-failure unit: {requirement_id}"
+            raise ValueError(msg)
+        if unit.node_id not in selected:
+            selected.append(unit.node_id)
+    return tuple(selected)
+
+
+def _schedule_with_validation_barrier(nodes: Sequence[WorkerNode], early: tuple[str, ...]) -> tuple[WorkerNode, ...]:
+    """Order the barrier without making source judgments depend on validation results."""
+    ordered = _schedule_nodes(
+        tuple(
+            replace(node, predecessors=tuple(dict.fromkeys((*node.predecessors, *(early[: early.index(node.node_id)] if node.node_id in early else early)))))
+            for node in nodes
+        )
+    )
+    original = {node.node_id: node for node in nodes}
+    return tuple(original[node.node_id] for node in ordered)
+
+
 def _synthesis_nodes(
     declared_nodes: Sequence[WorkerNode],
     audit_nodes: Sequence[WorkerNode],
@@ -2192,6 +2223,7 @@ def plan_graph(  # noqa: C901, PLR0913, PLR0915
     execution_profile: str = "grouped",
     captured_path_line_bounds: tuple[tuple[str, int], ...] = (),
     routing_decisions: tuple[RoutingDecision, ...] = (),
+    pre_review_validation_requirement_ids: tuple[str, ...] = (),
 ) -> GraphPlan:
     """Build the complete required graph for one exact execution profile."""
     if not isinstance(execution_profile, str) or execution_profile not in {"grouped", "isolated", "isolated-only", "mixed"}:
@@ -2274,13 +2306,14 @@ def plan_graph(  # noqa: C901, PLR0913, PLR0915
             *_synthesis_nodes(synthesis_nodes, audit_nodes, review_requirements, validation_units, normalized_additional_nodes),
         )
     )
+    early = _pre_review_validation_nodes(validation_units, pre_review_validation_requirement_ids)
     executable_evidence_ids = {_expected_planned_evidence_id(node) for node in all_nodes}
     evidence_overlap = tuple(sorted(executable_evidence_ids & set(reused_evidence_ids)))
     if evidence_overlap:
         msg = "exactly reused evidence identities overlap executable nodes: " + ", ".join(evidence_overlap)
         raise ValueError(msg)
     _validate_plan_edges(all_nodes)
-    scheduled = _schedule_nodes(all_nodes)
+    scheduled = _schedule_with_validation_barrier(all_nodes, early)
     epochs = _partition_execution_epochs(scheduled, budget) if execution_profile in {"isolated", "isolated-only", "mixed"} else ()
     current_epoch_ids = epochs[0].node_ids if epochs else ()
     selected_node_ids = {node.node_id for node in scheduled}
@@ -2317,6 +2350,7 @@ def plan_graph(  # noqa: C901, PLR0913, PLR0915
         routing_completion_blockers=routing_assessment.completion_blocking_catalog_ids if routing_assessment is not None else (),
         dispatch_allowed=routing_assessment.feasible if routing_assessment is not None else True,
         blockers=routing_assessment.blockers if routing_assessment is not None else (),
+        pre_review_validation_nodes=early,
     )
 
 
@@ -2376,6 +2410,8 @@ def _identifier_tuple_blockers(values: Sequence[str], *, label: str) -> tuple[st
 def graph_plan_digest(plan: GraphPlan) -> str:
     """Hash a plan without empty optional fields absent from legacy identities."""
     document = asdict(plan)
+    if not plan.pre_review_validation_nodes:
+        document.pop("pre_review_validation_nodes")
     if not plan.validation_recoveries:
         document.pop("validation_recoveries")
     if not plan.audit_delta_reviews:
@@ -2394,6 +2430,8 @@ def graph_plan_digest_matches(plan: GraphPlan, digest: str) -> bool:
     if digest == graph_plan_digest(plan):
         return True
     legacy = asdict(plan)
+    if not plan.pre_review_validation_nodes:
+        legacy.pop("pre_review_validation_nodes")
     if not plan.validation_recoveries:
         legacy.pop("validation_recoveries")
     if not plan.validation_exclusions:
@@ -5909,6 +5947,7 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0915
         validator_skill_path=str(_resolve_checked_skill_path("$SKILLS_ROOT/review-validator/SKILL.md", "review-validator", skill_roots)),
         captured_path_line_bounds=captured_path_line_bounds,
         routing_decisions=routing_decisions,
+        pre_review_validation_requirement_ids=_tuple_field(document, "pre_review_validation_requirement_ids"),
     )
 
 

@@ -86,7 +86,8 @@ attempt and follow the runtime's continuation configuration after recovery.
 For an unstarted grouped/mixed validator blocked by preflight, add
 `preflight_blocked_nodes: [{"node_id": "<validator node>", "reason": "<concrete preflight blocker>"}]`
 to `schedule-ready`. This holds execution without reserving a worker or taking
-the serial lane, so authorized audits can continue. Do not put a held validator
+the serial lane, so authorized audits can continue unless a planned
+[early validation barrier](repair-validation.md) holds them. Do not put a held validator
 in `reserved_node_ids`, append `in-flight`, or claim validation evidence.
 The compact receipt and `schedule_input_path` preserve the hold and reason.
 After resolving the blocker and rerunning preflight, explicitly remove that
