@@ -25,7 +25,9 @@ def _project_files(project: Path, environment: Path) -> list[str]:
     for name in ("pyproject.toml", "uv.lock"):
         path = project / name
         try:
-            tomllib.loads(path.read_text(encoding="utf-8"))
+            metadata = tomllib.loads(path.read_text(encoding="utf-8"))
+            if name == "uv.lock" and (type(metadata.get("version")) is not int or not isinstance(metadata.get("requires-python"), str)):
+                blockers.append(f"uv project metadata invalid: {path}: expected integer version and string requires-python fields")
         except (OSError, UnicodeError, ValueError) as error:
             blockers.append(f"uv project metadata unavailable: {path}: {error}")
     try:

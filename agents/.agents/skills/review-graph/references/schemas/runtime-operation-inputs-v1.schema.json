@@ -24,7 +24,7 @@
                 "project_directory": {"type": "string", "minLength": 1},
                 "environment_path": {"type": "string", "minLength": 1},
                 "configured_python": {"type": "string", "minLength": 1},
-                "executables": {"type": "array", "uniqueItems": true, "items": {
+                "executables": {"type": "array", "items": {
                   "type": "string", "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.+-]*$"
                 }}
               }

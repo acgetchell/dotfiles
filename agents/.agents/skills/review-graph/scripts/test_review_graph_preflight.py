@@ -1,13 +1,16 @@
 """Effective uv prerequisite regressions without executing recipes or interpreters."""
 
 import json
+import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
+import review_graph_preflight as preflight
 import review_graph_runtime as runtime
 from review_graph_schema import SchemaValidationError
 from test_review_graph_efficiency import _preflight_request
@@ -87,6 +90,74 @@ def test_uv_console_tool_requires_environment_interpreter_even_when_not_listed(t
     assert not observations[0]["available"]
     assert observations[1]["available"]
     assert any("/bin/python" in blocker for blocker in report["units"][0]["execution_blockers"])
+
+
+def test_uv_tool_names_are_normalized_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    request = _uv_request(tmp_path, monkeypatch)
+    request["execution_prerequisites"][0]["uv_projects"][0]["executables"] = ["pytest", "python", "pytest"]
+    report = runtime.preflight_validation(request)
+    assert report["status"] == "ready"
+    observations = report["units"][0]["executor_observations"]["uv_projects"][0]["executables"]
+    assert [item["executable"] for item in observations] == ["python", "pytest"]
+
+
+@pytest.mark.parametrize("suffix", [".exe", ".com", ".bat", ".cmd"])
+@pytest.mark.parametrize("explicit_suffix", [False, True])
+def test_windows_environment_discovery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suffix: str, explicit_suffix: bool) -> None:
+    """Model Windows discovery on the host; this is not native Windows execution."""
+    request = _uv_request(tmp_path, monkeypatch)
+    directory = tmp_path / "configured-env" / "Scripts"
+    (directory.parent / "bin").rename(directory)
+    (directory / "python").rename(directory / "python.exe")
+    (directory / "pytest").rename(directory / f"pytest{suffix}")
+    if explicit_suffix:
+        request["execution_prerequisites"][0]["uv_projects"][0]["executables"] = [f"pytest{suffix}"]
+    monkeypatch.setattr(preflight, "os", SimpleNamespace(name="nt", access=os.access, X_OK=os.X_OK))
+    report = runtime.preflight_validation(request)
+    assert report["status"] == "ready"
+    observations = report["units"][0]["executor_observations"]["uv_projects"][0]["executables"]
+    assert [item["path"] for item in observations] == [str(directory / "python.exe"), str(directory / f"pytest{suffix}")]
+
+
+@pytest.mark.parametrize("missing", ["python", "pytest"])
+def test_windows_environment_discovery_does_not_fall_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing: str) -> None:
+    request = _uv_request(tmp_path, monkeypatch)
+    directory = tmp_path / "configured-env" / "Scripts"
+    _executable(directory / ("pytest.exe" if missing == "python" else "python.exe"))
+    _executable(tmp_path / "host-bin" / f"{missing}.exe")
+    monkeypatch.setattr(preflight, "os", SimpleNamespace(name="nt", access=os.access, X_OK=os.X_OK))
+    report = runtime.preflight_validation(request)
+    assert report["status"] == "blocked"
+    observations = report["units"][0]["executor_observations"]["uv_projects"][0]["executables"]
+    assert [item["executable"] for item in observations if not item["available"]] == [missing]
+    assert any(str(directory / f"{missing}.exe") in blocker for blocker in report["units"][0]["execution_blockers"])
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        "foo = 1",
+        'requires-python = ">=3.14"',
+        "version = 1",
+        'version = "1"\nrequires-python = ">=3.14"',
+        'version = true\nrequires-python = ">=3.14"',
+        "version = 1\nrequires-python = 314",
+    ],
+)
+def test_uv_lock_requires_typed_header_fields(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, metadata: str) -> None:
+    request = _uv_request(tmp_path, monkeypatch)
+    (tmp_path / "uv.lock").write_text(metadata, encoding="utf-8")
+    report = runtime.preflight_validation(request)
+    assert report["status"] == "blocked"
+    assert any("expected integer version and string requires-python" in blocker for blocker in report["units"][0]["execution_blockers"])
+
+
+@pytest.mark.parametrize("metadata", ['[tool.uv.workspace]\nmembers = ["packages/*"]', '[dependency-groups]\ndev = ["pytest"]'])
+def test_uv_preflight_accepts_projectless_metadata_and_optional_lock_revision(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, metadata: str) -> None:
+    request = _uv_request(tmp_path, monkeypatch)
+    (tmp_path / "pyproject.toml").write_text(metadata, encoding="utf-8")
+    (tmp_path / "uv.lock").write_text('version = 1\nrequires-python = ">=3.14"\n', encoding="utf-8")
+    assert runtime.preflight_validation(request)["status"] == "ready"
 
 
 def test_uv_project_availability_cannot_satisfy_another_declared_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

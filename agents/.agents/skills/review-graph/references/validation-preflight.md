@@ -47,8 +47,11 @@ Do not use the template for `uvx`, isolated/script environments, `--active`, or
 other wrappers unless their resolution has been independently inspected and
 represented through explicit executable paths.
 
-Preflight reads `pyproject.toml`, `uv.lock`, and `pyvenv.cfg`, then checks the
-environment's Python and declared tools in `bin` (`Scripts` on Windows).
+Preflight checks TOML syntax in `pyproject.toml` and `uv.lock`, requires an integer
+`version` and string `requires-python` in the lockfile, and reads `pyvenv.cfg`.
+It permits workspace roots without a `[project]` table and does not validate
+the full uv metadata schema. It then checks the environment's Python and declared
+tools in `bin` (`Scripts` on Windows), checking each repeated tool name only once.
 It always requires the environment interpreter, including for console tools;
 it never substitutes ambient Python or an ambient tool for a missing environment
 executable. If recipes set `UV_PYTHON` or `--python` to a path, supply that path
