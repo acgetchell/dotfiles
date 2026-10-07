@@ -1,0 +1,74 @@
+{
+  "$id": "https://openai.com/codex/review-graph/bootstrap-starter-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Branch just-ci Bootstrap Operator Choices v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "authorization", "consulted_routers", "instruction_paths",
+    "execution_profile", "environment", "toolchain", "platform", "features",
+    "elapsed_time_budget", "artifact_root", "ignored_outputs", "command_policy",
+    "execution_prerequisites"
+  ],
+  "properties": {
+    "schema_version": {"const": 1, "type": "integer"},
+    "authorization": {"enum": ["review-only", "review-and-fix"]},
+    "consulted_routers": {"$ref": "#/$defs/stringArray"},
+    "instruction_paths": {"$ref": "#/$defs/stringArray"},
+    "execution_profile": {"enum": ["grouped", "isolated", "isolated-only", "mixed"]},
+    "environment": {"type": "string", "minLength": 1},
+    "toolchain": {"type": "string", "minLength": 1},
+    "platform": {"type": "string", "minLength": 1},
+    "features": {"$ref": "#/$defs/stringArray"},
+    "elapsed_time_budget": {"type": "string", "minLength": 1},
+    "artifact_root": {"type": "string", "minLength": 1},
+    "ignored_outputs": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["path", "kind"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "kind": {"enum": ["build", "cache", "coverage", "log", "report", "test-result", "other"]}
+        }
+      }
+    },
+    "command_policy": {
+      "type": "object", "additionalProperties": false,
+      "required": ["disposition", "reason"],
+      "properties": {
+        "disposition": {"enum": ["allowed", "blocked"]},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    },
+    "execution_prerequisites": {
+      "type": "object", "additionalProperties": false,
+      "required": ["executables", "native_available", "reason"],
+      "properties": {
+        "executables": {"$ref": "#/$defs/stringArray"},
+        "native_available": {"type": "boolean"},
+        "reason": {"type": "string", "minLength": 1},
+        "uv_projects": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["project_directory", "environment_path", "executables"],
+            "properties": {
+              "project_directory": {"type": "string", "minLength": 1},
+              "environment_path": {"type": "string", "minLength": 1},
+              "configured_python": {"type": "string", "minLength": 1},
+              "executables": {"type": "array", "items": {"type": "string", "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.+-]*$"}}
+            }
+          }
+        }
+      }
+    },
+    "routing_overrides": {
+      "description": "Optional planning-input-v1 routingOverride objects, validated after capture binding.",
+      "type": "array", "items": {"type": "object"}
+    }
+  },
+  "$defs": {
+    "stringArray": {"type": "array", "items": {"type": "string", "minLength": 1}}
+  }
+}

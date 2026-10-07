@@ -14,6 +14,7 @@ from research_repo_tools.process import ExecutableNotFoundError, format_exceptio
 from review_graph_plan import DEFAULT_ROUTING_CATALOG, DEFAULT_SKILL_ROOT, plan_from_document
 from review_graph_receipts import stage_receipt
 from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
+from review_graph_starter import STARTER_EXAMPLE, STARTER_SCHEMA, starter_metrics, starter_preflight, starter_template
 
 PLANNING_SCHEMA = Path(__file__).resolve().parents[1] / "references" / "schemas" / "planning-input-v1.schema.json"
 RUNTIME_SCHEMA = Path(__file__).resolve().parents[1] / "references" / "schemas" / "runtime-operation-inputs-v1.schema.json"
@@ -127,11 +128,17 @@ def _parser() -> argparse.ArgumentParser:
             "Every graph needs a repository validation requirement with baseline: true. "
             "This marks the repository check, not baseline review scope: a branch just ci unit uses "
             "baseline: true with requested_scope: branch. "
+            "For the branch just-ci preset, use --starter-config instead of --input. "
+            "Its artifact isolation root contains external cache/log output; requires_isolation=false "
+            "keeps execution in the captured checkout. Starter mode runs read-only preflight before returning a dispatch command. "
+            f"Starter choices: {STARTER_SCHEMA}; example: {STARTER_EXAMPLE}. "
             f"Field contracts: {PLANNING_SCHEMA}#/$defs/validationRequirement"
         ),
     )
     parser.add_argument("--capture", type=Path, required=True, help="capture_scope.py JSON manifest")
-    parser.add_argument("--input", type=Path, required=True, help="compact routing and validation template")
+    inputs = parser.add_mutually_exclusive_group(required=True)
+    inputs.add_argument("--input", type=Path, help="compact routing and validation template")
+    inputs.add_argument("--starter-config", type=Path, help="explicit operator choices for the branch just-ci preset")
     parser.add_argument("--output", type=Path, required=True, help="immutable normalized planning document")
     parser.add_argument("--catalog", type=Path, default=DEFAULT_ROUTING_CATALOG)
     parser.add_argument("--skill-root", action="append", type=Path)
@@ -139,16 +146,32 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _starter_preflight(output: dict[str, Any], choices: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    # Import here: runtime also imports bootstrap_document for continuations.
+    from review_graph_runtime import preflight_validation  # noqa: PLC0415
+
+    document = starter_preflight(output["plan"], choices, output["planning_input"]["repository_root"])
+    report = preflight_validation(document)
+    output.update(
+        preflight_input=document,
+        preflight_report=report,
+        starter_metrics=starter_metrics(args.capture, args.starter_config, output["planning_input"], document),
+    )
+    return report
+
+
 def main(argv: list[str] | None = None) -> int:
     """Normalize, validate, plan, and persist one deterministic bootstrap result."""
     args = _parser().parse_args(argv)
     try:
         capture = _read_object(args.capture)
-        document = bootstrap_document(capture, _read_object(args.input))
+        choices = _read_object(args.starter_config) if args.starter_config else None
+        template = starter_template(capture, choices) if choices is not None else _read_object(args.input)
+        document = bootstrap_document(capture, template)
         require_schema(document, PLANNING_SCHEMA)
         root = Path(str(document["repository_root"]))
         plan = plan_from_document(document, catalog_path=args.catalog, skill_roots=tuple(args.skill_root or (DEFAULT_SKILL_ROOT,)), repository_root=root)
-        plan_document = asdict(plan)
+        plan_document = json.loads(json.dumps(asdict(plan)))
         source_state = _source_state(document)
         proof_store = args.output.resolve().parent
         materialization_input = {
@@ -175,8 +198,17 @@ def main(argv: list[str] | None = None) -> int:
             "planning_input": document,
             "schema_version": 1,
         }
+        preflight = _starter_preflight(output, choices, args) if choices is not None else None
+        dispatch_ready = plan.dispatch_allowed and (preflight is None or preflight["status"] == "ready")
         _write_once(args.output, output)
         receipt = stage_receipt("bootstrap", args.output, output)
+        if preflight is not None:
+            receipt.update(
+                dispatch_allowed=dispatch_ready,
+                preflight_status=preflight["status"],
+                blockers=[*plan.blockers, *(blocker for unit in preflight["units"] for blocker in unit["blockers"])],
+                starter_metrics=output["starter_metrics"],
+            )
         receipt["next_command"] = (
             [
                 sys.executable,
@@ -187,12 +219,12 @@ def main(argv: list[str] | None = None) -> int:
                 "--output",
                 str(args.output.resolve().with_suffix(".dispatches.json")),
             ]
-            if plan.dispatch_allowed
+            if dispatch_ready
             else None
         )
         receipt["next_operation_inputs"] = {"input": str(args.output.resolve()), "current_capture": str(args.capture.resolve())}
         print(json.dumps(output if args.full_output else receipt, sort_keys=True))
-        return 0 if plan.dispatch_allowed else 2
+        return 0 if dispatch_ready else 2
     except (ExecutableNotFoundError, KeyError, OSError, TypeError, ValueError, json.JSONDecodeError, subprocess.SubprocessError) as error:
         if isinstance(error, SchemaValidationError):
             print(json.dumps(error.as_dict(), sort_keys=True), file=sys.stderr)

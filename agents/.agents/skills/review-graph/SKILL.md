@@ -28,8 +28,9 @@ instructions/references, and result schema. Coordinator execution records
 - Honor repository instructions and explicit scope/base/exclusions; otherwise
   capture branch scope.
 - Run `capture_scope.py` before routing and after each authorized repair batch.
-- Bootstrap the capture and compact template with
+- Bootstrap capture and template with
   `review_graph_bootstrap.py`; follow its compact receipt and `next_command`.
+  Branch `just ci`: [starter](references/bootstrap-starter.md).
   Keep full proof artifacts on disk; use `--full-output` only for diagnosis.
 - Fix only when authorized and never mutate Git state.
 - Keep all proof artifacts outside the reviewed repository.

@@ -2699,7 +2699,9 @@ def _read_json_object(path: Path) -> dict[str, Any]:
 
 def _operation_document(document: dict[str, Any], operation: str) -> dict[str, Any]:
     """Accept a bootstrap bundle directly where it owns the operation input."""
-    field = {"materialize-dispatches": "materialization_input", "routing-projection": "planning_input"}.get(operation)
+    field = {"materialize-dispatches": "materialization_input", "routing-projection": "planning_input", "preflight-validation": "preflight_input"}.get(
+        operation
+    )
     if field is None and operation in {"compile-node", "finalize-proof", "journal-append", "next-ready", "snapshot-workspace"}:
         field = "lifecycle_input"
     if field is None or field not in document:
