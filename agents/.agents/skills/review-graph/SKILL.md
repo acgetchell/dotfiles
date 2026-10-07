@@ -120,10 +120,11 @@ manifests bind metadata for every immediate entry. Accept only when both gates p
 Never replay equivalent checks. A validator failure is owner evidence, not
 itself a finding. The compiler rejects unexpected outputs;
 source-adjacent build intermediates require an isolated working tree.
-For a proven failure before checks start, `recover-validation-launch` permits
-one attempt after an explicit remedy, preserving accepted work and the failure.
-Follow its returned continuation configuration; see
-[state transitions](references/state-transitions.md).
+`recover-validation-launch` handles failures before checks start;
+`recover-validation-execution` handles permission denials during a failed
+aggregate. Both preserve evidence and permit one remedied attempt per node/source.
+Follow [continuations](references/state-transitions.md) and declare
+[executor permissions](references/validation-preflight.md).
 
 ## Synthesize From A Compact Bundle
 

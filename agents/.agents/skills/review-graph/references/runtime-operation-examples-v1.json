@@ -17,6 +17,7 @@
     "execution_prerequisites": [{
       "node_id": "validation-001",
       "executables": ["just", "uv"],
+      "sandbox_permissions": "use_default",
       "uv_projects": [{"project_directory": ".", "environment_path": ".venv", "executables": ["python", "pytest"]}],
       "native_available": true,
       "reason": "current native host; inspected nested uv run --locked recipes use the declared project environment"
@@ -34,6 +35,27 @@
     "remedy": "Use the accessible repository-local cache",
     "environment": "current host; UV_CACHE_DIR=.uv-cache",
     "permission_change": "none"
+  },
+  "recover-validation-execution": {
+    "artifact_store": "/tmp/review-recovery",
+    "plan": {},
+    "source_state": ["scope", "worktree", "repository"],
+    "node_id": "validation-001",
+    "failure_kind": "executor-permission",
+    "checks_started": true,
+    "reason": "The aggregate ran tests, then Jupyter socket binding was denied by the restricted executor; remaining stages did not run",
+    "remedy": "Use the permitted native executor with socket access and record its actual tool permission setting",
+    "environment": "native host with permitted socket access",
+    "permission_change": "Request the execution tool's require_escalated permission mode",
+    "executor_permissions": "require_escalated",
+    "failure_evidence": {
+      "log_path": "/tmp/review/ci.log",
+      "diagnostic": "PermissionError: [Errno 1] Operation not permitted",
+      "before_capture": "/tmp/review/before.json",
+      "after_capture": "/tmp/review/after.json",
+      "workspace_before": "/tmp/review/workspace-before.json",
+      "workspace_after": "/tmp/review/workspace-after.json"
+    }
   },
   "publish-worker-payload": {
     "mode": "audit",

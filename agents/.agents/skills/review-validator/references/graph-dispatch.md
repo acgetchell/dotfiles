@@ -1,7 +1,6 @@
 # Compact Graph Validation Dispatch
 
-Execute only the exact `review-graph` unit. The graph owns planning, coalescing,
-placement, compilation, and proof acceptance; never discover or broaden work.
+Execute only the dispatched unit; never broaden work.
 
 ## Required Dispatch
 
@@ -19,6 +18,7 @@ Require:
   root, and runtime snapshot policy
 - recursive required payload shape and the exact worker payload path
 - dependency policy and elapsed bounds
+- execution-tool `executor_requirements.sandbox_permissions` (legacy: `use_default`)
 
 Missing fields mean `blocked`, never standalone discovery.
 
@@ -28,7 +28,8 @@ Missing fields mean `blocked`, never standalone discovery.
    state.
 2. Recheck that every dispatched command is non-mutating under repository-owned
    definitions or policy.
-3. Execute each command exactly once in order. Respect `stop-on-failure` or
+3. Apply required tool permissions; respect approvals. If unavailable, report
+   blocked. Execute each command exactly once in order. Respect `stop-on-failure` or
    `continue-independent`. Isolated working directories and external artifacts
    must remain beneath the dispatched isolation root.
 4. Record command, working directory, executor, result, exit code, elapsed time,
@@ -39,18 +40,16 @@ Missing fields mean `blocked`, never standalone discovery.
    payload once and stream it to `worker_payload_persistence.publish_command`,
    which reviews and publishes identical bytes. Return its bound receipt without
    echoing the payload.
-6. The coordinator invokes the runtime-owned
-   post-execution snapshot immediately afterward.
+6. The coordinator immediately takes the runtime-owned post-execution snapshot.
 
 Do not report artifact digests, snapshots, fingerprints, or compiler identities.
 When checks never started, leave `executions` empty and explain the observed
 blocker in `limitations`. Never create placeholder outputs; runtime snapshots
-record absence. Only the coordinator authorizes bounded launch recovery;
-executed results remain owner evidence.
+record absence. For executed permission failures, report `failed`, quote the
+denial in `evidence`, and retain an approved log. Only coordinators request recovery.
 
-A successful command proves only the dispatched execution environment. Do not
-describe a local aggregate run or focused emulation as native evidence for a
-different platform.
+Success proves only the dispatched environment; never describe local runs or
+emulation as native evidence for another platform.
 
 Do not review code, diagnose findings, edit, install substitute toolchains,
 change dependencies, re-plan, or create another worker.
@@ -93,5 +92,4 @@ identities/snapshots.
 
 `compile-node` consumes the persisted payload and runtime snapshots, derives
 identities, mappings, ledger export and canonical evidence, and checks
-native/envelope acceptance. For `compile-validation` diagnosis, consult runtime
-`--help` and operation examples.
+native/envelope acceptance. Diagnose with runtime `--help` and operation examples.

@@ -17,6 +17,7 @@
           "properties": {
             "node_id": {"type": "string", "minLength": 1},
             "executables": {"$ref": "#/$defs/stringArray"},
+            "sandbox_permissions": {"enum": ["use_default", "require_escalated"]},
             "uv_projects": {"type": "array", "items": {
               "type": "object", "additionalProperties": false,
               "required": ["project_directory", "environment_path", "executables"],
@@ -55,10 +56,41 @@
         "node_id": {"type": "string", "minLength": 1},
         "failure_kind": {"enum": ["cache-access", "command-launch", "executor-permission"]},
         "checks_started": {"const": false},
+        "executor_permissions": {"enum": ["use_default", "require_escalated"]},
         "reason": {"type": "string", "minLength": 1},
         "remedy": {"type": "string", "minLength": 1},
         "environment": {"type": "string", "minLength": 1},
         "permission_change": {"type": "string", "minLength": 1}
+      }
+    },
+    "recover-validation-execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_store", "plan", "source_state", "node_id", "failure_kind", "checks_started", "reason", "remedy", "environment", "permission_change", "executor_permissions", "failure_evidence"],
+      "properties": {
+        "artifact_store": {"type": "string", "minLength": 1},
+        "plan": {"type": "object"},
+        "source_state": {"$ref": "#/$defs/sourceState"},
+        "node_id": {"type": "string", "minLength": 1},
+        "failure_kind": {"const": "executor-permission"},
+        "checks_started": {"const": true},
+        "reason": {"type": "string", "minLength": 1},
+        "remedy": {"type": "string", "minLength": 1},
+        "environment": {"type": "string", "minLength": 1},
+        "permission_change": {"type": "string", "minLength": 1},
+        "executor_permissions": {"enum": ["use_default", "require_escalated"]},
+        "failure_evidence": {
+          "type": "object", "additionalProperties": false,
+          "required": ["log_path", "diagnostic", "before_capture", "after_capture", "workspace_before", "workspace_after"],
+          "properties": {
+            "log_path": {"type": "string", "minLength": 1},
+            "diagnostic": {"type": "string", "minLength": 1},
+            "before_capture": {"type": "string", "minLength": 1},
+            "after_capture": {"type": "string", "minLength": 1},
+            "workspace_before": {"type": "string", "minLength": 1},
+            "workspace_after": {"type": "string", "minLength": 1}
+          }
+        }
       }
     },
     "resume-after-external-metadata": {
