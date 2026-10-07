@@ -2674,7 +2674,7 @@ def _graph_plan(raw: dict[str, Any]) -> GraphPlan:
         reuse_source_snapshots=tuple(source_snapshot(item) for item in _records(raw, "reuse_source_snapshots")),
         audit_delta_reviews=_records(raw, "audit_delta_reviews"),
         validation_recoveries=_records(raw, "validation_recoveries"),
-        pre_review_validation_nodes=_text_list(raw, "pre_review_validation_nodes"),
+        pre_review_validation_nodes=_string_tuple(raw, "pre_review_validation_nodes"),
         validation_exclusions=tuple(
             ValidationExclusion(
                 originating_evidence_id=_required_text(item, "originating_evidence_id"),
@@ -4996,7 +4996,7 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
             "state_verification_command": _required_text(document, "state_verification_command"),
         }
     )
-    lifecycle = {"plan": asdict(new_plan), "source_state": list(new_state)}
+    lifecycle = json.loads(canonical_json({"plan": asdict(new_plan), "source_state": list(new_state)}))
     continuation = {
         "lifecycle_input_path": artifact_store / "lifecycle.json",
         "dispatches_path": artifact_store / "dispatches.json",

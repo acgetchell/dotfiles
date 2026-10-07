@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 from capture_scope import _scope_data
 from review_graph_metrics import projected_waves
+from review_graph_phases import phase_accounting
 from review_graph_plan import graph_plan_digest, graph_plan_digest_matches, plan_from_document
 from review_graph_runtime import (
     JournalEventRequest,
@@ -68,6 +69,7 @@ def test_phase_moves_whole_coalesced_unit_without_duplicate_execution_or_semanti
     assert waves[0] == [early]
     assert sum(early in wave for wave in waves) == 1
     assert _graph_plan(_json_plan(plan)) == plan
+    assert _graph_plan({**_json_plan(plan), "pre_review_validation_nodes": plan.pre_review_validation_nodes}) == plan
     assert not graph_plan_digest_matches(plan, graph_plan_digest(replace(plan, pre_review_validation_nodes=())))
 
 
@@ -173,11 +175,52 @@ def test_multiple_early_units_require_verified_success_in_declared_order(tmp_pat
 
 
 def _ready(result: dict[str, Any]) -> dict[str, Any]:
-    lifecycle = json.loads(json.dumps(result["lifecycle_input"]))
+    lifecycle = result["lifecycle_input"]
     events, _state, _head = read_execution_journal(
         Path(result["journal_path"]), plan=_graph_plan(lifecycle["plan"]), source_state=tuple(lifecycle["source_state"])
     )
     return next_ready_nodes({**lifecycle, "current_source_state": lifecycle["source_state"]}, journal_events=events, dispatch_set=result["dispatch_set"])
+
+
+@pytest.mark.parametrize("early", [False, True])
+def test_returned_repair_lifecycle_supports_direct_python_continuation(tmp_path: Path, early: bool) -> None:
+    request = _mutation_request(tmp_path)
+    if early:
+        request["planning_template"]["pre_review_validation_requirement_ids"] = ["baseline-validation"]
+    result = advance_after_mutation(request)
+    lifecycle = result["lifecycle_input"]
+    assert lifecycle == json.loads(Path(result["lifecycle_input_path"]).read_text())
+    ready = _ready(result)
+    node_id = ready["ready_node_ids"][0]
+    append_journal_event(Path(result["journal_path"]), lifecycle, JournalEventRequest(node_id, "in-flight"))
+    assert _ready(result)["lifecycle"]["in_flight_node_ids"] == [node_id]
+
+
+@pytest.mark.parametrize(
+    ("statuses", "known"),
+    [
+        ([], True),
+        (["in-flight", "accepted"], True),
+        (["accepted"], False),
+        (["in-flight", "accepted", "invalidated", "accepted"], False),
+        (["accepted", "invalidated", "in-flight", "accepted"], False),
+        (["in-flight", "invalidated", "accepted"], False),
+        (["in-flight", "accepted", "invalidated", "in-flight", "accepted"], False),
+    ],
+)
+@pytest.mark.parametrize("lane", ["worker", "coordinator"])
+def test_accounting_requires_complete_attempts_and_proven_executor_history(statuses: list[str], known: bool, lane: str) -> None:
+    plan = plan_from_document(_phase_plan(), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
+    node_id = plan.pre_review_validation_nodes[0]
+    events = tuple({"node_id": node_id, "status": status, "affected_node_ids": [node_id], "sequence": index + 1} for index, status in enumerate(statuses))
+    accounting = phase_accounting(plan, events, {node_id: {"dispatch": {"execution_location": lane}}})[0]
+    observed_starts = statuses.count("in-flight")
+    assert accounting["journal_start_count"] == observed_starts
+    assert accounting["result_record_count"] == statuses.count("accepted")
+    assert accounting["worker_launch_count"] == (observed_starts * (lane == "worker") if known else None)
+    assert accounting["coordinator_start_count"] == (observed_starts * (lane == "coordinator") if known else None)
+    assert accounting["first_start_unix_ns"] is None
+    assert accounting["last_result_unix_ns"] is None
 
 
 def _run_early_check(result: dict[str, Any], tmp_path: Path) -> dict[str, str]:
@@ -267,7 +310,6 @@ def test_repair_lint_failure_stops_fanout_then_new_source_reruns_once(tmp_path: 
     template["pre_review_validation_requirement_ids"] = ["baseline-validation"]
     template.update(concrete_change_target=True, change_target="repaired source")
     first = advance_after_mutation(request)
-    first["lifecycle_input"] = json.loads(json.dumps(first["lifecycle_input"]))
     ready = _ready(first)
     assert len(ready["ready_node_ids"]) == 1
     entries = {entry["node_id"]: entry for entry in first["dispatch_set"]["dispatches"]}
@@ -303,7 +345,6 @@ def test_repair_lint_failure_stops_fanout_then_new_source_reruns_once(tmp_path: 
             "sources": [failed_source],
         }
     )
-    second["lifecycle_input"] = json.loads(json.dumps(second["lifecycle_input"]))
     assert not set(first["new_plan"]["pre_review_validation_nodes"]) & set(second["new_plan"]["pre_review_validation_nodes"])
     assert _ready(second)["ready_dispatches"][0]["result_contract"] == "compact-validation"
     passing_directory = tmp_path / "passing"
@@ -323,7 +364,6 @@ def test_early_success_is_final_evidence_and_unchanged_audit_reuse_survives(tmp_
     request["planning_template"]["pre_review_validation_requirement_ids"] = ["baseline-validation"]
     result = advance_after_mutation(request)
     assert unchanged["dispatch"]["evidence_id"] in result["reused_evidence_ids"]
-    result["lifecycle_input"] = json.loads(json.dumps(result["lifecycle_input"]))
     executions: list[str] = []
     for _ in range(result["new_plan"]["complete_node_count"] + 1):
         ready = _ready(result)
@@ -405,6 +445,7 @@ def test_metadata_resume_retains_audits_and_restarts_only_current_validation(tmp
     lifecycle = json.loads(Path(result["lifecycle_input_path"]).read_text())
     journal = Path(result["journal_path"])
     validator = _ready(result)["ready_dispatches"][0]
+    append_journal_event(journal, lifecycle, JournalEventRequest(validator["node_id"], "in-flight"))
     _compile_repair_fixture_entry(validator, lifecycle, journal)
     audit = next(entry for entry in _ready(result)["ready_dispatches"] if entry["dispatch"].get("mode") == "audit")
     if in_flight:
@@ -434,6 +475,10 @@ def test_metadata_resume_retains_audits_and_restarts_only_current_validation(tmp
         {**resumed_lifecycle, "current_source_state": resumed["current_source_state"]}, journal_events=events, dispatch_set=resumed["dispatch_set"]
     )
     assert ready["ready_node_ids"] == [validator["node_id"]]
+    accounting = ready["phase_accounting"][0]
+    assert accounting["journal_start_count"] == 1
+    assert accounting["worker_launch_count"] is None
+    assert accounting["coordinator_start_count"] is None
     _run_test_git(git, "-C", str(repository), "restore", "--staged", "state.rs")
     resumed_again = resume_after_external_metadata(
         {
@@ -448,7 +493,6 @@ def test_metadata_resume_retains_audits_and_restarts_only_current_validation(tmp
     assert audit["node_id"] in resumed_again["preserved_node_ids"]
     if in_flight:
         current = {**resumed_again["lifecycle_input"], "current_source_state": resumed_again["current_source_state"]}
-        current = json.loads(json.dumps(current))
         current_audit = next(entry for entry in resumed_again["dispatch_set"]["dispatches"] if entry["node_id"] == audit["node_id"])
         _compile_repair_fixture_entry(current_audit, current, Path(resumed_again["journal_path"]))
 

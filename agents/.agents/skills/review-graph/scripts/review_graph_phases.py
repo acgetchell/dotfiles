@@ -50,6 +50,30 @@ def require_validation_barrier(plan: GraphPlan, state: dict[str, str], latest: d
         raise ValueError(msg)
 
 
+def _launch_totals_known(nodes: set[str], events: tuple[dict[str, Any], ...]) -> bool:
+    """Require each attempt's start and avoid inferring historical executor lanes."""
+    active: set[str] = set()
+    started: set[str] = set()
+    for event in events:
+        node_id, status = event["node_id"], event["status"]
+        if status in {"invalidated", "awaiting-replan"}:
+            affected = set(event["affected_node_ids"]) & nodes
+            if affected & started:
+                # A continuation may replace the dispatch lane. The journal
+                # records starts, but does not bind their historical executors.
+                return False
+            active.difference_update(affected)
+        elif node_id in nodes:
+            if status == "in-flight":
+                active.add(node_id)
+                started.add(node_id)
+            elif status in {"accepted", "blocked"}:
+                if node_id not in active:
+                    return False
+                active.remove(node_id)
+    return True
+
+
 def phase_accounting(plan: GraphPlan, events: tuple[dict[str, Any], ...], entries: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     """Report observed journal boundaries and starts without estimating provider costs."""
     stages = {
@@ -63,17 +87,17 @@ def phase_accounting(plan: GraphPlan, events: tuple[dict[str, Any], ...], entrie
         observed = [event for event in events if event["node_id"] in nodes]
         starts = [event for event in observed if event["status"] == "in-flight"]
         recorded = [event for event in observed if event["status"] in {"accepted", "blocked"}]
-        missing_starts = {event["node_id"] for event in recorded} - {event["node_id"] for event in starts}
+        launches_known = _launch_totals_known(nodes, events)
         result.append(
             {
                 "stage": stage,
                 "planned_node_count": len(nodes),
                 "journal_start_count": len(starts),
                 "worker_launch_count": (
-                    None if missing_starts else sum(entries[event["node_id"]]["dispatch"]["execution_location"] == "worker" for event in starts)
+                    sum(entries[event["node_id"]]["dispatch"]["execution_location"] == "worker" for event in starts) if launches_known else None
                 ),
                 "coordinator_start_count": (
-                    None if missing_starts else sum(entries[event["node_id"]]["dispatch"]["execution_location"] == "coordinator" for event in starts)
+                    sum(entries[event["node_id"]]["dispatch"]["execution_location"] == "coordinator" for event in starts) if launches_known else None
                 ),
                 "result_record_count": len(recorded),
                 "first_start_unix_ns": starts[0].get("recorded_at_unix_ns") if starts else None,

@@ -64,7 +64,10 @@ journal starts, worker launches, coordinator starts, result records, and journal
 boundary timestamps (Unix nanoseconds). These timestamps measure lifecycle
 recording, not command duration. Command elapsed time remains in validation
 evidence. Missing start records or legacy timestamps produce unknown launch
-counts or times, not inferred measurements. Continuations retain original
+counts or times, not inferred measurements. Launch totals also remain unknown
+after a recorded start is invalidated: a continuation can replace its dispatch
+lane, and the journal does not prove the historical executor. The raw
+`journal_start_count` still reports every observed start. Continuations retain original
 result timestamps and keep historical journals available. Reconcile their
 lineage before combining counts across journals to avoid counting retained
 events twice.
