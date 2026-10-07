@@ -74,11 +74,11 @@ def _compile_aggregate(lifecycle: dict[str, Any], args: Namespace, entry: dict[s
         check=False,
     )
     elapsed = time.monotonic() - started
-    output = run.stdout.decode() + run.stderr.decode()
-    assert "2 checks passed" in output
-    assert ("build completed" in output) == permitted
+    output = run.stdout + run.stderr
+    assert b"2 checks passed" in output
+    assert (b"build completed" in output) == permitted
     log = Path(unit["allowed_artifacts"][0]["path"])
-    log.write_text(output)
+    log.write_bytes(output)
     after = capture_workspace_snapshot(entry["dispatch"])
     status = "passed" if run.returncode == 0 else "failed"
     payload = {
@@ -139,10 +139,11 @@ def _compile_aggregate(lifecycle: dict[str, Any], args: Namespace, entry: dict[s
     }
 
 
-def _fixture(tmp_path: Path, *, extra_command: bool = False) -> tuple[dict[str, Any], Namespace, dict[str, Any], dict[str, Any]]:
+def _fixture(tmp_path: Path, *, extra_command: bool = False, non_utf8_output: bool = False) -> tuple[dict[str, Any], Namespace, dict[str, Any], dict[str, Any]]:
     script = tmp_path / "aggregate.py"
     script.write_text(
-        'import os\nassert 1 + 1 == 2\nassert len([1, 2]) == 2\nprint("2 checks passed", flush=True)\n'
+        ('import sys\nsys.stdout.buffer.write(b"\\xff\\n")\n' if non_utf8_output else "")
+        + 'import os\nassert 1 + 1 == 2\nassert len([1, 2]) == 2\nprint("2 checks passed", flush=True)\n'
         'if os.environ["FIXTURE_SOCKET_ACCESS"] != "permitted":\n'
         '    raise PermissionError(1, "Operation not permitted")\nprint("build completed")\n'
     )
@@ -226,10 +227,12 @@ def _finalize(lifecycle: dict[str, Any], args: Namespace, directory: Path) -> di
     return result
 
 
-def test_executed_permission_recovery_releases_early_gate_only_after_success(tmp_path: Path) -> None:
-    request, args, failed, successful = _fixture(tmp_path)
+@pytest.mark.parametrize("non_utf8_output", [False, True])
+def test_executed_permission_recovery_releases_early_gate_only_after_success(tmp_path: Path, non_utf8_output: bool) -> None:
+    request, args, failed, successful = _fixture(tmp_path, non_utf8_output=non_utf8_output)
     assert not _ready(request, args)["ready_node_ids"]
     original = {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+    assert (b"\xff" in original[Path(request["failure_evidence"]["log_path"])]) == non_utf8_output
     recovered = recover_validation_execution(request, args)
     lifecycle, retry_args = _continuation(recovered)
     assert lifecycle["source_state"] == request["source_state"]

@@ -6127,7 +6127,7 @@ def _verify_validation_recoveries(plan: GraphPlan) -> None:
     for recovery in plan.validation_recoveries:
         identity = (_required_text(recovery, "node_id"), _text_list(recovery, "source_state", required=True))
         if identity in seen:
-            msg = "validation launch recovery budget exhausted for this node and source state"
+            msg = "validation recovery budget exhausted for this node and source state"
             raise ValueError(msg)
         seen.add(identity)
         for artifact in _records(recovery, "preserved_files"):
@@ -6297,7 +6297,7 @@ def _execution_failure_snapshots(
         raise ValueError(msg)
     root = Path(entry["dispatch"]["repository_root"])
     log_bytes = _read_regular_file_no_follow(_workspace_path(log_path, root))
-    if digest_bytes(log_bytes) != log["artifact_digest"] or diagnostic not in log_bytes.decode("utf-8") or diagnostic not in executions[0]["evidence"]:
+    if digest_bytes(log_bytes) != log["artifact_digest"] or diagnostic.encode("utf-8") not in log_bytes or diagnostic not in executions[0]["evidence"]:
         msg = "execution recovery diagnostic or log differs from compiled failure evidence"
         raise ValueError(msg)
     snapshots = {"failure.log": log_bytes}
@@ -6350,7 +6350,7 @@ def _recover_validation(document: dict[str, Any], args: argparse.Namespace, *, c
         msg = "validation recovery requires quiescent execution without active or source-mutated nodes"
         raise ValueError(msg)
     if any(item["node_id"] == node_id and tuple(item["source_state"]) == source_state for item in plan.validation_recoveries):
-        msg = "validation launch recovery budget exhausted for this node and source state"
+        msg = "validation recovery budget exhausted for this node and source state"
         raise ValueError(msg)
     environment = _required_text(document, "environment")
     permission_change = _required_text(document, "permission_change")
