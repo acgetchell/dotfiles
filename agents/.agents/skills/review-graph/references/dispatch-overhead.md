@@ -1,5 +1,49 @@
 # Dispatch Overhead Measurement
 
+## Partial Recheck Proof Transport (#128)
+
+The fixed regression fixture owns `pyproject.toml` and
+`tests/tooling/test_adoption.py` in a repository with exactly 100 captured paths.
+Only the test changes; configuration coverage is reused. Two seeded findings,
+unit dependencies, validation requirements, and a routing handoff survive
+publication, compilation, and evidence verification.
+
+Reproduce the byte measurement from the checkout:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run --locked pytest -q -s \
+  agents/.agents/skills/review-graph/scripts/test_review_graph_coverage_proofs.py \
+  -k fixed_partial_recheck_dispatch_bytes
+```
+
+The 2026-10-07 local run measured these serialized bytes. Absolute temporary and
+skill paths affect exact sizes. The inline comparison replaces only the new
+dispatch's execution view with the complete proof and serializes the same
+worker wrapper; it is a controlled representation comparison, not a historical
+runtime replay.
+
+| Artifact or representation | Bytes |
+| --- | ---: |
+| Fresh worker input | 16,771 |
+| Partial recheck with inline proof (comparison) | 55,975 |
+| Partial recheck with external proof | 19,889 |
+| Compact execution view alone | 1,747 |
+| Full external proof alone | 25,591 |
+| Partial publication contract | 3,195 |
+
+Externalizing the proof reduces the partial worker input by about 64% against
+the inline comparison. Both complete 100-entry fingerprint arrays remain in the
+read-only proof artifact and the compiler-bound plan. Neither worker input nor
+publication contract embeds them. Tests also reject missing, byte-altered, or
+symlinked proofs, forged projections and partitions, altered dependency or
+instruction claims, unsupported snapshots, and omitted inherited obligations.
+Existing staging regressions exercise inherited semantic Git dependencies.
+
+These are scripted protocol and byte measurements. Model tokens, model cost,
+review latency, and semantic finding recall are unobserved; the printed report
+uses `null` for model measurements. Retaining two seeded findings demonstrates
+provenance preservation, not model recall.
+
 ## Repeatable Protocol Benchmark
 
 Run from the dotfiles checkout:

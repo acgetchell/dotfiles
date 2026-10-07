@@ -7,8 +7,23 @@ from review_graph_integrity import canonical_json, digest_json
 from review_graph_reuse import AuditInputIdentity, AuditReuseTransition, ReviewSourceSnapshot, verify_reuse_inputs
 
 
+def coverage_execution_view(context: dict[str, Any], reference: dict[str, str]) -> dict[str, Any]:
+    """Project verified work and inherited obligations without capture arrays."""
+    return {
+        "schema_version": 1,
+        "proof_reference": reference,
+        "evidence_id": context["evidence_id"],
+        "units": [{key: value for key, value in unit.items() if key != "reason"} for unit in context["units"]],
+        "original_findings": context["original_findings"],
+        "original_validation_requirements": context["original_validation_requirements"],
+        "original_handoffs": context["original_handoffs"],
+        "original_audit_context": context.get("original_audit_context", {}),
+        "original_git_context": context.get("original_git_context", {}),
+    }
+
+
 def coverage_reference(context: dict[str, Any]) -> dict[str, Any]:
-    """Bind compact native output to the complete verified metadata proof."""
+    """Bind native output to verified metadata and its external proof, if any."""
     return {
         "schema_version": 1,
         "metadata_field": "expectation.coverage_reuse",

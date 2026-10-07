@@ -85,8 +85,13 @@ independence just because implementation bytes are unchanged.
 each unit, including uncertain dependencies and failed input proofs. Ineligible
 audits also report the applicable category; an audit without a partition reports
 `no-coverage-partition` with an empty unit list.
-Its plan-bound `coverage_reuse` dispatch retains original artifacts, captures,
-findings, and instruction identities. Inspect only units marked `recheck`;
+Its plan-bound `coverage_reuse` dispatch is a verified execution view: unit paths,
+dependencies, reused/recheck dispositions, original findings attributed to
+`evidence_id`, typed audit/Git context, and validation/handoff obligations.
+`proof_reference` names a read-only full proof artifact by absolute path and
+SHA-256 digest. It retains both complete captures, original artifact references,
+instruction identities, and metadata transitions outside ordinary worker context.
+Read that artifact only when the full proof is needed. Inspect only units marked `recheck`;
 `files_inspected` records those actual reads. The compiler combines this with
 proved reused coverage, carries original finding provenance forward, and keeps
 historical rechecked findings visible. Reconcile original validation needs and
@@ -95,13 +100,18 @@ partitions, uncertain dependencies, changed instructions, or changed routing
 require fresh inspection. Legacy audits without partitions retain whole-audit
 reuse behavior; a delta audit is not itself a fresh partition origin.
 
-The complete coverage proof stays in metadata at `expectation.coverage_reuse`
-and in the normalized record. Native Markdown carries only a canonical digest
-reference and reused/rechecked unit counts. Verification binds that reference
-to the complete proof and replays source, dependency, instruction, and finding
-provenance checks. Original typed context remains attributed to its evidence ID
+Metadata at `expectation.coverage_reuse` and the normalized record retain the same
+execution view and proof reference. Native Markdown binds that view by canonical
+digest and reused/rechecked unit counts. Publication preflight, compilation, and
+evidence verification reload the full proof without following file symlinks,
+check its digest and exact execution projection, and replay source, dependency,
+instruction, and finding provenance checks. Missing or altered proofs block
+acceptance even after a report has been compiled. The full proof also remains
+plan-bound; keep it with the other immutable artifacts. Original typed context
+remains attributed to its evidence ID
 in `inherited_audit_context`; it is not a fresh worker assertion. Older inline
-coverage proofs remain readable under the existing native size limits.
+coverage proofs and saved dispatches remain readable under the existing native
+size limits. New external-proof publication contracts require compiler preflight.
 The coverage proof also retains `original_git_context`, verified against the
 original immutable artifact. Git dependencies and unclassified commands apply
 to every reused unit because the payload has no unit-specific Git attribution.

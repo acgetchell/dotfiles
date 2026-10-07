@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics, run_command_bytes
 from review_graph_bootstrap import bootstrap_document
-from review_graph_coverage import combined_findings, coverage_decisions, reused_paths, validate_coverage_units
+from review_graph_coverage import combined_findings, coverage_decisions, coverage_execution_view, reused_paths, validate_coverage_units
 from review_graph_doi import captured_software_inputs, inspect_canonical_recheck
 from review_graph_git import audit_git_context, discovery_reconciliation, intervening_metadata_blockers, metadata_audit_blockers, validate_git_dependencies
 from review_graph_independent import CHECK_LABELS, SCHEMA as _INDEPENDENT_PAYLOAD_SCHEMA, render_independent_payload
@@ -3449,7 +3449,9 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
     audit_scope_text = (
         " For audits, scope_limitations is reserved exclusively for omitted dispatch-owned paths and must equal owned_paths minus "
         "files_inspected and runtime-proved reused paths. When coverage_reuse is present, inspect only recheck units, preserve their prior findings and "
-        "reconcile original validation needs/handoffs; do not claim fresh reads of reused paths. For broad fresh audits, use optional coverage_units when "
+        "reconcile original validation needs/handoffs; do not claim fresh reads of reused paths. Its verified execution view contains unit dependencies "
+        "and original finding IDs attributed to evidence_id; proof_reference provides lazy access to the full proof when needed. "
+        "For broad fresh audits, use optional coverage_units when "
         "you can partition contracts with explicit dependencies and uncertainty: partition every owned path and every finding exactly once "
         "using one-based finding_indices, give each unit a unique unit_id, and account for every nearby_contract_owners path in dependency_paths. "
         'See payload_schema.optional_shapes.coverage_units; dependency_uncertainty="" means no uncertainty, and [] means no findings/dependencies. '
@@ -3492,6 +3494,9 @@ def _publication_dispatch(contract: dict[str, Any]) -> dict[str, Any] | None:
     """Reload the immutable dispatch bound to publication, never worker-authored context."""
     reference = contract.get("compiler_preflight")
     if reference is None:
+        if "proof_reference" in contract.get("coverage_reuse", {}):
+            msg = "external coverage proof requires its bound compiler preflight before publication"
+            raise ValueError(msg)
         # Saved contracts remain usable; compile-node applies the current verifier.
         return None
     content = Path(reference["worker_input_path"]).read_bytes()
@@ -3975,7 +3980,10 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
                 msg = "delta audit requires exactly one bound coverage context"
                 raise ValueError(msg)
             _verify_delta_context(deltas[0], common)
-            common["coverage_reuse"] = deltas[0]
+            proof_bytes = canonical_json(deltas[0]).encode()
+            proof_path = artifact_store / f"{node.node_id}.coverage-proof.json"
+            _queue_materialized_write(pending_writes, proof_path, proof_bytes, mode=0o444)
+            common["coverage_reuse"] = coverage_execution_view(deltas[0], {"path": str(proof_path), "digest": digest_bytes(proof_bytes)})
         if node.node_id in inspection_groups:
             # Keep shared observations in one immutable artifact, not every wrapper.
             common["shared_inspection_evidence"] = {
@@ -4427,8 +4435,63 @@ def _carry_forward_audits(  # noqa: C901, PLR0912, PLR0913, PLR0915 - preserve p
     return routed, list(decisions.values())
 
 
+def _coverage_proof(context: dict[str, Any]) -> dict[str, Any]:
+    """Load a digest-bound full proof and reject a divergent worker projection."""
+    if "proof_reference" not in context:
+        # Saved inline dispatches and evidence retain their original representation.
+        return context
+    reference = context["proof_reference"]
+    if not isinstance(reference, dict) or set(reference) != {"path", "digest"}:
+        msg = "coverage proof reference requires only path and digest"
+        raise ValueError(msg)
+    path = Path(_required_text(reference, "path"))
+    if not path.is_absolute():
+        msg = "coverage proof reference requires an absolute artifact path"
+        raise ValueError(msg)
+    content = _read_regular_file_no_follow(path)
+    if digest_bytes(content) != _required_text(reference, "digest"):
+        msg = "coverage proof digest differs from its bound execution view"
+        raise ValueError(msg)
+    proof = json.loads(content)
+    if not isinstance(proof, dict) or "proof_reference" in proof:
+        msg = "coverage proof artifact must contain a complete inline proof object"
+        raise ValueError(msg)
+    required_fields = {
+        "node_id": str,
+        "evidence_id": str,
+        "artifact_path": str,
+        "metadata_path": str,
+        "artifact_digest": str,
+        "origin": dict,
+        "target": dict,
+        "units": list,
+        "original_findings": list,
+        "original_validation_requirements": list,
+        "original_handoffs": list,
+        "instruction_digests": list,
+        "metadata_transitions": list,
+    }
+    for field, expected_type in required_fields.items():
+        if not isinstance(proof.get(field), expected_type):
+            msg = f"coverage proof {field} must be a {expected_type.__name__}"
+            raise TypeError(msg)
+    try:
+        expected = coverage_execution_view(proof, reference)
+    except (KeyError, TypeError, AttributeError) as error:
+        msg = "coverage proof artifact lacks complete execution context"
+        raise ValueError(msg) from error
+    if context != expected:
+        msg = "coverage execution view differs from original immutable findings or verified unit decisions"
+        raise ValueError(msg)
+    return proof
+
+
 def _verify_delta_context(context: dict[str, Any], dispatch: dict[str, Any]) -> None:
     """Replay the original immutable partition proof at materialization and acceptance."""
+    context = _coverage_proof(context)
+    if dispatch.get("mode") != "audit":
+        msg = "delta coverage applies only to audit mode"
+        raise ValueError(msg)
     origin, target = source_snapshot(context["origin"]), source_snapshot(context["target"])
     if target.source_state != _state(dispatch, "source_state"):
         msg = "delta coverage target differs from the dispatched source state"
@@ -5319,6 +5382,11 @@ def _dispatches_by_node(dispatch_set: dict[str, Any], *, plan: GraphPlan, source
             if _read_regular_file_no_follow(worker_input) != expected_input:
                 msg = f"worker input differs from its materialized dispatch: {node_id} ({worker_input})"
                 raise ValueError(msg)
+        planned_coverage = next((context for context in plan.audit_delta_reviews if context["node_id"] == node_id), None)
+        coverage = dispatch.get("coverage_reuse")
+        if (None if coverage is None else _coverage_proof(coverage)) != planned_coverage:
+            msg = f"dispatch coverage proof differs from its bound plan: {node_id}"
+            raise ValueError(msg)
         shared = dispatch.get("shared_inspection_evidence")
         if isinstance(shared, dict) and "source_packet_path" in shared:
             packet = _read_regular_file_no_follow(Path(_required_text(shared, "source_packet_path")))
