@@ -7,13 +7,67 @@ and `reason`. Inspect nested recipes and fixtures against user restrictions;
 omitted commands are unreviewed.
 
 For each executable unit, supply `execution_prerequisites` with `node_id`,
-explicit `executables` including nested tools, `native_available`, and a concrete
+explicit host `executables` including nested tools, `native_available`, and a concrete
 `reason`. The runtime checks executable discovery and working directories;
 the native-environment observation comes from the coordinator. An omitted
 prerequisite remains uninspected and blocks execution readiness. These checks
 describe the current executor; they cannot certify a different sandbox's
 permissions or toolchain. See the `preflight-validation` definition in
 [operation schemas](schemas/runtime-operation-inputs-v1.schema.json).
+
+For inspected `uv run --locked` commands, including nested Just recipes, use
+the validated prerequisite template in
+[operation examples](runtime-operation-examples-v1.json#/preflight-validation).
+Keep host wrappers and native tools in `executables`; declare environment tools
+by name in `uv_projects`, so Python need not exist on ambient PATH:
+
+```json
+{
+  "node_id": "<validation node>",
+  "executables": ["just", "uv"],
+  "uv_projects": [{
+    "project_directory": ".",
+    "environment_path": ".venv",
+    "executables": ["python", "pytest"]
+  }],
+  "native_available": true,
+  "reason": "Inspected nested locked uv recipes use this existing project environment."
+}
+```
+
+Adapt tool names to the inspected recipes, including native host tools such as
+`cargo` where required. `project_directory` is the uv workspace root, relative
+to `repository_root` or absolute. `environment_path` is the inspected effective
+project environment, relative to that workspace root or absolute; copy an
+explicit `UV_PROJECT_ENVIRONMENT` override here. uv defaults to `.venv` and
+resolves relative overrides from the workspace root, as documented in
+[uv project configuration](https://docs.astral.sh/uv/concepts/projects/config/#project-environment-path).
+The runtime does not infer overrides from its own process or parse recipes.
+Do not use the template for `uvx`, isolated/script environments, `--active`, or
+other wrappers unless their resolution has been independently inspected and
+represented through explicit executable paths.
+
+Preflight checks TOML syntax in `pyproject.toml` and `uv.lock`, requires an integer
+`version` and string `requires-python` in the lockfile, and reads `pyvenv.cfg`.
+It permits workspace roots without a `[project]` table and does not validate
+the full uv metadata schema. It then checks the environment's Python and declared
+tools in `bin` (`Scripts` on Windows), checking each repeated tool name only once.
+It always requires the environment interpreter, including for console tools;
+it never substitutes ambient Python or an ambient tool for a missing environment
+executable. If recipes set `UV_PYTHON` or `--python` to a path, supply that path
+as optional `configured_python` (relative to `project_directory` or absolute).
+It must be executable and resolve to the existing environment interpreter;
+missing paths or differing interpreters block readiness. Resolve version/name
+selectors separately before using this path-only template.
+
+The report's per-unit `executor_observations` separates host discovery from
+uv project paths, resolved executables, and interpreter selection. Missing or
+malformed metadata, missing environments, and broken/non-executable Python or
+tools produce execution blockers. These observations establish discovery only;
+they do not certify lock freshness, interpreter versions, installed dependency
+consistency, or a later sync's success. Do not run uv, sync, download, or launch
+validation to obtain this prerequisite evidence. Native availability, command
+policy, cache observations, and hosted obligations remain separate checks.
 
 The read-only report checks obligations, caches, and effect paths without
 executing commands or certifying sandbox write access. Missing permitted outputs

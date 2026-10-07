@@ -17,6 +17,18 @@
           "properties": {
             "node_id": {"type": "string", "minLength": 1},
             "executables": {"$ref": "#/$defs/stringArray"},
+            "uv_projects": {"type": "array", "items": {
+              "type": "object", "additionalProperties": false,
+              "required": ["project_directory", "environment_path", "executables"],
+              "properties": {
+                "project_directory": {"type": "string", "minLength": 1},
+                "environment_path": {"type": "string", "minLength": 1},
+                "configured_python": {"type": "string", "minLength": 1},
+                "executables": {"type": "array", "items": {
+                  "type": "string", "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.+-]*$"
+                }}
+              }
+            }},
             "native_available": {"type": "boolean"},
             "reason": {"type": "string", "minLength": 1}
           }

@@ -95,6 +95,7 @@ from review_graph_plan import (
     validation_execution_result_blockers,
     validation_requirements_from_document,
 )
+from review_graph_preflight import inspect_executor_executables
 from review_graph_provenance import review_scope_body, worker_payload_reference
 from review_graph_receipts import stage_receipt
 from review_graph_reuse import (
@@ -5977,9 +5978,10 @@ def _verify_validation_recoveries(plan: GraphPlan) -> None:
                 raise ValueError(msg)
 
 
-def _preflight_executor(unit: ValidationUnit, prerequisite: dict[str, Any] | None, repository_root: Path) -> list[str]:
+def _preflight_executor(unit: ValidationUnit, prerequisite: dict[str, Any] | None, repository_root: Path) -> tuple[dict[str, Any], list[str]]:
+    observations: dict[str, Any] = {"host_executables": [], "uv_projects": []}
     if not unit.commands:
-        return []
+        return observations, []
     blockers: list[str] = []
     if prerequisite is None:
         blockers.append("executor/native availability has not been inspected for this unit")
@@ -5988,14 +5990,15 @@ def _preflight_executor(unit: ValidationUnit, prerequisite: dict[str, Any] | Non
             blockers.append("native environment unavailable: " + prerequisite["reason"])
         if not prerequisite["executables"]:
             blockers.append("executor executables have not been declared for this command-bearing unit")
-        # Explicit executables avoid pretending that shell parsing finds nested tools.
-        blockers.extend(f"executor executable unavailable: {executable}" for executable in prerequisite["executables"] if shutil.which(executable) is None)
+        # Explicit contexts avoid pretending that shell parsing finds nested tools.
+        observations, executable_blockers = inspect_executor_executables(prerequisite, repository_root)
+        blockers.extend(executable_blockers)
     blockers.extend(
         f"executor working directory unavailable: {directory}"
         for directory in unit.working_directories
         if not _workspace_path(directory, repository_root).is_dir()
     )
-    return blockers
+    return observations, blockers
 
 
 def _preflight_outputs(unit: ValidationUnit, repository_root: Path) -> tuple[list[dict[str, Any]], list[str]]:
@@ -6067,7 +6070,8 @@ def preflight_validation(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C
             decision = policy.get(command)
             if decision is None or decision["disposition"] != "allowed":
                 blockers.append(f"command policy: {command}: {decision['reason'] if decision else 'not reviewed, including nested recipes and fixtures'}")
-        blockers.extend(_preflight_executor(unit, prerequisites.get(unit.node_id), repository_root))
+        executor_observations, executor_blockers = _preflight_executor(unit, prerequisites.get(unit.node_id), repository_root)
+        blockers.extend(executor_blockers)
         outputs, output_blockers = _preflight_outputs(unit, repository_root)
         if any(not item["accessible"] for item in cache_checks):
             blockers.append("declared executor cache is inaccessible; remedy it before dispatch")
@@ -6078,6 +6082,7 @@ def preflight_validation(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C
                 "status": "blocked" if blockers or output_blockers else "ready",
                 "expected_outputs": [artifact.path for artifact in unit.allowed_artifacts],
                 "output_observations": outputs,
+                "executor_observations": executor_observations,
                 "configuration_errors": output_blockers,
                 "execution_blockers": blockers,
                 "repository_findings": [],
