@@ -267,7 +267,10 @@
         "expected_workspace_effects": {"$ref": "#/$defs/stringArray"},
         "features": {"$ref": "#/$defs/stringArray"},
         "independence_basis": {"type": "string"},
-        "isolation_root": {"type": ["string", "null"]},
+        "isolation_root": {
+          "description": "Absolute root outside and not overlapping the repository, required for external artifacts even when requires_isolation is false. It bounds artifact paths without relocating execution by itself.",
+          "type": ["string", "null"]
+        },
         "meaningful_skips": {"$ref": "#/$defs/stringArray"},
         "mutation_classification": {"type": "string"},
         "mutation_lock": {"type": "string"},
@@ -278,7 +281,10 @@
           "description": "Scope being validated; independent of the baseline flag that designates the repository check. A branch review normally uses branch even when baseline is true.",
           "enum": ["branch", "staged", "worktree", "baseline", "release"]
         },
-        "requires_isolation": {"type": "boolean"},
+        "requires_isolation": {
+          "description": "When true, working directories must also be absolute and under isolation_root. Use false with a non-null isolation_root for external cache/log artifacts while executing in the captured checkout with ignored repository outputs.",
+          "type": "boolean"
+        },
         "required": {"type": "boolean"},
         "requirement_id": {"type": "string"},
         "selection_reason": {"type": "string"},

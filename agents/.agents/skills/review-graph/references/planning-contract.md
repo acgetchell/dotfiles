@@ -257,6 +257,8 @@ requirement's `baseline: true` identifies the repository check (such as
 A minimal branch template therefore marks its repository check `baseline: true`
 while retaining `requested_scope: branch`. Other targeted units may use false.
 The bootstrap help and validation-requirement schema expose this distinction.
+The [branch starter](bootstrap-starter.md) supplies this contract from explicit
+operator choices and demonstrates external artifacts with checkout execution.
 Require all applicable language
 production syntheses, `repository-independent-review` for concrete change
 targets, and `repository-production-review` for final broad reconciliation.

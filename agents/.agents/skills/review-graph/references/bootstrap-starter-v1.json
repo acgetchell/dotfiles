@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "authorization": "review-only",
+  "consulted_routers": ["review-graph", "python-review-orchestrator", "docs-review-orchestrator"],
+  "instruction_paths": ["AGENTS.md"],
+  "execution_profile": "grouped",
+  "environment": "current POSIX host; existing locked uv project environment",
+  "toolchain": "repository-pinned uv, Python, and Just",
+  "platform": "current native host",
+  "features": [],
+  "elapsed_time_budget": "15m",
+  "artifact_root": "/tmp/review-proof/validation",
+  "ignored_outputs": [
+    {"path": ".venv", "kind": "build"},
+    {"path": ".pytest_cache", "kind": "cache"},
+    {"path": ".ruff_cache", "kind": "cache"}
+  ],
+  "command_policy": {
+    "disposition": "blocked",
+    "reason": "Inspect just ci, nested recipes, and fixtures for the task's no-Git-mutation restriction before allowing execution."
+  },
+  "execution_prerequisites": {
+    "executables": ["env", "just", "uv"],
+    "uv_projects": [{"project_directory": ".", "environment_path": ".venv", "executables": ["python", "pytest", "ruff"]}],
+    "native_available": false,
+    "reason": "Confirm this executor's native prerequisites and adapt the declared tools to the inspected recipe."
+  }
+}
