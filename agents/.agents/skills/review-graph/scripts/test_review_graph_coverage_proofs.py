@@ -249,3 +249,63 @@ def test_external_proof_requires_preflight_and_legacy_inline_evidence_remains_re
     Path(legacy["metadata_path"]).write_text(json.dumps(metadata))
     Path(partial["dispatch"]["coverage_reuse"]["proof_reference"]["path"]).unlink()
     assert runtime._load_evidence_source(legacy, require_normalized=True)[4] == metadata["normalized_record"]
+
+
+@pytest.mark.parametrize("field", ["origin", "target", "artifact_digest", "instruction_digests", "metadata_transitions"])
+def test_incomplete_rebound_proof_reports_input_error_without_publication(tmp_path: Path, capsys: pytest.CaptureFixture[str], field: str) -> None:
+    _fresh, partial, result, payload = _proof_fixture(tmp_path)
+    view = partial["dispatch"]["coverage_reuse"]
+    proof = runtime._coverage_proof(view)
+    del proof[field]
+    proof_bytes = canonical_json(proof).encode()
+    proof_path = Path(view["proof_reference"]["path"])
+    proof_path.chmod(0o644)
+    proof_path.write_bytes(proof_bytes)
+    partial["dispatch"]["coverage_reuse"] = coverage_execution_view(proof, {"path": str(proof_path), "digest": digest_bytes(proof_bytes)})
+    worker_input = Path(partial["worker_input_path"])
+    worker_input.chmod(0o644)
+    worker_input.write_text(json.dumps(partial))
+    contract = json.loads(Path(partial["worker_payload_contract_path"]).read_bytes())
+    contract["coverage_reuse"] = partial["dispatch"]["coverage_reuse"]
+    contract["compiler_preflight"]["digest"] = digest_bytes(worker_input.read_bytes())
+    with pytest.raises(ValueError, match=f"coverage proof {field}"):
+        runtime.publish_worker_payload_bytes(contract, json.dumps(payload).encode())
+    assert not Path(partial["worker_payload_path"]).exists()
+
+    state = result["new_source_state"]
+    compiler_input = tmp_path / "compile-input.json"
+    compiler_input.write_text(json.dumps({"dispatch": {**partial["dispatch"], "before_state": state, "after_state": state}, "payload": payload}))
+    artifact, metadata = tmp_path / "rejected.md", tmp_path / "rejected.json"
+    assert runtime.main(["compile-review", "--input", str(compiler_input), "--artifact", str(artifact), "--metadata", str(metadata)]) == 2
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert f"coverage proof {field}" in output.err
+    assert "Traceback" not in output.err
+    assert not artifact.exists()
+    assert not metadata.exists()
+
+
+@pytest.mark.parametrize("tamper", ["missing", "substituted"])
+def test_self_consistent_dispatch_still_requires_its_planned_coverage(tmp_path: Path, tamper: str) -> None:
+    _fresh, partial, result, _payload_after = _proof_fixture(tmp_path)
+    if tamper == "missing":
+        del partial["dispatch"]["coverage_reuse"]
+    else:
+        view = partial["dispatch"]["coverage_reuse"]
+        proof = runtime._coverage_proof(view)
+        proof["node_id"] = "another-audit"
+        substitute = tmp_path / "substituted-proof.json"
+        content = canonical_json(proof).encode()
+        substitute.write_bytes(content)
+        partial["dispatch"]["coverage_reuse"] = coverage_execution_view(proof, {"path": str(substitute), "digest": digest_bytes(content)})
+        # The substituted projection and bytes agree; the unchanged plan must reject it.
+        assert runtime._coverage_proof(partial["dispatch"]["coverage_reuse"]) == proof
+    worker_input = Path(partial["worker_input_path"])
+    worker_input.chmod(0o644)
+    worker_input.write_text(json.dumps(partial, indent=2, sort_keys=True) + "\n")
+    dispatches = result["dispatch_set"]
+    dispatches["dispatch_set_digest"] = digest_bytes(canonical_json({key: value for key, value in dispatches.items() if key != "dispatch_set_digest"}).encode())
+    lifecycle = json.loads(Path(result["lifecycle_input_path"]).read_bytes())
+    with pytest.raises(ValueError, match="dispatch coverage proof differs from its bound plan"):
+        runtime.next_ready_nodes({**lifecycle, "current_source_state": result["new_source_state"]}, dispatch_set=dispatches, journal_events=())
+    assert not Path(partial["worker_payload_path"]).exists()

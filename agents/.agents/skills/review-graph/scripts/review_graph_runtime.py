@@ -4456,6 +4456,25 @@ def _coverage_proof(context: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(proof, dict) or "proof_reference" in proof:
         msg = "coverage proof artifact must contain a complete inline proof object"
         raise ValueError(msg)
+    required_fields = {
+        "node_id": str,
+        "evidence_id": str,
+        "artifact_path": str,
+        "metadata_path": str,
+        "artifact_digest": str,
+        "origin": dict,
+        "target": dict,
+        "units": list,
+        "original_findings": list,
+        "original_validation_requirements": list,
+        "original_handoffs": list,
+        "instruction_digests": list,
+        "metadata_transitions": list,
+    }
+    for field, expected_type in required_fields.items():
+        if not isinstance(proof.get(field), expected_type):
+            msg = f"coverage proof {field} must be a {expected_type.__name__}"
+            raise TypeError(msg)
     try:
         expected = coverage_execution_view(proof, reference)
     except (KeyError, TypeError, AttributeError) as error:
