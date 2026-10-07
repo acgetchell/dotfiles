@@ -10,6 +10,7 @@ from review_graph_bootstrap import bootstrap_document
 from review_graph_plan import plan_from_document
 from review_graph_runtime import (
     JournalEventRequest,
+    _coverage_proof,
     _graph_plan,
     advance_after_mutation,
     append_journal_event,
@@ -617,7 +618,7 @@ def test_partitioned_audit_retains_original_capture_across_multiple_repairs(tmp_
     result = repairs[-1]
     delta = next(item for item in result["dispatch_set"]["dispatches"] if item["dispatch"]["skill_id"] == "python-cli-review")
     context = delta["dispatch"]["coverage_reuse"]
-    assert context["origin"]["repository_state_fingerprint"] == origin["repository_state_fingerprint"]
+    assert _coverage_proof(context)["origin"]["repository_state_fingerprint"] == origin["repository_state_fingerprint"]
     assert {unit["unit_id"]: unit["disposition"] for unit in context["units"]} == {"tool.py": "reused", "pyproject.toml": "recheck"}
     state = result["new_source_state"]
     _content, updated = compile_review(

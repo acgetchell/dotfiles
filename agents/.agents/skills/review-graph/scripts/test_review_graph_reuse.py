@@ -133,8 +133,10 @@ def test_large_recheck_publishes_retries_and_finalizes_without_expanding_markdow
     result = runtime.advance_after_mutation(request)
     entry = next(item for item in result["dispatch_set"]["dispatches"] if item["dispatch"]["skill_id"] == original["dispatch"]["skill_id"])
     context = entry["dispatch"]["coverage_reuse"]
-    assert len(context["origin"]["repository_path_fingerprints"]) >= 180
-    assert len(json.dumps(context, separators=(",", ":")).encode()) > MAX_NATIVE_SECTION_BYTES
+    proof = runtime._coverage_proof(context)
+    assert len(proof["origin"]["repository_path_fingerprints"]) >= 180
+    assert len(json.dumps(proof, separators=(",", ":")).encode()) > MAX_NATIVE_SECTION_BYTES
+    assert "repository_path_fingerprints" not in json.dumps(context)
     assert sum(unit["disposition"] == "reused" for unit in context["units"]) == 22
     assert sum(unit["disposition"] == "recheck" for unit in context["units"]) == 1
     payload = _payload(request["changed_paths"])
@@ -261,6 +263,7 @@ def test_saved_payload_compiles_unchanged_and_legacy_native_proof_still_verifies
     # Model a publication made under the previous contract, before preflight existed.
     contract = json.loads(Path(entry["worker_payload_contract_path"]).read_bytes())
     del contract["compiler_preflight"]
+    contract["coverage_reuse"] = runtime._coverage_proof(contract["coverage_reuse"])
     payload_bytes = json.dumps(_payload(request["changed_paths"])).encode()
     receipt = runtime.publish_worker_payload_bytes(contract, payload_bytes)
     assert receipt["artifact_write_review"]["audit_path_roles"]["omitted_dispatch_owned_paths"] == []
