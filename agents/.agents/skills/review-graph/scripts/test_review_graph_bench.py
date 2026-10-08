@@ -80,6 +80,34 @@ def test_forwarding_equivalence_matches_real_just_expansion(tmp_path: Path) -> N
     assert benchmark_identity(result.stderr.strip()) == requested
 
 
+@pytest.mark.parametrize("argument", ["$BENCH_FILTER", "*.rs", "$(printf filter)", "~"])
+@pytest.mark.parametrize("variadic", [False, True])
+def test_shell_expansion_differences_do_not_require_literal_or_forwarding_recipes(tmp_path: Path, argument: str, variadic: bool) -> None:
+    base = "cargo bench --bench interval -- "
+    suffix = " --test" if variadic else ""
+    parameter = " *args" if variadic else ""
+    forwarding = " {{args}}" if variadic else ""
+    body = base + shlex.quote(argument) + forwarding
+    (tmp_path / "justfile").write_text(f"bench-interval{parameter}:\n    {body}\n")
+    requested = benchmark_identity(base + argument + suffix)
+    assert requested is not None
+    assert equivalent_recipe(requested, benchmark_recipes(tmp_path)["bench-interval"], "bench-interval") is None
+    requirement = ValidationRequirement(
+        "fixtures", ("s", "w", "r"), (base + argument + suffix,), (str(tmp_path),), "native", "stable", (), "native", "validator", "serial"
+    )
+    assert _late_validation_quality_blockers(requirement, repository_root=tmp_path, authorization="review-only") == ()
+
+
+def test_shell_expansion_does_not_bypass_required_cargo_features(tmp_path: Path) -> None:
+    (tmp_path / "Cargo.toml").write_text('[[bench]]\nname="interval"\nrequired-features=["bench"]\n')
+    command = "cargo bench --bench interval -- $BENCH_FILTER"
+    requirement = ValidationRequirement("fixtures", ("s", "w", "r"), (command,), (str(tmp_path),), "native", "stable", (), "native", "validator", "serial")
+    assert any(
+        "missing required features: bench" in item
+        for item in _late_validation_quality_blockers(requirement, repository_root=tmp_path, authorization="review-only")
+    )
+
+
 @pytest.mark.parametrize(
     ("suffix", "mode", "canonical"),
     [("", "timing", True), (" --no-run", "build-only", False), (" -- --test", "test", False), (" -- --sample-size 10", "timing", False)],

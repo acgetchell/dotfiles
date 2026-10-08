@@ -16,6 +16,7 @@ class BenchmarkCommand:
     cargo_context: tuple[str, ...]
     cargo_arguments: tuple[str, ...]
     harness_arguments: tuple[str, ...]
+    shell_expansion_free: bool
 
     @property
     def mode(self) -> str:
@@ -87,7 +88,8 @@ def benchmark_identity(command: str) -> BenchmarkCommand | None:  # noqa: C901
         else:
             remaining.append(word)
         cursor += 1
-    return BenchmarkCommand(tuple(sorted(set(targets))), frozenset(features), all_features, context, tuple(remaining), harness)
+    shell_expansion_free = "\n" not in command and all(re.fullmatch(r"[A-Za-z0-9_./:=,+@%\-]+", word) is not None for word in words)
+    return BenchmarkCommand(tuple(sorted(set(targets))), frozenset(features), all_features, context, tuple(remaining), harness, shell_expansion_free)
 
 
 def _has_recipe_attributes(lines: list[str], index: int) -> bool:
@@ -148,6 +150,6 @@ def equivalent_recipe(requested: BenchmarkCommand, recipe: tuple[str, str], name
         if (variadic.startswith("+") and not forwarded) or any(re.fullmatch(r"[A-Za-z0-9_./:=,+@%\-]+", argument) is None for argument in forwarded):
             return None  # Just interpolates raw values; shell quoting at invocation is lost.
         command = marker.sub(lambda _match: " ".join(forwarded), command)
-    if benchmark_identity(command) != requested:
+    if not requested.shell_expansion_free or benchmark_identity(command) != requested:
         return None
     return shlex.join(("just", name, *forwarded))
