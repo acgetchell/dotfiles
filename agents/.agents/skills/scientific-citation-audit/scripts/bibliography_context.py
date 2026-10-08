@@ -26,4 +26,4 @@ def publication_years(entry: str, doi: str) -> tuple[str, ...]:
     text = re.sub(re.escape(doi), "", entry, flags=re.IGNORECASE)
     text = re.sub(r"https?://[^\s<>]+", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\b10\.\d{4,9}/\S+", "", text, flags=re.IGNORECASE)
-    return tuple(sorted(set(re.findall(r"\b(?:1[0-9]{3}|2[0-9]{3})\b", text))))
+    return tuple(sorted({match.group() for match in re.finditer(r"\b(?:1[0-9]{3}|2[0-9]{3})\b", text)}))
