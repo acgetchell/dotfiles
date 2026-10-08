@@ -84,7 +84,40 @@ class DoiEntry:
         text = re.sub(r"CITATION\.cff", "", text, flags=re.IGNORECASE)
         # A deliberately small vocabulary: unknown names, dates, and titles must
         # go through the ordinary bibliography checks, never a canonical bypass.
-        pointer_words = {"doi", "see", "for", "the", "this", "software", "project", "citation", "canonical", "metadata", "in", "and", "version", "concept"}
+        pointer_words = {
+            "doi",
+            "see",
+            "for",
+            "the",
+            "this",
+            "software",
+            "project",
+            "citation",
+            "canonical",
+            "metadata",
+            "in",
+            "and",
+            "version",
+            "concept",
+            "citing",
+            "cite",
+            "please",
+            "use",
+            "repository",
+            "below",
+            "above",
+            "tagged",
+            "release",
+            "releases",
+            "archive",
+            "archived",
+            "on",
+            "zenodo",
+            "under",
+            "all",
+            "versions",
+            "are",
+        }
         return set(re.findall(r"\w+", text.casefold())) <= pointer_words
 
 
@@ -165,6 +198,7 @@ class CslMetadata:
     year: str | None
     container: str | None
     author_families: tuple[str, ...]
+    date_provenance: tuple[tuple[str, str], ...] = ()
 
     @classmethod
     def parse(cls, raw: dict[str, Any]) -> CslMetadata:
@@ -175,9 +209,10 @@ class CslMetadata:
             raise ValueError(msg)
 
         container = plain_text(raw.get("container-title")) or None
-        year = issued_year(raw)
+        dates = tuple((field, year) for field in DATE_FIELDS if (year := date_year(raw.get(field))) is not None)
+        year = next((year for field, year in dates if field in PUBLICATION_DATE_FIELDS), None)
         authors = author_families(raw.get("author"))
-        return cls(title=title, year=year, container=container, author_families=authors)
+        return cls(title=title, year=year, container=container, author_families=authors, date_provenance=dates)
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,6 +231,9 @@ class DoiResult:
     message: str
     local_status: AuditStatus | None = None
     canonical_software: SoftwareCitation | None = None
+    date_provenance: tuple[tuple[str, str], ...] = ()
+    mismatched_fields: tuple[str, ...] = ()
+    local_years: tuple[str, ...] = ()
 
     def to_json_object(self) -> dict[str, object]:
         """Return a JSON-serializable report object."""
@@ -210,6 +248,9 @@ class DoiResult:
             "resolved_container": self.resolved_container,
             "resolved_authors": list(self.resolved_authors),
             "message": self.message,
+            "date_provenance": dict(self.date_provenance),
+            "mismatched_fields": list(self.mismatched_fields),
+            "local_years": list(self.local_years),
         }
         if self.local_status is not None:
             result["local_status"] = self.local_status.value
@@ -360,9 +401,12 @@ def plain_text(value: object) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def issued_year(data: dict[str, Any]) -> str | None:
-    """Extract the first issued year from CSL JSON."""
-    issued = data.get("issued")
+PUBLICATION_DATE_FIELDS = ("published-print", "published", "published-online", "issued")
+DATE_FIELDS = (*PUBLICATION_DATE_FIELDS, "created", "deposited", "indexed")
+
+
+def date_year(issued: object) -> str | None:
+    """Extract a valid calendar year without treating deposit dates as publication."""
     if not isinstance(issued, dict):
         return None
     parts = issued.get("date-parts")
@@ -372,9 +416,14 @@ def issued_year(data: dict[str, Any]) -> str | None:
     if not isinstance(first_part, list) or not first_part:
         return None
     year = first_part[0]
-    if isinstance(year, int | str):
+    if type(year) in {int, str} and re.fullmatch(r"[1-9][0-9]{3}", str(year)):
         return str(year)
     return None
+
+
+def issued_year(data: dict[str, Any]) -> str | None:
+    """Retain the issued-field helper for callers inspecting CSL metadata."""
+    return date_year(data.get("issued"))
 
 
 def author_families(value: object) -> tuple[str, ...]:
@@ -453,18 +502,32 @@ def validate_entry(
             resolved_container=metadata.container,
             resolved_authors=metadata.author_families,
             message="DOI resolves, but this link supplies no bibliographic context; compare its identity with CITATION.cff or primary metadata",
+            date_provenance=metadata.date_provenance,
         )
         return reconcile_software(result, metadata, raw, citation) if citation is not None else result
 
     resolved_title_score = title_score(metadata.title, entry.entry)
     resolved_author_score = author_score(metadata.author_families, entry.entry)
     problems: list[str] = []
+    fields: list[str] = []
+    local_years = tuple(sorted(set(re.findall(r"\b(?:1[0-9]{3}|2[0-9]{3})\b", entry.entry))))
     if resolved_title_score < min_title_score:
         problems.append("resolved title has low overlap with local entry")
+        fields.append("title")
     if resolved_author_score == 0.0:
         problems.append("resolved authors do not appear in local entry")
-    if metadata.year is not None and metadata.year not in entry.entry:
+        fields.append("authors")
+    if metadata.year is not None and metadata.year not in local_years:
         problems.append("resolved year does not appear in local entry")
+        fields.append("year")
+    publication_years = {year for field, year in metadata.date_provenance if field in PUBLICATION_DATE_FIELDS}
+    if len(publication_years) > 1:
+        problems.append("resolver publication date fields disagree; inspect primary publication records")
+        if "year" not in fields:
+            fields.append("year")
+    if isinstance(raw.get("DOI"), str) and raw["DOI"].casefold() != entry.doi.value.casefold():
+        problems.append("resolved DOI differs from linked DOI")
+        fields.append("doi")
 
     status = AuditStatus.OK if not problems else AuditStatus.MISMATCH
     message = "metadata matches local entry" if not problems else "; ".join(problems)
@@ -479,6 +542,9 @@ def validate_entry(
         resolved_container=metadata.container,
         resolved_authors=metadata.author_families,
         message=message,
+        date_provenance=metadata.date_provenance,
+        mismatched_fields=tuple(fields),
+        local_years=local_years,
     )
 
 
@@ -583,7 +649,11 @@ def run(argv: Sequence[str] | None = None) -> int:
     results = validate_entries(entries, args.timeout, args.min_title_score, **options)
 
     if args.json:
-        source = {"path": str(args.markdown.resolve()), "digest": "sha256:" + sha256(markdown_bytes).hexdigest()}
+        source = {
+            "path": str(args.markdown.resolve()),
+            "digest": "sha256:" + sha256(markdown_bytes).hexdigest(),
+            "content_base64": base64.b64encode(markdown_bytes).decode("ascii"),
+        }
         json.dump([{**result.to_json_object(), "source": source} for result in results], sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
     else:

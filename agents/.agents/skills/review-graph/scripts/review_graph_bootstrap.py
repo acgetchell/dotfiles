@@ -139,6 +139,7 @@ def _parser() -> argparse.ArgumentParser:
     inputs = parser.add_mutually_exclusive_group(required=True)
     inputs.add_argument("--input", type=Path, help="compact routing and validation template")
     inputs.add_argument("--starter-config", type=Path, help="explicit operator choices for the branch just-ci preset")
+    parser.add_argument("--resume-from", type=Path, help="saved starter bundle; rerun only preflight with updated operator choices")
     parser.add_argument("--output", type=Path, required=True, help="immutable normalized planning document")
     parser.add_argument("--catalog", type=Path, default=DEFAULT_ROUTING_CATALOG)
     parser.add_argument("--skill-root", action="append", type=Path)
@@ -166,6 +167,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         capture = _read_object(args.capture)
         choices = _read_object(args.starter_config) if args.starter_config else None
+        if args.resume_from:
+            if choices is None:
+                msg = "--resume-from requires --starter-config"
+                raise ValueError(msg)
+            return _resume_starter(capture, choices, args)
         template = starter_template(capture, choices) if choices is not None else _read_object(args.input)
         document = bootstrap_document(capture, template)
         require_schema(document, PLANNING_SCHEMA)
@@ -223,6 +229,8 @@ def main(argv: list[str] | None = None) -> int:
             else None
         )
         receipt["next_operation_inputs"] = {"input": str(args.output.resolve()), "current_capture": str(args.capture.resolve())}
+        if choices is not None:
+            receipt["preflight_retry_command"] = _retry_command(args)
         print(json.dumps(output if args.full_output else receipt, sort_keys=True))
         return 0 if dispatch_ready else 2
     except (ExecutableNotFoundError, KeyError, OSError, TypeError, ValueError, json.JSONDecodeError, subprocess.SubprocessError) as error:
@@ -231,6 +239,60 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"review_graph_bootstrap: {format_exception_diagnostics(error)}", file=sys.stderr)
         return 2
+
+
+def _retry_command(args: argparse.Namespace) -> list[str]:
+    return [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--resume-from",
+        str(args.output.resolve()),
+        "--capture",
+        str(args.capture.resolve()),
+        "--starter-config",
+        str(args.starter_config.resolve()),
+        "--output",
+        str(args.output.resolve().with_suffix(".preflight.json")),
+    ]
+
+
+def _resume_starter(capture: dict[str, Any], choices: dict[str, Any], args: argparse.Namespace) -> int:
+    """Keep saved routing and identities while refreshing executor observations."""
+    output = _read_object(args.resume_from)
+    if "preflight_input" not in output or capture != output.get("capture"):
+        msg = "preflight continuation requires the original starter capture and bundle"
+        raise ValueError(msg)
+    document = bootstrap_document(capture, starter_template(capture, choices))
+    require_schema(document, PLANNING_SCHEMA)
+    if document != output["planning_input"]:
+        msg = "preflight continuation cannot change planning choices; bootstrap a new plan"
+        raise ValueError(msg)
+    report = _starter_preflight(output, choices, args)
+    output["starter_metrics"].update(protocol_operations=["preflight-validation"], protocol_operation_count=1)
+    ready = output["plan"]["dispatch_allowed"] and report["status"] == "ready"
+    _write_once(args.output, output)
+    receipt = stage_receipt("bootstrap", args.output, output)
+    receipt.update(
+        dispatch_allowed=ready,
+        preflight_status=report["status"],
+        blockers=[*output["plan"]["blockers"], *(blocker for unit in report["units"] for blocker in unit["blockers"])],
+        starter_metrics=output["starter_metrics"],
+        preflight_retry_command=_retry_command(args),
+        next_command=[
+            sys.executable,
+            str(Path(__file__).with_name("review_graph_runtime.py").resolve()),
+            "materialize-dispatches",
+            "--input",
+            str(args.output.resolve()),
+            "--output",
+            str(args.output.resolve().with_suffix(".dispatches.json")),
+        ]
+        if ready
+        else None,
+        next_operation_inputs={"input": str(args.output.resolve()), "current_capture": str(args.capture.resolve())},
+    )
+    print(json.dumps(output if args.full_output else receipt, sort_keys=True))
+    return 0 if ready else 2
 
 
 if __name__ == "__main__":

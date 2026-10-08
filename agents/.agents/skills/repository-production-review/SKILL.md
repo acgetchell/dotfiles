@@ -75,6 +75,9 @@ For a failed DOI check accompanied by passing canonical software verification,
 read [software DOI reconciliation](../review-graph/references/software-doi-reconciliation.md).
 Keep the original failed result and bind the separate verification in
 `validation_reconciliation`; ordinary failed or unexecuted checks still prevent readiness.
+For year-only DOI disagreements with primary publication evidence, read
+[scholarly DOI reconciliation](../review-graph/references/scholarly-doi-reconciliation.md).
+Bind every occurrence and reviewer disposition while retaining failed history.
 
 Do not create subagents or recursively invoke `review-graph`.
 Do not request or load complete predecessor artifacts; the proof verifier owns

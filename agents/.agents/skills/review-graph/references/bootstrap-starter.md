@@ -39,6 +39,10 @@ Edit `operator.json` before bootstrap:
 - Adapt host `executables`, optional `uv_projects`, and `native_available` to
   the observed executor. The example starts blocked and native availability is
   unconfirmed. See [preflight](validation-preflight.md) for uv environment paths.
+- Select `execution_prerequisites.sandbox_permissions`: `use_default` (also the
+  omission default) or `require_escalated`. It must match the requirement's
+  `executor-permissions=require_escalated` feature when present. This selects
+  the executor mode; the execution tool still owns the approval decision.
 
 Capture with the requested branch base, then bootstrap; neither command mutates
 Git, runs `just ci`, installs tools, or starts workers:
@@ -89,8 +93,13 @@ are needed.
 An invalid schema or artifact contract fails before saving a bundle. A routing
 or execution blocker saves the bundle for inspection, returns exit code 2,
 sets receipt `dispatch_allowed: false`, and leaves `next_command` null. Resolve
-operator choices and bootstrap to a new output path; existing bundles cannot be
-overwritten with different contents. Full output retains the planner's own
+planning choices and bootstrap to a new output path. For preflight-only changes
+to `command_policy` or `execution_prerequisites`, edit the operator file and run
+the receipt's `preflight_retry_command` (`--resume-from <saved bundle>`).
+This checks the original capture, preserves the plan and materialization inputs,
+and reruns only preflight into a new immutable bundle. Changing environment,
+features, routing, authorization, or artifact policy requires a new bootstrap.
+Existing bundles cannot be overwritten with different contents. Full output retains the planner's own
 `plan.dispatch_allowed`; executor readiness is recorded separately in
 `preflight_report`. For deliberate partial progress with blocked validation,
 follow the existing [preflight hold workflow](validation-preflight.md).

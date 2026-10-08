@@ -91,3 +91,9 @@ rechecks the binding at finalization. Final output preserves
 `repository_validation_status: "failed"` and exposes `software_doi_resolutions`;
 `repository_readiness` may be `ready` only when this reconciliation and all other
 readiness conditions hold. Neither history nor source state is rewritten.
+
+When the same report also contains primary-supported scholarly date disagreements,
+use [scholarly DOI reconciliation](scholarly-doi-reconciliation.md). Its typed
+mixed-report path can bind canonical software rows from an exit-1 follow-up
+whose remaining failures are scholarly dates. Reconcile those remaining dates
+for both validators; retain both failed executions.

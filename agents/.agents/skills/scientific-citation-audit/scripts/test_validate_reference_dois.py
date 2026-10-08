@@ -28,6 +28,61 @@ def metadata(title: str, *, family: str = "Shewchuk", year: int = 1997) -> dict[
     return {"title": title, "author": [{"family": family, "given": "J. R."}], "issued": {"date-parts": [[year]]}, "container-title": "Fixture Journal"}
 
 
+@pytest.mark.parametrize(
+    ("doi", "title", "authors", "local_year", "resolver_year"),
+    [
+        ("10.24033/rhm.30", "La méthode de Cholesky", ["Brezinski"], 2005, 2018),
+        ("10.56021/9781421407944", "Matrix Computations", ["Golub", "Van Loan"], 2013, 2012),
+    ],
+)
+def test_primary_publication_date_disagreements_retain_provenance(doi: str, title: str, authors: list[str], local_year: int, resolver_year: int) -> None:
+    entry = MODULE.DoiEntry(MODULE.Doi.parse(doi), 1, f"{', '.join(authors)}. {title}. ({local_year}). DOI: {doi}")
+    raw = {
+        "title": title,
+        "DOI": doi,
+        "author": [{"family": name} for name in authors],
+        "issued": {"date-parts": [[resolver_year]]},
+        "created": {"date-parts": [[2020]]},
+    }
+    result = MODULE.validate_entry(entry, 1, 0.45, lambda *_: raw)
+    assert result.status == MODULE.AuditStatus.MISMATCH
+    assert result.mismatched_fields == ("year",)
+    assert result.local_years == (str(local_year),)
+    assert result.resolved_year == str(resolver_year)
+    assert result.to_json_object()["date_provenance"] == {"issued": str(resolver_year), "created": "2020"}
+    raw["published-print"] = {"date-parts": [[local_year]]}
+    preferred = MODULE.validate_entry(entry, 1, 0.45, lambda *_: raw)
+    assert preferred.resolved_year == str(local_year)
+    assert preferred.status == MODULE.AuditStatus.MISMATCH
+    assert "date fields disagree" in preferred.message
+
+
+def test_deposit_year_is_not_a_publication_year() -> None:
+    raw = metadata("Example")
+    del raw["issued"]
+    raw["created"] = {"date-parts": [[2020]]}
+    parsed = MODULE.CslMetadata.parse(raw)
+    assert parsed.year is None
+    assert parsed.date_provenance == (("created", "2020"),)
+
+
+def test_cff_pointer_above_concept_doi_has_insufficient_context() -> None:
+    entry = MODULE.extract_entries("For citing this software, please see [CITATION.cff](CITATION.cff).\nConcept DOI: https://doi.org/10.5281/zenodo.18158926")[
+        0
+    ]
+    assert entry.context_only
+    result = MODULE.validate_entry(entry, 1, 0.45, lambda *_: metadata("Linear Algebra Stack", family="Getchell", year=2026))
+    assert result.status == MODULE.AuditStatus.INSUFFICIENT_CONTEXT
+    release_pointer = MODULE.extract_entries(
+        "Tagged releases are archived on Zenodo under the all-versions concept DOI\n[10.5281/zenodo.18158926](https://doi.org/10.5281/zenodo.18158926)."
+    )[0]
+    assert release_pointer.context_only
+    alternate = MODULE.extract_entries("Software releases archived on Zenodo; concept DOI: https://doi.org/10.5281/zenodo.18158926")[0]
+    assert alternate.context_only
+    bibliographic = MODULE.extract_entries("Getchell. Software releases archived on Zenodo (2026). DOI: https://doi.org/10.5281/zenodo.18158926")[0]
+    assert not bibliographic.context_only
+
+
 def test_extracts_doi_label_with_parentheses_and_angle_tokens() -> None:
     """DOI labels preserve full DOI text even when URLs are Markdown-hostile."""
     markdown = (
