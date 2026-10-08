@@ -47,6 +47,7 @@
       "properties": {
         "executables": {"$ref": "#/$defs/stringArray"},
         "native_available": {"type": "boolean"},
+        "sandbox_permissions": {"enum": ["use_default", "require_escalated"], "default": "use_default"},
         "reason": {"type": "string", "minLength": 1},
         "uv_projects": {
           "type": "array",

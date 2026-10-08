@@ -7,8 +7,9 @@ initially when auditing project software links. See the
 [checker contract](../../scientific-citation-audit/references/doi-validation.md).
 
 An exit-1 DOI report can reflect missing inline metadata rather than a
-contradictory citation. This path preserves that failed execution and obtains
+contradictory citation. For software-only reports, reconciliation preserves that failed execution and obtains
 a separate passing canonical check on the same captured source state.
+Mixed scholarly/software reports use the [scholarly path](scholarly-doi-reconciliation.md) below.
 It does not use launch recovery, alter accepted payloads, or mark the original
 validator passed. Other failures still block readiness.
 
@@ -91,3 +92,9 @@ rechecks the binding at finalization. Final output preserves
 `repository_validation_status: "failed"` and exposes `software_doi_resolutions`;
 `repository_readiness` may be `ready` only when this reconciliation and all other
 readiness conditions hold. Neither history nor source state is rewritten.
+
+When the same report also contains primary-supported scholarly date disagreements,
+use [scholarly DOI reconciliation](scholarly-doi-reconciliation.md). Its typed
+mixed-report path can bind canonical software rows from an exit-1 follow-up
+whose remaining failures are scholarly dates. Reconcile those remaining dates
+for both validators; retain both failed executions.

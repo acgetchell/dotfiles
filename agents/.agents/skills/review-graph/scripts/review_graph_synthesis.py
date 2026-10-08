@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from review_graph_doi import validate_software_doi_resolution
+from review_graph_doi import validate_scholarly_doi_resolution, validate_software_doi_resolution
 
 
 def synthesis_binding_blockers(  # noqa: C901, PLR0912, PLR0915
@@ -29,6 +29,11 @@ def synthesis_binding_blockers(  # noqa: C901, PLR0912, PLR0915
             if len(item["requirement_ids"]) != len(set(item["requirement_ids"])):
                 blockers.append(f"{field}[{index}].requirement_ids must be unique")
     for item in validations:
+        scholarly = item.get("scholarly_doi_resolution")
+        if scholarly is not None:
+            software_references = [check["software_verification"]["evidence_id"] for check in scholarly["checks"] if "software_verification" in check]
+            if item["result"] != "failed" or any(key not in validation_ids for key in software_references) or "software_doi_resolution" in item:
+                blockers.append("scholarly DOI resolution requires failed evidence, accepted follow-ups, and one resolution type")
         resolution = item.get("software_doi_resolution")
         if resolution is not None and (
             item["result"] != "failed" or any(check["verification_evidence_id"] not in validation_ids for check in resolution["checks"])
@@ -70,6 +75,11 @@ def synthesis_binding_blockers(  # noqa: C901, PLR0912, PLR0915
                     validate_software_doi_resolution(item["software_doi_resolution"], record, records)
                 except ValueError as error:
                     blockers.append(str(error))
+            if "scholarly_doi_resolution" in item:
+                try:
+                    validate_scholarly_doi_resolution(item["scholarly_doi_resolution"], record, records)
+                except (KeyError, OSError, TypeError, ValueError) as error:
+                    blockers.append(f"scholarly DOI resolution: {error}")
             if "validation_environments" in context:
                 environment = context["validation_environments"].get(record["node_id"])
                 if environment is None or item["platform"] != environment["platform"]:
@@ -85,7 +95,7 @@ def synthesis_binding_blockers(  # noqa: C901, PLR0912, PLR0915
     unfinished = any(item["disposition"] in {"remaining", "blocked"} for item in payload["findings"])
     failed = any(
         item["result"] == "blocked"
-        or (item["result"] == "failed" and (bundle is None or "software_doi_resolution" not in item))
+        or (item["result"] == "failed" and (bundle is None or not {"software_doi_resolution", "scholarly_doi_resolution"} & item.keys()))
         or item["execution_mode"] == "unexecuted"
         for item in validations
     )

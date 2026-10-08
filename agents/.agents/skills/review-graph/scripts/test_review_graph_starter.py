@@ -223,3 +223,53 @@ def test_starter_does_not_replace_existing_bundle(tmp_path: Path, capsys: pytest
     assert _invoke(tmp_path, capture, choices)[0] == 2
     assert "refusing to overwrite" in capsys.readouterr().err
     assert output.read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    ("required", "selected", "ready"),
+    [
+        ("use_default", None, True),
+        ("use_default", "use_default", True),
+        ("require_escalated", "require_escalated", True),
+        ("require_escalated", "use_default", False),
+        ("use_default", "require_escalated", False),
+    ],
+)
+def test_starter_executor_permissions(tmp_path: Path, capsys: pytest.CaptureFixture[str], required: str, selected: str | None, ready: bool) -> None:
+    capture, choices = _fixture(tmp_path)
+    if required == "require_escalated":
+        choices["features"].append("executor-permissions=require_escalated")
+    if selected is not None:
+        choices["execution_prerequisites"]["sandbox_permissions"] = selected
+    status, output = _invoke(tmp_path, capture, choices)
+    receipt = json.loads(capsys.readouterr().out)
+    assert (status == 0) == ready
+    assert receipt["dispatch_allowed"] == ready
+    assert bool(receipt["next_command"]) == ready
+    unit = json.loads(output.read_bytes())["preflight_report"]["units"][0]
+    assert unit["executor_requirements"]["sandbox_permissions"] == required
+    assert not list(Path(choices["artifact_root"]).iterdir())
+
+
+def test_starter_preflight_continuation_preserves_plan(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    capture, choices = _fixture(tmp_path)
+    choices["features"].append("executor-permissions=require_escalated")
+    assert _invoke(tmp_path, capture, choices)[0] == 2
+    receipt = json.loads(capsys.readouterr().out)
+    original_path = tmp_path / "bootstrap.json"
+    original = original_path.read_bytes()
+    choices["execution_prerequisites"]["sandbox_permissions"] = "require_escalated"
+    (tmp_path / "choices.json").write_text(json.dumps(choices))
+    assert main(receipt["preflight_retry_command"][2:]) == 0
+    result = json.loads(capsys.readouterr().out)
+    bundle = json.loads(Path(result["next_operation_inputs"]["input"]).read_bytes())
+    saved = json.loads(original)
+    for field in ("plan", "planning_input", "materialization_input", "lifecycle_input", "capture"):
+        assert bundle[field] == saved[field]
+    assert bundle["starter_metrics"]["protocol_operations"] == ["preflight-validation"]
+    assert original_path.read_bytes() == original
+    assert result["next_command"][2] == "materialize-dispatches"
+    choices["environment"] = "changed planning identity"
+    (tmp_path / "choices.json").write_text(json.dumps(choices))
+    assert main(receipt["preflight_retry_command"][2:]) == 2
+    assert "cannot change planning choices" in capsys.readouterr().err

@@ -4245,11 +4245,14 @@ def test_late_validation_quality_gate_rejects_incomplete_benchmark_and_post_reme
     assert any("missing required features: proptest" in blocker for blocker in toolchain_blockers)
     assert any("canonical recipe just bench-exact" in blocker for blocker in toolchain_blockers)
 
-    for command in ("cargo bench -F proptest --bench exact", "cargo --locked bench --all-features --bench exact"):
+    for command in ("cargo bench -F proptest --bench exact",):
         noncanonical = replace(requirement, commands=(command,), expected_evidence="benchmark records current captured behavior")
         blockers = _late_validation_quality_blockers(noncanonical, repository_root=repository, authorization="review-only")
         assert not any("missing required features" in blocker for blocker in blockers)
         assert any("canonical recipe just bench-exact" in blocker for blocker in blockers)
+
+    wider = replace(requirement, commands=("cargo --locked bench --all-features --bench exact",), expected_evidence="current captured behavior")
+    assert _late_validation_quality_blockers(wider, repository_root=repository, authorization="review-only") == ()
 
     harness_only = replace(
         requirement,

@@ -1,5 +1,16 @@
 # Complete Review Graph Planning
 
+For late Cargo benchmark requirements, retain the exact target list, feature
+selection, Cargo options, and harness arguments after `--`. Build-only
+`--no-run`, Criterion `-- --test`, and measurement commands are distinct proof
+obligations. A `bench-<target>` recipe (underscores become hyphens) is required
+only when its inspected literal command or variadic argument expansion preserves
+those selections. Parameterless timing recipes cannot replace fixture checks.
+Complex or unsupported recipe expressions retain the focused command.
+Missing required Cargo features still block dispatch. Add accepted specialist
+requirements through `reconcile-validation-requirements` on the unchanged
+captured epoch; no source mutation is needed to create this continuation.
+
 This is a maintainer-facing planner specification. Ordinary review execution
 uses `runtime-contract.md` and the planner CLI; do not load this file unless
 changing planning behavior or diagnosing a rejected plan.

@@ -20,6 +20,7 @@
     "reason": "Inspect just ci, nested recipes, and fixtures for the task's no-Git-mutation restriction before allowing execution."
   },
   "execution_prerequisites": {
+    "sandbox_permissions": "use_default",
     "executables": ["env", "just", "uv"],
     "uv_projects": [{"project_directory": ".", "environment_path": ".venv", "executables": ["python", "pytest", "ruff"]}],
     "native_available": false,

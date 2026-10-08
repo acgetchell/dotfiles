@@ -19,9 +19,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics, run_command_bytes
+from review_graph_bench import benchmark_identity, benchmark_recipes, equivalent_recipe
 from review_graph_bootstrap import bootstrap_document
 from review_graph_coverage import combined_findings, coverage_decisions, coverage_execution_view, reused_paths, validate_coverage_units
-from review_graph_doi import captured_software_inputs, inspect_canonical_recheck
+from review_graph_doi import captured_doi_inputs, captured_software_inputs, inspect_canonical_recheck
 from review_graph_executor import executor_permissions, remedied_features
 from review_graph_git import audit_git_context, discovery_reconciliation, intervening_metadata_blockers, metadata_audit_blockers, validate_git_dependencies
 from review_graph_independent import CHECK_LABELS, SCHEMA as _INDEPENDENT_PAYLOAD_SCHEMA, render_independent_payload
@@ -1210,7 +1211,7 @@ def compile_review(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  #
         "artifact_digest": evidence.raw_result_digest,
         "normalized_record": _review_normalized_record(payload, expectation, evidence),
     }
-    if mode == "synthesis" and any("software_doi_resolution" in item for item in payload["validation_reconciliation"]):
+    if mode == "synthesis" and any({"software_doi_resolution", "scholarly_doi_resolution"} & item.keys() for item in payload["validation_reconciliation"]):
         # Retain the evidence needed to reverify resolutions when loading this artifact.
         metadata["synthesis_bundle"] = dispatch.get("synthesis_bundle")
     return content, metadata
@@ -2128,6 +2129,9 @@ def _validation_normalized_record(payload: dict[str, Any], evidence: ValidationE
     inputs = captured_software_inputs(record, capture) if capture is not None else {}
     if inputs:
         record["captured_software_inputs"] = inputs
+    doi_inputs = captured_doi_inputs(record, capture) if capture is not None else {}
+    if doi_inputs:
+        record["captured_doi_inputs"] = doi_inputs
     return record
 
 
@@ -2545,7 +2549,7 @@ def compile_validation(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]
         "payload_digest": digest_bytes(canonical_payload.encode()),
         "artifact_digest": evidence.raw_result_digest,
         "normalized_record": normalized,
-        **({"source_capture": dispatch["source_capture"]} if "captured_software_inputs" in normalized else {}),
+        **({"source_capture": dispatch["source_capture"]} if "captured_software_inputs" in normalized or "captured_doi_inputs" in normalized else {}),
         "workspace_audit": workspace_audit,
     }
 
@@ -5794,78 +5798,10 @@ def _fallback_to_coordinator_locked(document: dict[str, Any], args: argparse.Nam
     }
 
 
-def _just_recipe_names(repository_root: Path) -> set[str]:
-    justfile = repository_root / "justfile"
-    if not justfile.is_file():
-        return set()
-    recipe = re.compile(r"^([A-Za-z0-9_-]+)(?:\s+[^:]*)?:")
-    return {match.group(1) for line in justfile.read_text(encoding="utf-8").splitlines() if (match := recipe.match(line)) is not None}
-
-
-def _cargo_subcommand_index(arguments: list[str], subcommand: str) -> int | None:
-    """Locate a Cargo subcommand after any rustup selector and global options."""
-    if len(arguments) < 2:
-        return None
-    index = 1
-    if arguments[index].startswith("+") and len(arguments[index]) > 1:
-        index += 1
-    global_flags = {"--frozen", "--locked", "--offline", "--quiet", "--verbose", "-q", "-v"}
-    global_value_options = {"--color", "--config", "--explain", "-C", "-Z"}
-    attached_value_prefixes = ("--color=", "--config=", "--explain=", "-C", "-Z")
-    while index < len(arguments) and arguments[index] != subcommand:
-        argument = arguments[index]
-        if argument in global_flags or (argument.startswith("-v") and set(argument[1:]) == {"v"}):
-            index += 1
-        elif argument in global_value_options:
-            index += 2
-        elif argument.startswith(attached_value_prefixes):
-            index += 1
-        else:
-            return None
-    return index if index < len(arguments) and arguments[index] == subcommand else None
-
-
-def _cargo_benchmark_options(arguments: list[str], subcommand_index: int) -> tuple[str | None, set[str], bool]:
-    """Extract a targeted benchmark and its feature-selection options."""
-    target: str | None = None
-    features: set[str] = set()
-    all_features = False
-    for argument_index, argument in enumerate(arguments[subcommand_index + 1 :], start=subcommand_index + 1):
-        if argument == "--":
-            break
-        if argument == "--bench" and argument_index + 1 < len(arguments):
-            target = arguments[argument_index + 1]
-        elif argument.startswith("--bench="):
-            target = argument.partition("=")[2]
-        elif argument in {"--features", "-F"} and argument_index + 1 < len(arguments):
-            features.update(item for item in re.split(r"[\s,]+", arguments[argument_index + 1]) if item)
-        elif argument.startswith("--features="):
-            features.update(item for item in re.split(r"[\s,]+", argument.partition("=")[2]) if item)
-        elif argument.startswith("-F") and argument != "-F":
-            features.update(item for item in re.split(r"[\s,]+", argument[2:]) if item)
-        elif argument == "--all-features":
-            all_features = True
-    return target, features, all_features
-
-
-def _cargo_benchmark_identity(command: str) -> tuple[str, set[str], bool] | None:
-    try:
-        arguments = shlex.split(command)
-    except ValueError:
-        return None
-    if len(arguments) < 2 or Path(arguments[0]).name != "cargo":
-        return None
-    index = _cargo_subcommand_index(arguments, "bench")
-    if index is None:
-        return None
-    target, features, all_features = _cargo_benchmark_options(arguments, index)
-    return (target, features, all_features) if target else None
-
-
-def _late_validation_quality_blockers(requirement: ValidationRequirement, *, repository_root: Path, authorization: str) -> tuple[str, ...]:  # noqa: C901
+def _late_validation_quality_blockers(requirement: ValidationRequirement, *, repository_root: Path, authorization: str) -> tuple[str, ...]:  # noqa: C901, PLR0912
     """Reject audit-authored proof obligations that cannot validate the captured epoch."""
     blockers: list[str] = []
-    recipe_names = _just_recipe_names(repository_root)
+    recipes = benchmark_recipes(repository_root)
     cargo_manifest = repository_root / "Cargo.toml"
     benches: dict[str, set[str]] = {}
     if cargo_manifest.is_file():
@@ -5876,21 +5812,22 @@ def _late_validation_quality_blockers(requirement: ValidationRequirement, *, rep
                 if isinstance(required, list) and all(isinstance(item, str) for item in required):
                     benches[raw["name"]] = set(cast("list[str]", required))
     for command in requirement.commands:
-        identity = _cargo_benchmark_identity(command)
+        identity = benchmark_identity(command)
         if identity is None:
             continue
-        target, enabled, all_features = identity
-        required = benches.get(target, set())
-        canonical_name = f"bench-{target}"
-        canonical = f"just {canonical_name}" if canonical_name in recipe_names else None
-        missing = [] if all_features else sorted(required - enabled)
-        if missing:
-            detail = f"cargo benchmark target {target} is missing required features: {', '.join(missing)}"
-            if canonical is not None:
-                detail += f"; use the repository canonical recipe {canonical}"
-            blockers.append(detail)
-        elif canonical is not None and (requirement.commands != (canonical,) or requirement.canonical_recipe != canonical):
-            blockers.append(f"cargo benchmark target {target} must use the repository canonical recipe {canonical}")
+        for target in identity.targets:
+            required = benches.get(target, set())
+            canonical_name = f"bench-{target.replace('_', '-')}"
+            recipe = recipes.get(canonical_name)
+            missing = [] if identity.all_features else sorted(required - identity.features)
+            if missing:
+                detail = f"cargo benchmark target {target} is missing required features: {', '.join(missing)}"
+                if recipe is not None:
+                    detail += f"; inspect the repository canonical recipe just {canonical_name}"
+                blockers.append(detail)
+            elif recipe is not None and (canonical := equivalent_recipe(identity, recipe, canonical_name)) is not None:
+                if command != canonical or requirement.canonical_recipe != canonical:
+                    blockers.append(f"cargo benchmark target {target} must use the repository canonical recipe {canonical}")
     if not requirement.requires_isolation:
         blockers.extend(
             f"working directory does not exist in the captured current state: {directory}"
@@ -6747,6 +6684,9 @@ def finalize_proof(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, P
         "repository_validation_status": repository_validation_status,
         "repository_readiness": final_record.get("readiness_verdict", "blocked") if final_record and not blockers else "blocked",
         "software_doi_resolutions": [item for item in final_record.get("validation_reconciliation", []) if "software_doi_resolution" in item]
+        if final_record and not blockers
+        else [],
+        "scholarly_doi_resolutions": [item for item in final_record.get("validation_reconciliation", []) if "scholarly_doi_resolution" in item]
         if final_record and not blockers
         else [],
         "reviewed_source_state": list(source_state),

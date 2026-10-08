@@ -400,22 +400,259 @@
           "software_doi_resolution": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["reason", "checks"],
+            "required": [
+              "reason",
+              "checks"
+            ],
             "properties": {
-              "reason": {"type": "string", "minLength": 1},
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              },
               "checks": {
                 "type": "array",
                 "minItems": 1,
                 "items": {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["execution_index", "original_report", "verification_evidence_id", "verification_execution_index", "verification_report"],
+                  "required": [
+                    "execution_index",
+                    "original_report",
+                    "verification_evidence_id",
+                    "verification_execution_index",
+                    "verification_report"
+                  ],
                   "properties": {
-                    "execution_index": {"type": "integer", "minimum": 0},
-                    "original_report": {"type": "string", "minLength": 1},
-                    "verification_evidence_id": {"type": "string", "minLength": 1},
-                    "verification_execution_index": {"type": "integer", "minimum": 0},
-                    "verification_report": {"type": "string", "minLength": 1}
+                    "execution_index": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "original_report": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "verification_evidence_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "verification_execution_index": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "verification_report": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "scholarly_doi_resolution": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "reason",
+              "checks"
+            ],
+            "properties": {
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              },
+              "checks": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "execution_index",
+                    "original_report",
+                    "occurrences"
+                  ],
+                  "properties": {
+                    "execution_index": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "original_report": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "occurrences": {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "doi",
+                          "line",
+                          "field",
+                          "resolver_value",
+                          "disposition",
+                          "reviewer",
+                          "reason",
+                          "primary_record"
+                        ],
+                        "properties": {
+                          "doi": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "line": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "field": {
+                            "const": "year"
+                          },
+                          "resolver_value": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "disposition": {
+                            "const": "retain-local-publication-year"
+                          },
+                          "reviewer": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "reason": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "primary_record": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "path",
+                              "digest",
+                              "url",
+                              "authority",
+                              "retrieved_on",
+                              "doi",
+                              "title",
+                              "authors",
+                              "publication_year",
+                              "excerpt"
+                            ],
+                            "properties": {
+                              "path": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "digest": {
+                                "type": "string",
+                                "pattern": "^sha256:[0-9a-f]{64}$"
+                              },
+                              "url": {
+                                "type": "string",
+                                "pattern": "^https://[^/ ]+(?:/[^ ]*)?$"
+                              },
+                              "authority": {
+                                "enum": [
+                                  "publisher",
+                                  "journal-archive"
+                                ]
+                              },
+                              "retrieved_on": {
+                                "type": "string",
+                                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+                              },
+                              "doi": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "title": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "authors": {
+                                "type": "array",
+                                "minItems": 1,
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "publication_year": {
+                                "type": "string",
+                                "pattern": "^[1-9][0-9]{3}$"
+                              },
+                              "excerpt": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            }
+                          },
+                          "resolver_field": {
+                            "enum": [
+                              "resolved_year",
+                              "published-print",
+                              "published",
+                              "published-online",
+                              "issued"
+                            ],
+                            "default": "resolved_year"
+                          }
+                        }
+                      }
+                    },
+                    "software_verification": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "evidence_id",
+                        "execution_index",
+                        "report"
+                      ],
+                      "properties": {
+                        "evidence_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "execution_index": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "report": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    },
+                    "source_evidence": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "capture_path",
+                        "capture_digest",
+                        "bibliography_path",
+                        "bibliography_digest"
+                      ],
+                      "properties": {
+                        "capture_path": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "capture_digest": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "^sha256:[0-9a-f]{64}$"
+                        },
+                        "bibliography_path": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "bibliography_digest": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "^sha256:[0-9a-f]{64}$"
+                        }
+                      }
+                    }
                   }
                 }
               }

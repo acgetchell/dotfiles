@@ -28,6 +28,85 @@ def metadata(title: str, *, family: str = "Shewchuk", year: int = 1997) -> dict[
     return {"title": title, "author": [{"family": family, "given": "J. R."}], "issued": {"date-parts": [[year]]}, "container-title": "Fixture Journal"}
 
 
+@pytest.mark.parametrize("doi", ["10.1007/example", "10.12345/paper.2018", "10.1007/example.2018"])
+def test_doi_digits_and_link_destinations_are_not_publication_years(doi: str) -> None:
+    entry = MODULE.extract_entries(f"Shewchuk. Robust predicates. (1997). DOI: [{doi}](https://doi.org/{doi}) [archive](https://example.org/2020)")[0]
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: metadata("Robust predicates", year=2018))
+    assert result.status == MODULE.AuditStatus.MISMATCH
+    assert result.local_years == ("1997",)
+    assert result.mismatched_fields == ("year",)
+
+
+@pytest.mark.parametrize("marker", ["-", "+", "*", "1.", "1)"])
+def test_adjacent_list_entries_keep_only_their_own_claims(marker: str) -> None:
+    markdown = (
+        f"{marker} Shewchuk. Robust predicates. (1997). DOI: https://doi.org/10.1007/example\n"
+        f"{marker} Smith. Other paper. (2005). DOI: https://doi.org/10.12345/other\n"
+    )
+    entries = MODULE.extract_entries(markdown)
+    assert len(entries) == 2
+    first = MODULE.validate_entry(entries[0], 1.0, 0.45, lambda *_: metadata("Robust predicates"))
+    second = MODULE.validate_entry(entries[1], 1.0, 0.45, lambda *_: metadata("Other paper", family="Smith", year=2005))
+    assert first.status == second.status == MODULE.AuditStatus.OK
+    assert first.local_years == ("1997",)
+    assert second.local_years == ("2005",)
+
+
+@pytest.mark.parametrize(
+    ("doi", "title", "authors", "local_year", "resolver_year"),
+    [
+        ("10.24033/rhm.30", "La méthode de Cholesky", ["Brezinski"], 2005, 2018),
+        ("10.56021/9781421407944", "Matrix Computations", ["Golub", "Van Loan"], 2013, 2012),
+    ],
+)
+def test_primary_publication_date_disagreements_retain_provenance(doi: str, title: str, authors: list[str], local_year: int, resolver_year: int) -> None:
+    entry = MODULE.DoiEntry(MODULE.Doi.parse(doi), 1, f"{', '.join(authors)}. {title}. ({local_year}). DOI: {doi}")
+    raw = {
+        "title": title,
+        "DOI": doi,
+        "author": [{"family": name} for name in authors],
+        "issued": {"date-parts": [[resolver_year]]},
+        "created": {"date-parts": [[2020]]},
+    }
+    result = MODULE.validate_entry(entry, 1, 0.45, lambda *_: raw)
+    assert result.status == MODULE.AuditStatus.MISMATCH
+    assert result.mismatched_fields == ("year",)
+    assert result.local_years == (str(local_year),)
+    assert result.resolved_year == str(resolver_year)
+    assert result.to_json_object()["date_provenance"] == {"issued": str(resolver_year), "created": "2020"}
+    raw["published-print"] = {"date-parts": [[local_year]]}
+    preferred = MODULE.validate_entry(entry, 1, 0.45, lambda *_: raw)
+    assert preferred.resolved_year == str(local_year)
+    assert preferred.status == MODULE.AuditStatus.MISMATCH
+    assert "date fields disagree" in preferred.message
+
+
+def test_deposit_year_is_not_a_publication_year() -> None:
+    raw = metadata("Example")
+    del raw["issued"]
+    raw["created"] = {"date-parts": [[2020]]}
+    parsed = MODULE.CslMetadata.parse(raw)
+    assert parsed.year is None
+    assert parsed.date_provenance == (("created", "2020"),)
+
+
+def test_cff_pointer_above_concept_doi_has_insufficient_context() -> None:
+    entry = MODULE.extract_entries("For citing this software, please see [CITATION.cff](CITATION.cff).\nConcept DOI: https://doi.org/10.5281/zenodo.18158926")[
+        0
+    ]
+    assert entry.context_only
+    result = MODULE.validate_entry(entry, 1, 0.45, lambda *_: metadata("Linear Algebra Stack", family="Getchell", year=2026))
+    assert result.status == MODULE.AuditStatus.INSUFFICIENT_CONTEXT
+    release_pointer = MODULE.extract_entries(
+        "Tagged releases are archived on Zenodo under the all-versions concept DOI\n[10.5281/zenodo.18158926](https://doi.org/10.5281/zenodo.18158926)."
+    )[0]
+    assert release_pointer.context_only
+    alternate = MODULE.extract_entries("Software releases archived on Zenodo; concept DOI: https://doi.org/10.5281/zenodo.18158926")[0]
+    assert alternate.context_only
+    bibliographic = MODULE.extract_entries("Getchell. Software releases archived on Zenodo (2026). DOI: https://doi.org/10.5281/zenodo.18158926")[0]
+    assert not bibliographic.context_only
+
+
 def test_extracts_doi_label_with_parentheses_and_angle_tokens() -> None:
     """DOI labels preserve full DOI text even when URLs are Markdown-hostile."""
     markdown = (
@@ -200,6 +279,20 @@ def test_software_link_requires_context_then_matches_explicit_cff(tmp_path: Path
     assert result.local_status == MODULE.AuditStatus.INSUFFICIENT_CONTEXT
     assert result.to_json_object()["canonical_software"]["doi"] == SOFTWARE_DOI
     assert original.status == MODULE.AuditStatus.INSUFFICIENT_CONTEXT
+
+
+@pytest.mark.parametrize("field", ["published-print", "published", "published-online"])
+@pytest.mark.parametrize("canonical", [False, True])
+def test_software_pointers_retain_conflicting_publication_dates(tmp_path: Path, field: str, canonical: bool) -> None:
+    cff = tmp_path / "CITATION.cff"
+    cff.write_text(CFF)
+    raw = {**software_metadata(), "issued": {"date-parts": [[2025]]}, field: {"date-parts": [[2026]]}}
+    citation = MODULE.SoftwareCitation.load(cff) if canonical else None
+    result = MODULE.validate_entry(MODULE.extract_entries(SOFTWARE_LINKS[0])[0], 1.0, 0.45, lambda *_: raw, citation=citation)
+    assert result.status == MODULE.AuditStatus.MISMATCH
+    assert result.mismatched_fields == ("year",)
+    assert "publication date fields disagree" in result.message
+    assert dict(result.date_provenance) == {field: "2026", "issued": "2025"}
 
 
 @pytest.mark.parametrize("claim", ["Wrong, A. " + SOFTWARE_TITLE + ". 2026.", "Getchell. Unrelated science. 2026.", "Getchell. " + SOFTWARE_TITLE + ". 2001."])
