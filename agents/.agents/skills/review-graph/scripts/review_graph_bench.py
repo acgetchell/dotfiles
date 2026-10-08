@@ -107,7 +107,10 @@ def benchmark_recipes(repository: Path) -> dict[str, tuple[str, str]]:
         return {}
     recipes: dict[str, tuple[str, str]] = {}
     lines = path.read_text(encoding="utf-8").splitlines()
-    if any(re.match(r"^(?:set|export|unexport|import|mod)\b", line) for line in lines):
+    if any(
+        re.match(r"^(?:set|export|unexport|import|mod)\b", line) and not re.fullmatch(r"set\s+quiet(?:\s*:=\s*(?:true|false))?\s*(?:#.*)?", line)
+        for line in lines
+    ):
         return {}  # Global settings, exports, and imported recipes can change execution.
     for index, line in enumerate(lines):
         match = re.fullmatch(r"(bench-[\w-]+)(?:\s+([*+]\w+))?:\s*", line)

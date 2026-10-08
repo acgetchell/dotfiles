@@ -48,12 +48,26 @@ def test_global_options_preserve_the_actual_benchmark_subcommand(context: str) -
 
 @pytest.mark.parametrize("attribute", ["[windows]", "[unix]", "[no-cd]", '[working-directory: "bench"]'])
 def test_unproven_execution_attributes_do_not_require_recipes(tmp_path: Path, attribute: str) -> None:
-    (tmp_path / "justfile").write_text(f"{attribute}\n# Recipe context must still be observed.\nbench-interval:\n    cargo bench --bench interval\n")
+    (tmp_path / "justfile").write_text(f"set quiet\n{attribute}\n# Recipe context must still be observed.\nbench-interval:\n    cargo bench --bench interval\n")
     assert benchmark_recipes(tmp_path) == {}
 
 
-def test_global_just_execution_settings_do_not_prove_equivalence(tmp_path: Path) -> None:
-    (tmp_path / "justfile").write_text('set working-directory := "other"\nbench-interval:\n    cargo bench --bench interval\n')
+@pytest.mark.parametrize("setting", ["set quiet", "set quiet := true", "set quiet := false", "set quiet # Suppress command echoing."])
+def test_quiet_setting_preserves_recipe_validation(tmp_path: Path, setting: str) -> None:
+    command = "cargo bench --bench interval"
+    (tmp_path / "justfile").write_text(f"{setting}\nbench-interval:\n    {command}\n")
+    requested = benchmark_identity(command)
+    assert requested is not None
+    recipes = benchmark_recipes(tmp_path)
+    assert recipes == {"bench-interval": (command, "")}
+    assert equivalent_recipe(requested, recipes["bench-interval"], "bench-interval") == "just bench-interval"
+
+
+@pytest.mark.parametrize(
+    "setting", ['set working-directory := "other"', 'set shell := ["sh", "-c"]', 'export MODE := "other"', "unexport MODE", 'import "other.just"', "mod other"]
+)
+def test_global_just_execution_settings_do_not_prove_equivalence(tmp_path: Path, setting: str) -> None:
+    (tmp_path / "justfile").write_text(f"set quiet\n{setting}\nbench-interval:\n    cargo bench --bench interval\n")
     assert benchmark_recipes(tmp_path) == {}
 
 
