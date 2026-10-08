@@ -2,6 +2,7 @@
 
 import base64
 import json
+import runpy
 from copy import deepcopy
 from hashlib import sha256
 from pathlib import Path
@@ -27,11 +28,14 @@ from test_review_graph_runtime import ROUTING_CATALOG, SCHEMA_ROOT, SKILL_ROOT, 
 from test_review_graph_transitions import _synthesis_payload
 
 
-def _scholarly_fixture(tmp_path: Path, *, mixed: bool = False) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+def _scholarly_fixture(
+    tmp_path: Path, *, mixed: bool = False, first_doi: str = "10.24033/rhm.30", adjacent: bool = False
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
     original, verified, _software = _fixture(tmp_path)
+    prefix, separator = ("- ", "\n") if adjacent else ("", "\n\n")
     references = (
-        "Brezinski. La méthode de Cholesky. (2005). DOI: https://doi.org/10.24033/rhm.30\n\n"
-        "Golub, Van Loan. Matrix Computations. (2013). DOI: https://doi.org/10.56021/9781421407944\n"
+        f"{prefix}Brezinski. La méthode de Cholesky. (2005). DOI: https://doi.org/{first_doi}{separator}"
+        f"{prefix}Golub, Van Loan. Matrix Computations. (2013). DOI: https://doi.org/10.56021/9781421407944\n"
     ).encode()
     if mixed:
         references += b"\nSee CITATION.cff for this software citation. DOI: https://doi.org/10.5281/zenodo.123\n"
@@ -47,10 +51,10 @@ def _scholarly_fixture(tmp_path: Path, *, mixed: bool = False) -> tuple[dict[str
     rows: list[dict[str, Any]] = []
     occurrences = []
     for doi, line, title, authors, local, resolved, url, authority in (
-        ("10.24033/rhm.30", 1, "La méthode de Cholesky", ["Brezinski"], "2005", "2018", "https://www.numdam.org/articles/10.24033/rhm.30/", "journal-archive"),
+        (first_doi, 1, "La méthode de Cholesky", ["Brezinski"], "2005", "2018", f"https://www.numdam.org/articles/{first_doi}/", "journal-archive"),
         (
             "10.56021/9781421407944",
-            3,
+            2 if adjacent else 3,
             "Matrix Computations",
             ["Golub", "Van Loan"],
             "2013",
@@ -123,6 +127,31 @@ def _scholarly_fixture(tmp_path: Path, *, mixed: bool = False) -> tuple[dict[str
             "report": verified["artifacts"][0]["path"],
         }
     return original, verified, resolution, capture
+
+
+@pytest.mark.parametrize("first_doi", ["10.1007/example", "10.12345/paper.2018"])
+@pytest.mark.parametrize("adjacent", [False, True])
+def test_checker_output_reconciles_doi_digits_and_adjacent_items(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, first_doi: str, adjacent: bool) -> None:
+    original, _verified, resolution, _capture = _scholarly_fixture(tmp_path, first_doi=first_doi, adjacent=adjacent)
+    rows = json.loads(Path(original["artifacts"][0]["path"]).read_bytes())
+    source = rows[0]["source"]
+    markdown = base64.b64decode(source["content_base64"]).decode()
+    checker_path = SKILL_ROOT.parent / "scientific-citation-audit" / "scripts" / "validate_reference_dois.py"
+    monkeypatch.syspath_prepend(str(checker_path.parent))
+    checker = runpy.run_path(str(checker_path))
+    resolved = {
+        row["doi"]: {
+            "title": row["resolved_title"],
+            "author": [{"family": name} for name in row["resolved_authors"]],
+            "issued": {"date-parts": [[int(row["resolved_year"])]]},
+        }
+        for row in rows
+    }
+    results = checker["validate_entries"](checker["extract_entries"](markdown), 1.0, 0.45, lambda doi, _timeout: resolved[doi.value])
+    reported = [{**result.to_json_object(), "source": source} for result in results]
+    assert [row["local_years"] for row in reported] == [["2005"], ["2013"]]
+    original["artifacts"] = [_save_report(Path(original["artifacts"][0]["path"]), reported)]
+    validate_scholarly_doi_resolution(resolution, original, {original["evidence_id"]: original})
 
 
 @pytest.mark.parametrize("mixed", [False, True])

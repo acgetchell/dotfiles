@@ -24,11 +24,12 @@ from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from bibliography_context import collect_entry, publication_years
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
 
 STOPWORDS = {"a", "an", "and", "are", "as", "by", "for", "from", "in", "into", "is", "it", "of", "on", "or", "the", "to", "using", "with"}
-_ENTRY_BOUNDARY = re.compile(r"^(?:\s*$| {0,3}#{1,6}(?:[ \t]|$))")
 
 
 class AuditStatus(StrEnum):
@@ -356,27 +357,6 @@ def trim_raw_url_doi(value: str) -> str:
     return value
 
 
-def collect_entry(lines: Sequence[str], doi_idx: int) -> str:
-    """Collect a bibliography item, stopping at blank lines or ATX headings."""
-    start = doi_idx
-    while start > 0:
-        prev = lines[start - 1]
-        if _ENTRY_BOUNDARY.match(prev):
-            break
-        if re.match(r"^\s*(?:[-*]|\d+\.)\s+", prev) and start - 1 != doi_idx:
-            start -= 1
-            break
-        start -= 1
-
-    end = doi_idx + 1
-    while end < len(lines) and not _ENTRY_BOUNDARY.match(lines[end]):
-        if re.match(r"^\s*(?:[-*]|\d+\.)\s+", lines[end]) and end > doi_idx + 1:
-            break
-        end += 1
-
-    return " ".join(line.strip() for line in lines[start:end])
-
-
 def fetch_csl_json(doi: Doi, timeout: float) -> dict[str, Any]:
     """Resolve one DOI through content negotiation."""
     request = urllib.request.Request(
@@ -490,19 +470,22 @@ def validate_entry(
             message=f"{type(exc).__name__}: {exc}",
         )
 
+    publication_dates = {year for field, year in metadata.date_provenance if field in PUBLICATION_DATE_FIELDS}
+    conflict = "resolver publication date fields disagree; inspect primary publication records" if len(publication_dates) > 1 else ""
     if entry.context_only:
         result = DoiResult(
             doi=entry.doi.value,
             line=entry.line,
-            status=AuditStatus.INSUFFICIENT_CONTEXT,
+            status=AuditStatus.MISMATCH if conflict else AuditStatus.INSUFFICIENT_CONTEXT,
             title_score=None,
             author_score=None,
             resolved_title=metadata.title,
             resolved_year=metadata.year,
             resolved_container=metadata.container,
             resolved_authors=metadata.author_families,
-            message="DOI resolves, but this link supplies no bibliographic context; compare its identity with CITATION.cff or primary metadata",
+            message=conflict or "DOI resolves, but this link supplies no bibliographic context; compare its identity with CITATION.cff or primary metadata",
             date_provenance=metadata.date_provenance,
+            mismatched_fields=("year",) if conflict else (),
         )
         return reconcile_software(result, metadata, raw, citation) if citation is not None else result
 
@@ -510,7 +493,7 @@ def validate_entry(
     resolved_author_score = author_score(metadata.author_families, entry.entry)
     problems: list[str] = []
     fields: list[str] = []
-    local_years = tuple(sorted(set(re.findall(r"\b(?:1[0-9]{3}|2[0-9]{3})\b", entry.entry))))
+    local_years = publication_years(entry.entry, entry.doi.value)
     if resolved_title_score < min_title_score:
         problems.append("resolved title has low overlap with local entry")
         fields.append("title")
@@ -520,9 +503,8 @@ def validate_entry(
     if metadata.year is not None and metadata.year not in local_years:
         problems.append("resolved year does not appear in local entry")
         fields.append("year")
-    publication_years = {year for field, year in metadata.date_provenance if field in PUBLICATION_DATE_FIELDS}
-    if len(publication_years) > 1:
-        problems.append("resolver publication date fields disagree; inspect primary publication records")
+    if conflict:
+        problems.append(conflict)
         if "year" not in fields:
             fields.append("year")
     if isinstance(raw.get("DOI"), str) and raw["DOI"].casefold() != entry.doi.value.casefold():
@@ -551,7 +533,7 @@ def validate_entry(
 def reconcile_software(result: DoiResult, metadata: CslMetadata, raw: dict[str, Any], citation: SoftwareCitation) -> DoiResult:
     """Check canonical identity only for entries without bibliographic claims."""
     resolved_doi = raw.get("DOI")
-    problems = []
+    problems = [result.message] if result.status == AuditStatus.MISMATCH else []
     if result.doi.casefold() != citation.doi.value.casefold():
         problems.append("linked DOI differs from canonical software DOI")
     if isinstance(resolved_doi, str):

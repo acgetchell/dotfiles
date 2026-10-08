@@ -25,15 +25,35 @@ class BenchmarkCommand:
         return "test" if "--test" in self.harness_arguments else "timing"
 
 
+def _bench_subcommand(words: list[str]) -> int | None:
+    """Find the first Cargo positional word after recognized global options."""
+    index = 1
+    if index < len(words) and words[index].startswith("+"):
+        index += 1
+    while index < len(words) and words[index].startswith("-"):
+        word = words[index]
+        if word in {"--color", "--config", "-Z", "-C"}:
+            index += 2
+        elif (
+            word in {"--verbose", "--quiet", "--locked", "--offline", "--frozen"}
+            or re.fullmatch(r"-[vq]+", word)
+            or re.match(r"^(?:--(?:color|config)=.+|-[ZC].+)$", word)
+        ):
+            index += 1
+        else:
+            return None  # Unknown or informational options cannot prove benchmark execution.
+    return index if index < len(words) and words[index] == "bench" else None
+
+
 def benchmark_identity(command: str) -> BenchmarkCommand | None:  # noqa: C901
     """Retain all target selections and arguments on both sides of Cargo's --."""
     try:
         words = shlex.split(command)
     except ValueError:
         return None
-    if len(words) < 2 or Path(words[0]).name != "cargo" or "bench" not in words:
+    index = _bench_subcommand(words) if words and Path(words[0]).name == "cargo" else None
+    if index is None:
         return None
-    index = words.index("bench")
     context = tuple(words[:index])
     arguments = words[index + 1 :]
     harness: tuple[str, ...] = ()
@@ -70,17 +90,29 @@ def benchmark_identity(command: str) -> BenchmarkCommand | None:  # noqa: C901
     return BenchmarkCommand(tuple(sorted(set(targets))), frozenset(features), all_features, context, tuple(remaining), harness)
 
 
+def _has_recipe_attributes(lines: list[str], index: int) -> bool:
+    """Recognize attributes even when comments separate them from a recipe."""
+    preceding = index - 1
+    while preceding >= 0 and (not lines[preceding].strip() or lines[preceding].lstrip().startswith("#")):
+        preceding -= 1
+    return preceding >= 0 and lines[preceding].lstrip().startswith("[")
+
+
 def benchmark_recipes(repository: Path) -> dict[str, tuple[str, str]]:
-    """Recognize a single literal Cargo command with an optional variadic argument."""
+    """Recognize literal commands only where Just execution context is understood."""
     path = repository / "justfile"
     if not path.is_file():
         return {}
     recipes: dict[str, tuple[str, str]] = {}
     lines = path.read_text(encoding="utf-8").splitlines()
+    if any(re.match(r"^(?:set|export|unexport|import|mod)\b", line) for line in lines):
+        return {}  # Global settings, exports, and imported recipes can change execution.
     for index, line in enumerate(lines):
         match = re.fullmatch(r"(bench-[\w-]+)(?:\s+([*+]\w+))?:\s*", line)
         if match is None:
             continue
+        if _has_recipe_attributes(lines, index):
+            continue  # Platform and execution attributes require more than a literal body.
         body: list[str] = []
         for following in lines[index + 1 :]:
             if following and not following[0].isspace():
@@ -113,9 +145,9 @@ def equivalent_recipe(requested: BenchmarkCommand, recipe: tuple[str, str], name
             forwarded = requested.cargo_arguments[len(base.cargo_arguments) :]
             if requested.harness_arguments:
                 forwarded += ("--", *requested.harness_arguments)
-        command = marker.sub(lambda _match: shlex.join(forwarded), command)
-        if variadic.startswith("+") and not forwarded:
-            return None
+        if (variadic.startswith("+") and not forwarded) or any(re.fullmatch(r"[A-Za-z0-9_./:=,+@%\-]+", argument) is None for argument in forwarded):
+            return None  # Just interpolates raw values; shell quoting at invocation is lost.
+        command = marker.sub(lambda _match: " ".join(forwarded), command)
     if benchmark_identity(command) != requested:
         return None
     return shlex.join(("just", name, *forwarded))

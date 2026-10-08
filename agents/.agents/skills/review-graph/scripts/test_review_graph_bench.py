@@ -1,6 +1,9 @@
 """Benchmark proof commands keep build, fixture, timing, and argument semantics."""
 
 import json
+import shlex
+import shutil
+import subprocess
 from dataclasses import replace
 from pathlib import Path
 
@@ -9,6 +12,72 @@ from review_graph_bench import benchmark_identity, benchmark_recipes, equivalent
 from review_graph_plan import ValidationRequirement
 from review_graph_runtime import _expanded_validation_plan, _late_validation_quality_blockers
 from test_review_graph_runtime import _compile_materialized_evidence, _late_validation_plan, _late_validation_requirement
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cargo build --package bench",
+        "cargo --config bench build",
+        "cargo +nightly -Z unstable-options -C bench build",
+        "cargo --color bench",
+        "cargo --help bench",
+        "cargo --unknown bench",
+    ],
+)
+def test_non_benchmark_subcommands_and_option_values_are_not_benchmarks(command: str) -> None:
+    assert benchmark_identity(command) is None
+
+
+@pytest.mark.parametrize(
+    "context",
+    [
+        "cargo",
+        "cargo +nightly -Z unstable-options -C bench",
+        "cargo --config bench --color never -vv --locked",
+        "cargo --config=bench --color=never -Zunstable-options -Cbench",
+    ],
+)
+def test_global_options_preserve_the_actual_benchmark_subcommand(context: str) -> None:
+    identity = benchmark_identity(context + " bench --bench interval -- --test")
+    assert identity is not None
+    assert identity.cargo_context == tuple(shlex.split(context))
+    assert identity.targets == ("interval",)
+    assert identity.harness_arguments == ("--test",)
+
+
+@pytest.mark.parametrize("attribute", ["[windows]", "[unix]", "[no-cd]", '[working-directory: "bench"]'])
+def test_unproven_execution_attributes_do_not_require_recipes(tmp_path: Path, attribute: str) -> None:
+    (tmp_path / "justfile").write_text(f"{attribute}\n# Recipe context must still be observed.\nbench-interval:\n    cargo bench --bench interval\n")
+    assert benchmark_recipes(tmp_path) == {}
+
+
+def test_global_just_execution_settings_do_not_prove_equivalence(tmp_path: Path) -> None:
+    (tmp_path / "justfile").write_text('set working-directory := "other"\nbench-interval:\n    cargo bench --bench interval\n')
+    assert benchmark_recipes(tmp_path) == {}
+
+
+@pytest.mark.parametrize("argument", ["match filter", "", "*.rs", "$(touch marker)", "value; true", "~", "#comment"])
+def test_raw_just_forwarding_rejects_arguments_that_need_shell_quoting(tmp_path: Path, argument: str) -> None:
+    (tmp_path / "justfile").write_text("bench-interval *args:\n    cargo bench --bench interval -- {{args}}\n")
+    requested = benchmark_identity("cargo bench --bench interval -- " + shlex.quote(argument))
+    assert requested is not None
+    assert equivalent_recipe(requested, benchmark_recipes(tmp_path)["bench-interval"], "bench-interval") is None
+
+
+def test_forwarding_equivalence_matches_real_just_expansion(tmp_path: Path) -> None:
+    just = shutil.which("just")
+    assert just is not None
+    path = tmp_path / "justfile"
+    path.write_text("bench-interval *args:\n    cargo bench --bench interval -- {{args}}\n")
+    requested = benchmark_identity("cargo bench --bench interval -- --test --sample-size 10")
+    assert requested is not None
+    equivalent = equivalent_recipe(requested, benchmark_recipes(tmp_path)["bench-interval"], "bench-interval")
+    assert equivalent is not None
+    result = subprocess.run(  # noqa: S603 - installed Just only prints the fixed fixture's expansion.
+        [just, "--justfile", str(path), "--dry-run", *shlex.split(equivalent)[1:]], capture_output=True, text=True, check=True
+    )
+    assert benchmark_identity(result.stderr.strip()) == requested
 
 
 @pytest.mark.parametrize(

@@ -4,8 +4,10 @@ import base64
 import html
 import json
 import re
+import runpy
 import shlex
 from datetime import date
+from functools import cache
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
@@ -15,6 +17,13 @@ from review_graph_reuse import ReviewSourceSnapshot, regular_file_fingerprint, s
 
 def _reject(detail: str) -> ValueError:
     return ValueError(f"software DOI reconciliation: {detail}")
+
+
+@cache
+def _bibliography_parser() -> dict[str, Any]:
+    """Load the citation checker's dependency-free context parser without path mutation."""
+    path = Path(__file__).parents[2] / "scientific-citation-audit" / "scripts" / "bibliography_context.py"
+    return runpy.run_path(str(path))
 
 
 def _execution(record: dict[str, Any], index: int, result: str) -> dict[str, Any]:
@@ -423,15 +432,9 @@ def _source_row(row: dict[str, Any], markdown: Path, original: dict[str, Any], r
     if index >= len(lines) or row["doi"].casefold() not in lines[index].casefold():
         msg = "DOI occurrence is absent from captured bibliography line"
         raise _reject(msg)
-    start, end = index, index + 1
-    boundary = re.compile(r"^(?:\s*$| {0,3}#{1,6}(?:[ \t]|$))")
-    while start > 0 and not boundary.match(lines[start - 1]):
-        start -= 1
-        if re.match(r"^\s*(?:[-*]|\d+\.)\s+", lines[start]):
-            break
-    while end < len(lines) and not boundary.match(lines[end]) and not re.match(r"^\s*(?:[-*]|\d+\.)\s+", lines[end]):
-        end += 1
-    years = sorted(set(re.findall(r"\b(?:1[0-9]{3}|2[0-9]{3})\b", " ".join(lines[start:end]))))
+    parser = _bibliography_parser()
+    entry = parser["collect_entry"](lines, index)
+    years = list(parser["publication_years"](entry, row["doi"]))
     if "local_years" in row and row["local_years"] != years:
         msg = "local publication year differs from captured bibliography context"
         raise _reject(msg)
