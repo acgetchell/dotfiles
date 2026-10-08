@@ -136,7 +136,7 @@ def test_checker_output_reconciles_doi_digits_and_adjacent_items(tmp_path: Path,
     rows = json.loads(Path(original["artifacts"][0]["path"]).read_bytes())
     source = rows[0]["source"]
     markdown = base64.b64decode(source["content_base64"]).decode()
-    checker_path = SKILL_ROOT.parent / "scientific-citation-audit" / "scripts" / "validate_reference_dois.py"
+    checker_path = SKILL_ROOT / "scientific-citation-audit" / "scripts" / "validate_reference_dois.py"
     monkeypatch.syspath_prepend(str(checker_path.parent))
     checker = runpy.run_path(str(checker_path))
     resolved = {
