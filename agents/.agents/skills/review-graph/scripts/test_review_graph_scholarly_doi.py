@@ -271,6 +271,34 @@ def test_primary_year_resolution_rejects_unproven_disagreements(tmp_path: Path, 
         validate_scholarly_doi_resolution(resolution, original, {})
 
 
+@pytest.mark.parametrize(
+    ("defect", "message"),
+    [
+        ("scholarly-status", "changed scholarly validation history"),
+        ("scholarly-identity", "resolved identity changed"),
+        ("source-state", "same captured source"),
+        ("cff-binding", "digest does not match captured CFF bytes"),
+    ],
+)
+def test_mixed_followup_rejects_changed_history_and_unproven_software(tmp_path: Path, defect: str, message: str) -> None:
+    original, verified, resolution, _capture = _scholarly_fixture(tmp_path, mixed=True)
+    path = Path(verified["artifacts"][0]["path"])
+    rows = json.loads(path.read_bytes())
+    if defect == "scholarly-status":
+        rows[0]["status"] = "OK"
+    elif defect == "scholarly-identity":
+        rows[0]["resolved_title"] = "Different scholarly work"
+    elif defect == "source-state":
+        verified["observed_source_state"][0] = "f" * 64
+    else:
+        del verified["captured_software_inputs"]
+    verified["artifacts"] = [_save_report(path, rows)]
+    before = deepcopy([original, verified])
+    with pytest.raises(ValueError, match=message):
+        validate_scholarly_doi_resolution(resolution, original, {verified["evidence_id"]: verified})
+    assert [original, verified] == before
+
+
 @pytest.mark.parametrize("defect", [None, "source", "bytes", "identity"])
 def test_historical_year_reports_use_retained_source_evidence(tmp_path: Path, defect: str | None) -> None:
     original, _verified, resolution, capture = _scholarly_fixture(tmp_path)
