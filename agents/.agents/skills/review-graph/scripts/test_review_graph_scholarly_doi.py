@@ -154,6 +154,27 @@ def test_checker_output_reconciles_doi_digits_and_adjacent_items(tmp_path: Path,
     validate_scholarly_doi_resolution(resolution, original, {original["evidence_id"]: original})
 
 
+@pytest.mark.parametrize("defect", ["doi", "title", "author", "year", "doi-only-year"])
+def test_primary_excerpt_requires_complete_facts_and_year_outside_doi(tmp_path: Path, defect: str) -> None:
+    original, _verified, resolution, _capture = _scholarly_fixture(tmp_path, first_doi="10.12345/paper.2005")
+    primary = resolution["checks"][0]["occurrences"][0]["primary_record"]
+    excerpt = primary["excerpt"]
+    replacements = {
+        "doi": (primary["doi"], primary["doi"] + "extra"),
+        "title": (primary["title"], primary["title"] + "extra"),
+        "author": ("Brezinski", "Brezinskian"),
+        "year": ("year 2005", "year 12005"),
+        "doi-only-year": ("Publication year 2005.", ""),
+    }
+    old, new = replacements[defect]
+    primary["excerpt"] = excerpt.replace(old, new)
+    path = Path(primary["path"])
+    path.write_text(primary["excerpt"])
+    primary["digest"] = "sha256:" + sha256(path.read_bytes()).hexdigest()
+    with pytest.raises(ValueError, match="primary excerpt does not support"):
+        validate_scholarly_doi_resolution(resolution, original, {})
+
+
 @pytest.mark.parametrize("mixed", [False, True])
 def test_primary_year_resolution_retains_failed_history_and_mixed_software(tmp_path: Path, mixed: bool) -> None:
     original, verified, resolution, _capture = _scholarly_fixture(tmp_path, mixed=mixed)

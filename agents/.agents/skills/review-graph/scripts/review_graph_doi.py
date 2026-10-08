@@ -15,6 +15,10 @@ from typing import Any
 from review_graph_reuse import ReviewSourceSnapshot, regular_file_fingerprint, source_snapshot
 
 
+class _UnusableReportError(ValueError):
+    """A retained report has no usable DOI results; its bytes are still intact."""
+
+
 def _reject(detail: str) -> ValueError:
     return ValueError(f"software DOI reconciliation: {detail}")
 
@@ -97,20 +101,20 @@ def _report(record: dict[str, Any], execution: dict[str, Any], path: str) -> dic
             msg = "report bytes changed after validation"
             raise _reject(msg)
         rows = json.loads(content)
-    except (OSError, ValueError) as exc:
-        raise _reject(f"cannot verify report: {exc}") from exc
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise _UnusableReportError(f"software DOI reconciliation: cannot verify report: {exc}") from exc
     if not isinstance(rows, list) or not rows:
         msg = "report must contain DOI results"
-        raise _reject(msg)
+        raise _UnusableReportError(f"software DOI reconciliation: {msg}")
     indexed = {}
     for row in rows:
         if not isinstance(row, dict) or not isinstance(row.get("doi"), str) or type(row.get("line")) is not int or row["line"] < 1:
             msg = "report has an invalid DOI occurrence"
-            raise _reject(msg)
+            raise _UnusableReportError(f"software DOI reconciliation: {msg}")
         key = (row["doi"].casefold(), row["line"])
         if key in indexed:
             msg = "report repeats a DOI occurrence"
-            raise _reject(msg)
+            raise _UnusableReportError(f"software DOI reconciliation: {msg}")
         indexed[key] = row
     return indexed
 
@@ -189,7 +193,11 @@ def _canonical_rows(record: dict[str, Any]) -> list[tuple[Path, dict[str, Any]]]
         report_path = _canonical_report_path(record, execution)
         if report_path is None:
             continue
-        for row in _report(record, execution, report_path).values():
+        try:
+            report_rows = _report(record, execution, report_path)
+        except _UnusableReportError:
+            continue  # Preserve completed execution evidence without granting reconciliation eligibility.
+        for row in report_rows.values():
             canonical = row.get("canonical_software")
             if row.get("status") == "OK" and isinstance(canonical, dict):
                 rows.append((cff, canonical))
@@ -407,10 +415,13 @@ def _primary_excerpt(primary: dict[str, Any], content: bytes) -> None:
     year = primary["publication_year"]
     text = html.unescape(re.sub(r"<[^>]+>", " ", content.decode("utf-8")))
     excerpt = primary["excerpt"]
-    if _identity(excerpt) not in _identity(text):
+    normalized = f" {_identity(excerpt)} "
+    if normalized not in f" {_identity(text)} ":
         msg = "primary excerpt is absent from retained evidence"
         raise _reject(msg)
-    if not all(_identity(value) in _identity(excerpt) for value in (primary["doi"], primary["title"], year, *primary["authors"])):
+    facts = (primary["doi"], primary["title"], *primary["authors"])
+    without_doi = re.sub(re.escape(primary["doi"]), " ", excerpt, flags=re.IGNORECASE)
+    if not all(f" {_identity(value)} " in normalized for value in facts) or f" {year} " not in f" {_identity(without_doi)} ":
         msg = "primary excerpt does not support DOI, title, authors, and publication year"
         raise _reject(msg)
 

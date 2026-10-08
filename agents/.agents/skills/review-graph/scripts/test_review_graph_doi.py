@@ -326,6 +326,22 @@ def test_identified_canonical_report_still_requires_unchanged_bytes(tmp_path: Pa
         captured_software_inputs(verified, _source_capture(tmp_path))
 
 
+@pytest.mark.parametrize("content", [b"invalid json", b"\xff", b"[]", b"[{}]"])
+@pytest.mark.parametrize("valid_report", [False, True])
+def test_unusable_canonical_report_does_not_discard_other_execution_evidence(tmp_path: Path, content: bytes, valid_report: bool) -> None:
+    _original, verified, _resolution = _fixture(tmp_path)
+    path = tmp_path / "unusable.json"
+    path.write_bytes(content)
+    artifact = {**verified["artifacts"][0], "path": str(path), "artifact_digest": "sha256:" + sha256(content).hexdigest()}
+    execution = {**verified["executions"][0], "artifact_paths": [str(path)]}
+    verified["artifacts"] = [artifact, *verified["artifacts"]] if valid_report else [artifact]
+    verified["executions"] = [execution, *verified["executions"]] if valid_report else [execution]
+    before = deepcopy(verified)
+    expected = {str(tmp_path / "CITATION.cff"): "sha256:" + sha256(CFF_CONTENT).hexdigest()} if valid_report else {}
+    assert captured_software_inputs(verified, _source_capture(tmp_path)) == expected
+    assert verified == before
+
+
 @pytest.mark.parametrize(
     "defect",
     [
