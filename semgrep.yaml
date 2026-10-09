@@ -3,7 +3,8 @@
 #
 # Keep this file small and project-specific. Broad default/community rules
 # duplicate CodeRabbit, actionlint, zizmor, Ruff, ty, ShellCheck, and gitleaks.
-# Zizmor owns SHA pinning; workflow-allowlist-check reads the Actions policy JSON.
+# Zizmor owns SHA pinning and dangerous triggers; workflow-allowlist-check reads
+# the Actions policy JSON.
 
 rules:
   - id: dotfiles.docs.check-before-fix-command-order
@@ -75,27 +76,6 @@ rules:
             [^\n]*
           )*
           (?=\n[ \t]*-(?:[ \t]+[A-Za-z_-]+:|[ \t]*(?:\#.*)?$)|\z)
-
-  - id: dotfiles.github-actions.no-pull-request-target
-    languages:
-      - regex
-    severity: WARNING
-    message: "Avoid pull_request_target; use pull_request unless a workflow has a documented security review."
-    metadata:
-      category: security
-      rationale: >-
-        pull_request_target runs with base-repository privileges and is risky
-        for workflows that touch untrusted PR content.
-    paths:
-      include:
-        - "/.github/workflows/**/*.yml"
-        - "/.github/workflows/**/*.yaml"
-        - "/tests/semgrep/.github/workflows/**/*.yml"
-        - "/tests/semgrep/.github/workflows/**/*.yaml"
-    pattern-either:
-      - pattern-regex: '(?m)^[ \t]*(?:-[ \t]+)?["'']?pull_request_target["'']?[ \t]*(?::|(?:#.*)?$)'
-      - pattern-regex: '(?m)^[ \t]*["'']?on["'']?[ \t]*:[ \t]*["'']?pull_request_target["'']?[ \t]*(?:#.*)?$'
-      - pattern-regex: '(?m)^[ \t]*["'']?on["'']?[ \t]*:[ \t]*\[[^\]]*\bpull_request_target\b[^\]]*\]'
 
   - id: dotfiles.github-actions.github-script-no-expression-interpolation
     languages:

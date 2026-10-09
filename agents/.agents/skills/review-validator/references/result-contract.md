@@ -232,6 +232,14 @@ Return every heading, using `none` when a section has no entries.
 
 Write `none` when no command executed.
 
+For a command containing line breaks or leading/trailing whitespace, replace
+`Command` with `Command (JSON)` and render its exact text as one JSON string
+using ASCII escapes. Ordinary single-line commands retain the `Command` field,
+including literal quotes and backslashes. The field label distinguishes a
+literal command from encoded text; payloads and command identity digests always
+retain the raw command. Saved successful payloads can be compiled with this
+representation without changing the dispatch or rerunning validation.
+
 ## Reused Evidence
 
 - Ledger entry: <exact entry identity>

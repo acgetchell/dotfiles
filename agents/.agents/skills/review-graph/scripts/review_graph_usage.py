@@ -183,8 +183,8 @@ def summarize(paths: list[Path]) -> dict[str, Any]:
         )
         group["attempts"] += 1
         end = ends.get(request_id)
-        group[end["status"] if end else "unfinished"] += 1
-        usage = measurements(end) if end else {"cost_basis": "unavailable"}
+        group[end["status"] if end is not None else "unfinished"] += 1
+        usage = measurements(end) if end is not None else {"cost_basis": "unavailable"}
         for direction in ("input", "output"):
             count = usage.get(f"{direction}_tokens")
             group[f"unknown_{direction}_attempts" if count is None else f"{direction}_tokens_known"] += 1 if count is None else count

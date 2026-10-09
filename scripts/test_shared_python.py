@@ -31,7 +31,7 @@ def test_shared_baseline_checks_dotfiles_mirrors_without_repair(tmp_path: Path, 
         [executable, "--root", str(tmp_path), "toolchain", "python-check"], capture_output=True, text=True, check=False, timeout=30
     )
     assert (result.returncode == 0) == (drift is None), result.stderr
-    if drift:
+    if drift is not None:
         assert "shared Python drift" in result.stderr
     assert before == {path.name: path.read_bytes() for path in tmp_path.iterdir()}
 

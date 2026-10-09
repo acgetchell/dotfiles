@@ -9,7 +9,7 @@ authors = [{ name = "Adam Getchell", email = "adam@adamgetchell.org" }]
 
 [tool.uv]
 package = false
-required-version = "==0.12.23"
+required-version = "==0.12.24"
 
 [tool.research-repo-tools.toolchain]
 inherit-python = true
@@ -37,7 +37,6 @@ namespace = "dotfiles."
 [tool.research-repo-tools.semgrep.counts."tests/semgrep/.github/workflows/action_policy.yml"]
 "dotfiles.github-actions.external-action-version-comment" = 3
 "dotfiles.github-actions.checkout-persist-credentials-false" = 7
-"dotfiles.github-actions.no-pull-request-target" = 1
 "dotfiles.github-actions.github-script-no-expression-interpolation" = 1
 "dotfiles.github-actions.uv-sync-locked-in-workflows" = 3
 "dotfiles.tooling.uv-run-locked" = 3
@@ -46,9 +45,6 @@ namespace = "dotfiles."
 
 [tool.research-repo-tools.semgrep.counts."tests/semgrep/.github/workflows/reusable.yml"]
 "dotfiles.github-actions.external-action-version-comment" = 1
-
-[tool.research-repo-tools.semgrep.counts."tests/semgrep/.github/workflows/triggers.yml"]
-"dotfiles.github-actions.no-pull-request-target" = 4
 
 [tool.research-repo-tools.semgrep.counts."tests/semgrep/.github/workflows/dependabot-auto-merge.yml"]
 "dotfiles.github-actions.no-retired-coderabbit-token" = 1
@@ -224,8 +220,8 @@ dev = [
   "PyYAML>=6.0",
   "pytest==9.1.1",
   "ruff==0.16.10",
-  "semgrep==1.179.0",
-  "ty==0.0.84",
+  "semgrep==1.180.0",
+  "ty==0.0.85",
   "yamllint==1.38.0",
   "zizmor==1.30.1",
 ]

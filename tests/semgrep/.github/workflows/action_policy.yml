@@ -1,8 +1,6 @@
 name: Action policy fixtures
 on:
   workflow_dispatch:
-  # ruleid: dotfiles.github-actions.no-pull-request-target
-  pull_request_target:
 
 jobs:
   fixtures:

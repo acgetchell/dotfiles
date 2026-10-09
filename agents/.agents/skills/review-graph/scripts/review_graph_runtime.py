@@ -95,6 +95,7 @@ from review_graph_plan import (
     repository_review_proof_expectation,
     review_requirements_from_routing,
     review_source_state_blockers,
+    validation_command_field,
     validation_evidence_expectation,
     validation_execution_result_blockers,
     validation_requirements_from_document,
@@ -654,7 +655,7 @@ def _review_normalized_record(payload: dict[str, Any], expectation: ReviewEviden
         **{key: payload[key] for key in ("execution_facts", "validation_limits", "unresolved_uncertainties") if key in payload},
         **(
             {"inherited_audit_context": {**inherited_context, "evidence_id": expectation.coverage_reuse["evidence_id"]}}
-            if inherited_context and expectation.coverage_reuse
+            if inherited_context and expectation.coverage_reuse is not None
             else {}
         ),
         "artifact_digest": evidence.raw_result_digest,
@@ -2017,6 +2018,7 @@ def _validation_executions_body(
     results: list[str] = []
     bodies: list[str] = []
     for ordinal, raw in enumerate(raw_executions, start=1):
+        command_label, command_text = validation_command_field(raw.get("command"))
         result = _required_text(raw, "result")
         if result not in {"passed", "failed", "blocked", "not-run"}:
             msg = f"validation execution {ordinal} has invalid result {result}"
@@ -2049,7 +2051,7 @@ def _validation_executions_body(
                 (
                     f"- Execution ID: {evidence.node_id}-exec-{ordinal}",
                     f"  - Executor: {_required_text(raw, 'executor')}",
-                    f"  - Command: {_required_text(raw, 'command')}",
+                    f"  - {command_label}: {command_text}",
                     f"  - Working directory: {_required_text(raw, 'working_directory')}",
                     f"  - Environment/configuration: {expectation_environment}",
                     f"  - Result: {result}",
@@ -5093,7 +5095,7 @@ def _expected_evidence_id(node: WorkerNode, plan: GraphPlan) -> str:
         ),
         None,
     )
-    return identity + (":" + _required_text(recovery, "attempt_id").removeprefix("validation-recovery:") if recovery else "")
+    return identity + (":" + _required_text(recovery, "attempt_id").removeprefix("validation-recovery:") if recovery is not None else "")
 
 
 def _sha256_digest(value: object, name: str) -> str:
@@ -6104,7 +6106,7 @@ def _preflight_outputs(unit: ValidationUnit, repository_root: Path) -> tuple[lis
     observations: list[dict[str, Any]] = []
     blockers: list[str] = []
     approved = {artifact.path: artifact for artifact in unit.allowed_artifacts}
-    effect_root = Path(unit.isolation_root) if unit.requires_isolation and unit.isolation_root else repository_root
+    effect_root = Path(unit.isolation_root) if unit.requires_isolation and unit.isolation_root is not None else repository_root
     for path in dict.fromkeys((*unit.expected_workspace_effects, *approved)):
         try:
             resolved = _workspace_path(path, effect_root if path in unit.expected_workspace_effects else repository_root)
@@ -6162,13 +6164,15 @@ def preflight_validation(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C
         cache_checks.append({"path": str(path), "accessible": accessible, "evidence": reason})
     units: list[dict[str, Any]] = []
     for unit in plan.coalesced_validation_units:
-        blockers = [unit.planning_blocker] if unit.planning_blocker else []
+        blockers = [unit.planning_blocker] if unit.planning_blocker is not None else []
         if not unit.commands:
             blockers.append("no local command; retain the hosted or unexecutable obligation as blocked")
         for command in unit.commands:
             decision = policy.get(command)
             if decision is None or decision["disposition"] != "allowed":
-                blockers.append(f"command policy: {command}: {decision['reason'] if decision else 'not reviewed, including nested recipes and fixtures'}")
+                blockers.append(
+                    f"command policy: {command}: {decision['reason'] if decision is not None else 'not reviewed, including nested recipes and fixtures'}"
+                )
         executor_observations, executor_blockers = _preflight_executor(unit, prerequisites.get(unit.node_id), repository_root)
         blockers.extend(executor_blockers)
         outputs, output_blockers = _preflight_outputs(unit, repository_root)
@@ -6276,7 +6280,7 @@ def _recover_validation(document: dict[str, Any], args: argparse.Namespace, *, c
     node_id = _required_text(document, "node_id")
     unit = next((item for item in plan.coalesced_validation_units if item.node_id == node_id), None)
     expected_status = "accepted" if checks_started else "blocked"
-    if unit is None or state.get(node_id) != expected_status or not unit.commands or unit.planning_blocker:
+    if unit is None or state.get(node_id) != expected_status or not unit.commands or unit.planning_blocker is not None:
         msg = (
             "execution recovery requires accepted failed owner evidence from an executable validator"
             if checks_started
@@ -6682,12 +6686,12 @@ def finalize_proof(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, P
         },
         "proof": asdict(proof),
         "repository_validation_status": repository_validation_status,
-        "repository_readiness": final_record.get("readiness_verdict", "blocked") if final_record and not blockers else "blocked",
+        "repository_readiness": final_record.get("readiness_verdict", "blocked") if final_record is not None and not blockers else "blocked",
         "software_doi_resolutions": [item for item in final_record.get("validation_reconciliation", []) if "software_doi_resolution" in item]
-        if final_record and not blockers
+        if final_record is not None and not blockers
         else [],
         "scholarly_doi_resolutions": [item for item in final_record.get("validation_reconciliation", []) if "scholarly_doi_resolution" in item]
-        if final_record and not blockers
+        if final_record is not None and not blockers
         else [],
         "reviewed_source_state": list(source_state),
         "current_source_state": list(current_source_state),
@@ -7365,7 +7369,7 @@ def main(argv: list[str] | None = None) -> int:
             raise TypeError(msg)
         operation_document = _operation_document(document, args.operation)
         require_schema_definition(operation_document, _RUNTIME_OPERATION_INPUT_SCHEMA, args.operation)
-        usage_ledger = os.environ.get("REVIEW_GRAPH_USAGE_LEDGER")
+        usage_ledger = os.environ.get("REVIEW_GRAPH_USAGE_LEDGER", "")
         if usage_ledger:
             return measure_call(
                 lambda: _run_operation(operation_document, args),

@@ -60,7 +60,7 @@ def linux_boundary(tmp_path: Path) -> dict[str, str]:
     # GNU tar invokes gzip through PATH when reading compressed release archives.
     for name in ("git", "bash", "tar", "gzip", "unzip", "sed", "head", "awk", "mkdir", "mktemp", "chmod", "cp", "mv", "rm", "dirname"):
         tool = shutil.which(name)
-        assert tool
+        assert tool is not None
         (binaries / name).symlink_to(tool)
     # macOS need not install GNU coreutils to exercise the Linux boundary fixture.
     checksum = binaries / "sha256sum"

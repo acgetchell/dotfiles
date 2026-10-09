@@ -66,6 +66,33 @@ def parse(value, items):
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def _zizmor_finding_ids(path: Path) -> set[str]:
+    """Run the pinned offline audit with the repository's regular persona."""
+    executable = shutil.which("zizmor")
+    assert executable is not None
+    result = subprocess.run(  # noqa: S603
+        [
+            executable,
+            "--offline",
+            "--persona",
+            "regular",
+            "--no-config",
+            "--no-progress",
+            "--format",
+            "json",
+            "--cache-dir",
+            str(path.parent / "cache"),
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode in {0, 10, 11, 12, 13, 14}, result.stderr
+    return {finding["ident"] for finding in json.loads(result.stdout)}
+
+
 @pytest.mark.parametrize("form", ["named", "shorthand", "reusable"])
 def test_zizmor_owns_sha_pinning(tmp_path: Path, form: str) -> None:
     """Removing the Semgrep duplicate preserves the gate for every workflow form."""
@@ -79,29 +106,20 @@ def test_zizmor_owns_sha_pinning(tmp_path: Path, form: str) -> None:
         prefix += "      - name: Setup\n        " if form == "named" else "      - "
         source = prefix + f"uses: actions/setup-python@{sha} # v7.0.0\n"
     path = tmp_path / "workflow.yml"
-    executable = shutil.which("zizmor")
-    assert executable is not None
     for revision, expected in ((sha, False), ("v7", True)):
         path.write_text(source.replace(sha, revision))
-        result = subprocess.run(  # noqa: S603
-            [
-                executable,
-                "--offline",
-                "--persona",
-                "regular",
-                "--no-config",
-                "--no-progress",
-                "--format",
-                "json",
-                "--cache-dir",
-                str(tmp_path / "cache"),
-                str(path),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=30,
-        )
-        assert result.returncode in {0, 10, 11, 12, 13, 14}, result.stderr
-        findings = json.loads(result.stdout)
-        assert any(finding["ident"] == "unpinned-uses" for finding in findings) is expected
+        assert ("unpinned-uses" in _zizmor_finding_ids(path)) is expected
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    ["on:\n  {event}:\n", "on: {event}\n", "on: [push, {event}]\n", "on:\n  - {event}\n", '"on":\n  "{event}":\n'],
+    ids=["mapping", "scalar", "flow-list", "block-list", "quoted"],
+)
+def test_zizmor_owns_dangerous_triggers(tmp_path: Path, declaration: str) -> None:
+    """Retain each retired Semgrep trigger case and its compliant counterpart."""
+    path = tmp_path / "workflow.yml"
+    job = "permissions: {}\njobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n"
+    for event, expected in (("pull_request", False), ("pull_request_target", True)):
+        path.write_text("name: Audit\n" + declaration.format(event=event) + job)
+        assert ("dangerous-triggers" in _zizmor_finding_ids(path)) is expected

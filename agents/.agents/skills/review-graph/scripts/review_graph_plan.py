@@ -3355,6 +3355,19 @@ def validation_execution_result_blockers(*, result: str, exit_code: object, elap
     return tuple(blockers)
 
 
+def validation_command_field(command: object) -> tuple[str, str]:
+    """Render exact command text on one field line without ambiguous escaping."""
+    if not isinstance(command, str) or not command.strip():
+        msg = "command must be a non-empty string"
+        raise ValueError(msg)
+    # Native fields use splitlines() and strip(); JSON protects every character
+    # those parsers could remove. The distinct label keeps literal JSON commands
+    # unambiguous and preserves existing ordinary single-line evidence.
+    if command.splitlines() != [command] or command != command.strip():
+        return "Command (JSON)", json.dumps(command, ensure_ascii=True)
+    return "Command", command
+
+
 def _validation_native_sections_blockers(  # noqa: C901, PLR0912, PLR0915
     sections: Mapping[str, str], expectation: ValidationEvidenceExpectation, evidence: ValidationEvidence
 ) -> tuple[str, ...]:
@@ -3404,19 +3417,21 @@ def _validation_native_sections_blockers(  # noqa: C901, PLR0912, PLR0915
         blockers.append("native validation result Execution IDs must be unique non-empty values")
     execution_commands: list[str] = []
     execution_results: list[str] = []
-    execution_labels = (
-        "Executor",
-        "Command",
-        "Working directory",
-        "Environment/configuration",
-        "Result",
-        "Exit code",
-        "Elapsed",
-        "Evidence",
-        "Log or artifact",
-    )
+    command_fields = tuple(validation_command_field(command) for command in expectation.validation_unit.commands)
     expected_environment = _validation_environment_identity(expectation.validation_unit)
     for ordinal, (execution_id, record_body) in enumerate(execution_records, start=1):
+        command_label = command_fields[ordinal - 1][0] if ordinal <= len(command_fields) else "Command"
+        execution_labels = (
+            "Executor",
+            command_label,
+            "Working directory",
+            "Environment/configuration",
+            "Result",
+            "Exit code",
+            "Elapsed",
+            "Evidence",
+            "Log or artifact",
+        )
         fields, field_blockers = _native_record_fields(record_body, section=f"Execution {execution_id}", labels=execution_labels)
         blockers.extend(field_blockers)
         if execution_id != f"{evidence.node_id}-exec-{ordinal}":
@@ -3424,7 +3439,7 @@ def _validation_native_sections_blockers(  # noqa: C901, PLR0912, PLR0915
         executor = fields.get("Executor")
         if executor is not None and executor == "none":
             blockers.append(f"native validation result Execution {execution_id} has no concrete executor")
-        command = fields.get("Command")
+        command = fields.get(command_label)
         if command is not None:
             execution_commands.append(command)
         working_directory = fields.get("Working directory")
@@ -3452,7 +3467,7 @@ def _validation_native_sections_blockers(  # noqa: C901, PLR0912, PLR0915
                 blockers.append(f"native validation result Execution {execution_id} requires concrete evidence")
             blockers.extend(_validation_execution_artifact_reference_blockers(fields.get("Log or artifact"), reported_artifacts, execution_id=execution_id))
 
-    expected_commands = expectation.validation_unit.commands
+    expected_commands = tuple(value for _label, value in command_fields)
     if evidence.status in {"passed", "failed"} and tuple(execution_commands) != expected_commands:
         blockers.append("native validation result Executions do not match the exact dispatched commands")
     if evidence.status == "blocked" and tuple(execution_commands) != expected_commands[: len(execution_commands)]:

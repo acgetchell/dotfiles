@@ -24,7 +24,7 @@ def projected_waves(nodes: list[dict[str, Any]], concurrent_worker_limit: int, *
         ]
         # Validation/fix work shares the repository mutation boundary.
         serial = next((node for node in ready if node["mode"] in {"validation", "fix"}), None)
-        wave = [serial["node_id"]] if serial else [node["node_id"] for node in ready[:concurrent_worker_limit]]
+        wave = [serial["node_id"]] if serial is not None else [node["node_id"] for node in ready[:concurrent_worker_limit]]
         if not wave:
             msg = "cannot project waves with missing or cyclic dependencies"
             raise ValueError(msg)

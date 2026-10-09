@@ -141,7 +141,7 @@ def metadata_audit_blockers(record: dict[str, Any], transition: ExternalMetadata
     """Check fresh and inherited judgments without presenting old reads as fresh."""
     blockers = [] if fresh_current else _metadata_context_blockers(record, transition)
     inherited = _inherited_metadata_context(record)
-    if inherited:
+    if inherited is not None:
         blockers.extend({**blocker, "evidence_id": inherited["evidence_id"]} for blocker in _metadata_context_blockers(inherited, transition))
     return blockers
 
@@ -165,7 +165,7 @@ def discovery_reconciliation(record: dict[str, Any], transition: ExternalMetadat
         "nearby_contract_owners": record.get("nearby_contract_owners", []),
         **(
             {"inherited": discovery_reconciliation(inherited, transition), "inherited_evidence_id": inherited["evidence_id"]}
-            if (inherited := _inherited_metadata_context(record))
+            if (inherited := _inherited_metadata_context(record)) is not None
             else {}
         ),
     }

@@ -685,24 +685,19 @@ def test_schema_reference_reports_canonical_version_and_rejects_filename_mismatc
         _schema_reference(mismatched)
 
 
-def test_planning_schema_reports_routing_decision_item_diagnostics() -> None:
+@pytest.mark.parametrize(
+    ("section", "identity_field", "missing_field"),
+    [("routing_decisions", "catalog_id", "router_id"), ("review_requirements", "requirement_id", "skill_id")],
+    ids=["routing-decisions", "review-requirements"],
+)
+def test_planning_schema_reports_item_diagnostics(section: str, identity_field: str, missing_field: str) -> None:
     with pytest.raises(SchemaValidationError) as captured:
-        require_schema({"routing_decisions": [{"catalog_id": "rust.errors", "unexpected": True}]}, SCHEMA_ROOT / "planning-input-v1.schema.json")
+        require_schema({section: [{identity_field: "rust.errors", "unexpected": True}]}, SCHEMA_ROOT / "planning-input-v1.schema.json")
 
     diagnostics = cast("list[dict[str, Any]]", captured.value.as_dict()["diagnostics"])
     paths = {item["path"] for item in diagnostics}
-    assert "$.routing_decisions[0].router_id" in paths
-    assert "$.routing_decisions[0].unexpected" in paths
-
-
-def test_planning_schema_reports_review_requirement_item_diagnostics() -> None:
-    with pytest.raises(SchemaValidationError) as captured:
-        require_schema({"review_requirements": [{"requirement_id": "rust.errors", "unexpected": True}]}, SCHEMA_ROOT / "planning-input-v1.schema.json")
-
-    diagnostics = cast("list[dict[str, Any]]", captured.value.as_dict()["diagnostics"])
-    paths = {item["path"] for item in diagnostics}
-    assert "$.review_requirements[0].skill_id" in paths
-    assert "$.review_requirements[0].unexpected" in paths
+    assert f"$.{section}[0].{missing_field}" in paths
+    assert f"$.{section}[0].unexpected" in paths
 
 
 @pytest.mark.parametrize(("attempt", "retry_allowed"), [(1, True), (2, False)])
@@ -4068,7 +4063,7 @@ def _compile_materialized_evidence(  # noqa: PLR0913
                 "status": "no-findings",
                 "validation_requirements": validation_requirements,
             }
-            if audit_findings and dispatch["mode"] == "audit":
+            if bool(audit_findings) and dispatch["mode"] == "audit":
                 payload.update({"status": "completed", "findings": audit_findings})
             content, metadata = compile_review({"dispatch": dispatch, "payload": _typed_synthesis_payload(dispatch, payload, plan)})
             kind = "review"
@@ -5119,35 +5114,17 @@ def test_ordinary_validator_and_all_surface_prompt_budgets() -> None:
 
 
 @pytest.mark.review_contract
-def test_trace_prioritized_rust_leaf_prompt_budgets() -> None:
-    for skill_id, budget in TRACE_PRIORITIZED_RUST_LEAF_BUDGETS.items():
-        entrypoint = SKILL_ROOT / skill_id / "SKILL.md"
-        words = _word_count((entrypoint,))
-
-        assert words <= budget, f"{skill_id} graph/orchestrator entrypoint is {words} words"
-
-
-@pytest.mark.review_contract
-def test_trace_prioritized_documentation_prompt_budgets() -> None:
-    for skill_id, budget in TRACE_PRIORITIZED_DOCUMENTATION_SKILL_BUDGETS.items():
-        entrypoint = SKILL_ROOT / skill_id / "SKILL.md"
-        words = _word_count((entrypoint,))
-
-        assert words <= budget, f"{skill_id} graph/orchestrator entrypoint is {words} words"
-
-
-@pytest.mark.review_contract
-def test_trace_prioritized_python_prompt_budgets() -> None:
-    for skill_id, budget in TRACE_PRIORITIZED_PYTHON_SKILL_BUDGETS.items():
-        entrypoint = SKILL_ROOT / skill_id / "SKILL.md"
-        words = _word_count((entrypoint,))
-
-        assert words <= budget, f"{skill_id} graph/orchestrator entrypoint is {words} words"
-
-
-@pytest.mark.review_contract
-def test_trace_prioritized_shared_prompt_budgets() -> None:
-    for skill_id, budget in TRACE_PRIORITIZED_SHARED_SKILL_BUDGETS.items():
+@pytest.mark.parametrize(
+    "budgets",
+    [
+        pytest.param(TRACE_PRIORITIZED_RUST_LEAF_BUDGETS, id="rust"),
+        pytest.param(TRACE_PRIORITIZED_DOCUMENTATION_SKILL_BUDGETS, id="documentation"),
+        pytest.param(TRACE_PRIORITIZED_PYTHON_SKILL_BUDGETS, id="python"),
+        pytest.param(TRACE_PRIORITIZED_SHARED_SKILL_BUDGETS, id="shared"),
+    ],
+)
+def test_trace_prioritized_prompt_budgets(budgets: dict[str, int]) -> None:
+    for skill_id, budget in budgets.items():
         entrypoint = SKILL_ROOT / skill_id / "SKILL.md"
         words = _word_count((entrypoint,))
 
