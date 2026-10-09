@@ -562,8 +562,8 @@
       "target_kind": "leaf",
       "default_priority": "supporting-quality",
       "synthesis_dependency": "python-synthesis",
-      "path_patterns": ["pyproject.toml", "uv.lock", "src/**/*.py"],
-      "semantic_triggers": ["Build metadata, wheels/sdists, package discovery/data, installed imports, entry points, extras, runtimes, platforms, or consumers are material."]
+      "path_patterns": ["pyproject.toml", "uv.lock", "src/**/*.py", "scripts/**/*.py", "tools/**/*.py", "tests/**/*.py", "test/**/*.py"],
+      "semantic_triggers": ["Build metadata, wheels/sdists, package discovery/data, installed imports, entry points, extras, runtimes, platforms, or consumers are material. Include source and fixture path, filesystem, executable, and shell assumptions on supported platforms even for unpackaged support tooling or unchanged CI workflows."]
     },
     {
       "catalog_id": "python.notebook",

@@ -3,6 +3,29 @@
 Read this reference when test confidence depends on an operating-system,
 runtime, or byte-transport boundary.
 
+## Review The Fixture's Platform Contract
+
+Read the CI shell and runner configuration even when only a Python test changed.
+Trace real command fakes and shell scripts through Git Bash/MSYS and native
+Python on Windows. A POSIX `$PWD` string is not a portable expected value for
+`WindowsPath`; assert actual filesystem identity when cwd is the behavior, and
+test exact strings only when their format is the public contract. Cover spaces,
+drive/UNC paths, executable suffixes, permissions, or symlink availability when
+the changed boundary relies on them. A successful macOS/Linux fixture run does
+not establish the corresponding Windows behavior.
+
+For symlink rejection or preservation, assert separately that the object remains
+a symlink, its observed `readlink()` value is unchanged across the action, and
+`link.samefile(expected_target)` holds when the target exists. Do not compare
+`readlink()` directly with the path used to create the link: Windows can add a
+`\\?\` prefix, and relative targets have a different representation. Cover
+absolute and relative links when both are accepted fixture forms. Preserve the
+failure-atomicity assertions; replacing path equality must not weaken them.
+
+After a portability repair, inspect newly added regression fixtures and their
+assertions for the same class of platform assumptions, not only the originally
+failing line. A new fixture is part of the Windows execution surface.
+
 ## Exercise The Owning Boundary
 
 Exercise the actual boundary rather than only a related application or tool

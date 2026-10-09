@@ -29,8 +29,10 @@ the dispatch-bound review command. The runtime validates the schema and semantic
 without an artifact write. For audits, `scope_limitations` must equal the omitted
 `owned_paths`; `nearby_contract_owners` is inspected context provenance, not
 omitted scope, and narrative `limitations` never expand the write set. For payload
-publication, only the published payload path is a durable artifact target; atomic publication uses a
-runtime-owned temporary sibling. The stdin contract contains no candidate path.
+publication, the reviewed payload target is the published payload path; atomic
+publication uses a runtime-owned temporary sibling. Publication also persists
+the complete write-review evidence as an immutable digest-addressed sibling in
+the proof store. The stdin contract contains no candidate path.
 Source captures and other workflow proof artifacts remain authorized under the
 external temporary store; the payload restriction does not prohibit those writes.
 Legacy `--payload` inputs retain a separate candidate-bearing schema for saved
@@ -54,10 +56,22 @@ and compares the canonical payload with sealed worker bytes when present.
 Missing or changed bound metadata or sealed bytes fail verification. Smaller
 audits and previously compiled inline reports retain their existing format.
 
-The persistence receipt and any publication-failure diagnostic carry the same
-`artifact_write_review`: exact byte digest/count, bound paths, path-role summary,
-and a canonical digest of the entire validated persistence contract, including
-mode, owned paths, and schema version. The `approval_identity` binds the bytes,
+Publication and persistence receipts default to compact status/identity fields
+and `artifact_write_review_reference` (path, exact byte digest, and byte count).
+The immutable reference contains the complete `artifact_write_review`: exact
+payload byte digest/count, bound paths, path-role summary, and a canonical digest
+of the entire validated persistence contract, including mode, owned paths, and
+schema version. `--full-output` includes that review inline; Python publication
+receipts retain it inline. The read-only `review-worker-payload-write` command
+continues returning the complete review without writing artifacts.
+
+Publication-failure diagnostics retain the error, actionable message, node,
+payload identity, approval identity, and saved review reference without repeating
+path inventories. If evidence storage itself fails, the reference is null and
+the payload is not published. `--full-output` also includes the complete review
+in rejection diagnostics. Changed or symlinked evidence sidecars cannot be
+overwritten, and identical retries reuse the same saved evidence.
+The `approval_identity` binds the bytes,
 target, input mode, and contract digest. Both the stdin CLI and Python publication
 API require this identity; it identifies the reviewed write and does not grant
 environment permission. If the environment requires

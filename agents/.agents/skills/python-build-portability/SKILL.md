@@ -30,6 +30,11 @@ Review-graph and Python-orchestrator dispatches already own that information.
 
 Derive supported Python versions, operating systems, architectures, and dependency modes from `pyproject.toml`, documentation, workflows, and release policy. Do not invent support the project does not claim.
 
+Read unchanged workflows that execute changed scripts/tests, including projects
+with `package = false`. When Windows is supported, read
+[Windows boundaries](references/windows-boundaries.md) even without packaging
+changes or explicit platform branches.
+
 ## Ownership Boundaries
 
 - Own artifact construction, installation, importability, declared compatibility, extras, entry points, and platform-sensitive source behavior here.

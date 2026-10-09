@@ -17,6 +17,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
+class AccountingInputError(ValueError):
+    """Expose a safe diagnostic containing no caller-supplied values or paths."""
+
+
 def digest(value: object) -> str:
     """Identify exact JSON inputs, rejecting non-finite numbers."""
     return digest_json(value, allow_nan=False)
@@ -27,7 +31,7 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     for key, value in pairs:
         if key in result:
             msg = "duplicate JSON field"
-            raise ValueError(msg)
+            raise AccountingInputError(msg)
         result[key] = value
     return result
 
@@ -46,7 +50,7 @@ def read_json(path: Path) -> dict[str, Any]:
     """Read a bounded JSON object without duplicate fields."""
     if path.stat().st_size > 4_194_304:
         msg = "JSON input exceeds four MiB"
-        raise ValueError(msg)
+        raise AccountingInputError(msg)
     return parse_json(path.read_text(encoding="utf-8"))
 
 
@@ -107,28 +111,43 @@ def start_request(path: Path, *, stage: str, provider: str, model: str | None, s
     return request_id
 
 
+def _nonnegative_finite_number(value: object) -> bool:
+    if not isinstance(value, int | float) or type(value) not in {int, float}:
+        return False
+    try:
+        return math.isfinite(value) and value >= 0
+    except OverflowError:
+        return False
+
+
 def measurements(value: dict[str, Any]) -> dict[str, Any]:
     """Validate portable provider measurements without inventing usage or prices."""
     result: dict[str, Any] = {}
     for name in ("input_tokens", "output_tokens", "cached_input_tokens"):
         count = value.get(name)
         if count is not None and (type(count) is not int or count < 0):
-            raise ValueError(f"{name} must be a nonnegative integer or null")
+            raise AccountingInputError(f"{name} must be a nonnegative integer or null")
         result[name] = count
     for name in ("elapsed_seconds", "cost_usd"):
         number = value.get(name)
-        if number is not None and (type(number) not in {int, float} or not math.isfinite(number) or number < 0):
-            raise ValueError(f"{name} must be a nonnegative finite number or null")
+        if number is not None and not _nonnegative_finite_number(number):
+            raise AccountingInputError(f"{name} must be a nonnegative finite number or null")
         result[name] = number
     basis = value.get("cost_basis", "unavailable")
-    if basis not in {"measured", "estimated", "unavailable"} or (basis == "unavailable") != (result["cost_usd"] is None):
-        msg = "cost_basis must describe the supplied cost"
-        raise ValueError(msg)
+    if not isinstance(basis, str) or basis not in {"measured", "estimated", "unavailable"}:
+        msg = "cost_basis must be measured, estimated, or unavailable"
+        raise AccountingInputError(msg)
+    if basis != "unavailable" and result["cost_usd"] is None:
+        msg = "cost_basis must be unavailable when cost_usd is null; measured or estimated requires a supplied cost_usd"
+        raise AccountingInputError(msg)
+    if basis == "unavailable" and result["cost_usd"] is not None:
+        msg = "cost_basis must be measured or estimated when cost_usd is supplied; unavailable requires null cost_usd"
+        raise AccountingInputError(msg)
     result["cost_basis"] = basis
     source = value.get("measurement_source")
     if not isinstance(source, str) or not source.strip():
-        msg = "measurement_source is required, including for unavailable measurements"
-        raise ValueError(msg)
+        msg = "measurement_source is required and must be a nonempty string, including for unavailable measurements"
+        raise AccountingInputError(msg)
     result["measurement_source"] = source
     return result
 
@@ -195,7 +214,29 @@ def summarize(paths: list[Path]) -> dict[str, Any]:
     return {"schema_version": 1, "groups": list(groups.values()), "totals_are_partial": any(g["unknown_cost_attempts"] for g in groups.values())}
 
 
-def main() -> int:
+def _read_usage(path: Path) -> dict[str, Any]:
+    try:
+        return measurements(read_json(path))
+    except AccountingInputError as error:
+        raise AccountingInputError(f"--usage: {error}") from error
+    except json.JSONDecodeError as error:
+        msg = f"--usage: invalid JSON at line {error.lineno}, column {error.colno}"
+        raise AccountingInputError(msg) from error
+    except OSError as error:
+        msg = "--usage: cannot read JSON file; supply a readable file path, not inline JSON"
+        raise AccountingInputError(msg) from error
+    except UnicodeError as error:
+        msg = "--usage: JSON file must use UTF-8 encoding"
+        raise AccountingInputError(msg) from error
+    except TypeError as error:
+        msg = "--usage: JSON input must be an object"
+        raise AccountingInputError(msg) from error
+    except ValueError as error:
+        msg = "--usage: invalid JSON: non-finite numbers or unsupported numeric ranges"
+        raise AccountingInputError(msg) from error
+
+
+def main(argv: list[str] | None = None) -> int:
     """Expose accounting for routing, specialists, validation, synthesis, and proof stages."""
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -205,24 +246,54 @@ def main() -> int:
     start.add_argument("--provider", required=True)
     start.add_argument("--model")
     start.add_argument("--scope-digest", required=True)
-    finish = sub.add_parser("finish")
+    finish = sub.add_parser(
+        "finish",
+        description="Record completion using measurements from a JSON file.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Minimal usage.json when provider measurements are unknown:
+{
+  "input_tokens": null,
+  "output_tokens": null,
+  "cached_input_tokens": null,
+  "elapsed_seconds": null,
+  "cost_usd": null,
+  "cost_basis": "unavailable",
+  "measurement_source": "provider usage unavailable"
+}
+Pass its path with --usage usage.json (not inline JSON).
+Missing numeric fields stay unknown; use zero only for a measured zero.
+Token counts must be nonnegative integers; elapsed_seconds and cost_usd must
+be nonnegative finite numbers. cost_basis is measured, estimated, or unavailable;
+measured/estimated requires a numeric cost_usd, unavailable requires null.
+measurement_source is required; identify the rate source for estimated costs.
+Never infer tokens or costs from byte counts or account-wide allowances.""",
+    )
     finish.add_argument("--ledger", type=Path, required=True)
     finish.add_argument("--id", required=True)
     finish.add_argument("--status", choices=("succeeded", "failed", "cancelled"), required=True)
-    finish.add_argument("--usage", type=Path, required=True)
+    finish.add_argument("--usage", type=Path, required=True, metavar="JSON_FILE", help="path to a UTF-8 JSON file of measurements; see the example below")
     report = sub.add_parser("report")
     report.add_argument("ledgers", type=Path, nargs="+")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     try:
         if args.command == "start":
             print(start_request(args.ledger, stage=args.stage, provider=args.provider, model=args.model, scope_digest=args.scope_digest))
         elif args.command == "finish":
-            finish_request(args.ledger, args.id, status=args.status, usage=read_json(args.usage))
+            finish_request(args.ledger, args.id, status=args.status, usage=_read_usage(args.usage))
         else:
             print(json.dumps(summarize(args.ledgers), indent=2))
-    # Semgrep 1.178 requires parentheses for three or more exception types.
-    except (OSError, ValueError, KeyError, TypeError):  # fmt: skip
-        print("review_graph_usage: invalid or unreadable accounting input", file=sys.stderr)
+    except AccountingInputError as error:
+        print(f"review_graph_usage: {error}", file=sys.stderr)
+        return 2
+    except OSError:
+        print("review_graph_usage: cannot read or write accounting file", file=sys.stderr)
+        return 2
+    except json.JSONDecodeError as error:
+        print(f"review_graph_usage: invalid ledger JSON at line {error.lineno}, column {error.colno}", file=sys.stderr)
+        return 2
+    # Keep parentheses for Semgrep's exception-pattern parser.
+    except (ValueError, KeyError, TypeError, UnicodeError):  # fmt: skip
+        print("review_graph_usage: invalid accounting fields", file=sys.stderr)
         return 2
     return 0
 

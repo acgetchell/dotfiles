@@ -70,8 +70,11 @@ When relevant, test cancellation, timeout, shutdown, worker exceptions, backpres
 
 For subprocess code, distinguish command-not-found, timeout, nonzero exit, malformed output, and successful empty output. Assert the resulting diagnostic without leaking secrets.
 
-For platform-sensitive or byte-sensitive subprocess regressions, read
+When changed tests or fixtures run on Windows, or for other platform-sensitive
+or byte-sensitive subprocess regressions, read
 [platform regression evidence](references/platform-regression-evidence.md).
+Inspect the fixture's own shell/path assumptions as well as production code;
+unchanged Windows workflow configuration still makes this reference applicable.
 
 ## Packaging And Configuration Evidence
 

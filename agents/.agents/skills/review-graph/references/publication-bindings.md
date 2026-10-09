@@ -4,6 +4,18 @@ Read for optional coverage partitions or publication binding diagnostics.
 Compact dispatches contain the applicable shapes/examples; full schemas remain
 available lazily.
 
+## Publication Receipts
+
+`publish-worker-payload` and `persist-worker-payload` emit compact receipts by
+default: status, node, payload path/digest/byte count, approval identity, and
+`artifact_write_review_reference`. Read that digest-bound immutable artifact for
+complete path roles, compiler preflight sizes, and contract bindings, or pass
+`--full-output` to include the full review inline. Actionable write failures keep
+the same identities and evidence reference for an unchanged-byte approval retry.
+If the review artifact cannot be saved, its reference is null and publication
+is blocked. The read-only review command still returns full details without
+writing, and Python publication receipts include full details plus the reference.
+
 ## Audit Coverage
 
 `payload_schema.optional_shapes.coverage_units` includes all required unit fields.

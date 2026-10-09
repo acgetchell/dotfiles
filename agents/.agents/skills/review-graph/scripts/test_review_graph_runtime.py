@@ -3439,7 +3439,7 @@ def test_nearby_audit_context_persists_compiles_and_journals_with_stable_approva
 
     diagnostic = json.loads(capsys.readouterr().err)
     assert diagnostic["error"] == "artifact-write-blocked"
-    assert diagnostic["artifact_write_review"] == write_review
+    assert json.loads(Path(diagnostic["artifact_write_review_reference"]["path"]).read_bytes()) == write_review
     assert not Path(entry["worker_payload_path"]).exists()
 
     changed_bytes = (json.dumps({**payload, "limitations": ["changed after approval"]}, sort_keys=True) + "\n").encode()
@@ -3453,7 +3453,7 @@ def test_nearby_audit_context_persists_compiles_and_journals_with_stable_approva
         patch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(payload_bytes), encoding="utf-8"))
         assert main([*persistence_command, "--approval-identity", write_review["approval_identity"]]) == 0
     receipt = json.loads(capsys.readouterr().out)
-    assert receipt["artifact_write_review"] == write_review
+    assert json.loads(Path(receipt["artifact_write_review_reference"]["path"]).read_bytes()) == write_review
     assert Path(receipt["worker_payload_path"]).read_bytes() == payload_bytes
 
     lifecycle_path, dispatch_path, capture_path = _compile_cli_paths(tmp_path, document, dispatches)

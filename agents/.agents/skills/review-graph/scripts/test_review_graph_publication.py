@@ -1,7 +1,9 @@
 """Worker-visible shapes and publication bindings agree with native compilation."""
 
+import io
 import json
 import shutil
+import sys
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -10,6 +12,7 @@ from typing import Any
 import pytest
 import review_graph_runtime as runtime
 from review_graph_benchmark import benchmark_fixture
+from review_graph_integrity import digest_bytes
 from review_graph_plan import GraphPlan, ValidationArtifact, plan_from_document
 from test_review_graph_compact import _publish
 from test_review_graph_runtime import (
@@ -33,6 +36,132 @@ from test_review_graph_transitions import _synthesis_payload
 def dispatch_set(tmp_path: Path) -> dict[str, Any]:
     document = benchmark_fixture(tmp_path / "repository")
     return runtime.materialize_dispatches({**document, "artifact_store": str(tmp_path / "proof")})
+
+
+@pytest.fixture(params=[21, 84])
+def broad_publication(tmp_path: Path, request: pytest.FixtureRequest) -> tuple[dict[str, Any], bytes]:
+    document = benchmark_fixture(tmp_path / "repository", scale=request.param)
+    dispatches = runtime.materialize_dispatches({**document, "artifact_store": str(tmp_path / "proof")})
+    entry = next(item for item in dispatches["dispatches"] if item["dispatch"]["skill_id"] == "python-test-quality")
+    assert len(entry["dispatch"]["owned_paths"]) >= 125
+    return entry, json.dumps(_compact_audit_payload(entry)).encode()
+
+
+def _publish_cli(entry: dict[str, Any], content: bytes, monkeypatch: pytest.MonkeyPatch, *options: str) -> int:
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(content), encoding="utf-8"))
+    return runtime.main(["publish-worker-payload", "--input", entry["worker_payload_contract_path"], *options])
+
+
+def _assert_write_review_reference(receipt: dict[str, Any], entry: dict[str, Any], content: bytes) -> dict[str, Any]:
+    reference = receipt["artifact_write_review_reference"]
+    path = Path(reference["path"])
+    saved = path.read_bytes()
+    assert reference["digest"] == digest_bytes(saved)
+    assert reference["byte_count"] == len(saved)
+    assert path.parent == Path(entry["worker_payload_path"]).parent
+    assert path.stat().st_mode & 0o222 == 0
+    review = json.loads(saved)
+    assert review["approval_identity"] == receipt["approval_identity"]
+    assert review["payload_digest"] == receipt["worker_payload_digest"] == digest_bytes(content)
+    assert review["payload_byte_count"] == receipt["worker_payload_byte_count"] == len(content)
+    assert review["audit_path_roles"]["dispatch_owned_paths"] == entry["dispatch"]["owned_paths"]
+    assert review["audit_path_roles"]["inspected_dispatch_owned_paths"] == entry["dispatch"]["owned_paths"]
+    contract = json.loads(Path(entry["worker_payload_contract_path"]).read_bytes())
+    assert review == runtime.review_worker_payload_write(contract, content)
+    return review
+
+
+def test_broad_publication_stdout_is_bounded_with_lazy_and_full_evidence(
+    broad_publication: tuple[dict[str, Any], bytes], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    entry, content = broad_publication
+    assert _publish_cli(entry, content, monkeypatch) == 0
+    output = capsys.readouterr()
+    assert not output.err
+    assert len(output.out.encode()) < 2048
+    assert all(path not in output.out for path in entry["dispatch"]["owned_paths"])
+    receipt = json.loads(output.out)
+    assert receipt["status"] == "published"
+    assert receipt["node_id"] == entry["node_id"]
+    assert "artifact_write_review" not in receipt
+    review = _assert_write_review_reference(receipt, entry, content)
+    assert Path(entry["worker_payload_path"]).read_bytes() == content
+    before = set(Path(entry["worker_payload_path"]).parent.iterdir())
+    assert _publish_cli(entry, content, monkeypatch, "--full-output") == 0
+    full = json.loads(capsys.readouterr().out)
+    assert full == {**receipt, "artifact_write_review": review}
+    assert set(Path(entry["worker_payload_path"]).parent.iterdir()) == before
+
+
+@pytest.mark.parametrize("full_output", [False, True])
+def test_blocked_publication_keeps_actionable_approval_and_complete_evidence(
+    broad_publication: tuple[dict[str, Any], bytes], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], full_output: bool
+) -> None:
+    entry, content = broad_publication
+
+    def deny_publication(_source: Path, _target: Path) -> Path:
+        message = "fixture publication approval required"
+        raise PermissionError(message)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "replace", deny_publication)
+        assert _publish_cli(entry, content, patch, *(["--full-output"] if full_output else [])) == 2
+    output = capsys.readouterr()
+    assert not output.out
+    rejection = json.loads(output.err)
+    assert rejection["error"] == "artifact-write-blocked"
+    assert rejection["status"] == "blocked"
+    assert "fixture publication approval required" in rejection["message"]
+    review = _assert_write_review_reference(rejection, entry, content)
+    if full_output:
+        assert rejection["artifact_write_review"] == review
+    else:
+        assert "artifact_write_review" not in rejection
+        assert len(output.err.encode()) < 2048
+        assert all(path not in output.err for path in entry["dispatch"]["owned_paths"])
+    assert not Path(entry["worker_payload_path"]).exists()
+    assert _publish_cli(entry, content + b"\n", monkeypatch, "--approval-identity", rejection["approval_identity"]) == 2
+    assert "differs from the explicitly approved artifact write" in capsys.readouterr().err
+    assert not Path(entry["worker_payload_path"]).exists()
+    assert _publish_cli(entry, content, monkeypatch, "--approval-identity", rejection["approval_identity"]) == 0
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["approval_identity"] == rejection["approval_identity"]
+    assert receipt["artifact_write_review_reference"] == rejection["artifact_write_review_reference"]
+
+
+def test_write_review_storage_failure_blocks_payload_with_approval_identity(
+    dispatch_set: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    entry = next(item for item in dispatch_set["dispatches"] if item["dispatch"].get("mode") == "audit")
+    content = json.dumps(_compact_audit_payload(entry)).encode()
+
+    def deny_storage(*_args: object, **_kwargs: object) -> tuple[int, str]:
+        message = "fixture evidence storage unavailable"
+        raise PermissionError(message)
+
+    monkeypatch.setattr(runtime.tempfile, "mkstemp", deny_storage)
+    assert _publish_cli(entry, content, monkeypatch) == 2
+    output = capsys.readouterr()
+    rejection = json.loads(output.err)
+    assert not output.out
+    assert rejection["artifact_write_review_reference"] is None
+    assert rejection["approval_identity"]
+    assert "evidence storage unavailable" in rejection["message"]
+    assert not Path(entry["worker_payload_path"]).exists()
+
+
+def test_tampered_write_review_cannot_be_replaced_by_publication(dispatch_set: dict[str, Any]) -> None:
+    entry = next(item for item in dispatch_set["dispatches"] if item["dispatch"].get("mode") == "audit")
+    contract = json.loads(Path(entry["worker_payload_contract_path"]).read_bytes())
+    content = json.dumps(_compact_audit_payload(entry)).encode()
+    receipt = runtime.publish_worker_payload_bytes(contract, content)
+    path = Path(receipt["artifact_write_review_reference"]["path"])
+    path.chmod(0o600)
+    path.write_bytes(b"tampered review")
+    with pytest.raises(ValueError, match="non-identical immutable artifact"):
+        runtime.publish_worker_payload_bytes(contract, content)
+    assert path.read_bytes() == b"tampered review"
+    assert Path(entry["worker_payload_path"]).read_bytes() == content
 
 
 def test_optional_coverage_shape_publishes_and_compiles_first_attempt(dispatch_set: dict[str, Any]) -> None:

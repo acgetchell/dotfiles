@@ -22,7 +22,7 @@ behavior:
 
 | Skill | Select when | Skip when |
 |---|---|---|
-| `python-build-portability` | Wheels, sdists, package discovery/data, installed imports, entry points, extras, markers, supported runtimes/platforms, native extensions, external consumers | Only workflow commands or tool pins changed |
+| `python-build-portability` | Wheels, sdists, package discovery/data, installed imports, entry points, extras, markers, supported runtimes/platforms, native extensions, external consumers; platform-sensitive scripts and fixtures, including unpackaged tooling | Only workflow commands or tool pins changed and no Python platform contract is affected |
 | `jupyter-notebook-review` | Notebook cells, metadata, outputs, execution, plotting, environments, or notebook artifacts changed | A normal Python module merely supports a notebook |
 | `python-cli-review` | User-visible arguments, output, privacy, application files, dates/times, or exit behavior changed | Pure parser/model or support-transform change |
 | `python-parse-dont-validate` | Raw external values carry structural or semantic invariants into trusted code | Passive reports or already-validated values |
@@ -32,6 +32,15 @@ behavior:
 | `python-production-review` | Always in orchestrated mode; also owns ordinary reusable modules and residual integration concerns | Never skip final synthesis during orchestration |
 
 Select `project-tooling-review` outside this skill when recipes, workflows, validation configuration, installers, or tool versions changed. Select documentation review for suite-wide docs consistency. Shared ownership does not justify loading unrelated Python specialists.
+
+For PRs or platform-sensitive changes, apply
+[platform coverage and native CI](../../review-graph/references/platform-ci-review.md)
+before selecting validators and again before completion. Read unchanged CI
+workflows to discover where changed scripts/tests run. Windows execution makes
+path, shell, subprocess, and fixture assumptions relevant even when changed
+files contain no `sys.platform` branch. Consult the portability owner and the
+applicable support/test platform references; record actual reads, not only
+selected skill names.
 
 ## Common Combinations
 

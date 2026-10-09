@@ -96,11 +96,11 @@ instructions; exclude coordinator conclusions, routing, and journals. Reviews
 attest to commands; validator-command duplicates require explicit authorization
 and reusable evidence.
 
-Return `ReviewPayload` for audits or `SynthesisPayload` for synthesis. Serialize
-once and stream the bytes to `dispatch.worker_payload_persistence.publish_command`.
-It validates, reviews, and atomically publishes identical bytes with a receipt.
-Return only the receipt. Python integrations use `publish_worker_payload_bytes`
-for the same transaction.
+Stream serialized `ReviewPayload` (audit) or `SynthesisPayload` bytes once to
+`dispatch.worker_payload_persistence.publish_command`. It validates, reviews,
+and atomically publishes identical bytes. Return its compact receipt;
+`artifact_write_review_reference` and `--full-output` expose complete evidence.
+Python `publish_worker_payload_bytes` retains the inline review.
 Approval binds contract and payload; separate review/persist commands support
 approved retries. Use materialized schemas and dispatched validation IDs/digests.
 

@@ -214,10 +214,11 @@ class JournalEventRequest:
 class WorkerPayloadWriteError(OSError):
     """Preserve the validated payload identity when artifact publication fails."""
 
-    def __init__(self, message: str, artifact_write_review: dict[str, Any]) -> None:
+    def __init__(self, message: str, artifact_write_review: dict[str, Any], review_reference: dict[str, Any] | None = None) -> None:
         """Attach the deterministic safety review to the publication failure."""
         super().__init__(message)
         self.artifact_write_review = artifact_write_review
+        self.review_reference = review_reference
 
 
 def _read_regular_file_no_follow(path: Path) -> bytes:
@@ -3500,6 +3501,9 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
         else ""
     )
     return (
+        "Read dispatch.skill_path and the dispatched instruction/reference files before performing this node; "
+        "follow the skill's conditional reference requirements. For review nodes, record actual skill/reference reads in nearby_contract_owners. "
+        "Routing selection and captured skill digests do not attest that instructions were read. "
         f"Publish the canonical {contract} payload using field names from {schema_text}. "
         "Every field shown in payload_schema.required_shape is required whenever its parent object is present. "
         "Do not author fingerprints, evidence IDs, artifact IDs, or digests. Copy supplied evidence/finding IDs only into schema-defined reference fields. "
@@ -3711,15 +3715,30 @@ def _approved_worker_payload_write(
     return artifact_write_review
 
 
-def _worker_payload_receipt(contract_document: dict[str, Any], payload_bytes: bytes, artifact_write_review: dict[str, Any]) -> dict[str, Any]:
+def _persist_worker_write_review(artifact_write_review: dict[str, Any]) -> dict[str, Any]:
+    """Keep complete write evidence in an immutable, digest-addressed sibling."""
+    content = (canonical_json(artifact_write_review) + "\n").encode()
+    digest = digest_bytes(content)
+    target = Path(artifact_write_review["worker_payload_path"])
+    path = target.with_name(f"write-review.{digest.removeprefix('sha256:')}.json")
+    _write_bytes_atomically_once(path, content, mode=0o400)
+    return {"path": str(path), "digest": digest, "byte_count": len(content)}
+
+
+def _worker_payload_receipt(
+    contract_document: dict[str, Any], payload_bytes: bytes, artifact_write_review: dict[str, Any], review_reference: dict[str, Any]
+) -> dict[str, Any]:
     return {
         "node_id": _required_text(contract_document, "node_id"),
         "result_contract": _required_text(contract_document, "result_contract"),
         "schema_version": 1,
+        "status": "published",
+        "approval_identity": artifact_write_review["approval_identity"],
         "worker_payload_byte_count": len(payload_bytes),
         "worker_payload_digest": digest_bytes(payload_bytes),
         "worker_payload_path": str(Path(_required_text(contract_document, "worker_payload_path")).resolve()),
         "artifact_write_review": artifact_write_review,
+        "artifact_write_review_reference": review_reference,
     }
 
 
@@ -3731,7 +3750,9 @@ def persist_worker_payload_bytes(contract_document: dict[str, Any], payload_byte
         msg = f"worker payload target directory does not exist: {target_path.parent}"
         raise ValueError(msg)
     artifact_write_review = _approved_worker_payload_write(contract_document, payload_bytes, approval_identity, candidate_is_write_target=False)
+    review_reference = None
     try:
+        review_reference = _persist_worker_write_review(artifact_write_review)
         descriptor, temporary_name = tempfile.mkstemp(prefix=f".{target_path.name}.", suffix=".tmp", dir=target_path.parent)
         temporary_path = Path(temporary_name)
         try:
@@ -3748,8 +3769,8 @@ def persist_worker_payload_bytes(contract_document: dict[str, Any], payload_byte
             temporary_path.unlink(missing_ok=True)
     except OSError as error:
         msg = f"worker payload artifact publication failed: {error}"
-        raise WorkerPayloadWriteError(msg, artifact_write_review) from error
-    return _worker_payload_receipt(contract_document, payload_bytes, artifact_write_review)
+        raise WorkerPayloadWriteError(msg, artifact_write_review, review_reference) from error
+    return _worker_payload_receipt(contract_document, payload_bytes, artifact_write_review, review_reference)
 
 
 def persist_worker_payload(contract_document: dict[str, Any], candidate_path: Path, *, approval_identity: str | None = None) -> dict[str, Any]:
@@ -3775,15 +3796,17 @@ def persist_worker_payload(contract_document: dict[str, Any], candidate_path: Pa
         artifact_write_review = _approved_worker_payload_write(contract_document, payload_bytes, approval_identity)
         stream.flush()
         os.fsync(stream.fileno())
+    review_reference = None
     try:
+        review_reference = _persist_worker_write_review(artifact_write_review)
         candidate.replace(target_path)
     except OSError as error:
         msg = f"worker payload artifact publication failed: {error}"
-        raise WorkerPayloadWriteError(msg, artifact_write_review) from error
+        raise WorkerPayloadWriteError(msg, artifact_write_review, review_reference) from error
     if target_path.read_bytes() != payload_bytes:
         msg = f"atomically published worker payload bytes differ from the validated candidate: {target_path}"
         raise ValueError(msg)
-    return _worker_payload_receipt(contract_document, payload_bytes, artifact_write_review)
+    return _worker_payload_receipt(contract_document, payload_bytes, artifact_write_review, review_reference)
 
 
 def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
@@ -7271,10 +7294,29 @@ def publish_worker_payload_bytes(document: dict[str, Any], payload_bytes: bytes,
     return persist_worker_payload_bytes(document, payload_bytes, approval_identity=approval_identity or review["approval_identity"])
 
 
+def _worker_payload_cli_output(receipt: dict[str, Any], *, full_output: bool) -> dict[str, Any]:
+    """Leave path inventories on disk unless the caller requests full output."""
+    fields = (
+        "schema_version",
+        "status",
+        "error",
+        "message",
+        "node_id",
+        "result_contract",
+        "worker_payload_path",
+        "worker_payload_digest",
+        "worker_payload_byte_count",
+        "approval_identity",
+        "artifact_write_review_reference",
+    )
+    return receipt if full_output else {key: receipt[key] for key in fields if key in receipt}
+
+
 def _run_worker_payload_operation(document: dict[str, Any], args: argparse.Namespace) -> int:
     if args.operation == "publish-worker-payload":
         payload_bytes = sys.stdin.buffer.read()
-        print(canonical_json(publish_worker_payload_bytes(document, payload_bytes, approval_identity=args.approval_identity)))
+        receipt = publish_worker_payload_bytes(document, payload_bytes, approval_identity=args.approval_identity)
+        print(canonical_json(_worker_payload_cli_output(receipt, full_output=args.full_output)))
         return 0
     if args.operation == "review-worker-payload-write":
         payload_bytes = sys.stdin.buffer.read()
@@ -7285,9 +7327,11 @@ def _run_worker_payload_operation(document: dict[str, Any], args: argparse.Names
             msg = "persist-worker-payload --payload-stdin requires the artifact-write review approval identity"
             raise ValueError(msg)
         payload_bytes = sys.stdin.buffer.read()
-        print(canonical_json(persist_worker_payload_bytes(document, payload_bytes, approval_identity=args.approval_identity)))
+        receipt = persist_worker_payload_bytes(document, payload_bytes, approval_identity=args.approval_identity)
+        print(canonical_json(_worker_payload_cli_output(receipt, full_output=args.full_output)))
         return 0
-    print(canonical_json(persist_worker_payload(document, args.payload, approval_identity=args.approval_identity)))
+    receipt = persist_worker_payload(document, args.payload, approval_identity=args.approval_identity)
+    print(canonical_json(_worker_payload_cli_output(receipt, full_output=args.full_output)))
     return 0
 
 
@@ -7380,8 +7424,21 @@ def main(argv: list[str] | None = None) -> int:
         return _run_operation(operation_document, args)
     except (ExecutableNotFoundError, OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError, subprocess.SubprocessError) as error:
         if isinstance(error, WorkerPayloadWriteError):
-            output = {"artifact_write_review": error.artifact_write_review, "error": "artifact-write-blocked", "message": str(error)}
-            print(canonical_json(output), file=sys.stderr)
+            review = error.artifact_write_review
+            output = {
+                "schema_version": 1,
+                "status": "blocked",
+                "error": "artifact-write-blocked",
+                "message": str(error),
+                "node_id": review["node_id"],
+                "worker_payload_path": review["worker_payload_path"],
+                "worker_payload_digest": review["payload_digest"],
+                "worker_payload_byte_count": review["payload_byte_count"],
+                "approval_identity": review["approval_identity"],
+                "artifact_write_review_reference": error.review_reference,
+                "artifact_write_review": review,
+            }
+            print(canonical_json(_worker_payload_cli_output(output, full_output=args.full_output)), file=sys.stderr)
         elif isinstance(error, SchemaValidationError):
             attempt = document.get("handoff_attempt", 1) if isinstance(document, dict) else 1
             retry_allowed = isinstance(attempt, int) and not isinstance(attempt, bool) and attempt == 1
