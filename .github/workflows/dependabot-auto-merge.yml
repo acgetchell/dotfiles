@@ -2,7 +2,6 @@ name: Dependabot approval and auto-merge
 
 on:
   # Security review: .github/DEPENDABOT.md; pinned shared job, no checkout or PR execution.
-  # nosemgrep: dotfiles.github-actions.no-pull-request-target
   pull_request_target: # zizmor: ignore[dangerous-triggers]
     types:
       - opened

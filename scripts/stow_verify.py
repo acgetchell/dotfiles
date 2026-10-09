@@ -184,7 +184,7 @@ def print_report(title: str, report: Report) -> None:
 
 def default_dotfiles_dir() -> Path:
     """Return the dotfiles directory from DOTFILES_DIR or the standard location."""
-    env_value = os.environ.get("DOTFILES_DIR")
+    env_value = os.environ.get("DOTFILES_DIR", "")
     if env_value:
         return Path(env_value)
     return Path.home() / "projects" / "dotfiles"

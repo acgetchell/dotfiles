@@ -113,7 +113,7 @@ def _normalize_pathspecs(repo: Path, requested_repo: Path, requested: Sequence[s
 
 def _resolve_base(git: str, repo: Path, explicit_base: str | None) -> str:
     """Resolve an explicit base or the repository's default branch ref."""
-    if explicit_base:
+    if explicit_base is not None and explicit_base:
         if _try_git(git, repo, ("rev-parse", "--verify", f"{explicit_base}^{{commit}}")) is None:
             message = f"base ref does not resolve to a commit: {explicit_base}"
             raise RuntimeError(message)
@@ -370,7 +370,7 @@ def _scope_data(git: str, repo: Path, mode: str, base: str | None, pathspecs: Se
 
     head = _decode(_run_git(git, repo, ("rev-parse", "HEAD")))
     branch_bytes = _try_git(git, repo, ("branch", "--show-current"))
-    branch = _decode(branch_bytes) if branch_bytes else ""
+    branch = _decode(branch_bytes) if branch_bytes is not None else ""
     untracked_arguments = _with_paths(("ls-files", "--others", "--exclude-standard", "-z"), pathspecs)
     selected_untracked = _decode_zlist(_run_git(git, repo, untracked_arguments))
 

@@ -83,7 +83,7 @@ def _command_inputs(execution: dict[str, Any]) -> tuple[Path, Path | None]:
     if not directory.is_absolute():
         msg = "checker working directory must be absolute"
         raise _reject(msg)
-    return (directory / positional[0]).resolve(), (directory / cff).resolve() if cff else None
+    return (directory / positional[0]).resolve(), (directory / cff).resolve() if cff is not None and cff else None
 
 
 def _report(record: dict[str, Any], execution: dict[str, Any], path: str) -> dict[tuple[str, int], dict[str, Any]]:

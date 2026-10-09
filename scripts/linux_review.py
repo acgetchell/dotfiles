@@ -69,11 +69,11 @@ def inventory() -> dict[str, object]:
     expected = {"uv": versions["tool"]["uv"]["required-version"].removeprefix("==")}
     just = shutil.which("just")
     for name in ("just", "dprint", "rumdl"):
-        expected[name] = command_output([just, "--evaluate", f"{name}_version"]) if just else "unavailable"
+        expected[name] = command_output([just, "--evaluate", f"{name}_version"]) if just is not None else "unavailable"
     tools = {}
     for name in ("uv", "just", "dprint", "rumdl", "git", "bash", "zsh", "stow"):
         executable = shutil.which(name)
-        lines = command_output([executable, "--version"]).splitlines() if executable else []
+        lines = command_output([executable, "--version"]).splitlines() if executable is not None else []
         identity = next(iter(lines), "unavailable")
         match = re.search(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", identity)
         tools[name] = {

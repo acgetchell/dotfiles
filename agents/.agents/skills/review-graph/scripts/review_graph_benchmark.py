@@ -67,17 +67,17 @@ def benchmark_fixture(root: Path, *, scale: int = 1) -> dict[str, Any]:
                 requirement_id=name,
                 captured_paths=tuple(files),
                 source_state=(identity, identity, identity),
-                commands=(command,) if command else (),
-                working_directories=(str(root),) if command else (),
+                commands=(command,) if command is not None else (),
+                working_directories=(str(root),) if command is not None else (),
                 environment="benchmark host",
                 toolchain="fixture",
                 features=(),
-                platform="hosted matrix" if not command else "current host",
+                platform="hosted matrix" if command is None else "current host",
                 artifact_owner="repository",
                 mutation_lock="serial",
                 baseline=index == 0,
                 canonical_recipe=command,
-                planning_blocker="No hosted commit for staged bytes" if not command else None,
+                planning_blocker="No hosted commit for staged bytes" if command is None else None,
             )
         )
         for index, (name, command) in enumerate((("baseline", "just check"), ("policy", "just ci"), ("hosted", None)))
