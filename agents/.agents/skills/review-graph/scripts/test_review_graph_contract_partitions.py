@@ -185,7 +185,10 @@ def _replay_contract_repair(
     record = runtime._load_evidence_source(entry, require_normalized=True)[4]
     assert record is not None
     assert record["files_inspected"] == sorted(rechecked)
-    assert {finding["summary"] for finding in record["findings"]} == {finding["summary"] for finding in payload["findings"]}
+    assert len(record["findings"]) == len(payload["findings"])
+    for expected in payload["findings"]:
+        actual = next(finding for finding in record["findings"] if finding["summary"] == expected["summary"])
+        assert {field: actual[field] for field in expected} == expected
     reused_indices = {index for unit in decision["units"] if unit["disposition"] == "reused" for index in unit["finding_indices"]}
     view = entry["dispatch"].get("coverage_reuse")
     if view:
