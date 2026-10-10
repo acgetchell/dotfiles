@@ -202,12 +202,41 @@ Do not derive request tokens from account-wide allowance changes or byte counts.
 Each retry or fallback needs its own attempt; imported baseline measurements are
 reference data and must not be counted as new requests when replaying comparisons.
 
-The `--usage` JSON for `finish` accepts `input_tokens`, `output_tokens`,
+`finish --usage JSON_FILE` requires a UTF-8 JSON **file path**, not inline JSON.
+The file accepts `input_tokens`, `output_tokens`,
 `cached_input_tokens`, `elapsed_seconds`, `cost_usd`, `cost_basis`
 (`measured`, `estimated`, or `unavailable`), and required `measurement_source`.
-Missing numeric fields remain null. Estimated cost must identify its rate source;
+Token counts must be nonnegative integers; elapsed time and cost must be
+nonnegative finite numbers. Missing numeric fields remain null (unknown), not
+zero. `cost_basis: "unavailable"` requires null cost; `measured` or `estimated`
+requires a numeric cost. Estimated cost must identify its rate source;
 subscription allowance is not an API invoice. Batched per-question costs are not
 measured and are not allocated by this runner.
+
+For unavailable provider measurements, save this complete minimal example as
+`<proof-store>/usage.json`:
+
+```json
+{
+  "input_tokens": null,
+  "output_tokens": null,
+  "cached_input_tokens": null,
+  "elapsed_seconds": null,
+  "cost_usd": null,
+  "cost_basis": "unavailable",
+  "measurement_source": "provider usage unavailable"
+}
+```
+
+```sh
+just review-usage finish --ledger <proof-store>/usage.jsonl --id <attempt-id> \
+  --status succeeded --usage <proof-store>/usage.json
+```
+
+`just review-usage finish --help` includes the same example and field rules.
+Unreadable files, invalid JSON, and invalid fields produce distinct sanitized
+diagnostics without printing submitted values or file contents. Invalid input
+does not append a completion event.
 
 ```sh
 just review-usage report <proof-store>/usage.jsonl <experiment-case>/usage.jsonl

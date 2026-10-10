@@ -1,6 +1,16 @@
 {
   "cases": [
     {
+      "id": "support-and-fixture-portability-without-packaging-or-workflow-edits",
+      "consulted_routers": ["review-graph", "python-review-orchestrator"],
+      "paths": ["scripts/benchmark.py", "scripts/tests/test_commands.py", "tools/release.py", "tests/test_paths.py"],
+      "expected_matches": {
+        "python.build": ["scripts/benchmark.py", "scripts/tests/test_commands.py", "tools/release.py", "tests/test_paths.py"],
+        "python.support-scripts": ["scripts/benchmark.py", "scripts/tests/test_commands.py", "tools/release.py"],
+        "python.tests": ["scripts/tests/test_commands.py", "tests/test_paths.py"]
+      }
+    },
+    {
       "id": "fixture-generator-tooling-config-and-nested-diagnostic-lockfile",
       "consulted_routers": ["review-graph", "python-review-orchestrator", "rust-review-orchestrator", "docs-review-orchestrator"],
       "paths": ["tests/fixtures/generate_ess.py", "tooling/examples.toml", "benches/diagnostic_backends/Cargo.lock"],

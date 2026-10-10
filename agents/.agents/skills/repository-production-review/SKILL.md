@@ -21,6 +21,9 @@ Require:
   language-synthesis records with stable evidence and artifact IDs
 - requirement-to-node and validation-reuse mappings
 - explicit user exclusions, exact evidence reuse, and remaining blockers
+- for PRs, accepted evidence that current native CI results and failed-step
+  logs were inspected, bound to the PR head/tested source; for platform-sensitive
+  work, the supported matrix and actual specialist/reference reads
 
 Return a blocked result when an input is missing, stale, malformed, or refers to
 an unresolved applicability handoff. Never infer that omitted work passed.
@@ -40,10 +43,15 @@ an unresolved applicability handoff. Never infer that omitted work passed.
 6. Preserve platform provenance: actual native executor, focused emulation, and
    unexecuted matrix cells are distinct evidence. Never promote local or
    emulated success into a native-platform pass.
-7. When available native CI for the reviewed source state contradicts earlier
+7. Require the coordinator's
+   [platform/CI gate](../review-graph/references/platform-ci-review.md), including
+   an explicit reason when remote CI does not apply. Missing CI inspection is
+   incomplete input, not implicit success. When native CI contradicts earlier
    local or emulated evidence, keep the native failure and resulting gap visible
    until owning review and current native validation reconcile it. Do not infer
    readiness from a configured matrix or a narrower successful aggregate run.
+   A local fix without a current native result leaves that validation obligation
+   open. Preserve older failures as diagnostic history, not current proof.
 8. Require accepted independent review for a concrete change target.
 9. Classify production readiness only after all required evidence and
    fingerprints reconcile.

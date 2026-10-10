@@ -5,12 +5,15 @@ description: "Coordinate provenance-preserving mixed-surface repository reviews 
 
 # Review Graph
 
-Cover every applicable focused review. Reviewers make semantic judgments;
-scripts own catalog identity, fingerprints, digests, canonical artifacts,
-evidence envelopes, and proof reconciliation.
+Cover every applicable focused review; scripts own evidence identity and
+reconciliation.
 
 Read [the runtime contract](references/runtime-contract.md). Execute scripts;
 inspect implementations only for failures or requested changes.
+
+For PRs or platform-sensitive changes, apply
+[platform/CI gates](references/platform-ci-review.md) before routing and final
+reporting; missing skill reads or CI inspection block completion.
 
 ## Profiles
 
@@ -147,13 +150,12 @@ Retain both Git captures and the user's index.
 Run `finalize-proof` with the signed dispatch set and journal after every
 applicable review and validation requirement has accepted non-stale evidence.
 It derives the mappings, manifest, and `RepositoryReviewProof`; report complete
-only when its verifier returns `complete`. Report repository readiness from
+only when its verifier returns `complete` and the platform/CI gate is reconciled.
+Proof completeness does not establish CI inspection. Report repository readiness from
 typed synthesis separately from proof completeness and validation success.
 
-Report findings, changes, validation, blockers, selected skills, proof status,
-final repository state, and artifact-manifest location compactly. Keep exhaustive
-lifecycle, routing, evidence, and resume views in the proof store; show them only
-when requested or needed to explain incompleteness.
+Report findings, changes, validation, blockers, skills, proof status, repository
+state, and manifest location. Keep exhaustive evidence in the proof store.
 
 Report stage costs as measured, estimated, or unavailable using
 [graph accounting](references/routing-experiment.md#account-for-the-whole-graph).

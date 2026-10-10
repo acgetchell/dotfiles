@@ -3,6 +3,17 @@
 Read this reference when support-script behavior depends on byte-sensitive or
 platform-dependent subprocess transport.
 
+## Shell And Filesystem Boundary
+
+Identify the shell actually used by Just, CI, and subprocess fixtures. On
+Windows, Git Bash/MSYS may emit POSIX-style paths while native Python uses
+drive/UNC paths. Trace cwd, argument quoting, environment variables, executable
+lookup, and returned paths across that boundary. Do not equate `$PWD` with
+`str(Path.cwd())` or assume a POSIX shebang proves native executable discovery.
+For directory identity, compare filesystem identity after obtaining a path
+native Python can resolve. For serialized paths, define and test the required
+representation. Keep native Windows evidence separate from POSIX fallback runs.
+
 ## Transport Boundary
 
 Trace the complete transport: producer bytes, stdout capture, intermediate

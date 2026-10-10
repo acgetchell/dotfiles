@@ -8,6 +8,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import asdict, replace
@@ -36,6 +37,7 @@ from review_graph_plan import (
 )
 from review_graph_runtime import (
     JournalEventRequest,
+    WorkerPayloadWriteError,
     _argument_parser,
     _canonical_worker_payload,
     _expected_evidence_id,
@@ -3337,16 +3339,25 @@ def test_stdin_publication_reports_temporary_file_creation_failure(tmp_path: Pat
     approval = review_worker_payload_write(contract, payload_bytes)
     target = Path(entry["worker_payload_path"])
     before = set(target.parent.iterdir())
+    mkstemp = tempfile.mkstemp
 
-    def fail_create(*_args: object, **_kwargs: object) -> tuple[int, str]:
-        msg = "temporary storage unavailable"
-        raise OSError(msg)
+    def fail_create(*, prefix: str, suffix: str, **kwargs: object) -> tuple[int, str]:
+        if prefix == f".{target.name}.":
+            msg = "temporary storage unavailable"
+            raise OSError(msg)
+        directory = kwargs["dir"]
+        assert isinstance(directory, Path)
+        return mkstemp(prefix=prefix, suffix=suffix, dir=directory)
 
     monkeypatch.setattr("review_graph_runtime.tempfile.mkstemp", fail_create)
-    with pytest.raises(OSError, match="worker payload artifact publication failed: temporary storage unavailable"):
+    with pytest.raises(WorkerPayloadWriteError, match="worker payload artifact publication failed: temporary storage unavailable") as failure:
         persist_worker_payload_bytes(contract, payload_bytes, approval_identity=approval["approval_identity"])
     assert not target.exists()
-    assert set(target.parent.iterdir()) == before
+    reference = failure.value.review_reference
+    assert reference is not None
+    review_path = Path(reference["path"])
+    assert json.loads(review_path.read_bytes()) == approval
+    assert set(target.parent.iterdir()) == before | {review_path}
 
 
 @pytest.mark.parametrize("changed_field", ["mode", "owned_paths", "node_id", "worker_payload_path", "schema_version", "result_contract"])
@@ -3439,7 +3450,7 @@ def test_nearby_audit_context_persists_compiles_and_journals_with_stable_approva
 
     diagnostic = json.loads(capsys.readouterr().err)
     assert diagnostic["error"] == "artifact-write-blocked"
-    assert diagnostic["artifact_write_review"] == write_review
+    assert json.loads(Path(diagnostic["artifact_write_review_reference"]["path"]).read_bytes()) == write_review
     assert not Path(entry["worker_payload_path"]).exists()
 
     changed_bytes = (json.dumps({**payload, "limitations": ["changed after approval"]}, sort_keys=True) + "\n").encode()
@@ -3453,7 +3464,7 @@ def test_nearby_audit_context_persists_compiles_and_journals_with_stable_approva
         patch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(payload_bytes), encoding="utf-8"))
         assert main([*persistence_command, "--approval-identity", write_review["approval_identity"]]) == 0
     receipt = json.loads(capsys.readouterr().out)
-    assert receipt["artifact_write_review"] == write_review
+    assert json.loads(Path(receipt["artifact_write_review_reference"]["path"]).read_bytes()) == write_review
     assert Path(receipt["worker_payload_path"]).read_bytes() == payload_bytes
 
     lifecycle_path, dispatch_path, capture_path = _compile_cli_paths(tmp_path, document, dispatches)
