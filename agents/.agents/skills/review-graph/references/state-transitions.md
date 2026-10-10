@@ -126,6 +126,9 @@ prevent reuse, never inferred informational exemptions. See the
 [audit context fields](audit-context.md).
 
 For broad audits, optionally partition `owned_paths` into `coverage_units`.
+Choose language/activity and affected-contract boundaries using the conditional
+[partitioning guidance](coverage-partitioning.md), including its evaluation of
+broad documentation dependencies and section-level proofs.
 Each unit declares a local `unit_id`, `owned_paths`, concrete `dependency_paths`,
 `dependency_uncertainty` (empty only when dependencies are understood), and
 one-based `finding_indices`. Partition every owned path and finding exactly
@@ -134,7 +137,10 @@ unit's dependencies when their contract affects its judgments. Do not infer
 independence just because implementation bytes are unchanged.
 
 `advance-after-mutation` reports `coverage_reuse_decisions` with reason codes for
-each unit, including uncertain dependencies and failed input proofs. Ineligible
+each unit, including uncertain dependencies and failed input proofs. Proven
+partition decisions also report `input_changes` for changed owned and dependency
+paths, including type/mode changes and missing files. These explanations do not
+change the compiler-bound proof or make empty change lists a reuse exemption. Ineligible
 audits also report the applicable category; an audit without a partition reports
 `no-coverage-partition` with an empty unit list.
 Its plan-bound `coverage_reuse` dispatch is a verified execution view: unit paths,

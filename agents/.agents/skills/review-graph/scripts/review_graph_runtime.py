@@ -32,7 +32,14 @@ from review_graph_commit import (
     verify_live_commit,
     verify_native_results,
 )
-from review_graph_coverage import combined_findings, coverage_decisions, coverage_execution_view, reused_paths, validate_coverage_units
+from review_graph_coverage import (
+    combined_findings,
+    coverage_decision_report,
+    coverage_decisions,
+    coverage_execution_view,
+    reused_paths,
+    validate_coverage_units,
+)
 from review_graph_doi import captured_doi_inputs, captured_software_inputs, inspect_canonical_recheck
 from review_graph_executor import executor_permissions, remedied_features
 from review_graph_git import audit_git_context, discovery_reconciliation, intervening_metadata_blockers, metadata_audit_blockers, validate_git_dependencies
@@ -3530,7 +3537,8 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
         "reconcile original validation needs/handoffs; do not claim fresh reads of reused paths. Its verified execution view contains unit dependencies "
         "and original finding IDs attributed to evidence_id; proof_reference provides lazy access to the full proof when needed. "
         "For broad fresh audits, use optional coverage_units when "
-        "you can partition contracts with explicit dependencies and uncertainty: partition every owned path and every finding exactly once "
+        "you can partition by language/activity and affected contract with explicit whole-file dependencies and uncertainty: "
+        "partition every owned path and every finding exactly once "
         "using one-based finding_indices, give each unit a unique unit_id, and account for every nearby_contract_owners path in dependency_paths. "
         'See payload_schema.optional_shapes.coverage_units; dependency_uncertainty="" means no uncertainty, and [] means no findings/dependencies. '
         "Source-discovery judgments must come from the captured "
@@ -4753,25 +4761,7 @@ def _plan_delta_audits(  # noqa: C901 - keep source and validation eligibility g
                 )
                 continue
             units = coverage_decisions(record, audit_origin, target, inputs, transition)
-            reviews.append(
-                {
-                    "node_id": node.node_id,
-                    "evidence_id": evidence.evidence_id,
-                    "units": [
-                        {
-                            **unit,
-                            "reason_code": (
-                                "dependency-uncertainty"
-                                if unit["dependency_uncertainty"]
-                                else "verified"
-                                if unit["disposition"] == "reused"
-                                else "input-proof-failed"
-                            ),
-                        }
-                        for unit in units
-                    ],
-                }
-            )
+            reviews.append({"node_id": node.node_id, "evidence_id": evidence.evidence_id, "units": coverage_decision_report(units, audit_origin, target)})
             if not any(unit["disposition"] == "reused" for unit in units):
                 continue
             context = {

@@ -85,6 +85,24 @@ def coverage_decisions(
     return decisions
 
 
+def coverage_decision_report(units: list[dict[str, Any]], origin: ReviewSourceSnapshot, target: ReviewSourceSnapshot) -> list[dict[str, Any]]:
+    """Explain changed whole-file inputs without changing immutable proof decisions."""
+    before, after = dict(origin.repository_path_fingerprints), dict(target.repository_path_fingerprints)
+    changed = {path for path in before.keys() | after.keys() if before.get(path) != after.get(path)}
+    return [
+        {
+            **unit,
+            "reason_code": "dependency-uncertainty"
+            if unit["dependency_uncertainty"]
+            else "verified"
+            if unit["disposition"] == "reused"
+            else "input-proof-failed",
+            "input_changes": {role: sorted(changed.intersection(unit[role])) for role in ("owned_paths", "dependency_paths")},
+        }
+        for unit in units
+    ]
+
+
 def reused_paths(context: dict[str, Any] | None) -> tuple[str, ...]:
     """Return only paths proved reusable by a compiler-bound delta context."""
     return tuple(cast("str", path) for unit in (context or {}).get("units", []) if unit["disposition"] == "reused" for path in unit["owned_paths"])

@@ -1,5 +1,71 @@
 # Dispatch Overhead Measurement
 
+## Capability Contract Partitions (#147)
+
+The fixed fixture owns three implementation files: notebook execution,
+scientific calculations, and operational diagnostics. The first two have
+independent capability contract files; `docs/api.md` links to those contracts
+and specifies operational diagnostics. Both strategies use identical captured
+source bytes, instruction files, manifests, and routed ownership.
+
+Reproduce the paired measurement:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run --locked pytest -q -s \
+  agents/.agents/skills/review-graph/scripts/test_review_graph_contract_partitions.py \
+  -k broad_vs_capability
+```
+
+The broad strategy declares the API document as a dependency of every unit.
+The capability strategy declares only the independently applicable contracts.
+An operational-doc repair rechecks three implementation paths under the broad
+strategy and one under the capability strategy. Each materializes one capability
+audit, publishes once, and compiles once; no model workers launch. The runtime
+verifies reused findings against original immutable evidence and retains all
+three seeded findings, including historical rechecked observations.
+
+The 2026-10-10 local paired run measured:
+
+| Scripted measurement | Broad dependency | Capability dependencies |
+| --- | ---: | ---: |
+| Rechecked implementation paths | 3 | 1 |
+| Reused implementation paths | 0 | 2 |
+| Materialized capability audits | 1 | 1 |
+| Worker-input bytes | 17,784 | 20,729 |
+| External coverage-proof bytes | 0 | 6,674 |
+| Publication / compilation calls | 1 / 1 | 1 / 1 |
+
+The sample ran on macOS arm64 with Python 3.14.7, pytest 9.1.1, and
+`research-repo-tools` 0.1.8. Its report identity is
+`sha256:5b2b862161cdf7677012a144d667348a395031d5812b0c43318361d3b74242bb`;
+the measured graph-script identity is
+`sha256:1afd677a24aca51936eab2e330b58b2dc9fe6f702c8e2a0d2d38627bfcbe159b`.
+The exact [retained JSON sample](measurements/capability-contract-partitions-2026-10-10.json)
+contains no private filesystem paths and remains the historical source for this table.
+The printed report retains the UTC measurement time, origin/target fixture
+path-map identities, graph script/schema identities, routing catalog, audit
+skill/references, runtime versions, and project/lockfile identities. Script and
+schema identities hash canonical sorted filename-to-content-digest maps of the
+respective directories, including the fixture and its helpers. `report_digest`
+hashes the complete canonical report before that field is added. Save the JSON
+report with each later sample to keep its measurements attributable.
+
+The printed report measures worker-input and external-proof bytes separately.
+Proof transport can increase worker-input bytes even when source inspection
+shrinks. Temporary path lengths affect the exact sizes. Publication/compilation
+counts and materialized dispatches are scripted protocol observations, not
+measured model launches, latency, or semantic recall. Provider tokens, cost,
+and model review time remain `null`; this comparison establishes no provider
+cost saving.
+
+Separate regressions edit each capability contract, change the shared manifest
+or applicable instructions, delete a contract, change its executable mode or
+replace it with a symlink retaining identical read bytes, and declare uncertain dependency
+ownership. Each checks the required rechecks and finding provenance through
+native publication, compilation, and evidence verification. The current proof
+still binds complete file identities; see the
+[section-level evaluation](coverage-partitioning.md#section-level-dependencies).
+
 ## Partial Recheck Proof Transport (#128)
 
 The fixed regression fixture owns `pyproject.toml` and
@@ -53,6 +119,11 @@ just review-workflow-benchmark
 # Compare only the current uncommitted runtime against the checked-in runtime:
 just review-workflow-benchmark HEAD
 ```
+
+The Just recipe defaults to `eeead7c646a45ca8227bc7fc057e6f2e1bdf52bf`,
+the earlier publication comparison. The direct Python entrypoint defaults to
+`da0e045d420a890d53a1e0993a0ecdfee5057c72`, the #87 comparison. Pass the
+chosen revision explicitly when comparing results from these entrypoints.
 
 The command prints an external `report.json` path. It reads the selected trusted
 Git revision with `git show`; it does not change Git state or execute repository
