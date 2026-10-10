@@ -50,6 +50,7 @@
       "additionalProperties": false,
       "required": ["artifact_store", "plan", "source_state", "node_id", "failure_kind", "checks_started", "reason", "remedy", "environment", "permission_change"],
       "properties": {
+        "external_metadata_transitions": {"type": "array", "items": {"type": "object"}},
         "artifact_store": {"type": "string", "minLength": 1},
         "plan": {"type": "object"},
         "source_state": {"$ref": "#/$defs/sourceState"},
@@ -68,6 +69,7 @@
       "additionalProperties": false,
       "required": ["artifact_store", "plan", "source_state", "node_id", "failure_kind", "checks_started", "reason", "remedy", "environment", "permission_change", "executor_permissions", "failure_evidence"],
       "properties": {
+        "external_metadata_transitions": {"type": "array", "items": {"type": "object"}},
         "artifact_store": {"type": "string", "minLength": 1},
         "plan": {"type": "object"},
         "source_state": {"$ref": "#/$defs/sourceState"},
@@ -152,6 +154,7 @@
         "authorization_before": {"enum": ["review-only", "review-and-fix"]},
         "changed_paths": {"$ref": "#/$defs/stringArray"},
         "new_capture": {"type": "object"},
+        "post_repair_capture": {"type": "object"},
         "plan": {"type": "object"},
         "planning_template": {"type": "object"},
         "previous_capture": {"type": "object"},
@@ -271,6 +274,7 @@
     "fallback-to-coordinator": {
       "additionalProperties": false,
       "properties": {
+        "external_metadata_transitions": {"type": "array", "items": {"type": "object"}},
         "artifact_store": {"minLength": 1, "type": "string"},
         "node_id": {"minLength": 1, "type": "string"},
         "plan": {"type": "object"},
@@ -412,6 +416,7 @@
     "reconcile-validation-requirements": {
       "additionalProperties": false,
       "properties": {
+        "external_metadata_transitions": {"type": "array", "items": {"type": "object"}},
         "plan": {"type": "object"},
         "source_state": {"$ref": "#/$defs/sourceState"},
         "artifact_store": {"minLength": 1, "type": "string"},

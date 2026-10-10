@@ -21,7 +21,15 @@ from review_graph_coverage import coverage_reference
 from review_graph_executor import executor_permissions
 from review_graph_integrity import digest_bytes, digest_json
 from review_graph_provenance import review_scope_body
-from review_graph_reuse import AuditInputIdentity, AuditReuseTransition, ExternalMetadataTransition, ReviewSourceSnapshot, metadata_states, verify_reuse_inputs
+from review_graph_reuse import (
+    AuditInputIdentity,
+    AuditReuseTransition,
+    ExternalMetadataTransition,
+    ReviewSourceSnapshot,
+    metadata_states,
+    source_snapshot,
+    verify_reuse_inputs,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -5483,8 +5491,26 @@ def _capture_pathspecs_from_document(document: Mapping[str, Any]) -> tuple[str, 
     return normalized
 
 
+def _verify_repair_metadata_recapture(transition: ExternalMetadataTransition, expected_manifest: dict[str, Any], manifest: dict[str, Any]) -> None:
+    """Bind the intermediate repair to a real, independently recaptured staging state."""
+    transition.verify()
+    before = asdict(transition.before)
+    before["captured_scope_paths"] = list(before["captured_scope_paths"])
+    before["requested_paths"] = list(before["requested_paths"])
+    if any(before.get(field) != expected for field, expected in expected_manifest.items()):
+        msg = "repair planning metadata transition does not start at the supplied repair capture"
+        raise ValueError(msg)
+    if source_snapshot(manifest) != transition.after:
+        msg = "post-repair metadata capture does not match independent recapture"
+        raise ValueError(msg)
+
+
 def _verified_captured_path_line_bounds(
-    document: Mapping[str, Any], captured_paths: Sequence[str], repository_root: Path | None, declared_bounds: Sequence[tuple[str, int]]
+    document: Mapping[str, Any],
+    captured_paths: Sequence[str],
+    repository_root: Path | None,
+    declared_bounds: Sequence[tuple[str, int]],
+    observed_metadata_transition: ExternalMetadataTransition | None = None,
 ) -> tuple[tuple[str, int], ...]:
     """Recapture exact source state and reject caller-authored line-bound claims."""
     if repository_root is None:
@@ -5520,6 +5546,11 @@ def _verified_captured_path_line_bounds(
         "requested_paths": list(requested_paths),
         "scope_fingerprint": document.get("scope_fingerprint"),
     }
+    if observed_metadata_transition is not None:
+        _verify_repair_metadata_recapture(observed_metadata_transition, expected_manifest, manifest)
+        # The verified transition binds identical bytes, line bounds and boundaries.
+        # Keep the actual pre-staging identity in this intermediate repair plan.
+        expected_manifest["repository_state_fingerprint"] = observed_metadata_transition.after.repository_state_fingerprint
     mismatches = tuple(field for field, expected in expected_manifest.items() if manifest.get(field) != expected)
     if mismatches:
         msg = "captured source manifest does not match independent recapture: " + ", ".join(mismatches)
@@ -5747,6 +5778,7 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0915
     catalog_path: Path = DEFAULT_ROUTING_CATALOG,
     skill_roots: Sequence[Path] = (DEFAULT_SKILL_ROOT,),
     repository_root: Path | None = None,
+    observed_metadata_transition: ExternalMetadataTransition | None = None,
 ) -> GraphPlan:
     """Build a graph plan from the exhaustive fixture/CLI JSON schema."""
     execution_profile = document.get("execution_profile", "grouped")
@@ -5765,6 +5797,13 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0915
         _normalized_repository_paths(_tuple_field(document, "captured_paths"), label="captured_paths") if document.get("captured_paths") is not None else None
     )
     captured_path_line_bounds = _captured_path_line_bounds_from_document(document, captured_paths)
+    if observed_metadata_transition is not None:
+        if captured_paths is None:
+            msg = "repair metadata composition requires captured_paths"
+            raise ValueError(msg)
+        captured_path_line_bounds = _verified_captured_path_line_bounds(
+            document, captured_paths, repository_root, captured_path_line_bounds, observed_metadata_transition
+        )
     routing_assessment: RoutingLedgerAssessment | None = None
     routing_catalog: tuple[RoutingCatalogEntry, ...] = ()
     routing_decisions: tuple[RoutingDecision, ...] = ()
@@ -5814,7 +5853,8 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0915
             if captured_paths is None:
                 msg = "independent-review line-bound verification requires captured_paths"
                 raise ValueError(msg)
-            captured_path_line_bounds = _verified_captured_path_line_bounds(document, captured_paths, repository_root, captured_path_line_bounds)
+            if observed_metadata_transition is None:
+                captured_path_line_bounds = _verified_captured_path_line_bounds(document, captured_paths, repository_root, captured_path_line_bounds)
         if change_target is not None:
             line_bounds = dict(captured_path_line_bounds)
             routing_assessment = replace(

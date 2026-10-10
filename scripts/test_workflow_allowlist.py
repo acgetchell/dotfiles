@@ -1,6 +1,8 @@
-"""Regressions for the Actions policy shared by local checks and repository settings."""
+"""Consumer contracts for the published checker and dotfiles' Actions policy."""
 
 import json
+import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -8,119 +10,101 @@ from pathlib import Path
 import pytest
 import yaml
 
-from check_workflow_allowlist import allowed_repositories, check_workflow, workflow_references
-
 REPOSITORY = Path(__file__).resolve().parents[1]
 POLICY = REPOSITORY / ".github/settings/actions-selected.json"
+WORKFLOWS = REPOSITORY / ".github/workflows"
 SHA = "1111111111111111111111111111111111111111"
-HEADER = "name: Test\non: workflow_dispatch\njobs:\n  check:\n"
 
 
-@pytest.mark.parametrize(
-    "body",
-    [
-        "    runs-on: ubuntu-latest\n    steps:\n      - name: Action\n        uses: {reference}\n",
-        "    runs-on: ubuntu-latest\n    steps:\n      - uses: {reference}\n",
-        "    runs-on: ubuntu-latest\n    steps:\n      - uses: '{reference}'\n",
-        '    runs-on: ubuntu-latest\n    steps:\n      - "uses": "{reference}"\n',
-        "    runs-on: ubuntu-latest\n    steps:\n      - uses: >-\n          {reference}\n",
-        "    uses: {reference}\n",
-        "    'uses': '{reference}'\n",
-        "    uses: >-\n      {reference}\n",
-    ],
-)
-def test_supported_yaml_forms_check_the_same_reference(tmp_path: Path, body: str) -> None:
-    workflow = tmp_path / "workflow.yml"
-    allowed = allowed_repositories(POLICY)
-    approved = f"acgetchell/research-repo-tools/.github/workflows/dependabot-approve.yml@{SHA}"
-    workflow.write_text(HEADER + body.format(reference=approved))
-    assert check_workflow(workflow, allowed) == []
-    workflow.write_text(HEADER + body.format(reference=approved.replace("acgetchell/", "unapproved/")))
-    findings = check_workflow(workflow, allowed)
-    assert len(findings) == 1
-    assert "unapproved/research-repo-tools/.github/workflows/dependabot-approve.yml" in findings[0]
-
-
-def test_actual_caller_mutation_is_rejected(tmp_path: Path) -> None:
-    caller = REPOSITORY / ".github/workflows/dependabot-auto-merge.yml"
-    allowed = allowed_repositories(POLICY)
-    assert check_workflow(caller, allowed) == []
-    changed = tmp_path / caller.name
-    changed.write_text(caller.read_text().replace("acgetchell/research-repo-tools", "unapproved/example"))
-    assert len(check_workflow(changed, allowed)) == 1
-
-
-def test_settings_file_is_the_allowlist_authority(tmp_path: Path) -> None:
-    workflow = tmp_path / "workflow.yml"
-    workflow.write_text(HEADER + f"    uses: dependabot/fetch-metadata@{SHA}\n")
-    assert check_workflow(workflow, allowed_repositories(POLICY)) == []
-    policy = json.loads(POLICY.read_text())
-    policy["patterns_allowed"].remove("dependabot/fetch-metadata@*")
-    changed = tmp_path / "policy.json"
-    changed.write_text(json.dumps(policy))
-    assert len(check_workflow(workflow, allowed_repositories(changed))) == 1
-
-
-def test_local_and_container_actions_and_nonreference_uses_values_are_outside_policy(tmp_path: Path) -> None:
-    workflow = tmp_path / "workflow.yml"
-    workflow.write_text(
-        HEADER + "    runs-on: ubuntu-latest\n    steps:\n"
-        "      - uses: ./.github/actions/local\n      - uses: docker://ubuntu:24.04\n"
-        "      - run: echo hello\n        env:\n          uses: an ordinary variable\n"
+def run_allowlist(*workflows: Path, policy: Path = POLICY) -> subprocess.CompletedProcess[str]:
+    """Exercise the installed distribution through its isolated public CLI."""
+    return subprocess.run(  # noqa: S603 - fixed installed module and explicit consumer inputs.
+        [sys.executable, "-I", "-m", "research_repo_tools", "--root", str(REPOSITORY), "actions", "allowlist", "--policy", str(policy), *map(str, workflows)],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
-    assert check_workflow(workflow, allowed_repositories(POLICY)) == []
 
 
-def test_yaml_aliases_are_checked_at_each_use() -> None:
-    source = HEADER + f"    runs-on: ubuntu-latest\n    steps:\n      - &step\n        uses: unapproved/example@{SHA}\n      - *step\n"
-    assert len(workflow_references(source)) == 2
-
-
-@pytest.mark.parametrize(
-    "source",
-    [
-        "jobs: {}\njobs: {}\n",
-        "jobs: []\n",
-        HEADER + "    steps: wrong\n",
-        HEADER + "    uses: [wrong]\n",
-        HEADER + "    uses: allowed/action@sha\n    uses: other/action@sha\n",
-        HEADER + "    <<: {uses: hidden/action@sha}\n",
-        HEADER + "    uses: [unterminated\n",
-    ],
-)
-def test_invalid_workflows_fail_closed(source: str) -> None:
-    with pytest.raises((ValueError, yaml.YAMLError)):
-        workflow_references(source)
+def test_committed_workflows_pass_without_mutation() -> None:
+    paths = [POLICY, *WORKFLOWS.glob("*.yml"), *WORKFLOWS.glob("*.yaml")]
+    before = {path: path.read_bytes() for path in paths}
+    result = run_allowlist(WORKFLOWS)
+    assert result.returncode == 0, result.stderr
+    assert "External Actions allowlist passed" in result.stdout
+    assert before == {path: path.read_bytes() for path in paths}
 
 
 @pytest.mark.parametrize(
-    "change",
-    [
-        {"github_owned_allowed": True},
-        {"verified_allowed": True},
-        {"patterns_allowed": []},
-        {"patterns_allowed": ["actions/*"]},
-        {"patterns_allowed": ["actions/checkout@main"]},
-        {"patterns_allowed": [False]},
-    ],
+    ("name", "approved"),
+    [("ci.yml", "actions/checkout"), ("dependabot-auto-merge.yml", "acgetchell/research-repo-tools/.github/workflows/dependabot-approve.yml")],
 )
-def test_unsupported_policy_cannot_silently_expand_access(tmp_path: Path, change: dict[str, object]) -> None:
-    policy = json.loads(POLICY.read_text()) | change
-    path = tmp_path / "policy.json"
-    path.write_text(json.dumps(policy))
-    with pytest.raises(ValueError, match="Actions policy"):
-        allowed_repositories(path)
+def test_actual_workflow_mutations_fail_with_source_locations(tmp_path: Path, name: str, approved: str) -> None:
+    source = (WORKFLOWS / name).read_text()
+    assert approved + "@" in source
+    workflow = tmp_path / name
+    changed = source.replace(approved + "@", "unapproved/example@", 1)
+    workflow.write_text(changed)
+    expected_line = next(number for number, line in enumerate(changed.splitlines(), start=1) if "unapproved/example@" in line)
 
+    result = run_allowlist(workflow)
 
-def test_cli_reports_findings_and_parse_failures(tmp_path: Path) -> None:
-    workflow = tmp_path / "workflow.yml"
-    command = [sys.executable, str(REPOSITORY / "scripts/check_workflow_allowlist.py"), "--policy", str(POLICY), str(workflow)]
-    workflow.write_text(HEADER + f"    uses: unapproved/example/.github/workflows/test.yml@{SHA}\n")
-    result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=30)  # noqa: S603
     assert result.returncode == 1
-    assert f"{workflow}:5:" in result.stderr
-    assert result.stdout == ""
-    workflow.write_text("jobs: [unterminated")
-    result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=30)  # noqa: S603
-    assert result.returncode == 2
-    assert "workflow allowlist:" in result.stderr
+    assert f"{workflow}:{expected_line}:" in result.stderr
+    assert "unapproved/example@*" in result.stderr
+    assert "passed" not in result.stdout
+    assert workflow.read_text() == changed
+
+
+@pytest.mark.parametrize("reference", ["dependabot/fetch-metadata", "acgetchell/research-repo-tools/.github/workflows/dependabot-approve.yml"])
+def test_committed_policy_is_authoritative_for_approved_integrations(tmp_path: Path, reference: str) -> None:
+    workflow = tmp_path / "workflow.yml"
+    if reference == "dependabot/fetch-metadata":
+        workflow.write_text(f"jobs:\n  metadata:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: {reference}@{SHA}\n")
+    else:
+        workflow.write_bytes((WORKFLOWS / "dependabot-auto-merge.yml").read_bytes())
+    assert run_allowlist(workflow).returncode == 0
+    policy = json.loads(POLICY.read_text())
+    policy["patterns_allowed"].remove(reference + "@*")
+    changed = tmp_path / "selected.json"
+    changed.write_text(json.dumps(policy))
+
+    result = run_allowlist(workflow, policy=changed)
+
+    assert result.returncode == 1
+    assert reference + "@*" in result.stderr
+
+
+def test_recipe_and_ci_keep_the_shared_allowlist_gate() -> None:
+    just = shutil.which("just")
+    assert just is not None
+    result = subprocess.run(  # noqa: S603 - inspect the real recipe without executing validators.
+        [just, "--dry-run", "github-actions-check"], cwd=REPOSITORY, check=True, capture_output=True, text=True, timeout=30
+    )
+    commands = [shlex.split(line) for line in result.stderr.splitlines() if "research-repo-tools actions allowlist" in line]
+    assert commands == [
+        [
+            "uv",
+            "run",
+            "--locked",
+            "--group",
+            "dev",
+            "research-repo-tools",
+            "actions",
+            "allowlist",
+            "--policy",
+            ".github/settings/actions-selected.json",
+            ".github/workflows",
+        ]
+    ]
+    assert "scripts/check_workflow_allowlist.py" not in result.stderr
+    recipe_graph = json.loads(
+        subprocess.run(  # noqa: S603
+            [just, "--dump", "--dump-format", "json"], cwd=REPOSITORY, check=True, capture_output=True, text=True, timeout=30
+        ).stdout
+    )
+    assert any(dependency["recipe"] == "check" for dependency in recipe_graph["recipes"]["ci"]["dependencies"])
+    assert any(dependency["recipe"] == "github-actions-check" for dependency in recipe_graph["recipes"]["check"]["dependencies"])
+    ci = yaml.safe_load((WORKFLOWS / "ci.yml").read_text())
+    assert any("just ci" in step.get("run", "") for step in ci["jobs"]["verify"]["steps"])

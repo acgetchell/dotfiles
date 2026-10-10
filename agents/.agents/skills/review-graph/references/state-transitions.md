@@ -110,7 +110,14 @@ owned files stayed unchanged. This check applies to whole audits, coverage units
 and replay of their immutable evidence. A fresh audit on the latest metadata
 state can be reused when its complete input proof still holds.
 Changed commands, directories, environment, toolchain, features, platform,
-artifacts, or mutation contracts still require explicit reconciliation.
+artifacts, or mutation contracts prevent whole-audit and coverage-partition reuse. The
+transition schedules the affected audit with `validation-requirements-changed`
+and names the conflicting or missing requirement before fanout. The worker
+reassesses the current validation requirement; original evidence and execution
+digests remain immutable. Eligible coverage-partition reuse still requires
+the worker to reconcile every original validation need in its new payload.
+Metadata reconciliation itself does not run validation; the replacement graph
+retains its required gates.
 Per-node `reuse_decisions` explain disposition and reason code, distinguishing
 `coverage-limitations`, `unclassified-limitations`, `unresolved-uncertainty`,
 and `validation-evidence-limits`. Typed execution facts and delegated validation
@@ -184,6 +191,35 @@ node ID. Copy its executor `platform` into validation reconciliation; use its
 digest-bound `environment` and `features`, together with execution evidence and
 limitations, to distinguish native runs, emulation, and unexecuted target cells.
 
+## External Staging During Repair Publication
+
+When a real saved repair capture S2 is followed by external staging S3 before
+`advance-after-mutation`, pass all three captures in that operation:
+
+- `previous_capture`: accepted S1, with any existing metadata continuation.
+- `new_capture`: saved S2 immediately after the content repair, before staging.
+- `post_repair_capture`: fresh S3 after external staging.
+
+Keep `changed_paths` equal to the S1→S2 content delta. The runtime verifies
+S1→S2 without index/HEAD/boundary changes, verifies S2→S3 as index-only, and
+independently recaptures S3 before publishing. It retains S2 as the repair plan's
+source identity, then composes the normal metadata continuation to S3. No capture
+is synthesized and no Git state is changed. Without the real saved S2, replan
+from S3; do not manufacture a bridge or alter the index.
+
+Follow the returned top-level continuation paths together. `capture` and
+`capture_path` identify S3; `new_source_state` remains the S2 plan identity and
+`current_source_state` identifies S3. The lifecycle retains the verified S2→S3
+metadata transition. `repair_transition_path` retains the intermediate repair,
+both S1/S2 captures, and supplied historical evidence references, including
+failures. Original logs, journals, and sealed evidence remain unchanged.
+Final `reuse_decisions`, `reused_evidence_ids`, and `node_decisions` account for
+staging: source-only judgments can survive, while Git-sensitive judgments and
+required validation are scheduled against S3. A content, mode, instruction,
+HEAD, branch, boundary, or live-state mismatch rejects the composition.
+
+## External Staging Without A Content Repair
+
 For external staging with unchanged reviewed content, use
 `resume-after-external-metadata --input <request.json> --output <result.json>`.
 Supply the existing `plan`, `source_state`, `dispatches_path`, `journal_path`,
@@ -194,6 +230,16 @@ worktree scope, complete path identities (including types/modes), applicable
 instructions, HEAD, branch, and boundaries unchanged. Staged/branch targets
 require replanning. No Git command changes the index and no repair epoch is
 consumed.
+
+Use the full returned lifecycle input, including `external_metadata_transitions`,
+for `reconcile-validation-requirements`, `fallback-to-coordinator`,
+`recover-validation-launch`, and `recover-validation-execution`. Supply the latest
+observed capture through `--current-capture`; keep `source_state` at its original
+logical identity. These operations verify and preserve the chain in their
+continuations and recovery history. Validation and failure evidence must bind to
+the latest observed state; execution recovery also requires before/after capture
+and workspace snapshots from that state. This applies equally after an ordinary
+metadata resume and a composed repair followed by staging.
 
 Follow the returned continuation paths. The review's original `source_state`
 remains its identity; actual before/after fingerprints and both snapshots are

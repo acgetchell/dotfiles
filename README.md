@@ -215,7 +215,7 @@ The same locked package owns the Semgrep fixture runner and CodeRabbit wrapper.
 `just semgrep-test` reads `[tool.research-repo-tools.semgrep]`; the repository keeps its
 rules and real fixtures while generic runner tests live upstream.
 The Jupyter review skill delegates notebook inspection, advice, validation, native
-Ruff/ty lint, cleanup, and execution to published v0.1.7 shared commands. It keeps
+Ruff/ty lint, cleanup, and execution to published v0.1.8 shared commands. It keeps
 only review policy and a tested consumer configuration template; generic notebook
 implementation and regression coverage live upstream. See the
 [shared notebook workflow](agents/.agents/skills/jupyter-notebook-review/references/shared-notebooks.md)
@@ -225,10 +225,16 @@ execution dependencies belong to each consumer's locked notebook environment.
 
 ### Shared tooling and Python upgrades
 
-Dotfiles adopts `research-repo-tools==0.1.7` for Python baseline inheritance,
+Dotfiles adopts `research-repo-tools==0.1.8` for Python baseline inheritance,
 tracked and nonignored file selection, notebook policy, workflow audits, dependency
 and secret scans, and managed scanner setup/cleanup. The
 [adoption map](docs/shared-tooling.md) records the command owners and scope.
+
+`just workflow-allowlist-check` delegates action-step and reusable-workflow checks
+to the installed shared package, using `.github/settings/actions-selected.json`
+as the sole allowlist. It remains part of `github-actions-check` and CI; actionlint
+owns workflow syntax and zizmor owns SHA pinning. The reusable Dependabot approval
+workflow retains its separately reviewed commit pin.
 
 When a published shared-tools release adopts Python 3.15, migrate with its version:
 

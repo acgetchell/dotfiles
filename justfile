@@ -77,7 +77,7 @@ action-lint: _ensure-actionlint
 
 # One allowlist for both local validation and the GitHub settings payload.
 workflow-allowlist-check: _ensure-uv
-    uv run --locked --group dev research-repo-tools files run --include '.github/workflows/*.yml' --include '.github/workflows/*.yaml' -- python scripts/check_workflow_allowlist.py --policy .github/settings/actions-selected.json
+    uv run --locked --group dev research-repo-tools actions allowlist --policy .github/settings/actions-selected.json .github/workflows
 
 brew-check: _ensure-brew
     HOMEBREW_NO_AUTO_UPDATE=1 brew bundle check --file="$PWD/Brewfile"

@@ -23,7 +23,9 @@ from test_review_graph_runtime import (
 from test_review_graph_transitions import _materialize, _payload
 
 
-def _proof_fixture(tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+def _proof_fixture(
+    tmp_path: Path, *, validation_change: str | None = None, stage_after_repair: bool = False
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Recheck one test while reusing its configuration in a 100-path repository."""
     git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
     owned = ["pyproject.toml", "tests/tooling/test_adoption.py"]
@@ -83,17 +85,30 @@ def _proof_fixture(tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any], dict
         ],
         "handoffs": [{"catalog_id": "python.build", "observed_trigger": "Test configuration", "reason": "Check installation", "scope": owned}],
     }
+    if stage_after_repair:
+        payload["git_dependencies"] = [{"kind": "index", "reason": "The judgment depends on staging."}]
     content, metadata = runtime.compile_review(
         {"dispatch": {**fresh["dispatch"], "before_state": lifecycle["source_state"], "after_state": lifecycle["source_state"]}, "payload": payload}
     )
     Path(fresh["artifact_path"]).write_bytes(content)
     Path(fresh["metadata_path"]).write_text(json.dumps(metadata))
+    if validation_change == "renamed-requirement":
+        template["validation_requirements"][0]["requirement_id"] += "-replacement"
+    elif validation_change == "environment":
+        template["validation_requirements"][0]["environment"] += "; changed executor"
     (repository / owned[1]).write_text("def test_adoption():\n    assert 1 == 1\n")
+    repaired_capture = _scope_data(git, repository, "baseline", None, ())
+    metadata_transition = {}
+    if stage_after_repair:
+        _run_test_git(git, "-C", str(repository), "add", owned[1])
+        metadata_transition["post_repair_capture"] = _scope_data(git, repository, "baseline", None, ())
+    original = {key: Path(fresh[key]).read_bytes() for key in ("artifact_path", "metadata_path")}
     result = runtime.advance_after_mutation(
         {
             **lifecycle,
+            **metadata_transition,
             "previous_capture": capture,
-            "new_capture": _scope_data(git, repository, "baseline", None, ()),
+            "new_capture": repaired_capture,
             "planning_template": template,
             "authorization_before": "review-only",
             "authorization_after": "review-and-fix",
@@ -104,6 +119,7 @@ def _proof_fixture(tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any], dict
             "sources": [{key: fresh[key] for key in ("artifact_path", "metadata_path")}],
         }
     )
+    assert {key: Path(fresh[key]).read_bytes() for key in original} == original
     partial = next(entry for entry in result["dispatch_set"]["dispatches"] if entry["dispatch"]["skill_id"] == "python-test-quality")
     validation = partial["dispatch"]["command_policy"]["planned_validation_units"][0]
     updated = {
@@ -120,6 +136,48 @@ def _proof_fixture(tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any], dict
 def _compile(entry: dict[str, Any], result: dict[str, Any], payload: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:
     state = result["new_source_state"]
     return runtime.compile_review({"dispatch": {**entry["dispatch"], "before_state": state, "after_state": state}, "payload": payload})
+
+
+def test_repair_then_staging_reports_discarded_partial_coverage(tmp_path: Path) -> None:
+    _fresh, replacement, result, _partial_payload = _proof_fixture(tmp_path, stage_after_repair=True)
+    assert "coverage_reuse" not in replacement["dispatch"]
+    node_id = replacement["node_id"]
+    decision = next(item for item in result["coverage_reuse_decisions"] if item["node_id"] == node_id)
+    assert decision["units"]
+    assert all(unit["disposition"] == "recheck" for unit in decision["units"])
+    assert all(unit["reason_code"] == "metadata-dependencies-changed" for unit in decision["units"])
+    assert decision["reason_code"] == "metadata-dependencies-changed"
+    assert next(item for item in result["node_decisions"] if item["node_id"] == node_id)["disposition"] == "recheck"
+    history = json.loads(Path(result["repair_transition_path"]).read_text())
+    original = next(item for item in history["coverage_reuse_decisions"] if item["node_id"] == node_id)
+    assert [(unit["unit_id"], unit["disposition"]) for unit in original["units"]] == [("configuration", "reused"), ("adoption-tests", "recheck")]
+
+
+@pytest.mark.parametrize("change", ["renamed-requirement", "environment"])
+def test_changed_validation_contract_requires_fresh_partitioned_audit(tmp_path: Path, change: str) -> None:
+    fresh, replacement, result, _partial_payload = _proof_fixture(tmp_path, validation_change=change)
+    original = {key: Path(fresh[key]).read_bytes() for key in ("artifact_path", "metadata_path")}
+    assert not replacement["dispatch"].get("coverage_reuse")
+    decision = next(item for item in result["coverage_reuse_decisions"] if item["node_id"] == replacement["dispatch"]["node_id"])
+    assert decision["reason_code"] == "validation-requirements-changed"
+    validation = replacement["dispatch"]["command_policy"]["planned_validation_units"][0]
+    payload = {
+        **_payload(["pyproject.toml", "tests/tooling/test_adoption.py"]),
+        "validation_requirements": [
+            {
+                "requirement_id": validation["requirement_ids"][0],
+                "planned_validation_digest": validation["planned_validation_digest"],
+                "owner": "review-validator",
+                "reason": "Delegate the current execution contract",
+                "expected_evidence": "Checks pass",
+            }
+        ],
+    }
+    contract = json.loads(Path(replacement["worker_payload_contract_path"]).read_bytes())
+    runtime.publish_worker_payload_bytes(contract, json.dumps(payload).encode())
+    _content, metadata = _compile(replacement, result, payload)
+    assert metadata["normalized_record"]["validation_requirements"] == payload["validation_requirements"]
+    assert {key: Path(fresh[key]).read_bytes() for key in original} == original
 
 
 def test_fixed_partial_recheck_dispatch_bytes_and_seeded_findings(tmp_path: Path) -> None:
@@ -165,33 +223,56 @@ def test_fixed_partial_recheck_dispatch_bytes_and_seeded_findings(tmp_path: Path
     print(json.dumps({**sizes, "seeded_findings_retained": 2, "model_tokens": None, "model_cost": None, "model_review_seconds": None}, sort_keys=True))
 
 
-@pytest.mark.parametrize("tamper", ["missing", "bytes", "symlink"])
+@pytest.mark.parametrize("tamper", ["missing", "bytes", "relative-symlink", "absolute-symlink"])
 def test_missing_or_altered_external_proof_blocks_publication_compilation_and_verification(tmp_path: Path, tamper: str) -> None:
     _fresh, partial, result, payload = _proof_fixture(tmp_path)
     content, metadata = _compile(partial, result, payload)
     Path(partial["artifact_path"]).write_bytes(content)
     Path(partial["metadata_path"]).write_text(json.dumps(metadata))
+    compiled = {Path(partial[key]): Path(partial[key]).read_bytes() for key in ("artifact_path", "metadata_path")}
     proof_path = Path(partial["dispatch"]["coverage_reuse"]["proof_reference"]["path"])
     proof_bytes = proof_path.read_bytes()
     proof_path.unlink()
+    substitute = tmp_path / "substitute.json"
     if tamper == "bytes":
         proof_path.write_bytes(proof_bytes + b"\n")
-    elif tamper == "symlink":
-        substitute = tmp_path / "substitute.json"
+    elif tamper.endswith("symlink"):
         substitute.write_bytes(proof_bytes)
-        proof_path.symlink_to(substitute)
+        target = substitute.relative_to(proof_path.parent, walk_up=True) if tamper == "relative-symlink" else substitute
+        proof_path.symlink_to(target)
+    invalid_bytes = proof_path.read_bytes() if proof_path.exists() else None
+    link_target = proof_path.readlink() if proof_path.is_symlink() else None
+
+    def assert_unchanged() -> None:
+        assert not Path(partial["worker_payload_path"]).exists(follow_symlinks=False)
+        assert all(not path.is_symlink() and path.read_bytes() == original for path, original in compiled.items())
+        if link_target is not None:
+            assert proof_path.is_symlink()
+            assert proof_path.readlink() == link_target
+            assert proof_path.samefile(substitute)
+            assert substitute.read_bytes() == proof_bytes
+        else:
+            assert not proof_path.is_symlink()
+        if invalid_bytes is None:
+            assert not proof_path.exists(follow_symlinks=False)
+        else:
+            assert proof_path.read_bytes() == invalid_bytes
+
     contract = json.loads(Path(partial["worker_payload_contract_path"]).read_bytes())
     message = "coverage proof digest|regular non-symlink file"
     with pytest.raises(ValueError, match=message):
         runtime.publish_worker_payload_bytes(contract, json.dumps(payload).encode())
-    assert not Path(partial["worker_payload_path"]).exists()
+    assert_unchanged()
     with pytest.raises(ValueError, match=message):
         _compile(partial, result, payload)
+    assert_unchanged()
     with pytest.raises(ValueError, match=message):
         runtime._load_evidence_source(partial, require_normalized=True)
+    assert_unchanged()
     lifecycle = json.loads(Path(result["lifecycle_input_path"]).read_bytes())
     with pytest.raises(ValueError, match=message):
         runtime.next_ready_nodes({**lifecycle, "current_source_state": result["new_source_state"]}, dispatch_set=result["dispatch_set"], journal_events=())
+    assert_unchanged()
 
 
 @pytest.mark.parametrize("tamper", ["partition", "dependency", "instructions", "unsupported", "finding", "view", "mode"])

@@ -1,18 +1,18 @@
 # Review Graph Python Environment
 
 Run the graph scripts with Python 3.14 or newer and the published
-`research-repo-tools` package. Dotfiles pins version 0.1.7. Consuming repositories
+`research-repo-tools` package. Dotfiles pins version 0.1.8. Consuming repositories
 can declare the same tooling dependency:
 
 ```sh
-uv add --group dev 'research-repo-tools==0.1.7'
+uv add --group dev 'research-repo-tools==0.1.8'
 uv run --locked python "$SKILLS_ROOT/review-graph/scripts/capture_scope.py" --help
 ```
 
 For a repository without that dependency, supply it for the invocation:
 
 ```sh
-uv run --with 'research-repo-tools==0.1.7' \
+uv run --with 'research-repo-tools==0.1.8' \
   python "$SKILLS_ROOT/review-graph/scripts/review_graph_runtime.py" --help
 ```
 

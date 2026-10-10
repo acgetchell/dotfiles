@@ -327,6 +327,14 @@ caller-declared deltas that differ, capture-boundary changes, and HEAD, branch,
 or index mutation before publication. Older manifests without these identities
 require a fresh pre-repair capture; status strings cannot recover content deltas.
 
+If external staging occurs after the saved repair capture, additionally supply
+`post_repair_capture`. Keep `new_capture` as the real pre-staging repair capture.
+The runtime verifies the repair delta first, independently recaptures the live
+post-staging state, and composes the repair with the existing metadata-only
+continuation. It requires complete content/type/mode, scope, HEAD, branch, and
+boundary equality between those last two captures. See the conditional
+[repair-plus-staging procedure](state-transitions.md#external-staging-during-repair-publication).
+
 `newly_touched_paths` is the new captured inventory minus the previous captured
 inventory, never minus node-owned coverage. Invalidate changed-path owners,
 expanded or changed review contracts, applicable instruction dependencies, and
@@ -342,6 +350,11 @@ qualify. Typed execution facts and delegated validator context are retained;
 scope omissions, unclassified limitations, unresolved uncertainty, and
 unavailable/failed environmental evidence block reuse. See the
 [audit context fields](audit-context.md).
+Before preserving an audit, reconcile each delegated validation requirement
+against the replacement plan. A changed execution identity or missing requirement
+keeps the audit executable with `validation-requirements-changed`; the worker
+must assess the current validation contract. Unchanged commands can bind through
+the verified source-only transition without rewriting the original digest.
 Convert their exact routed requirements to non-executable reuse before
 materialization; exclude their original IDs from the stale set. Required
 validators, independent reviews, and syntheses still execute against the new

@@ -1,6 +1,6 @@
 # Shared tooling adoption
 
-The exact published `research-repo-tools` package owns reusable mechanics.
+The exact published `research-repo-tools==0.1.8` package owns reusable mechanics.
 Dotfiles retains policy, machine provisioning, fixtures, and its skill protocols.
 No sibling checkout or unreleased code is needed.
 
@@ -10,7 +10,7 @@ No sibling checkout or unreleased code is needed.
 | Python migration | `shared-python-plan VERSION` and `shared-python-update VERSION` run the target release through isolated uvx |
 | File selection | Shared inventory and bounded batches for Python, Markdown, YAML, actionlint, and Semgrep |
 | Python lint/type policy | Complete configured Ruff and ty checks over tracked/nonignored `.py` and `.pyi`, including fixtures; fixers retain the narrower safe scope |
-| Workflow auditing | One locked Python zizmor pin and explicit persona; SHA pinning, offline local gate, required-online hosted audit, guarded SARIF upload; local YAML allowlist check reads the committed Actions settings |
+| Workflow auditing | One locked Python zizmor pin and explicit persona; SHA pinning, offline local gate, required-online hosted audit, guarded SARIF upload; shared Actions allowlist command reads the committed settings |
 | Dependency/secret scanning | Managed OSV/Gitleaks, explicit root `uv.lock`, full reachable history and current files, redacted reports; required CI `verify` includes the gate |
 | Scanner lifecycle | `tools-sync`, `tools-check`, `update-security-tools`, and preview-first `clean`; package-owned cache store |
 | Dependency/tool updates | Shared dependency and tool-pin helpers; Homebrew uv pin reconciliation; machine Cargo tools remain with their existing owner |
@@ -52,18 +52,24 @@ installed by ordinary validation.
 ## Scope decisions
 
 `just github-actions-check` combines actionlint, `workflow-allowlist-check`, and
-zizmor. The YAML allowlist checker reads `.github/settings/actions-selected.json`
+zizmor. The installed `research-repo-tools actions allowlist` command reads `.github/settings/actions-selected.json`
 for both action steps and reusable-workflow jobs. It supports the current exact
 `owner/repo[/path]@*` entries and rejects unsupported policy forms rather than
 silently widening access. Local and container actions remain outside this
 external-repository allowlist; actionlint owns the complete workflow schema.
 Zizmor owns SHA pinning. Its regular persona does not enforce the repository's
-blanket `persist-credentials: false` policy, and its installed `forbidden-uses`
-audit misses reusable-workflow calls, so these stricter checks retain local owners.
-The generic allowlist checker is proposed for research-repo-tools v0.1.8 in
-[upstream #66](https://github.com/acgetchell/research-repo-tools/issues/66).
-[Dotfiles #105](https://github.com/acgetchell/dotfiles/issues/105) tracks adoption
-and removal of the local checker after the published release supplies it.
+blanket `persist-credentials: false` policy, which remains in Semgrep. The shared
+allowlist command covers reusable-workflow calls independently of zizmor's
+`forbidden-uses` audit.
+
+The published checker replaces `scripts/check_workflow_allowlist.py` as part of
+[dotfiles #105](https://github.com/acgetchell/dotfiles/issues/105). Generic YAML
+parsing and malformed-policy regressions live in the
+[upstream Actions tests](https://github.com/acgetchell/research-repo-tools/blob/v0.1.8/tests/dependencies/test_actions.py).
+Dotfiles retains installed-package consumer tests for its actual workflows,
+unapproved action and reusable-call mutations with file/line diagnostics,
+committed policy authority, and recipe/CI wiring. The shared Dependabot workflow's
+v0.1.7 commit pin is independent of this Python package migration.
 
 Semgrep retains version-comment, locked-command, trigger, explicit checkout,
 bootstrap, portability, and review-graph policies. The retired
@@ -92,7 +98,7 @@ second owner. Managed scanner binaries and cleanup use the package's standard
 `~/.cache/research-repo-tools` store. Supply `clean --keep-root PATH` for other
 consumers sharing it. To use a custom store, set `RESEARCH_REPO_TOOLS_HOME` to an
 absolute path. The store may be inside or outside the checkout.
-v0.1.7 cleanup still rejects relative paths returned by uv's Python inventory;
+Shared cleanup still rejects relative paths returned by uv's Python inventory;
 this can occur even when the custom store path is absolute.
 
 The Gitleaks policy keeps all default detectors. Two rule-specific exceptions

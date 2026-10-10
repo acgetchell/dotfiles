@@ -3,8 +3,8 @@
 Dotfiles calls the shared [v0.1.7 approval workflow](https://github.com/acgetchell/research-repo-tools/blob/0a02204d4a889dfc97f55286c008397ced05d6ad/.github/workflows/dependabot-approve.yml).
 The pinned commit contains shared-tools PR #54; its prerequisite pilot
 [PR #52](https://github.com/acgetchell/research-repo-tools/pull/52) merged on
-September 26, 2026. The Python tooling package is also pinned to v0.1.7;
-its registry pin and this workflow's commit pin are updated independently.
+September 26, 2026. The Python tooling package's registry pin and this workflow's
+commit pin are updated independently.
 The approval workflow is unchanged between #54's merge and this release pin.
 
 ## Contract

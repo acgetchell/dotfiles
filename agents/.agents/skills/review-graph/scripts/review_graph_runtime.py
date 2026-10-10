@@ -4388,6 +4388,7 @@ def _carry_forward_audits(  # noqa: C901, PLR0912, PLR0913, PLR0915 - preserve p
     *,
     invalidated: tuple[str, ...],
     sources: dict[str, tuple[dict[str, Any], dict[str, Any]]],
+    observed_metadata_transition: ExternalMetadataTransition | None = None,
 ) -> tuple[GraphPlan, list[dict[str, str]]]:
     """Convert only proven unchanged leaves into non-executable routed reuse."""
     decisions = {
@@ -4466,6 +4467,10 @@ def _carry_forward_audits(  # noqa: C901, PLR0912, PLR0913, PLR0915 - preserve p
             # Incomplete/changed inputs are ordinary fresh review work, not reuse.
             decision(node_id, "input-proof-failed", str(error))
             continue
+        reconciliation = _validation_reconciliation(replace(candidate_plan, audit_reuse_transitions=(transition,)), [record])
+        if reconciliation["blockers"]:
+            decision(node_id, "validation-requirements-changed", "; ".join(reconciliation["blockers"]))
+            continue
         decision(node_id, "verified", "Complete audit inputs and dependencies are unchanged.")
         transitions.append(transition)
         records.append((expectation, evidence))
@@ -4480,6 +4485,7 @@ def _carry_forward_audits(  # noqa: C901, PLR0912, PLR0913, PLR0915 - preserve p
         catalog_path=Path(document.get("routing_catalog_path", DEFAULT_ROUTING_CATALOG)),
         skill_roots=(DEFAULT_SKILL_ROOT,),
         repository_root=root,
+        observed_metadata_transition=observed_metadata_transition,
     )
     needed_states = {state for transition in transitions for state in (transition.source_state, transition.target_state)}
     routed = replace(
@@ -4624,7 +4630,7 @@ def _blocked_coverage_reviews(record: dict[str, Any], candidate: GraphPlan) -> l
     ]
 
 
-def _plan_delta_audits(
+def _plan_delta_audits(  # noqa: C901 - keep source and validation eligibility gates together before publishing a reuse proof.
     document: dict[str, Any], previous: GraphPlan, candidate: GraphPlan, sources: dict[str, tuple[dict[str, Any], dict[str, Any]]]
 ) -> tuple[GraphPlan, list[dict[str, Any]]]:
     """Retain full specialist ownership while dispatching only stale partitions for reads."""
@@ -4670,6 +4676,19 @@ def _plan_delta_audits(
                 chain,
             )
             transition = replace(transition, source_state=audit_origin.source_state)
+            reconciliation = _validation_reconciliation(replace(candidate, audit_reuse_transitions=(transition,)), [record])
+            if reconciliation["blockers"]:
+                reviews.append(
+                    {
+                        "node_id": node.node_id,
+                        "evidence_id": evidence.evidence_id,
+                        "disposition": "recheck",
+                        "reason_code": "validation-requirements-changed",
+                        "reason": "; ".join(reconciliation["blockers"]),
+                        "units": [],
+                    }
+                )
+                continue
             units = coverage_decisions(record, audit_origin, target, inputs, transition)
             reviews.append(
                 {
@@ -4987,6 +5006,25 @@ def resume_after_external_metadata(document: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _replacement_lineage(previous: GraphPlan, current: GraphPlan, sources: dict[str, tuple[dict[str, Any], dict[str, Any]]]) -> list[dict[str, object]]:
+    """Map every final executable node to the prior contracts it replaces."""
+    contracts = {node.node_id: asdict(node) for node in previous.actual_worker_nodes}
+    contracts.update({node_id: record for node_id, (_source, record) in sources.items() if node_id not in contracts})
+    return [
+        {
+            "node_id": node.node_id,
+            "replaces_node_ids": [
+                node_id
+                for node_id, old in contracts.items()
+                if old.get("skill_id") == node.skill_id
+                and old.get("mode") == node.mode
+                and (set(old["requirement_ids"]).intersection(node.requirement_ids) or node.mode == "synthesis")
+            ],
+        }
+        for node in current.actual_worker_nodes
+    ]
+
+
 def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa: PLR0915
     """Close one repair epoch, recapture once, and emit a fresh final-state graph."""
     raw_plan = document.get("plan")
@@ -5019,6 +5057,7 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
         msg = "repair_epoch must be positive"
         raise ValueError(msg)
     changed_paths = _mutation_path_delta(document, previous_capture, new_capture)
+    metadata = metadata_transition({"before": new_capture, "after": document["post_repair_capture"]}) if "post_repair_capture" in document else None
     captured_paths = _text_list(new_capture, "captured_scope_paths")
     sources = _mutation_evidence_sources(document, old_plan)
     planning_input = bootstrap_document(new_capture, planning_template)
@@ -5027,12 +5066,16 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
     require_schema(planning_input, _PLANNING_INPUT_SCHEMA)
     repository_root = Path(_required_text(planning_input, "repository_root")).resolve()
     catalog_path = Path(document.get("routing_catalog_path", DEFAULT_ROUTING_CATALOG)).resolve()
-    new_plan = plan_from_document(planning_input, catalog_path=catalog_path, skill_roots=(DEFAULT_SKILL_ROOT,), repository_root=repository_root)
+    new_plan = plan_from_document(
+        planning_input, catalog_path=catalog_path, skill_roots=(DEFAULT_SKILL_ROOT,), repository_root=repository_root, observed_metadata_transition=metadata
+    )
     if not new_plan.dispatch_allowed:
         msg = "recaptured repair epoch produced a blocked final-state plan: " + "; ".join(new_plan.blockers)
         raise ValueError(msg)
     invalidated = _mutation_invalidated_nodes(old_plan, new_plan, changed_paths, repository_root, sources)
-    new_plan, reuse_decisions = _carry_forward_audits(document, old_plan, new_plan, planning_input, invalidated=invalidated, sources=sources)
+    new_plan, reuse_decisions = _carry_forward_audits(
+        document, old_plan, new_plan, planning_input, invalidated=invalidated, sources=sources, observed_metadata_transition=metadata
+    )
     new_plan, coverage_reviews = _plan_delta_audits(document, old_plan, new_plan, sources)
     new_plan = _epoch_scoped_plan(new_plan, epoch)
     reused_ids = {item.evidence_id for item in new_plan.audit_reuse_transitions}
@@ -5061,18 +5104,8 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
     old_paths = set(_text_list(previous_capture, "captured_scope_paths"))
     newly_touched_paths = tuple(sorted(set(captured_paths) - old_paths))
     unaffected = tuple(node for node in old_plan.actual_worker_nodes if node.node_id not in invalidated)
-    replacement_lineage: list[dict[str, object]] = []
-    for node in new_plan.actual_worker_nodes:
-        predecessors = tuple(
-            old.node_id
-            for old in old_plan.actual_worker_nodes
-            if old.skill_id == node.skill_id
-            and old.mode == node.mode
-            and (set(old.requirement_ids).intersection(node.requirement_ids) or node.mode == "synthesis")
-        )
-        replacement_lineage.append({"node_id": node.node_id, "replaces_node_ids": list(predecessors)})
     fix_node_id = f"fix-epoch-{epoch:03d}"
-    return {
+    result = {
         "authorization_transition": {"after": authorization_after, "before": authorization_before},
         "dispatch_set": dispatch_set,
         "invalidated_nodes": [{"node_id": node_id, "state": "awaiting-replan"} for node_id in invalidated],
@@ -5099,13 +5132,86 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
             "ordinal": epoch,
             "recapture_count": 1,
         },
-        "replacement_lineage": replacement_lineage,
+        "replacement_lineage": _replacement_lineage(old_plan, new_plan, sources),
         "schema_version": 1,
         "stale_evidence_ids": [
             *(_expected_evidence_id(node, old_plan) for node in old_plan.actual_worker_nodes if _expected_evidence_id(node, old_plan) not in reused_ids),
             *dict.fromkeys(evidence_id for _requirement_id, evidence_id in old_plan.exact_reused_review_evidence if evidence_id not in reused_ids),
         ],
         "status": "advanced",
+    }
+    return _resume_after_repair_metadata(document, result, sources) if metadata is not None else result
+
+
+def _resume_after_repair_metadata(
+    document: dict[str, Any], repair: dict[str, Any], sources: dict[str, tuple[dict[str, Any], dict[str, Any]]]
+) -> dict[str, Any]:
+    """Compose two verified transitions without synthesizing captures or changing Git."""
+    history_path = Path(repair["lifecycle_input_path"]).parent / "repair-transition.json"
+    history = {"previous_capture": document["previous_capture"], "historical_evidence_sources": document.get("sources", []), **repair}
+    _write_bytes_atomically_once(history_path, (json.dumps(history, indent=2, sort_keys=True) + "\n").encode("utf-8"), mode=0o444)
+    resumed = resume_after_external_metadata(
+        {
+            **repair["lifecycle_input"],
+            "previous_capture": repair["capture"],
+            "new_capture": document["post_repair_capture"],
+            "dispatches_path": repair["dispatches_path"],
+            "journal_path": repair["journal_path"],
+            "artifact_store": str(Path(repair["lifecycle_input_path"]).parent / "external-metadata"),
+            "routing_catalog_path": document.get("routing_catalog_path", DEFAULT_ROUTING_CATALOG),
+        }
+    )
+    reused_ids = {evidence_id for _requirement, evidence_id in resumed["lifecycle_input"]["plan"]["exact_reused_review_evidence"]}
+    invalidated_nodes = {item["node_id"] for item in repair["preserved_evidence"] if item["evidence_id"] not in reused_ids}
+    discarded_coverage = set(resumed["discarded_coverage_node_ids"])
+    coverage_recheck = {
+        "disposition": "recheck",
+        "reason_code": "metadata-dependencies-changed",
+        "reason": "External staging requires a fresh Git-sensitive judgment; see node_decisions.",
+    }
+    return {
+        **repair,
+        **{
+            key: resumed[key]
+            for key in (
+                "lifecycle_input",
+                "dispatch_set",
+                "lifecycle_input_path",
+                "dispatches_path",
+                "journal_path",
+                "capture_path",
+                "current_source_state",
+                "node_decisions",
+            )
+        },
+        "new_plan": resumed["lifecycle_input"]["plan"],
+        "replacement_lineage": _replacement_lineage(_graph_plan(document["plan"]), _graph_plan(resumed["lifecycle_input"]["plan"]), sources),
+        "capture": document["post_repair_capture"],
+        "repair_transition_path": str(history_path),
+        "reused_evidence_ids": sorted(reused_ids),
+        "invalidated_nodes": [
+            {"node_id": node_id, "state": "awaiting-replan"}
+            for node_id in sorted({item["node_id"] for item in repair["invalidated_nodes"]} | invalidated_nodes)
+        ],
+        "unaffected_node_ids": [node_id for node_id in repair["unaffected_node_ids"] if node_id not in invalidated_nodes],
+        "reuse_decisions": [
+            {
+                **item,
+                "disposition": "not-reused",
+                "reason_code": "metadata-dependencies-changed",
+                "reason": "External staging requires a fresh Git-sensitive judgment; see node_decisions.",
+            }
+            if item["node_id"] in invalidated_nodes
+            else item
+            for item in repair["reuse_decisions"]
+        ],
+        "coverage_reuse_decisions": [
+            {**item, **coverage_recheck, "units": [{**unit, **coverage_recheck} for unit in item["units"]]} if item["node_id"] in discarded_coverage else item
+            for item in repair["coverage_reuse_decisions"]
+        ],
+        "preserved_evidence": [item for item in repair["preserved_evidence"] if item["evidence_id"] in reused_ids],
+        "stale_evidence_ids": sorted(set(repair["stale_evidence_ids"]) | (set(repair["reused_evidence_ids"]) - reused_ids)),
+        "transition_kind": "repair-then-observed-external-git-metadata",
     }
 
 
@@ -5139,7 +5245,42 @@ def _sha256_digest(value: object, name: str) -> str:
     return value
 
 
-def _journal_evidence(raw: object, *, plan: GraphPlan, node: WorkerNode, status: str) -> dict[str, str] | None:
+def _historical_validation_evidence(evidence: dict[str, str], plan: GraphPlan, node: WorkerNode) -> bool:
+    """Verify an old attempt against the recovery's immutable prior journal."""
+    if node.mode != "validation":
+        return False
+    recovery = next(
+        (item for item in plan.validation_recoveries if item["node_id"] == node.node_id and item.get("previous_evidence_id") == evidence["evidence_id"]), None
+    )
+    if recovery is None:
+        return False
+    saved = {}
+    for filename in ("lifecycle.json", "execution.jsonl"):
+        matches = [item for item in recovery["preserved_files"] if Path(item["path"]).name == filename]
+        if len(matches) != 1:
+            msg = "historical validation evidence requires one preserved lifecycle and journal"
+            raise ValueError(msg)
+        content = _read_regular_file_no_follow(Path(matches[0]["path"]))
+        if digest_bytes(content) != matches[0]["digest"]:
+            msg = "preserved validation recovery evidence changed"
+            raise ValueError(msg)
+        saved[filename] = content
+    lifecycle = json.loads(saved["lifecycle.json"])
+    previous = _graph_plan(lifecycle["plan"])
+    source_state = _state(lifecycle, "source_state")
+    if _plan_digest(previous) != recovery["previous_plan_digest"] or source_state != tuple(recovery["source_state"]):
+        msg = "historical validation evidence differs from its recovery plan"
+        raise ValueError(msg)
+    events, _state_view, head = _read_execution_journal_content(
+        saved["execution.jsonl"], path=Path("execution.jsonl"), plan=previous, source_state=source_state
+    )
+    if head != recovery["previous_journal_head"]:
+        msg = "historical validation evidence differs from its recovery journal"
+        raise ValueError(msg)
+    return any(event["node_id"] == node.node_id and event["evidence"] == evidence for event in events)
+
+
+def _journal_evidence(raw: object, *, plan: GraphPlan, node: WorkerNode, status: str, superseded: bool = False) -> dict[str, str] | None:
     if raw is None:
         if status == "accepted":
             msg = f"accepted journal event requires verified evidence: {node.node_id}"
@@ -5153,7 +5294,7 @@ def _journal_evidence(raw: object, *, plan: GraphPlan, node: WorkerNode, status:
     _sha256_digest(evidence["artifact_digest"], "journal artifact_digest")
     _sha256_digest(evidence["normalized_record_digest"], "journal normalized_record_digest")
     expected_evidence_id = _expected_evidence_id(node, plan)
-    if evidence["evidence_id"] != expected_evidence_id:
+    if evidence["evidence_id"] != expected_evidence_id and not (superseded and _historical_validation_evidence(evidence, plan, node)):
         msg = f"journal evidence ID differs from plan for {node.node_id}"
         raise ValueError(msg)
     valid_statuses = {"passed", "failed", "blocked", "reused", "not-applicable"} if node.mode == "validation" else _REVIEW_STATUSES
@@ -5270,8 +5411,8 @@ def _apply_journal_transition(plan: GraphPlan, state: dict[str, str], *, node_id
     return (node_id,)
 
 
-def _validated_journal_record(
-    event: dict[str, Any], *, expected_sequence: int, plan: GraphPlan, source_state: tuple[str, str, str], previous_digest: str | None
+def _validated_journal_record(  # noqa: PLR0913 - bind both chain and historical-attempt position before accepting a record.
+    event: dict[str, Any], *, expected_sequence: int, plan: GraphPlan, source_state: tuple[str, str, str], previous_digest: str | None, superseded: bool
 ) -> tuple[str, str]:
     if set(event) - {"recorded_at_unix_ns"} != _JOURNAL_EVENT_KEYS:
         msg = f"journal event {expected_sequence} has unexpected fields"
@@ -5303,17 +5444,23 @@ def _validated_journal_record(
         requirement = "requires" if requires_reason else "must not contain"
         msg = f"{status} journal event {requirement} a reason: {node_id}"
         raise ValueError(msg)
-    _journal_evidence(event.get("evidence"), plan=plan, node=node, status=status)
+    _journal_evidence(event.get("evidence"), plan=plan, node=node, status=status, superseded=superseded)
     return node_id, status
 
 
 def _fold_execution_journal(plan: GraphPlan, source_state: tuple[str, str, str], events: tuple[dict[str, Any], ...]) -> tuple[dict[str, str], str | None]:
     state: dict[str, str] = {}
     latest: dict[str, dict[str, Any]] = {}
+    last = {event.get("node_id"): event for event in events}
     previous_digest: str | None = None
     for expected_sequence, event in enumerate(events, start=1):
         node_id, status = _validated_journal_record(
-            event, expected_sequence=expected_sequence, plan=plan, source_state=source_state, previous_digest=previous_digest
+            event,
+            expected_sequence=expected_sequence,
+            plan=plan,
+            source_state=source_state,
+            previous_digest=previous_digest,
+            superseded=event is not last[event.get("node_id")],
         )
         require_validation_barrier(plan, state, latest, node_id=node_id, status=status)
         affected = _apply_journal_transition(plan, state, node_id=node_id, status=status)
@@ -5778,7 +5925,8 @@ def fallback_to_coordinator(document: dict[str, Any], args: argparse.Namespace) 
 def _fallback_to_coordinator_locked(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
     plan = _graph_plan(document["plan"])
     source_state = _state(document, "source_state")
-    if _capture_source_state(args.current_capture) != source_state:
+    current_state = _current_metadata_state(document)
+    if _capture_source_state(args.current_capture) != current_state:
         msg = "fallback current capture differs from plan-bound source state"
         raise ValueError(msg)
     if plan.execution_profile not in {"grouped", "mixed"} or document.get("worker_created") is not False:
@@ -5789,10 +5937,13 @@ def _fallback_to_coordinator_locked(document: dict[str, Any], args: argparse.Nam
     events, state, head = read_execution_journal(args.journal, plan=plan, source_state=source_state)
     dispatch_set = _read_json_object(args.dispatches)
     entries = _dispatches_by_node(dispatch_set, plan=plan, source_state=source_state)
-    if node_id not in entries or node_id in state:
-        msg = "fallback requires a planned node with no prior execution or lifecycle event"
+    _sources, records = _accepted_journal_sources(plan, source_state, events, entries, include_blocked=True)
+    if blockers := _metadata_evidence_blockers(document, records):
+        raise ValueError("; ".join(blockers))
+    if node_id not in entries or state.get(node_id) not in {None, "invalidated"}:
+        msg = "fallback requires a planned node with an unstarted pending or invalidated current attempt"
         raise ValueError(msg)
-    ready = next_ready_nodes({**document, "current_source_state": list(source_state)}, journal_events=events, dispatch_set=dispatch_set)
+    ready = next_ready_nodes({**document, "current_source_state": list(current_state)}, journal_events=events, dispatch_set=dispatch_set)
     if node_id not in ready["ready_node_ids"]:
         msg = f"fallback node is not dependency-ready: {node_id}"
         raise ValueError(msg)
@@ -5808,6 +5959,8 @@ def _fallback_to_coordinator_locked(document: dict[str, Any], args: argparse.Nam
     updated.pop("dispatch_set_digest")
     updated["dispatch_set_digest"] = digest_bytes(canonical_json(updated).encode())
     lifecycle = {"plan": document["plan"], "source_state": list(source_state)}
+    if "external_metadata_transitions" in document:
+        lifecycle["external_metadata_transitions"] = document["external_metadata_transitions"]
     dispatches_path = store / "dispatches.json"
     lifecycle_path = store / "lifecycle.json"
     for path, content in ((dispatches_path, updated), (lifecycle_path, lifecycle)):
@@ -5962,12 +6115,14 @@ def reconcile_validation_requirements(document: dict[str, Any], args: argparse.N
     """Inspect late requirements or publish a source-preserving plan revision."""
     plan = _graph_plan(document["plan"])
     source_state = _state(document, "source_state")
-    if _capture_source_state(args.current_capture) != source_state:
+    if _capture_source_state(args.current_capture) != _current_metadata_state(document):
         msg = "validation reconciliation current capture differs from plan-bound source state"
         raise ValueError(msg)
     events, state, head = read_execution_journal(args.journal, plan=plan, source_state=source_state)
     entries = _dispatches_by_node(_read_json_object(args.dispatches), plan=plan, source_state=source_state)
     sources, records = _accepted_journal_sources(plan, source_state, events, entries)
+    if blockers := _metadata_evidence_blockers(document, records):
+        raise ValueError("; ".join(blockers))
     reconciliation = _validation_reconciliation(plan, records)
     if document.get("software_doi_rechecks") and not document.get("validation_requirements"):
         msg = "software DOI rechecks require new canonical validation requirements"
@@ -5986,6 +6141,45 @@ def reconcile_validation_requirements(document: dict[str, Any], args: argparse.N
     if expanded == plan:
         return {"schema_version": 1, "status": "resolved", **reconciliation}
     return _publish_validation_continuation(document, args, plan, expanded, entries, sources, records, head, status="expanded", journal_events=events)
+
+
+def _migrate_validation_journal(
+    plan: GraphPlan, source_state: tuple[str, str, str], events: tuple[dict[str, Any], ...], retained: set[str], *, replaced_node_id: str | None
+) -> tuple[dict[str, Any], ...]:
+    """Preserve admission history in order while leaving replaced validation owed."""
+    keep = retained | set(plan.pre_review_validation_nodes)
+    migrated: list[dict[str, Any]] = []
+    state: dict[str, str] = {}
+
+    def append(original: dict[str, Any]) -> None:
+        event = {
+            **original,
+            "affected_node_ids": list(_apply_journal_transition(plan, state, node_id=original["node_id"], status=original["status"])),
+            "plan_digest": _plan_digest(plan),
+            "previous_event_digest": migrated[-1]["event_digest"] if migrated else None,
+            "sequence": len(migrated) + 1,
+        }
+        event.pop("event_digest", None)
+        event["event_digest"] = digest_bytes(canonical_json(event).encode())
+        migrated.append(event)
+
+    for event in events:
+        if event["node_id"] in keep:
+            append(event)
+    if replaced_node_id in state and state[replaced_node_id] in {"accepted", "blocked", "in-flight"}:
+        append(
+            {
+                "node_id": replaced_node_id,
+                "status": "invalidated",
+                "evidence": None,
+                "reason": "Validation recovery preserves prior admission history; the replacement attempt remains required.",
+                "schema_version": 1,
+                "source_state": list(source_state),
+            }
+        )
+    # The full barrier and attempt-identity checks must pass before publication.
+    _fold_execution_journal(plan, source_state, tuple(migrated))
+    return tuple(migrated)
 
 
 def _publish_validation_continuation(  # noqa: PLR0913, PLR0917
@@ -6011,12 +6205,15 @@ def _publish_validation_continuation(  # noqa: PLR0913, PLR0917
     sample = first_entry["dispatch"]
     store = Path(_required_text(document, "artifact_store")).resolve() / f"validation-{status}-{_plan_digest(expanded)[7:23]}"
     state, _head = _fold_execution_journal(plan, source_state, journal_events)
-    latest = {event["node_id"]: event for event in journal_events}
     retained = {
         node.node_id: entries[node.node_id]
         for node in plan.actual_worker_nodes
         if state.get(node.node_id) in {"accepted", "blocked"} and node.node_id != replaced_node_id and node.mode != "synthesis"
     }
+    for node in expanded.actual_worker_nodes:
+        if node.node_id in retained and node.node_id in sources:
+            _verified_journal_evidence(sources[node.node_id], plan=expanded, node=node, source_state=source_state)
+    migrated = _migrate_validation_journal(expanded, source_state, journal_events, set(retained), replaced_node_id=replaced_node_id)
     dispatches = materialize_dispatches(
         {
             "artifact_store": str(store / "artifacts"),
@@ -6024,39 +6221,15 @@ def _publish_validation_continuation(  # noqa: PLR0913, PLR0917
             "plan": json.loads(canonical_json(asdict(expanded))),
             "repository_root": sample["repository_root"],
             "source_state": list(source_state),
+            "external_metadata_transitions": document.get("external_metadata_transitions", []),
             "state_verification_command": sample["state_verification_command"],
             "sources": _continuation_synthesis_sources(entries),
         },
         preserved_entries=retained,
     )
     lifecycle = {"plan": json.loads(canonical_json(asdict(expanded))), "source_state": list(source_state)}
-    # Rebind verified states to the new plan, preserving every original artifact.
-    # Publish this journal once; never append to or rewrite the historical journal.
-    migrated: list[dict[str, Any]] = []
-    migrated_state: dict[str, str] = {}
-    for node in expanded.actual_worker_nodes:
-        if node.node_id not in retained:
-            continue
-        previous = latest[node.node_id]
-        evidence = None
-        if previous["evidence"] is not None:
-            evidence, _limitations = _verified_journal_evidence(sources[node.node_id], plan=expanded, node=node, source_state=source_state)
-        affected = _apply_journal_transition(expanded, migrated_state, node_id=node.node_id, status=previous["status"])
-        event: dict[str, Any] = {
-            "affected_node_ids": list(affected),
-            "evidence": evidence,
-            "node_id": node.node_id,
-            "plan_digest": _plan_digest(expanded),
-            "previous_event_digest": migrated[-1]["event_digest"] if migrated else None,
-            "reason": previous["reason"],
-            "schema_version": 1,
-            "sequence": len(migrated) + 1,
-            "source_state": list(source_state),
-            "status": previous["status"],
-            **({"recorded_at_unix_ns": previous["recorded_at_unix_ns"]} if "recorded_at_unix_ns" in previous else {}),
-        }
-        event["event_digest"] = digest_bytes(canonical_json(event).encode())
-        migrated.append(event)
+    if "external_metadata_transitions" in document:
+        lifecycle["external_metadata_transitions"] = document["external_metadata_transitions"]
     paths = {
         "dispatches_path": store / "dispatches.json",
         "lifecycle_input_path": store / "lifecycle.json",
@@ -6272,13 +6445,19 @@ def _execution_failure_snapshots(
         raise ValueError(msg)
     snapshots = {"failure.log": log_bytes}
     dispatch = {**entry["dispatch"]}
+    current_state = _current_metadata_state(document)
     for phase in ("before", "after"):
         capture_path = Path(failure[f"{phase}_capture"])
-        if _capture_source_state(capture_path) != unit.source_state:
+        if _capture_source_state(capture_path) != current_state:
             msg = "execution recovery requires unchanged before/after source captures"
             raise ValueError(msg)
         workspace_path = Path(failure[f"workspace_{phase}"])
-        dispatch[f"workspace_{phase}"] = _workspace_records(workspace_path, node_id=unit.node_id, source_state=unit.source_state)
+        dispatch[f"workspace_{phase}"] = _workspace_records(
+            workspace_path,
+            node_id=unit.node_id,
+            source_state=unit.source_state,
+            observed_state=current_state if document.get("external_metadata_transitions") else None,
+        )
         snapshots[f"{phase}-capture.json"] = _read_regular_file_no_follow(capture_path)
         snapshots[f"{phase}-workspace.json"] = _read_regular_file_no_follow(workspace_path)
     if _validation_workspace_audit(dispatch, unit) != metadata.get("workspace_audit"):
@@ -6301,7 +6480,7 @@ def _recover_validation(document: dict[str, Any], args: argparse.Namespace, *, c
     plan = _graph_plan(document["plan"])
     _verify_validation_recoveries(plan)
     source_state = _state(document, "source_state")
-    if _capture_source_state(args.current_capture) != source_state:
+    if _capture_source_state(args.current_capture) != _current_metadata_state(document):
         msg = "validation recovery requires unchanged source state"
         raise ValueError(msg)
     events, state, head = read_execution_journal(args.journal, plan=plan, source_state=source_state)
@@ -6341,6 +6520,8 @@ def _recover_validation(document: dict[str, Any], args: argparse.Namespace, *, c
         msg = "recovery requires a recorded environment or permission change"
         raise ValueError(msg)
     sources, records = _accepted_journal_sources(plan, source_state, events, entries, include_blocked=True)
+    if blockers := _metadata_evidence_blockers(document, records):
+        raise ValueError("; ".join(blockers))
     failed_source = sources.get(node_id)
     if failed_source is None:
         msg = "recovery requires compiled, journal-bound launch-failure evidence"
@@ -6381,7 +6562,7 @@ def _recover_validation(document: dict[str, Any], args: argparse.Namespace, *, c
     # Snapshot the journal: future appends must not invalidate historical evidence.
     snapshots = {
         **execution_snapshots,
-        "lifecycle.json": canonical_json({"plan": asdict(plan), "source_state": source_state}).encode(),
+        "lifecycle.json": canonical_json({key: document[key] for key in ("plan", "source_state", "external_metadata_transitions") if key in document}).encode(),
         "execution.jsonl": _read_regular_file_no_follow(args.journal),
         "dispatches.json": _read_regular_file_no_follow(args.dispatches),
     }
