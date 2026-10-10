@@ -5149,7 +5149,7 @@ def _resume_after_repair_metadata(
     """Compose two verified transitions without synthesizing captures or changing Git."""
     history_path = Path(repair["lifecycle_input_path"]).parent / "repair-transition.json"
     history = {"previous_capture": document["previous_capture"], "historical_evidence_sources": document.get("sources", []), **repair}
-    _write_text_once(history_path, json.dumps(history, indent=2, sort_keys=True) + "\n")
+    _write_bytes_atomically_once(history_path, (json.dumps(history, indent=2, sort_keys=True) + "\n").encode("utf-8"), mode=0o444)
     resumed = resume_after_external_metadata(
         {
             **repair["lifecycle_input"],

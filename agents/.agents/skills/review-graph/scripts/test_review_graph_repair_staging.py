@@ -15,6 +15,7 @@ from review_graph_bootstrap import bootstrap_document
 from review_graph_plan import plan_from_document
 from test_review_graph_execution_recovery import _compile_aggregate
 from test_review_graph_git import _discovery_payload
+from test_review_graph_repairs import _interrupt_recovery_write
 from test_review_graph_runtime import (
     ROUTING_CATALOG,
     SKILL_ROOT,
@@ -215,6 +216,43 @@ def test_repair_then_external_staging_preserves_only_eligible_evidence(tmp_path:
     assert all(path.read_bytes() == content for path, content in history.items())
     assert _scope_data(git, repository, "baseline", None, ()) == request["post_repair_capture"]
     assert json.dumps(request, sort_keys=True) == original_request
+
+
+def test_interrupted_repair_history_publication_can_retry_identical_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    git, repository, request, _audit, history = _staged_repair(tmp_path)
+    input_path, output_path = tmp_path / "request.json", tmp_path / "result.json"
+    input_path.write_text(json.dumps(request))
+    history[input_path] = input_path.read_bytes()
+    history_path = Path(request["artifact_store"]) / "repair-epoch-001" / "repair-transition.json"
+    argv = ["advance-after-mutation", "--input", str(input_path), "--output", str(output_path)]
+    with monkeypatch.context() as patch:
+        # The result stage matches this filename without recovery-directory constraints.
+        interrupted = _interrupt_recovery_write(patch, "result", history_path.name)
+        assert runtime.main(argv) == 2
+    assert len(interrupted) == 1
+    assert "injected interrupted recovery write" in capsys.readouterr().err
+    assert not history_path.exists()
+    assert not interrupted[0].exists()
+    assert not output_path.exists()
+    assert all(path.read_bytes() == content for path, content in history.items())
+
+    assert runtime.main(argv) == 0
+    result = json.loads(output_path.read_bytes())
+    assert result["transition_kind"] == "repair-then-observed-external-git-metadata"
+    assert Path(result["repair_transition_path"]) == history_path
+    retained_bytes = history_path.read_bytes()
+    retained = json.loads(retained_bytes)
+    assert retained_bytes == (json.dumps(retained, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    assert retained["previous_capture"] == request["previous_capture"]
+    assert retained["capture"] == request["new_capture"]
+    assert retained["historical_evidence_sources"] == request["sources"]
+    history[history_path] = retained_bytes
+    _finish_repair(tmp_path, result)
+    assert all(path.read_bytes() == content for path, content in history.items())
+    assert _scope_data(git, repository, "baseline", None, ()) == request["post_repair_capture"]
+    assert not list(Path(request["artifact_store"]).rglob("*.tmp"))
 
 
 @pytest.mark.parametrize("change", ["content", "mode", "instructions", "head", "boundary", "forged-bridge", "stale-live-index"])
