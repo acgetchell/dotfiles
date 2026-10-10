@@ -4,6 +4,7 @@ import json
 import shutil
 import subprocess
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -12,7 +13,9 @@ import review_graph_runtime as runtime
 from capture_scope import _run_git, _scope_data
 from review_graph_bootstrap import bootstrap_document
 from review_graph_commit import _unchanged_comparison, verify_live_commit
+from review_graph_integrity import digest_bytes
 from review_graph_plan import plan_from_document
+from review_graph_reuse import metadata_transition
 from test_review_graph_runtime import (
     ROUTING_CATALOG,
     SKILL_ROOT,
@@ -178,6 +181,105 @@ def _assert_original_comparison(request: dict[str, Any], dispatch: dict[str, Any
     assert b"+value = 2" in diff
 
 
+def test_reused_audit_native_requirement_survives_a_repair_then_commit(tmp_path: Path) -> None:
+    git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
+    native = deepcopy(template["validation_requirements"][0])
+    native.update(
+        requirement_id="native-ci", commands=["native-ci-pending"], canonical_recipe=None, baseline=False, environment="native Linux", platform="linux"
+    )
+    template["validation_requirements"].append(native)
+    capture = _scope_data(git, repository, "baseline", None, ())
+    _complete_structural_fixture_routing(template, cast("list[str]", capture["captured_scope_paths"]))
+    plan = plan_from_document(bootstrap_document(capture, template), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)
+    lifecycle, dispatch_set, _dispatches = _materialize(tmp_path, capture, plan)
+    audit = next(entry for entry in dispatch_set["dispatches"] if entry["dispatch"]["skill_id"] == "rust-invariant-state-transitions")
+    payload = _payload(audit["dispatch"]["owned_paths"])
+    planned = next(unit for unit in audit["dispatch"]["command_policy"]["planned_validation_units"] if "native-ci" in unit["requirement_ids"])
+    payload["validation_requirements"] = [
+        {
+            "requirement_id": "native-ci",
+            "planned_validation_digest": planned["planned_validation_digest"],
+            "owner": audit["dispatch"]["skill_id"],
+            "reason": "Native target behavior requires CI",
+            "expected_evidence": "Native CI passes",
+        }
+    ]
+    source = _save(audit, lifecycle, tmp_path / "original.jsonl", payload)
+    original_bytes = {path: Path(path).read_bytes() for path in source.values()}
+    (repository / "tool.py").write_text("value = 2\n")
+    repaired_capture = _scope_data(git, repository, "baseline", None, ())
+    advanced = runtime.advance_after_mutation(
+        {
+            **lifecycle,
+            "previous_capture": capture,
+            "new_capture": repaired_capture,
+            "changed_paths": ["tool.py"],
+            "planning_template": template,
+            "sources": [source],
+            "authorization_before": "review-only",
+            "authorization_after": "review-and-fix",
+            "repair_epoch": 1,
+            "artifact_store": str(tmp_path / "repair"),
+            "state_verification_command": "capture_scope.py --mode baseline",
+        }
+    )
+    assert advanced["reused_evidence_ids"] == [audit["dispatch"]["evidence_id"]]
+    native_entry = next(
+        entry for entry in advanced["dispatch_set"]["dispatches"] if "native-ci" in entry["dispatch"].get("validation_unit", {}).get("requirement_ids", [])
+    )
+    _run_test_git(git, "-C", str(repository), "switch", "-c", "fix/repair-then-commit")
+    _run_test_git(git, "-C", str(repository), "add", ".")
+    _run_test_git(git, "-C", str(repository), "commit", "-m", "Reviewed repair")
+    committed_capture = _scope_data(git, repository, "baseline", None, ())
+    result = runtime.resume_after_authorized_commit(
+        {
+            **advanced["lifecycle_input"],
+            "previous_capture": repaired_capture,
+            "new_capture": committed_capture,
+            "journal_path": advanced["journal_path"],
+            "dispatches_path": advanced["dispatches_path"],
+            "artifact_store": str(tmp_path / "handoff"),
+            "authorization": {
+                "operation": "branch-commit",
+                "repository_root": str(repository),
+                "branch": committed_capture["branch"],
+                "source_state": advanced["new_source_state"],
+                "user_authorization": "Commit the reviewed repair.",
+            },
+            "native_ci": {
+                native_entry["node_id"]: {"commands": [f"native-ci --commit {committed_capture['head']}"], "checks": [{"name": "CI", "target": "linux"}]}
+            },
+        }
+    )
+    bundle = runtime.build_synthesis_bundle(result["lifecycle_input"])
+    reconciliation = bundle["plan_context"]["validation_reconciliation"]
+    assert reconciliation["blockers"] == []
+    assert len(reconciliation["requirements"]) == 1
+    requirement = reconciliation["requirements"][0]
+    assert requirement["resolution"] == "planned"
+    binding = requirement["commit_handoff_binding"]
+    assert binding["commit"] == committed_capture["head"]
+    assert binding["original_planned_validation_digest"] == planned["planned_validation_digest"]
+    assert binding["reuse_binding"]["original_source_state"] == lifecycle["source_state"]
+    assert binding["reuse_binding"]["replacement_source_state"] == advanced["new_source_state"]
+    resumed_plan = runtime._graph_plan(result["lifecycle_input"]["plan"])
+    record = json.loads(Path(source["metadata_path"]).read_bytes())["normalized_record"]
+    unproved = runtime._validation_reconciliation(replace(resumed_plan, audit_reuse_transitions=()), [record])
+    assert unproved["requirements"][0]["resolution"] == "identity-conflict"
+    assert unproved["blockers"]
+    for path, content in original_bytes.items():
+        assert Path(path).read_bytes() == content
+
+
+def _native_synthesis_payload(dispatch: dict[str, Any], bundle: dict[str, Any], head: str) -> dict[str, Any]:
+    reconciliation = bundle["plan_context"]["validation_reconciliation"]
+    assert reconciliation["blockers"] == []
+    assert reconciliation["requirements"]
+    assert all(item["resolution"] == "planned" for item in reconciliation["requirements"])
+    assert all(item["commit_handoff_binding"]["commit"] == head for item in reconciliation["requirements"])
+    return _synthesis_payload(dispatch, bundle)
+
+
 @pytest.mark.parametrize("mode", ["baseline", "worktree"])
 @pytest.mark.parametrize("git_sensitive_review", [False, True])
 def test_commit_handoff_preserves_evidence_and_finalizes_exact_commit(tmp_path: Path, mode: str, git_sensitive_review: bool) -> None:
@@ -254,7 +356,8 @@ def test_commit_handoff_preserves_evidence_and_finalizes_exact_commit(tmp_path: 
                 sources[entry["node_id"]] = {key: entry[key] for key in ("artifact_path", "metadata_path")}
                 continue
             if entry["dispatch"]["mode"] == "synthesis":
-                payload = _synthesis_payload(entry["dispatch"], runtime.build_synthesis_bundle({**lifecycle, "sources": list(sources.values())}))
+                bundle = runtime.build_synthesis_bundle({**lifecycle, "sources": list(sources.values())})
+                payload = _native_synthesis_payload(entry["dispatch"], bundle, request["new_capture"]["head"])
             elif entry["dispatch"]["mode"] == "independent-review":
                 _assert_original_comparison(request, entry["dispatch"])
                 payload = _compact_independent_payload(entry["dispatch"])
@@ -338,6 +441,69 @@ def test_history_symlink_cannot_write_into_reviewed_source(tmp_path: Path) -> No
     git = shutil.which("git")
     assert git is not None
     assert _scope_data(git, repository, "baseline", None, ()) == request["new_capture"]
+
+
+@pytest.mark.parametrize("damage", ["empty", "array", "authorization", "policy", "native", "file", "missing-history"])
+def test_malformed_handoff_has_a_boundary_error_and_preserves_cli_output(tmp_path: Path, capsys: pytest.CaptureFixture[str], damage: str) -> None:
+    request, _entries, _sources = _commit_fixture(tmp_path)
+    result = runtime.resume_after_authorized_commit(request)
+    lifecycle = deepcopy(result["lifecycle_input"])
+    transition = lifecycle["plan"]["commit_handoffs"][-1]
+    proof = transition["commit_handoff"]
+    if damage == "empty":
+        transition["commit_handoff"] = {}
+    elif damage == "array":
+        transition["commit_handoff"] = []
+    elif damage == "authorization":
+        proof["authorization"] = []
+    elif damage == "policy":
+        next(iter(proof["preserved_evidence"].values()))["policy"] = []
+    elif damage == "native":
+        proof["native_ci"] = {"invalid": []}
+    elif damage == "file":
+        proof["preserved_files"] = [{}]
+    else:
+        proof["preserved_files"] = [item for item in proof["preserved_files"] if not item["path"].endswith("reconciliation.json")]
+    with pytest.raises(ValueError, match="commit"):
+        metadata_transition(transition)
+    input_path, output_path = tmp_path / "malformed.json", tmp_path / "existing.json"
+    input_path.write_text(json.dumps(lifecycle))
+    output_path.write_text("Keep the previous proof.\n")
+    assert runtime.main(["finalize-proof", "--input", str(input_path), "--current-capture", result["capture_path"], "--output", str(output_path)]) == 2
+    diagnostic = capsys.readouterr().err
+    assert diagnostic.strip()
+    assert "Traceback" not in diagnostic
+    assert "commit" in diagnostic
+    assert output_path.read_text() == "Keep the previous proof.\n"
+
+
+@pytest.mark.parametrize("damage", ["root", "policies", "record", "plan", "duplicate"])
+def test_malformed_retained_handoff_history_is_rejected(tmp_path: Path, damage: str) -> None:
+    request, _entries, _sources = _commit_fixture(tmp_path)
+    result = runtime.resume_after_authorized_commit(request)
+    transition = result["lifecycle_input"]["plan"]["commit_handoffs"][-1]
+    proof = transition["commit_handoff"]
+    if damage == "duplicate":
+        proof["preserved_files"].append(proof["preserved_files"][0])
+    else:
+        policy = next(iter(proof["preserved_evidence"].values()))
+        name = "plan.json" if damage == "plan" else policy["node_id"] + ".metadata_path" if damage == "record" else "reconciliation.json"
+        item = next(item for item in proof["preserved_files"] if Path(item["path"]).name == name)
+        path = Path(item["path"])
+        content = json.loads(path.read_bytes())
+        if damage == "root":
+            content = []
+        elif damage == "policies":
+            content[policy["kind"]] = []
+        elif damage == "record":
+            content["normalized_record"] = []
+        else:
+            content["coalesced_validation_units"] = [[]]
+        path.chmod(0o644)
+        path.write_text(json.dumps(content))
+        item["digest"] = digest_bytes(path.read_bytes())
+    with pytest.raises((TypeError, ValueError), match="commit handoff history"):
+        metadata_transition(transition)
 
 
 def test_committed_symlink_identity_and_executable_mode(tmp_path: Path) -> None:

@@ -3019,6 +3019,9 @@ def _validation_reconciliation(plan: GraphPlan, records: list[dict[str, Any]]) -
 
 def _commit_validation_reference(plan: GraphPlan, record: dict[str, Any], requirement: dict[str, Any], unit: ValidationUnit) -> dict[str, Any] | None:
     """Reconcile a retained audit's native obligation with its exact-commit replacement."""
+    original_digest = requirement.get("planned_validation_digest")
+    if original_digest is None:
+        return None
     for transition in reversed(plan.commit_handoffs):
         if not isinstance(transition, CommitHandoffTransition):
             continue
@@ -3030,12 +3033,14 @@ def _commit_validation_reference(plan: GraphPlan, record: dict[str, Any], requir
         identity = proof["source_records"].get(record["evidence_id"])
         if identity != digest_bytes(canonical_json(record).encode()) or metadata_audit_blockers(record, transition):
             continue
-        if requirement.get("planned_validation_digest") == _planned_validation_digest(prior):
+        reuse_binding = _reused_validation_reference(plan, record, requirement, prior, None)
+        if original_digest == _planned_validation_digest(prior) or reuse_binding is not None:
             return {
-                "original_planned_validation_digest": _planned_validation_digest(prior),
+                "original_planned_validation_digest": original_digest,
                 "replacement_planned_validation_digest": _planned_validation_digest(unit),
                 "commit": transition.after.head,
                 "reason": "The pending native obligation is superseded by checks of the exact reviewed commit.",
+                **({"reuse_binding": reuse_binding} if reuse_binding is not None else {}),
             }
     return None
 
@@ -3077,6 +3082,7 @@ def build_synthesis_bundle(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
         msg = "synthesis requires compiler evidence sources"
         raise ValueError(msg)
     derived: list[dict[str, Any]] = []
+    immutable_records: list[dict[str, Any]] = []
     for source in raw_sources:
         _kind, expectation, evidence, _content, normalized = _load_evidence_source(source, require_normalized=True)
         if expectation.source_state != source_state:
@@ -3091,6 +3097,7 @@ def build_synthesis_bundle(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
         if normalized is None:  # Defensive for type narrowing after require_normalized.
             msg = f"synthesis evidence has no normalized record: {evidence.evidence_id}"
             raise ValueError(msg)
+        immutable_records.append(normalized)
         if expectation.source_state != source_state:
             normalized = {**normalized, "reuse": {"original_source_state": list(expectation.source_state), "verified_source_state": list(source_state)}}
         derived.append(normalized)
@@ -3116,7 +3123,8 @@ def build_synthesis_bundle(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
         records.append(record)
     bundle: dict[str, Any] = {"schema_version": 1, "source_state": list(source_state), "records": sorted(records, key=lambda item: item["evidence_id"])}
     if plan is not None:
-        bundle["plan_context"] = _synthesis_plan_context(plan, bundle["records"])
+        # Bind original evidence in bundle order, before bundle-only reuse/digest annotations.
+        bundle["plan_context"] = _synthesis_plan_context(plan, sorted(immutable_records, key=lambda item: item["evidence_id"]))
         if document.get("external_metadata_transitions"):
             bundle["plan_context"]["external_metadata_transitions"] = document["external_metadata_transitions"]
     bundle["bundle_digest"] = digest_bytes(canonical_json(bundle).encode())

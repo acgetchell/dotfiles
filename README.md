@@ -456,17 +456,17 @@ Install with `just stow-check agents`, then `just stow-apply agents` and
 `just stow-verify`. Connect Codex once per host:
 
 ```sh
-mkdir -p ~/.codex
-ln -s ../.agents/AGENTS.md ~/.codex/AGENTS.md
+mkdir -p "${CODEX_HOME:-$HOME/.codex}"
+ln -s "$HOME/.agents/AGENTS.md" "${CODEX_HOME:-$HOME/.codex}/AGENTS.md"
 ```
 
 If either instruction path already contains a regular file, review and preserve
 its contents before moving it aside. Stow and `ln -s` report conflicts rather
 than overwriting files. Keep `~/.codex` itself as a local directory; only the
 instruction file links to the shared source. Start a new Codex session to load
-the instructions. A nonempty `~/.codex/AGENTS.override.md` takes precedence;
-a custom `CODEX_HOME` needs the link there instead. Remote and cloud agents need
-the same setup on their own execution host.
+the instructions. A nonempty `AGENTS.override.md` in the Codex home directory
+takes precedence. The commands above also support a custom `CODEX_HOME`.
+Remote and cloud agents need the same setup on their own execution host.
 
 ## Codex config
 

@@ -13,6 +13,7 @@ from capture_scope import _run_git, _scope_data, _update_part
 from review_graph_git import _source_discovery_command, metadata_audit_blockers
 from review_graph_integrity import canonical_json, digest_bytes
 from review_graph_reuse import CommitHandoffTransition, regular_file_fingerprint, source_snapshot
+from review_graph_schema import require_schema_definition
 
 if TYPE_CHECKING:
     from review_graph_plan import GraphPlan
@@ -21,42 +22,68 @@ if TYPE_CHECKING:
 
 def verify_commit_transition(transition: CommitHandoffTransition) -> None:
     """Replay path, boundary, authorization, and retained-history identities."""
-    verify_commit_identity(transition)
     proof = transition.commit_handoff
-    if not proof.get("preserved_files") or not proof.get("native_ci"):
-        msg = "commit handoff requires retained history and an exact-commit native obligation"
-        raise ValueError(msg)
+    schema = Path(__file__).resolve().parents[1] / "references" / "schemas" / "runtime-operation-inputs-v1.schema.json"
+    require_schema_definition(proof, schema, "commitHandoff")
+    verify_commit_identity(transition)
     retained = {}
     for item in proof["preserved_files"]:
         path = Path(item["path"])
         if path.resolve() != path or path.is_symlink() or not path.is_file() or digest_bytes(path.read_bytes()) != item["digest"]:
             raise ValueError(f"commit handoff history missing or changed: {path}")
+        if path.name in retained:
+            raise ValueError(f"commit handoff history has a duplicate name: {path.name}")
         retained[path.name] = path.read_bytes()
-    declarations = json.loads(retained["reconciliation.json"])
-    if any(proof[key] != declarations[key] for key in ("authorization", "native_ci")):
+    declarations = _history_object(retained, "reconciliation.json")
+    if any(proof[key] != declarations.get(key) for key in ("authorization", "native_ci")):
         msg = "commit handoff policy differs from immutable reconciliation history"
         raise ValueError(msg)
     for policy in proof["preserved_evidence"].values():
-        declared = declarations[policy["kind"]].get(policy["node_id"])
-        metadata = json.loads(retained[policy["node_id"] + ".metadata_path"])
-        if policy["policy"] != declared or policy["record_digest"] != digest_bytes(canonical_json(metadata["normalized_record"]).encode()):
+        policies = _history_mapping(declarations.get(policy["kind"]), f"reconciliation.{policy['kind']}")
+        declared = policies.get(policy["node_id"])
+        record = _history_record(retained, policy["node_id"] + ".metadata_path")
+        if policy["policy"] != declared or policy["record_digest"] != digest_bytes(canonical_json(record).encode()):
             msg = "preserved commit evidence differs from its immutable reconciliation history"
             raise ValueError(msg)
     for key, snapshot in (("previous_capture", transition.before), ("new_capture", transition.after)):
-        if source_snapshot(json.loads(retained[key + ".json"])) != snapshot:
+        if source_snapshot(_history_object(retained, key + ".json")) != snapshot:
             msg = "commit handoff capture differs from retained history"
             raise ValueError(msg)
     _verify_retained_records(proof, retained)
 
 
+def _history_mapping(value: Any, name: str) -> dict[str, Any]:
+    """Reject malformed retained JSON before using object fields."""
+    if not isinstance(value, dict):
+        raise TypeError(f"commit handoff history {name} must be an object")
+    return value
+
+
+def _history_object(retained: dict[str, bytes], name: str) -> dict[str, Any]:
+    if name not in retained:
+        raise ValueError(f"commit handoff history is missing {name}")
+    return _history_mapping(json.loads(retained[name]), name)
+
+
+def _history_record(retained: dict[str, bytes], name: str) -> dict[str, Any]:
+    record = _history_mapping(_history_object(retained, name).get("normalized_record"), name + ".normalized_record")
+    if not isinstance(record.get("evidence_id"), str) or not record["evidence_id"].strip():
+        raise ValueError(f"commit handoff history {name} requires an evidence_id")
+    return record
+
+
 def _verify_retained_records(proof: dict[str, Any], retained: dict[str, bytes]) -> None:
     """Bind native replacement and record mappings to the original archived plan."""
-    original_plan = json.loads(retained["plan.json"])
-    native_units = {unit["node_id"]: unit for unit in original_plan["coalesced_validation_units"] if unit["node_id"] in proof["native_ci"]}
+    original_plan = _history_object(retained, "plan.json")
+    units = original_plan.get("coalesced_validation_units")
+    if not isinstance(units, list) or any(not isinstance(unit, dict) or not isinstance(unit.get("node_id"), str) for unit in units):
+        msg = "commit handoff history plan requires validation units with node_id strings"
+        raise ValueError(msg)
+    native_units = {unit["node_id"]: unit for unit in units if unit["node_id"] in proof["native_ci"]}
     if canonical_json(proof["previous_native_units"]) != canonical_json(native_units):
         msg = "native replacement differs from its retained execution identity"
         raise ValueError(msg)
-    original_records = [json.loads(content)["normalized_record"] for name, content in retained.items() if name.endswith(".metadata_path")]
+    original_records = [_history_record(retained, name) for name in retained if name.endswith(".metadata_path")]
     if proof["source_records"] != {record["evidence_id"]: digest_bytes(canonical_json(record).encode()) for record in original_records}:
         msg = "commit source records differ from original immutable evidence"
         raise ValueError(msg)
@@ -73,6 +100,9 @@ def verify_commit_identity(transition: CommitHandoffTransition) -> None:
         msg = "commit handoff requires a new commit on a named branch"
         raise ValueError(msg)
     proof = transition.commit_handoff
+    if not isinstance(proof, dict) or not isinstance(proof.get("authorization"), dict):
+        msg = "commit handoff requires an authorization object"
+        raise TypeError(msg)
     authorization = proof["authorization"]
     if (
         authorization.get("operation") != "branch-commit"
