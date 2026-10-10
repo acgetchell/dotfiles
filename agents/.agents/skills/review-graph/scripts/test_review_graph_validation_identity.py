@@ -296,3 +296,49 @@ def test_reused_validation_reference_is_scoped_to_its_verified_audit(tmp_path: P
         reconciliation = runtime._validation_reconciliation(plan, [changed])
         assert reconciliation["requirements"][0]["resolution"] == "identity-conflict"
         assert "reuse_binding" not in reconciliation["requirements"][0]
+
+
+@pytest.mark.parametrize("change", ["log-path", "environment", "removed-requirement"])
+def test_repair_rechecks_audit_when_delegated_validation_identity_changes(tmp_path: Path, change: str) -> None:
+    request, original, source = _mutation_with_audit_source(tmp_path, reference_planned_validation=True)
+    original_bytes = {Path(path): Path(path).read_bytes() for path in source.values()}
+    requirement = request["planning_template"]["validation_requirements"][0]
+    if change == "log-path":
+        requirement["commands"] = ["just check-fast > ci-release-review.log"]
+        requirement["canonical_recipe"] = None
+    elif change == "environment":
+        requirement["environment"] = "replacement executor"
+    else:
+        requirement["requirement_id"] = "replacement-validation"
+
+    result = runtime.advance_after_mutation(request)
+
+    assert original["dispatch"]["evidence_id"] not in result["reused_evidence_ids"]
+    decision = next(item for item in result["reuse_decisions"] if item["node_id"] == original["node_id"])
+    assert decision["reason_code"] == "validation-requirements-changed"
+    assert "validation" in decision["reason"]
+    replacement = [entry for entry in result["dispatch_set"]["dispatches"] if entry["dispatch"].get("skill_id") == original["dispatch"]["skill_id"]]
+    assert len(replacement) == 1
+    assert replacement[0]["dispatch"]["owned_paths"] == original["dispatch"]["owned_paths"]
+    lifecycle = result["lifecycle_input"]
+    plan = runtime._graph_plan(lifecycle["plan"])
+    journal = Path(result["journal_path"])
+    sources = []
+    executed = []
+    for _ in range(plan.complete_node_count + 1):
+        events, _states, _head = runtime.read_execution_journal(journal, plan=plan, source_state=tuple(lifecycle["source_state"]))
+        ready = runtime.next_ready_nodes(
+            {**lifecycle, "current_source_state": lifecycle["source_state"]}, journal_events=events, dispatch_set=result["dispatch_set"]
+        )
+        if ready["complete"]:
+            break
+        assert ready["ready_dispatches"], ready["blockers"]
+        for entry in ready["ready_dispatches"]:
+            sources.append(_compile_repair_fixture_entry(entry, lifecycle, journal))
+            executed.append(entry["node_id"])
+    else:
+        pytest.fail("changed validation identity left the repair graph unschedulable")
+    final = runtime.finalize_proof({**lifecycle, "current_source_state": lifecycle["source_state"], "sources": sources})
+    assert final["graph_proof_status"] == "complete", final["blockers"]
+    assert executed.count(plan.coalesced_validation_units[0].node_id) == 1
+    assert all(path.read_bytes() == content for path, content in original_bytes.items())

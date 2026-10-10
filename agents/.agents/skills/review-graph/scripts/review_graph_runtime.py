@@ -4388,6 +4388,7 @@ def _carry_forward_audits(  # noqa: C901, PLR0912, PLR0913, PLR0915 - preserve p
     *,
     invalidated: tuple[str, ...],
     sources: dict[str, tuple[dict[str, Any], dict[str, Any]]],
+    observed_metadata_transition: ExternalMetadataTransition | None = None,
 ) -> tuple[GraphPlan, list[dict[str, str]]]:
     """Convert only proven unchanged leaves into non-executable routed reuse."""
     decisions = {
@@ -4466,6 +4467,10 @@ def _carry_forward_audits(  # noqa: C901, PLR0912, PLR0913, PLR0915 - preserve p
             # Incomplete/changed inputs are ordinary fresh review work, not reuse.
             decision(node_id, "input-proof-failed", str(error))
             continue
+        reconciliation = _validation_reconciliation(replace(candidate_plan, audit_reuse_transitions=(transition,)), [record])
+        if reconciliation["blockers"]:
+            decision(node_id, "validation-requirements-changed", "; ".join(reconciliation["blockers"]))
+            continue
         decision(node_id, "verified", "Complete audit inputs and dependencies are unchanged.")
         transitions.append(transition)
         records.append((expectation, evidence))
@@ -4480,6 +4485,7 @@ def _carry_forward_audits(  # noqa: C901, PLR0912, PLR0913, PLR0915 - preserve p
         catalog_path=Path(document.get("routing_catalog_path", DEFAULT_ROUTING_CATALOG)),
         skill_roots=(DEFAULT_SKILL_ROOT,),
         repository_root=root,
+        observed_metadata_transition=observed_metadata_transition,
     )
     needed_states = {state for transition in transitions for state in (transition.source_state, transition.target_state)}
     routed = replace(
@@ -5019,6 +5025,7 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
         msg = "repair_epoch must be positive"
         raise ValueError(msg)
     changed_paths = _mutation_path_delta(document, previous_capture, new_capture)
+    metadata = metadata_transition({"before": new_capture, "after": document["post_repair_capture"]}) if "post_repair_capture" in document else None
     captured_paths = _text_list(new_capture, "captured_scope_paths")
     sources = _mutation_evidence_sources(document, old_plan)
     planning_input = bootstrap_document(new_capture, planning_template)
@@ -5027,12 +5034,16 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
     require_schema(planning_input, _PLANNING_INPUT_SCHEMA)
     repository_root = Path(_required_text(planning_input, "repository_root")).resolve()
     catalog_path = Path(document.get("routing_catalog_path", DEFAULT_ROUTING_CATALOG)).resolve()
-    new_plan = plan_from_document(planning_input, catalog_path=catalog_path, skill_roots=(DEFAULT_SKILL_ROOT,), repository_root=repository_root)
+    new_plan = plan_from_document(
+        planning_input, catalog_path=catalog_path, skill_roots=(DEFAULT_SKILL_ROOT,), repository_root=repository_root, observed_metadata_transition=metadata
+    )
     if not new_plan.dispatch_allowed:
         msg = "recaptured repair epoch produced a blocked final-state plan: " + "; ".join(new_plan.blockers)
         raise ValueError(msg)
     invalidated = _mutation_invalidated_nodes(old_plan, new_plan, changed_paths, repository_root, sources)
-    new_plan, reuse_decisions = _carry_forward_audits(document, old_plan, new_plan, planning_input, invalidated=invalidated, sources=sources)
+    new_plan, reuse_decisions = _carry_forward_audits(
+        document, old_plan, new_plan, planning_input, invalidated=invalidated, sources=sources, observed_metadata_transition=metadata
+    )
     new_plan, coverage_reviews = _plan_delta_audits(document, old_plan, new_plan, sources)
     new_plan = _epoch_scoped_plan(new_plan, epoch)
     reused_ids = {item.evidence_id for item in new_plan.audit_reuse_transitions}
@@ -5072,7 +5083,7 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
         )
         replacement_lineage.append({"node_id": node.node_id, "replaces_node_ids": list(predecessors)})
     fix_node_id = f"fix-epoch-{epoch:03d}"
-    return {
+    result = {
         "authorization_transition": {"after": authorization_after, "before": authorization_before},
         "dispatch_set": dispatch_set,
         "invalidated_nodes": [{"node_id": node_id, "state": "awaiting-replan"} for node_id in invalidated],
@@ -5106,6 +5117,66 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
             *dict.fromkeys(evidence_id for _requirement_id, evidence_id in old_plan.exact_reused_review_evidence if evidence_id not in reused_ids),
         ],
         "status": "advanced",
+    }
+    return _resume_after_repair_metadata(document, result) if metadata is not None else result
+
+
+def _resume_after_repair_metadata(document: dict[str, Any], repair: dict[str, Any]) -> dict[str, Any]:
+    """Compose two verified transitions without synthesizing captures or changing Git."""
+    history_path = Path(repair["lifecycle_input_path"]).parent / "repair-transition.json"
+    history = {"previous_capture": document["previous_capture"], "historical_evidence_sources": document.get("sources", []), **repair}
+    _write_text_once(history_path, json.dumps(history, indent=2, sort_keys=True) + "\n")
+    resumed = resume_after_external_metadata(
+        {
+            **repair["lifecycle_input"],
+            "previous_capture": repair["capture"],
+            "new_capture": document["post_repair_capture"],
+            "dispatches_path": repair["dispatches_path"],
+            "journal_path": repair["journal_path"],
+            "artifact_store": str(Path(repair["lifecycle_input_path"]).parent / "external-metadata"),
+            "routing_catalog_path": document.get("routing_catalog_path", DEFAULT_ROUTING_CATALOG),
+        }
+    )
+    reused_ids = {evidence_id for _requirement, evidence_id in resumed["lifecycle_input"]["plan"]["exact_reused_review_evidence"]}
+    invalidated_nodes = {item["node_id"] for item in repair["preserved_evidence"] if item["evidence_id"] not in reused_ids}
+    return {
+        **repair,
+        **{
+            key: resumed[key]
+            for key in (
+                "lifecycle_input",
+                "dispatch_set",
+                "lifecycle_input_path",
+                "dispatches_path",
+                "journal_path",
+                "capture_path",
+                "current_source_state",
+                "node_decisions",
+            )
+        },
+        "new_plan": resumed["lifecycle_input"]["plan"],
+        "capture": document["post_repair_capture"],
+        "repair_transition_path": str(history_path),
+        "reused_evidence_ids": sorted(reused_ids),
+        "invalidated_nodes": [
+            {"node_id": node_id, "state": "awaiting-replan"}
+            for node_id in sorted({item["node_id"] for item in repair["invalidated_nodes"]} | invalidated_nodes)
+        ],
+        "unaffected_node_ids": [node_id for node_id in repair["unaffected_node_ids"] if node_id not in invalidated_nodes],
+        "reuse_decisions": [
+            {
+                **item,
+                "disposition": "not-reused",
+                "reason_code": "metadata-dependencies-changed",
+                "reason": "External staging requires a fresh Git-sensitive judgment; see node_decisions.",
+            }
+            if item["node_id"] in invalidated_nodes
+            else item
+            for item in repair["reuse_decisions"]
+        ],
+        "preserved_evidence": [item for item in repair["preserved_evidence"] if item["evidence_id"] in reused_ids],
+        "stale_evidence_ids": sorted(set(repair["stale_evidence_ids"]) | (set(repair["reused_evidence_ids"]) - reused_ids)),
+        "transition_kind": "repair-then-observed-external-git-metadata",
     }
 
 

@@ -152,6 +152,7 @@
         "authorization_before": {"enum": ["review-only", "review-and-fix"]},
         "changed_paths": {"$ref": "#/$defs/stringArray"},
         "new_capture": {"type": "object"},
+        "post_repair_capture": {"type": "object"},
         "plan": {"type": "object"},
         "planning_template": {"type": "object"},
         "previous_capture": {"type": "object"},
