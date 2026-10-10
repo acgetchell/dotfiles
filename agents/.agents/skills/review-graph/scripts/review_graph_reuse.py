@@ -5,7 +5,7 @@ import re
 from dataclasses import asdict, dataclass
 from hashlib import sha256 as sha256_hash
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, override
 
 from research_repo_tools.evidence import sha256
 from review_graph_integrity import canonical_json
@@ -147,12 +147,32 @@ class ExternalMetadataTransition:
             raise ValueError(msg)
 
 
+@dataclass(frozen=True)
+class CommitHandoffTransition(ExternalMetadataTransition):
+    """An authorized commit of reviewed bytes, with immutable reconciliation proof."""
+
+    commit_handoff: dict[str, Any]
+
+    @override
+    def verify(self) -> None:
+        """Verify the separate commit contract without relaxing index-only resumes."""
+        from review_graph_commit import verify_commit_transition  # noqa: PLC0415 - avoid the snapshot type import cycle.
+
+        self.before.verify()
+        self.after.verify()
+        verify_commit_transition(self)
+
+
 def metadata_transition(raw: dict[str, Any]) -> ExternalMetadataTransition:
     """Parse and verify an externally observed metadata transition."""
     if not isinstance(raw, dict) or any(not isinstance(raw.get(field), dict) for field in ("before", "after")):
         msg = "external metadata transition requires before and after snapshot objects"
         raise ValueError(msg)
-    result = ExternalMetadataTransition(source_snapshot(raw["before"]), source_snapshot(raw["after"]))
+    result = (
+        CommitHandoffTransition(source_snapshot(raw["before"]), source_snapshot(raw["after"]), raw["commit_handoff"])
+        if "commit_handoff" in raw
+        else ExternalMetadataTransition(source_snapshot(raw["before"]), source_snapshot(raw["after"]))
+    )
     result.verify()
     return result
 

@@ -3246,6 +3246,7 @@ def test_create_once_writers_reject_nonregular_targets(tmp_path: Path, writer: s
 
 def _legacy_plan_digest(plan: GraphPlan) -> str:
     document = asdict(plan)
+    document.pop("commit_handoffs")
     # Historical writers predate the optional scheduling barrier entirely.
     document.pop("pre_review_validation_nodes")
     if not plan.validation_recoveries:
@@ -4627,6 +4628,7 @@ def test_synthesis_bundle_binds_compact_routing_and_validation_closure(tmp_path:
 def test_plan_digest_keeps_existing_journals_compatible_without_optional_reuse_fields() -> None:
     plan = _sparse_plan()
     legacy = _json_plan(plan)
+    legacy.pop("commit_handoffs")
     legacy.pop("pre_review_validation_nodes")
     legacy.pop("validation_recoveries")
     legacy.pop("validation_exclusions")
@@ -4643,6 +4645,7 @@ def test_plan_digest_retains_nonempty_reuse_fields(tmp_path: Path) -> None:
     result = advance_after_mutation(request)
     plan = _graph_plan(json.loads(json.dumps(result["new_plan"])))
     document = _json_plan(plan)
+    document.pop("commit_handoffs")
     document.pop("pre_review_validation_nodes")
     document.pop("validation_recoveries")
     document.pop("audit_delta_reviews")

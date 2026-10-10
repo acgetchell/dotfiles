@@ -542,6 +542,7 @@ class GraphPlan:
     audit_delta_reviews: tuple[dict[str, Any], ...] = ()
     validation_recoveries: tuple[dict[str, Any], ...] = ()
     pre_review_validation_nodes: tuple[str, ...] = ()
+    commit_handoffs: tuple[ExternalMetadataTransition, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -2431,6 +2432,8 @@ def _identifier_tuple_blockers(values: Sequence[str], *, label: str) -> tuple[st
 def graph_plan_digest(plan: GraphPlan) -> str:
     """Hash a plan without empty optional fields absent from legacy identities."""
     document = asdict(plan)
+    if not plan.commit_handoffs:
+        document.pop("commit_handoffs")
     if not plan.pre_review_validation_nodes:
         document.pop("pre_review_validation_nodes")
     if not plan.validation_recoveries:
@@ -2451,6 +2454,8 @@ def graph_plan_digest_matches(plan: GraphPlan, digest: str) -> bool:
     if digest == graph_plan_digest(plan):
         return True
     legacy = asdict(plan)
+    if not plan.commit_handoffs:
+        legacy.pop("commit_handoffs")
     if not plan.pre_review_validation_nodes:
         legacy.pop("pre_review_validation_nodes")
     if not plan.validation_recoveries:

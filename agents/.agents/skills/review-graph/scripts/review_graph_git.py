@@ -156,7 +156,8 @@ def intervening_metadata_blockers(record: dict[str, Any], transitions: tuple[Ext
 def discovery_reconciliation(record: dict[str, Any], transition: ExternalMetadataTransition) -> dict[str, Any]:
     """Bind discovery to the combined HEAD-to-worktree change, retaining the original commands."""
     return {
-        "basis": "combined-staged-and-unstaged-content",
+        "basis": "unchanged-reviewed-path-identities" if transition.before.head != transition.after.head else "combined-staged-and-unstaged-content",
+        **({"comparison_commit": transition.before.head} if transition.before.head != transition.after.head else {}),
         "head": transition.after.head,
         "before_worktree_fingerprint": transition.before.captured_worktree_fingerprint,
         "after_worktree_fingerprint": transition.after.captured_worktree_fingerprint,
