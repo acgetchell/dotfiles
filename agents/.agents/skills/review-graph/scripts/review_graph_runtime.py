@@ -212,10 +212,10 @@ class JournalEventRequest:
 
 
 class WorkerPayloadWriteError(OSError):
-    """Preserve the validated payload identity when artifact publication fails."""
+    """Preserve validated artifact evidence when review storage or payload publication fails."""
 
     def __init__(self, message: str, artifact_write_review: dict[str, Any], review_reference: dict[str, Any] | None = None) -> None:
-        """Attach the deterministic safety review to the publication failure."""
+        """Attach the safety review and any persisted evidence to the write failure."""
         super().__init__(message)
         self.artifact_write_review = artifact_write_review
         self.review_reference = review_reference
@@ -3750,9 +3750,12 @@ def persist_worker_payload_bytes(contract_document: dict[str, Any], payload_byte
         msg = f"worker payload target directory does not exist: {target_path.parent}"
         raise ValueError(msg)
     artifact_write_review = _approved_worker_payload_write(contract_document, payload_bytes, approval_identity, candidate_is_write_target=False)
-    review_reference = None
     try:
         review_reference = _persist_worker_write_review(artifact_write_review)
+    except OSError as error:
+        msg = f"worker payload write-review persistence failed: {error}"
+        raise WorkerPayloadWriteError(msg, artifact_write_review) from error
+    try:
         descriptor, temporary_name = tempfile.mkstemp(prefix=f".{target_path.name}.", suffix=".tmp", dir=target_path.parent)
         temporary_path = Path(temporary_name)
         try:
@@ -3796,9 +3799,12 @@ def persist_worker_payload(contract_document: dict[str, Any], candidate_path: Pa
         artifact_write_review = _approved_worker_payload_write(contract_document, payload_bytes, approval_identity)
         stream.flush()
         os.fsync(stream.fileno())
-    review_reference = None
     try:
         review_reference = _persist_worker_write_review(artifact_write_review)
+    except OSError as error:
+        msg = f"worker payload write-review persistence failed: {error}"
+        raise WorkerPayloadWriteError(msg, artifact_write_review) from error
+    try:
         candidate.replace(target_path)
     except OSError as error:
         msg = f"worker payload artifact publication failed: {error}"

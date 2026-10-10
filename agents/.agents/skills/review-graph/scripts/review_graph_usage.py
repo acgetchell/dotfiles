@@ -231,6 +231,9 @@ def _read_usage(path: Path) -> dict[str, Any]:
     except TypeError as error:
         msg = "--usage: JSON input must be an object"
         raise AccountingInputError(msg) from error
+    except RecursionError as error:
+        msg = "--usage: invalid JSON: nesting exceeds parser limit"
+        raise AccountingInputError(msg) from error
     except ValueError as error:
         msg = "--usage: invalid JSON: non-finite numbers or unsupported numeric ranges"
         raise AccountingInputError(msg) from error

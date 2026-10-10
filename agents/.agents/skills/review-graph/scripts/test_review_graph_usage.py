@@ -70,6 +70,25 @@ def test_invalid_usage_identifies_failure_without_echoing_values(tmp_path: Path,
     assert ledger.read_text() == "existing event\n"
 
 
+@pytest.fixture
+def deeply_nested_usage(tmp_path: Path) -> Path:
+    depth = 50_000
+    path = tmp_path / "private-filename.json"
+    path.write_text('{"private-value":' + "[" * depth + '"private-value"' + "]" * depth + "}", encoding="utf-8")
+    return path
+
+
+def test_deep_usage_json_reports_safe_diagnostic_without_traceback(tmp_path: Path, deeply_nested_usage: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    ledger = tmp_path / "usage.jsonl"
+    ledger.write_text("existing event\n", encoding="utf-8")
+    assert usage.main(_finish_args(ledger, deeply_nested_usage)) == 2
+    output = capsys.readouterr()
+    assert not output.out
+    assert "--usage: invalid JSON: nesting exceeds parser limit" in output.err
+    assert all(value not in output.err for value in ("Traceback", "private-value", "private-filename"))
+    assert ledger.read_text(encoding="utf-8") == "existing event\n"
+
+
 @pytest.mark.parametrize("kind", ["missing", "directory", "inline", "encoding", "oversized"])
 def test_usage_file_failures_are_distinct_and_do_not_create_a_ledger(tmp_path: Path, capsys: pytest.CaptureFixture[str], kind: str) -> None:
     ledger = tmp_path / "usage.jsonl"

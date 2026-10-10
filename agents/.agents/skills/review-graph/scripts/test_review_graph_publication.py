@@ -129,25 +129,48 @@ def test_blocked_publication_keeps_actionable_approval_and_complete_evidence(
     assert receipt["artifact_write_review_reference"] == rejection["artifact_write_review_reference"]
 
 
+@pytest.mark.parametrize("candidate_mode", [False, True], ids=["stdin", "candidate"])
+@pytest.mark.parametrize("full_output", [False, True])
 def test_write_review_storage_failure_blocks_payload_with_approval_identity(
-    dispatch_set: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    dispatch_set: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], candidate_mode: bool, full_output: bool
 ) -> None:
     entry = next(item for item in dispatch_set["dispatches"] if item["dispatch"].get("mode") == "audit")
     content = json.dumps(_compact_audit_payload(entry)).encode()
+    contract = json.loads(Path(entry["worker_payload_contract_path"]).read_bytes())
+    candidate = Path(entry["worker_payload_path"]).with_suffix(".candidate.json")
+    contract_path = candidate.with_name("legacy-contract.json")
+    if candidate_mode:
+        candidate.write_bytes(content)
+        contract["candidate_path"] = str(candidate)
+        contract_path.write_text(json.dumps(contract), encoding="utf-8")
+    review = runtime.review_worker_payload_write(contract, content, candidate_is_write_target=candidate_mode)
 
     def deny_storage(*_args: object, **_kwargs: object) -> tuple[int, str]:
         message = "fixture evidence storage unavailable"
         raise PermissionError(message)
 
     monkeypatch.setattr(runtime.tempfile, "mkstemp", deny_storage)
-    assert _publish_cli(entry, content, monkeypatch) == 2
+    options = ["--full-output"] if full_output else []
+    result = (
+        runtime.main(["persist-worker-payload", "--input", str(contract_path), "--payload", str(candidate), *options])
+        if candidate_mode
+        else _publish_cli(entry, content, monkeypatch, *options)
+    )
+    assert result == 2
     output = capsys.readouterr()
     rejection = json.loads(output.err)
     assert not output.out
     assert rejection["artifact_write_review_reference"] is None
-    assert rejection["approval_identity"]
+    assert rejection["approval_identity"] == review["approval_identity"]
+    assert rejection["message"].startswith("worker payload write-review persistence failed:")
     assert "evidence storage unavailable" in rejection["message"]
+    if full_output:
+        assert rejection["artifact_write_review"] == review
+    else:
+        assert "artifact_write_review" not in rejection
     assert not Path(entry["worker_payload_path"]).exists()
+    if candidate_mode:
+        assert candidate.read_bytes() == content
 
 
 def test_tampered_write_review_cannot_be_replaced_by_publication(dispatch_set: dict[str, Any]) -> None:
