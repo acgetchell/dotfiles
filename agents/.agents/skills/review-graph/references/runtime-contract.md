@@ -121,7 +121,8 @@ partitions: unique unit IDs, every owned path/finding assigned exactly once
 (one-based indices), and nearby dependencies in `dependency_paths`. Rejection
 names missing dependencies before writing; see [publication bindings](publication-bindings.md).
 
-For typed audit caveats, see [audit-context.md](audit-context.md).
+Audits: [typed caveats](audit-context.md); broad audits:
+[coverage partitioning](coverage-partitioning.md).
 
 Bundle-only synthesis allows empty `files_inspected`, but requires predecessor
 evidence. Never invent source reads.

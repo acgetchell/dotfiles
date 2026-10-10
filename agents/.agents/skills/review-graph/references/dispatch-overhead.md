@@ -1,5 +1,55 @@
 # Dispatch Overhead Measurement
 
+## Capability Contract Partitions (#147)
+
+The fixed fixture owns three implementation files: notebook execution,
+scientific calculations, and operational diagnostics. The first two have
+independent capability contract files; `docs/api.md` links to those contracts
+and specifies operational diagnostics. Both strategies use identical captured
+source bytes, instruction files, manifests, and routed ownership.
+
+Reproduce the paired measurement:
+
+```sh
+UV_CACHE_DIR=.uv-cache uv run --locked pytest -q -s \
+  agents/.agents/skills/review-graph/scripts/test_review_graph_contract_partitions.py \
+  -k broad_vs_capability
+```
+
+The broad strategy declares the API document as a dependency of every unit.
+The capability strategy declares only the independently applicable contracts.
+An operational-doc repair rechecks three implementation paths under the broad
+strategy and one under the capability strategy. Each materializes one capability
+audit, publishes once, and compiles once; no model workers launch. The runtime
+verifies reused findings against original immutable evidence and retains all
+three seeded findings, including historical rechecked observations.
+
+The 2026-10-10 local paired run measured:
+
+| Scripted measurement | Broad dependency | Capability dependencies |
+| --- | ---: | ---: |
+| Rechecked implementation paths | 3 | 1 |
+| Reused implementation paths | 0 | 2 |
+| Materialized capability audits | 1 | 1 |
+| Worker-input bytes | 17,784 | 20,729 |
+| External coverage-proof bytes | 0 | 6,674 |
+| Publication / compilation calls | 1 / 1 | 1 / 1 |
+
+The printed report measures worker-input and external-proof bytes separately.
+Proof transport can increase worker-input bytes even when source inspection
+shrinks. Temporary path lengths affect the exact sizes. Publication/compilation
+counts and materialized dispatches are scripted protocol observations, not
+measured model launches, latency, or semantic recall. Provider tokens, cost,
+and model review time remain `null`; this comparison establishes no provider
+cost saving.
+
+Separate regressions edit each capability contract, change the shared manifest
+or applicable instructions, delete a contract, and declare uncertain dependency
+ownership. Each checks the required rechecks and finding provenance through
+native publication, compilation, and evidence verification. The current proof
+still binds complete file identities; see the
+[section-level evaluation](coverage-partitioning.md#section-level-dependencies).
+
 ## Partial Recheck Proof Transport (#128)
 
 The fixed regression fixture owns `pyproject.toml` and
