@@ -5245,7 +5245,42 @@ def _sha256_digest(value: object, name: str) -> str:
     return value
 
 
-def _journal_evidence(raw: object, *, plan: GraphPlan, node: WorkerNode, status: str) -> dict[str, str] | None:
+def _historical_validation_evidence(evidence: dict[str, str], plan: GraphPlan, node: WorkerNode) -> bool:
+    """Verify an old attempt against the recovery's immutable prior journal."""
+    if node.mode != "validation":
+        return False
+    recovery = next(
+        (item for item in plan.validation_recoveries if item["node_id"] == node.node_id and item.get("previous_evidence_id") == evidence["evidence_id"]), None
+    )
+    if recovery is None:
+        return False
+    saved = {}
+    for filename in ("lifecycle.json", "execution.jsonl"):
+        matches = [item for item in recovery["preserved_files"] if Path(item["path"]).name == filename]
+        if len(matches) != 1:
+            msg = "historical validation evidence requires one preserved lifecycle and journal"
+            raise ValueError(msg)
+        content = _read_regular_file_no_follow(Path(matches[0]["path"]))
+        if digest_bytes(content) != matches[0]["digest"]:
+            msg = "preserved validation recovery evidence changed"
+            raise ValueError(msg)
+        saved[filename] = content
+    lifecycle = json.loads(saved["lifecycle.json"])
+    previous = _graph_plan(lifecycle["plan"])
+    source_state = _state(lifecycle, "source_state")
+    if _plan_digest(previous) != recovery["previous_plan_digest"] or source_state != tuple(recovery["source_state"]):
+        msg = "historical validation evidence differs from its recovery plan"
+        raise ValueError(msg)
+    events, _state_view, head = _read_execution_journal_content(
+        saved["execution.jsonl"], path=Path("execution.jsonl"), plan=previous, source_state=source_state
+    )
+    if head != recovery["previous_journal_head"]:
+        msg = "historical validation evidence differs from its recovery journal"
+        raise ValueError(msg)
+    return any(event["node_id"] == node.node_id and event["evidence"] == evidence for event in events)
+
+
+def _journal_evidence(raw: object, *, plan: GraphPlan, node: WorkerNode, status: str, superseded: bool = False) -> dict[str, str] | None:
     if raw is None:
         if status == "accepted":
             msg = f"accepted journal event requires verified evidence: {node.node_id}"
@@ -5259,7 +5294,7 @@ def _journal_evidence(raw: object, *, plan: GraphPlan, node: WorkerNode, status:
     _sha256_digest(evidence["artifact_digest"], "journal artifact_digest")
     _sha256_digest(evidence["normalized_record_digest"], "journal normalized_record_digest")
     expected_evidence_id = _expected_evidence_id(node, plan)
-    if evidence["evidence_id"] != expected_evidence_id:
+    if evidence["evidence_id"] != expected_evidence_id and not (superseded and _historical_validation_evidence(evidence, plan, node)):
         msg = f"journal evidence ID differs from plan for {node.node_id}"
         raise ValueError(msg)
     valid_statuses = {"passed", "failed", "blocked", "reused", "not-applicable"} if node.mode == "validation" else _REVIEW_STATUSES
@@ -5376,8 +5411,8 @@ def _apply_journal_transition(plan: GraphPlan, state: dict[str, str], *, node_id
     return (node_id,)
 
 
-def _validated_journal_record(
-    event: dict[str, Any], *, expected_sequence: int, plan: GraphPlan, source_state: tuple[str, str, str], previous_digest: str | None
+def _validated_journal_record(  # noqa: PLR0913 - bind both chain and historical-attempt position before accepting a record.
+    event: dict[str, Any], *, expected_sequence: int, plan: GraphPlan, source_state: tuple[str, str, str], previous_digest: str | None, superseded: bool
 ) -> tuple[str, str]:
     if set(event) - {"recorded_at_unix_ns"} != _JOURNAL_EVENT_KEYS:
         msg = f"journal event {expected_sequence} has unexpected fields"
@@ -5409,17 +5444,23 @@ def _validated_journal_record(
         requirement = "requires" if requires_reason else "must not contain"
         msg = f"{status} journal event {requirement} a reason: {node_id}"
         raise ValueError(msg)
-    _journal_evidence(event.get("evidence"), plan=plan, node=node, status=status)
+    _journal_evidence(event.get("evidence"), plan=plan, node=node, status=status, superseded=superseded)
     return node_id, status
 
 
 def _fold_execution_journal(plan: GraphPlan, source_state: tuple[str, str, str], events: tuple[dict[str, Any], ...]) -> tuple[dict[str, str], str | None]:
     state: dict[str, str] = {}
     latest: dict[str, dict[str, Any]] = {}
+    last = {event.get("node_id"): event for event in events}
     previous_digest: str | None = None
     for expected_sequence, event in enumerate(events, start=1):
         node_id, status = _validated_journal_record(
-            event, expected_sequence=expected_sequence, plan=plan, source_state=source_state, previous_digest=previous_digest
+            event,
+            expected_sequence=expected_sequence,
+            plan=plan,
+            source_state=source_state,
+            previous_digest=previous_digest,
+            superseded=event is not last[event.get("node_id")],
         )
         require_validation_barrier(plan, state, latest, node_id=node_id, status=status)
         affected = _apply_journal_transition(plan, state, node_id=node_id, status=status)
@@ -6102,6 +6143,45 @@ def reconcile_validation_requirements(document: dict[str, Any], args: argparse.N
     return _publish_validation_continuation(document, args, plan, expanded, entries, sources, records, head, status="expanded", journal_events=events)
 
 
+def _migrate_validation_journal(
+    plan: GraphPlan, source_state: tuple[str, str, str], events: tuple[dict[str, Any], ...], retained: set[str], *, replaced_node_id: str | None
+) -> tuple[dict[str, Any], ...]:
+    """Preserve admission history in order while leaving replaced validation owed."""
+    keep = retained | set(plan.pre_review_validation_nodes)
+    migrated: list[dict[str, Any]] = []
+    state: dict[str, str] = {}
+
+    def append(original: dict[str, Any]) -> None:
+        event = {
+            **original,
+            "affected_node_ids": list(_apply_journal_transition(plan, state, node_id=original["node_id"], status=original["status"])),
+            "plan_digest": _plan_digest(plan),
+            "previous_event_digest": migrated[-1]["event_digest"] if migrated else None,
+            "sequence": len(migrated) + 1,
+        }
+        event.pop("event_digest", None)
+        event["event_digest"] = digest_bytes(canonical_json(event).encode())
+        migrated.append(event)
+
+    for event in events:
+        if event["node_id"] in keep:
+            append(event)
+    if replaced_node_id in state and state[replaced_node_id] in {"accepted", "blocked", "in-flight"}:
+        append(
+            {
+                "node_id": replaced_node_id,
+                "status": "invalidated",
+                "evidence": None,
+                "reason": "Validation recovery preserves prior admission history; the replacement attempt remains required.",
+                "schema_version": 1,
+                "source_state": list(source_state),
+            }
+        )
+    # The full barrier and attempt-identity checks must pass before publication.
+    _fold_execution_journal(plan, source_state, tuple(migrated))
+    return tuple(migrated)
+
+
 def _publish_validation_continuation(  # noqa: PLR0913, PLR0917
     document: dict[str, Any],
     args: argparse.Namespace,
@@ -6125,12 +6205,15 @@ def _publish_validation_continuation(  # noqa: PLR0913, PLR0917
     sample = first_entry["dispatch"]
     store = Path(_required_text(document, "artifact_store")).resolve() / f"validation-{status}-{_plan_digest(expanded)[7:23]}"
     state, _head = _fold_execution_journal(plan, source_state, journal_events)
-    latest = {event["node_id"]: event for event in journal_events}
     retained = {
         node.node_id: entries[node.node_id]
         for node in plan.actual_worker_nodes
         if state.get(node.node_id) in {"accepted", "blocked"} and node.node_id != replaced_node_id and node.mode != "synthesis"
     }
+    for node in expanded.actual_worker_nodes:
+        if node.node_id in retained and node.node_id in sources:
+            _verified_journal_evidence(sources[node.node_id], plan=expanded, node=node, source_state=source_state)
+    migrated = _migrate_validation_journal(expanded, source_state, journal_events, set(retained), replaced_node_id=replaced_node_id)
     dispatches = materialize_dispatches(
         {
             "artifact_store": str(store / "artifacts"),
@@ -6147,33 +6230,6 @@ def _publish_validation_continuation(  # noqa: PLR0913, PLR0917
     lifecycle = {"plan": json.loads(canonical_json(asdict(expanded))), "source_state": list(source_state)}
     if "external_metadata_transitions" in document:
         lifecycle["external_metadata_transitions"] = document["external_metadata_transitions"]
-    # Rebind verified states to the new plan, preserving every original artifact.
-    # Publish this journal once; never append to or rewrite the historical journal.
-    migrated: list[dict[str, Any]] = []
-    migrated_state: dict[str, str] = {}
-    for node in expanded.actual_worker_nodes:
-        if node.node_id not in retained:
-            continue
-        previous = latest[node.node_id]
-        evidence = None
-        if previous["evidence"] is not None:
-            evidence, _limitations = _verified_journal_evidence(sources[node.node_id], plan=expanded, node=node, source_state=source_state)
-        affected = _apply_journal_transition(expanded, migrated_state, node_id=node.node_id, status=previous["status"])
-        event: dict[str, Any] = {
-            "affected_node_ids": list(affected),
-            "evidence": evidence,
-            "node_id": node.node_id,
-            "plan_digest": _plan_digest(expanded),
-            "previous_event_digest": migrated[-1]["event_digest"] if migrated else None,
-            "reason": previous["reason"],
-            "schema_version": 1,
-            "sequence": len(migrated) + 1,
-            "source_state": list(source_state),
-            "status": previous["status"],
-            **({"recorded_at_unix_ns": previous["recorded_at_unix_ns"]} if "recorded_at_unix_ns" in previous else {}),
-        }
-        event["event_digest"] = digest_bytes(canonical_json(event).encode())
-        migrated.append(event)
     paths = {
         "dispatches_path": store / "dispatches.json",
         "lifecycle_input_path": store / "lifecycle.json",
