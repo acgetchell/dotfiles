@@ -1,5 +1,4 @@
 interface:
   display_name: "C++ Build Portability"
-  short_description: "Audit CMake and vcpkg C++ portability"
-  default_prompt: >-
-    Use $cpp-build-portability to audit this C++23 CMake/vcpkg build across headers, linkage, compiler matrices, presets, and configuration variants.
+  short_description: "Audit C++ build and portability contracts"
+  default_prompt: "Use $cpp-build-portability to audit this C++ build against its declared compiler, platform, linkage, and consumer contracts."

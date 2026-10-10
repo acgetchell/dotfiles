@@ -19,17 +19,14 @@ classify each result as native execution or focused emulation. An unexecuted
 target cell remains a gap even when its workflow is configured or its boundary
 has been modeled elsewhere.
 
-Choose the smallest single selection proving the touched risk. Do not run a
-named case followed by its class, module, suite, and full CI as successive
-tiers. If a broader validator is independently required, choose it initially
-or run only its uncovered portion.
+Avoid a ladder of overlapping test tiers solely for reassurance. Run focused
+red/green checks when useful during a fix, then any required final aggregate gate
+on the final source state even if it repeats those checks. Record the reason for
+overlap without counting it as independent evidence. Reuse valid evidence where
+the required validation contract permits it; overlap alone requires no approval
+or command-surface escalation.
 
-If a mandatory indivisible gate is discovered only after overlapping tests
-passed and offers no reliable exclusion, report the command-surface conflict
-to `project-tooling-review`; do not replay tests or count duplicate execution
-as new evidence.
-
-Rerun only after relevant source, fixture, dependency, environment, or
+Beyond required final gates, rerun only after relevant source, fixture, dependency, environment, or
 configuration changes invalidate a result, or to diagnose nondeterminism. A
 different Python version, platform, optional dependency, subprocess
 environment, async backend, or instrumentation mode is distinct evidence.

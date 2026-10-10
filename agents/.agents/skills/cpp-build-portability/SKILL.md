@@ -1,13 +1,17 @@
 ---
 name: cpp-build-portability
-description: "Audit and fix modern C++23 build-boundary correctness in the CDT++-oriented CMake, CMakePresets, vcpkg manifest, and just toolchain. Cover translation units, public headers, ODR and linkage, templates and explicit instantiation, modules, compiler and standard-library matrices, symbol visibility, static/shared builds, and configuration-sensitive behavior. Use when changes touch headers, CMake targets or presets, vcpkg manifests or triplets, compile features/definitions/options, generated configuration, modules, export macros, compiler-specific code, exception/RTTI/assertion modes, PCH, unity builds, LTO, or supported platform/compiler failures."
+description: "Audit C++ compilation, linkage, public headers, and supported build configurations when build or portability contracts change."
 ---
 
 # C++ Build Portability
 
 Verify that every supported build compiles and links the same intended C++ program. Treat translation-unit boundaries, target properties, compiler and standard-library combinations, and configuration variants as correctness surfaces rather than incidental build mechanics.
 
-## Fixed Toolchain Contract
+## Toolchain Defaults
+
+Select this skill from the language and affected contract in any repository.
+Use the following defaults when no project policy exists; respect an existing
+project toolchain and support policy without requiring a profile or migration.
 
 Use C++23, target-based CMake, checked-in `CMakePresets.json`, vcpkg manifest mode, and `just` as the command surface. Let presets select generators and vcpkg triplets for the supported compiler/platform matrix; do not hardcode one local generator as universal.
 
@@ -18,8 +22,8 @@ Do not add parallel build systems, dependency managers, test frameworks, command
 ## Ground Rules
 
 - Read repository-local guidance before reviewing or editing. Treat its exact recipe and preset names, supported platforms, compilers, libraries, and configurations as the contract unless the user explicitly changes it.
-- Require C++23 in target compile features and every supported preset. Report missing or inconsistent enforcement. Treat C++26 as a future explicit migration after standardization and verified toolchain support.
-- Do not mutate git state unless the user explicitly asks in the current turn.
+- Check that target compile features and supported presets enforce the declared C++ standard consistently. C++23 is the default for new work; changing an established standard or support matrix requires a project or user goal.
+- Do not mutate git state unless the user has explicitly authorized that operation and scope.
 - Default to changed files plus the target definitions, public consumers, generated headers, and configuration variants needed to understand their compilation contract.
 - Verify current compiler, standard-library, module, and build-system support from authoritative sources when version sensitivity matters. Do not bake a remembered support table into a finding.
 - Do not claim portability from one successful compiler, configuration, or CI job. Distinguish declared, configured, compiled, linked, and tested support.
@@ -29,7 +33,7 @@ Keep `just` recipe ergonomics, workflow wiring, tool pins, and CI maintenance un
 
 ## Audit Workflow
 
-### 1. Establish the compilation contract
+### Establish the compilation contract
 
 Record:
 
@@ -44,7 +48,7 @@ Record:
 
 Separate configurations that are documented as supported from experimental or maintainer-only diagnostics. Record which matrix cells are actually available locally or in CI rather than inferring coverage from configuration files.
 
-### 2. Reconstruct targets and translation units
+### Reconstruct targets and translation units
 
 For each affected target, trace:
 
@@ -58,7 +62,7 @@ For each affected target, trace:
 
 Prefer target-scoped properties over accidental directory-global state. Compare the effective properties of a library with every consumer that must agree with it. Use build-system introspection or `compile_commands.json` when available, but verify generated commands belong to the intended configuration.
 
-### 3. Require self-contained headers
+### Require self-contained headers
 
 Check that each public header:
 
@@ -71,7 +75,7 @@ Check that each public header:
 
 Check representative private headers when include order, unity builds, or generated definitions make them similarly fragile. Treat a PCH or unity build that conceals missing includes as a defect in the underlying source contract.
 
-### 4. Audit ODR and linkage
+### Audit ODR and linkage
 
 Check:
 
@@ -85,7 +89,7 @@ Check:
 
 Do not dismiss an ODR risk because the linker accepts it; many violations are ill-formed with no diagnostic required or surface only under LTO, optimization, dynamic linking, or a downstream consumer.
 
-### 5. Audit compiler and library portability
+### Audit compiler and library portability
 
 Distinguish language support from standard-library availability. Check:
 
@@ -98,38 +102,14 @@ Distinguish language support from standard-library availability. Check:
 
 Treat multiple compilers as independent correctness evidence: different front ends and libraries expose different diagnostics and assumptions. Do not weaken warnings or behavior merely to make the matrix superficially green.
 
-### 6. Audit configuration-sensitive behavior
+### Configuration and modules
 
-Compare declarations and behavior across relevant configurations, including:
+When configuration variants or modules affect the change, read
+[configuration and module boundaries](references/configuration-and-modules.md).
 
-- `NDEBUG` and assertion settings
-- exceptions and RTTI enabled or disabled
-- standard-library iterator or debug modes
-- sanitizer and coverage instrumentation
-- static versus shared linkage and symbol visibility
-- debug versus optimized builds, LTO, unity builds, and PCH use
-- platform and dependency feature macros
-- floating-point, architecture, and runtime-library options when they affect semantics or ABI
+### Validate the matrix proportionally
 
-Require every ODR- or ABI-sensitive definition to see compatible settings. Validation reachable from ordinary inputs must not disappear only because release builds disable assertions.
-
-### 7. Audit modules
-
-When modules are supported, check:
-
-- interface units, implementation units, and partitions form an explicit dependency graph
-- exported declarations have reachable dependencies and do not rely on accidental textual inclusion
-- global module fragments contain only required legacy-header or macro setup
-- macros are not expected to cross an `import` boundary
-- headers are not inconsistently imported and textually included in ways that duplicate or change declarations
-- module ownership, visibility, and explicit instantiation agree with non-module consumers where both are supported
-- binary module interfaces are treated as compiler-, version-, flag-, and configuration-specific artifacts
-
-Do not claim module portability from one experimental toolchain. Verify the exact supported compiler, standard library, generator, and build-system combination.
-
-### 8. Validate the matrix proportionally
-
-Use repository `just` recipes first; require them to delegate to the declared CMake presets and vcpkg manifest. If a needed recipe is absent, use the checked-in preset directly and report the missing command-surface coverage rather than inventing another workflow. Select the smallest evidence that proves the affected contract:
+Use repository `just` recipes when available, following the established toolchain and support policy. For CMake projects, require recipes to delegate to the declared presets; require a vcpkg manifest only when the project uses vcpkg. If a needed recipe is absent, use the checked-in preset or established toolchain command directly and report the missing command-surface coverage. Select the smallest evidence that proves the affected contract:
 
 1. compile minimal consumers with each changed public header first
 2. compile and link a two-or-more-translation-unit consumer for ODR, visibility, and explicit-instantiation risks

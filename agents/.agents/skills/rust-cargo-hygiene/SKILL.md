@@ -1,6 +1,6 @@
 ---
 name: rust-cargo-hygiene
-description: "Audit Cargo manifests and crate configuration for release readiness. Use for feature flags, default-features gating, dependency placement and versions, MSRV, edition, workspace inheritance, lints, rustfmt or clippy configuration, docs.rs metadata, crate-level lint policy, and semver-sensitive manifest changes. Route CI workflow logic to project-tooling-review."
+description: "Review Cargo declarations for dependency, feature, MSRV, lint, and publishing correctness when crate configuration changes."
 ---
 
 # rust-cargo-hygiene

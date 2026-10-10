@@ -1,6 +1,6 @@
 ---
 name: csharp-service-boundaries
-description: "Design or change ASP.NET Core service boundaries involving authentication, downstream APIs, cancellation, pagination, persistence, and sanitized errors. Use for concrete integration work; not a catchall C# review."
+description: "Implement or review ASP.NET service integrations involving identity, downstream calls, cancellation, pagination, or persistence."
 ---
 
 # C# Service Boundaries
@@ -8,6 +8,9 @@ description: "Design or change ASP.NET Core service boundaries involving authent
 Trace one request from transport authentication through authorization, domain code,
 persistence, and downstream calls. Preserve the repository's target framework,
 dependency-injection conventions, and existing client libraries.
+
+Apply the sections below only to contracts involved in the requested boundary.
+Do not expand a persistence-only change into a full identity or paging audit.
 
 ## Identity and authority
 

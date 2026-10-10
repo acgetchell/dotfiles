@@ -1,6 +1,6 @@
 ---
 name: cpp-production-review
-description: "Review modern C++23 for production readiness as either a directly requested standalone broad or release-readiness audit, or final synthesis after focused C++ reviews. In standalone mode, cover cross-cutting production risks. In orchestrated mode, reconcile prior evidence and assess only residual dependency, performance, simplification, deletion, validation, and integration risk without repeating specialist passes."
+description: "Perform a broad C++ production audit, or reconcile existing specialist evidence into a readiness assessment."
 ---
 
 # C++ Production Review
@@ -60,6 +60,10 @@ naming the files inspected, residual concerns applied, findings or an explicit
 no-finding result, fixes, and validators.
 
 ## Residual Workflow
+
+In graph synthesis, assess these concerns only through accepted evidence and
+return gaps to the coordinator. Source inspection and new checks below apply to
+standalone or non-graph orchestration within its authorized scope.
 
 ### 1. Reconcile dependencies and integration
 

@@ -1,6 +1,6 @@
 ---
 name: python-support-scripts
-description: "Review Python development, release, benchmark, fixture, CI, diagnostic, and generated-artifact scripts for transformation correctness, determinism, safe subprocess orchestration, malformed tool output, atomic publication, and release-day failure behavior. Use for changelog generators, release helpers, benchmark runners, Cargo or GitHub tooling, and repository automation. Route user applications, scientific algorithms, packaging semantics, boundary models, and test design to focused skills."
+description: "Review Python development and release scripts for correct transformations, safe subprocesses, and reliable artifact publication."
 ---
 
 # Python Support Scripts
@@ -26,14 +26,12 @@ Use changed-code mode by default. Use whole-repository mode only when requested.
 4. Check repeatability across machines and reruns.
 5. Verify failures preserve prior valid artifacts and enough diagnostics for release pressure.
 
-## Python Annotation Semantics
+## Annotation Compatibility
 
-Check the declared Python floor before preserving compatibility imports. For
-Python 3.14-or-newer-only projects, remove
-`from __future__ import annotations`: Python now defers annotations by default,
-while the future import retains deprecated stringified semantics. Keep it only
-when a documented runtime annotation consumer intentionally requires strings,
-and verify that consumer explicitly.
+For changed annotation evaluation, introspection, or Python support floors, read
+[annotation compatibility](../python-build-portability/references/annotation-compatibility.md).
+Requested script fixes include relevant local validation; preserve separate
+publication authorization and source/artifact ownership.
 
 ## Transform And Render Correctness
 

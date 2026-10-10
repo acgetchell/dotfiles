@@ -1,6 +1,6 @@
 ---
 name: rust-fluent-api-design
-description: "Review Rust public APIs for fluent, staged workflow ergonomics without forcing every API into a chain. Use when users ask about fluent APIs, method chaining, builders, proposals, transactions, guards, configuration workflows, terminal mutation methods, public examples, or whether to keep/remove duplicate non-fluent Rust functions; coordinate with parse-don't-validate when a chain should carry validation evidence through proof-bearing types."
+description: "Review Rust builders and staged APIs when sequencing, chaining, or duplicate workflow entrypoints are the design concern."
 ---
 
 # rust-fluent-api-design
@@ -56,20 +56,12 @@ The chain should read in domain order and keep every fallible stage visible with
 
 When a stage validates raw input, the next stage should consume or borrow a proof-bearing value rather than reaccepting raw values.
 
-Prefer:
-
-```rust
-let proposal = owner.propose_move(raw_move)?;
-proposal.attempt_on(&mut owner)?;
-```
-
-over:
-
-```rust
-owner.attempt_move(raw_move)?;
-```
-
-when `raw_move` contains handles, indexes, dimensions, topology IDs, numeric constraints, or other invariant-bearing input.
+Expose a proposal or validated intermediate when callers benefit from dry-run,
+reuse, inspection, or enforced sequencing. An atomic `owner.attempt_move(raw)?`
+may parse internally and preserve exactly the same invariants without a second
+public stage. Handles, indexes, dimensions, and numeric constraints alone do not
+justify expanding the API. Judge whether validation remains valid at use time,
+including owner identity and intervening mutation.
 
 Do not recommend fluent chaining that discards validation evidence or stores invalid state. Use `rust-parse-dont-validate` for deeper invariant-boundary review.
 

@@ -1,6 +1,6 @@
 ---
 name: csharp-test-quality
-description: "Design, write, or review C# unit and integration tests for .NET services, ASP.NET authentication, SDK HTTP clients, and EF Core persistence. Follow the repository's xUnit, NUnit, or MSTest setup instead of migrating frameworks."
+description: "Design or review .NET tests for real service, authentication, HTTP-client, and persistence behavior using the existing framework."
 ---
 
 # C# Test Quality
@@ -9,6 +9,9 @@ Map each requirement to an observable failure mode and the lowest test layer tha
 can prove it. Inspect the target framework, test SDK, assertion packages, and
 existing tests before choosing tools. Do not silently migrate xUnit major versions
 or add another runner.
+
+Select the relevant layers below; a pure unit-test change does not require
+loading every service, authentication, and database integration procedure.
 
 ## Use the right layer
 

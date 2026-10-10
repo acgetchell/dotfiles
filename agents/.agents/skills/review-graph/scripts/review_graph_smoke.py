@@ -77,7 +77,15 @@ def fixture_plan(repository: Path) -> GraphPlan:
                     "review_surface": ["state.rs"],
                     "reason": "scripted state fixture",
                     "applicability_evidence": [LIMIT],
-                }
+                },
+                {
+                    "catalog_id": "rust.build",
+                    "disposition": "not-applicable",
+                    "owners": ["rust"],
+                    "review_surface": ["state.rs"],
+                    "reason": "Literal-return protocol fixture has no supported Rust build matrix",
+                    "applicability_evidence": [LIMIT],
+                },
             ],
             "validation_requirements": [json.loads(json.dumps(asdict(requirement)))],
         },

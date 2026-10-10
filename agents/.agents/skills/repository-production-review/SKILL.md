@@ -1,6 +1,6 @@
 ---
 name: repository-production-review
-description: "Synthesize accepted isolated repository-review reports, exhaustive routing evidence, validation mappings, source-state fingerprints, and cross-surface disagreements into one production-readiness result. Use only as the final repository-level synthesis node of review-graph; do not use it for primary source review or standalone specialist analysis."
+description: "Synthesize accepted review-graph evidence into repository readiness; use only with a graph synthesis dispatch."
 ---
 
 # Repository Production Review

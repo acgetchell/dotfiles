@@ -5,7 +5,7 @@ import json
 import shlex
 from copy import deepcopy
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import review_graph_runtime as runtime
@@ -17,8 +17,10 @@ from test_review_graph_runtime import (
     SKILL_ROOT,
     _baseline_mutation_fixture,
     _compile_repair_fixture_entry,
+    _complete_structural_fixture_routing,
     _publish_worker_bytes,
     _run_test_git,
+    _set_fixture_routing,
     _worker_input_fixture,
 )
 from test_review_graph_transitions import _materialize, _payload, _synthesis_payload
@@ -37,7 +39,8 @@ def _audit_request(tmp_path: Path, *, large: bool = False, caveat: str = "facts"
         _run_test_git(git, "-C", str(repository), "add", ".")
         _run_test_git(git, "-C", str(repository), "commit", "-m", "whole repository fixture")
     catalog = "python.scientific" if large else "python.cli"
-    template["routing_overrides"].append(
+    _set_fixture_routing(
+        template,
         {
             "catalog_id": catalog,
             "disposition": "selected",
@@ -45,9 +48,10 @@ def _audit_request(tmp_path: Path, *, large: bool = False, caveat: str = "facts"
             "applicability_evidence": owned,
             "owners": ["python"],
             "review_surface": owned,
-        }
+        },
     )
     capture = _scope_data(git, repository, "baseline", None, ())
+    _complete_structural_fixture_routing(template, cast("list[str]", capture["captured_scope_paths"]))
     plan = plan_from_document(bootstrap_document(capture, template), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)
     lifecycle, entries, _dispatches = _materialize(tmp_path, capture, plan)
     skill = "python-scientific-review" if large else "python-cli-review"

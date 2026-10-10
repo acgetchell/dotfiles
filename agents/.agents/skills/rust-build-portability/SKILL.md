@@ -1,6 +1,6 @@
 ---
 name: rust-build-portability
-description: "Audit and fix Rust build-boundary correctness across MSRV and stable toolchains, Cargo features, target triples, cfg-selected APIs and behavior, build scripts, generated code, proc macros, dependency feature unification, no_std or alloc modes, WASM, FFI and native linking, and downstream consumers. Use when source or build changes are feature-, target-, platform-, architecture-, linker-, environment-, or toolchain-sensitive."
+description: "Audit Rust feature, target, MSRV, linking, and external-consumer behavior when supported build contracts change."
 ---
 
 # Rust Build Portability

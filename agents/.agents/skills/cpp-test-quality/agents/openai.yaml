@@ -1,6 +1,7 @@
 interface:
   display_name: "C++ Test Quality"
-  short_description: "Audit doctest BDD and CTest evidence"
+  short_description: "Review C++ test strength and regression evidence"
   default_prompt: >-
-    Use $cpp-test-quality to audit changed doctest BDD scenarios, CTest registration, compile-time consumer contracts, sanitizer coverage, and deterministic
-    fixtures.
+    Use $cpp-test-quality to review changed C++ tests and fixtures for meaningful
+    assertions, independent oracles, and reliable regression evidence with the
+    project's existing test stack.

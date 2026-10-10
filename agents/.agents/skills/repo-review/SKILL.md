@@ -1,6 +1,6 @@
 ---
 name: repo-review
-description: "Compatibility entrypoint for complete mixed-surface repository review and review-and-fix requests. Delegate branch, PR, staged, release-readiness, whole-repository, fix-all, and review-and-fix work to review-graph so every applicable review skill, validation result, and final proof uses one orchestration contract. Use a focused skill directly for one narrow surface."
+description: "Run a comprehensive repository review through review-graph; use a focused skill for a single contract."
 ---
 
 # Repo Review

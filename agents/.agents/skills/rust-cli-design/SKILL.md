@@ -1,6 +1,6 @@
 ---
 name: rust-cli-design
-description: Design, build, or review Rust command-line interfaces for library crates and scientific tooling. Use when a task touches Cargo binary packaging, optional CLI features, clap/argument parsing, parse-don't-validate CLI boundaries, notebook-driven CLI workflows, CLI README quickstarts, or whether a Rust CLI should be optional or always-on.
+description: "Design or review Rust CLI behavior and library/CLI packaging, with validated arguments and deliberate dependency isolation."
 ---
 
 # Rust CLI Design
@@ -15,92 +15,23 @@ First decide whether the crate is primarily a library or an application.
 - For an application crate, an always-on CLI can be appropriate. Still keep raw clap DTOs separate from validated runtime config.
 - For notebook workflows in a library crate, treat the CLI as the notebook execution boundary and document that notebooks require `--features cli`.
 
-## Cargo Shape
+## Packaging and Examples
 
-For optional CLIs in library crates, prefer this manifest shape:
+For a companion library CLI, keep CLI-only dependencies optional, gate the binary
+with `required-features`, and ensure the package includes its sources. A separate
+binary crate can provide the same isolation. Keep the established file layout
+unless it obscures ownership or responsibilities.
 
-```toml
-[package]
-autobins = false
-
-[dependencies]
-clap = { version = "...", features = ["derive"], optional = true }
-serde_json = { version = "...", optional = true }
-
-[features]
-cli = ["dep:clap", "dep:serde_json"]
-
-[[bin]]
-name = "crate-name"
-path = "src/main.rs"
-required-features = ["cli"]
-```
-
-Checklist:
-
-- Put CLI-only dependencies in `[dependencies]` as `optional = true` when the binary needs them.
-- Keep benchmark-only or test-only dependencies in `[dev-dependencies]`.
-- Avoid compatibility feature aliases unless an existing published API needs them.
-- Use `required-features = ["cli"]` on the binary so `cargo build` for library users does not build the CLI accidentally.
-- Keep package `include` broad enough to publish `src/main.rs` and any CLI config module if the binary is part of the release artifact.
-
-## File Shape
-
-Prefer the simple two-file binary shape unless the CLI grows enough to justify more:
-
-- `src/main.rs`: process entrypoint only
-- `src/config.rs`: clap DTOs, validated command/config types, typed CLI errors, and terminal runner
-
-Avoid nested `src/bin/<name>/support.rs` trees for a single companion CLI unless there are multiple binaries or genuinely independent modules.
+Read [packaging and parsing examples](references/implementation-examples.md)
+when adding a binary target or designing its argument-to-domain boundary.
 
 ## Parse-Don't-Validate Boundary
 
 Raw clap structs are DTOs. Do not pass them into computation.
 
-Prefer this process boundary:
-
-```rust
-fn main() -> ExitCode {
-    config::CliArgs::from_args()
-        .into_validated()
-        .and_then(|command| config::run(&command))
-        .map_or_else(config::exit_with_error, |()| ExitCode::SUCCESS)
-}
-```
-
-In `config.rs`, use raw args only at the edge:
-
-```rust
-#[derive(Debug, Parser)]
-pub struct CliArgs {
-    #[command(subcommand)]
-    command: CommandArgs,
-}
-
-impl CliArgs {
-    pub fn from_args() -> Self {
-        Self::parse()
-    }
-
-    pub fn into_validated(self) -> Result<ValidatedCommand, CliError> {
-        Ok(ValidatedCommand(self.command.into_validated()?))
-    }
-}
-```
-
-Then make the validated command opaque:
-
-```rust
-#[derive(Debug)]
-pub struct ValidatedCommand(Command);
-
-pub fn run(command: &ValidatedCommand) -> Result<(), CliError> {
-    match &command.0 {
-        Command::Generate(config) => run_generate(config),
-        Command::Stress(config) => run_stress(config),
-    }
-}
-```
+Parse raw arguments into an opaque validated command before execution. Keep
+process exit/output handling at the edge and let terminal runners accept the
+validated command.
 
 Validation rules:
 
@@ -108,17 +39,12 @@ Validation rules:
 - Convert dimension strings or numbers into enums or const-generic command variants before execution.
 - Store only accepted paths, modes, counts, and output options in validated config.
 - Keep passive report/output DTOs flat and serializable; do not reuse them as validated inputs.
-- Make public error enums `#[non_exhaustive]` when they cross a module or crate boundary.
+- Choose error-enum exhaustiveness from the public compatibility policy. A module boundary alone does not require `#[non_exhaustive]`; adding it to an already published exhaustive enum can break callers.
 
 ## Fluent API Lens
 
-Use fluent staging where it clarifies the boundary:
-
-```rust
-CliArgs::from_args()
-    .into_validated()
-    .and_then(|command| run(&command))
-```
+Use fluent staging when it clarifies argument parsing and execution; it does not
+require exposing an intermediate public stage without caller value.
 
 Do not force internal runners into chains. Once validation has produced a proof-bearing command, named terminal functions such as `run_generate`, `run_stress`, `write_json_output`, or `emit_report` are clearer than deeply chained closures.
 
@@ -159,13 +85,9 @@ cargo run --features cli --bin <name> -- --help
 
 Also smoke-test at least one successful command and one rejected invalid argument path. For notebook-backed CLIs, execute or lint the notebook through the repository's notebook validator.
 
-Record the source/build/feature state and behavior covered by each command. Do
-not run focused tests and then a full-CI recipe that merely reruns them. If full
-CI is independently required, use it as the single gate or run only its
-previously uncovered checks. Rerun earlier evidence only after a relevant edit
-or configuration change invalidates it.
-
-Decide whether such an indivisible policy gate is required before the first
-test. If that requirement is discovered late and the gate cannot exclude
-already-passing tests, report the command-surface conflict to
-`project-tooling-review` instead of silently replaying or double-counting them.
+Avoid a ladder of overlapping test tiers solely for reassurance. Run focused
+red/green checks when useful during a fix, then any required final aggregate gate
+on the final source state even if it repeats those checks. Record the reason for
+overlap without counting it as independent evidence. Reuse valid evidence where
+the required validation contract permits it; overlap alone requires no approval
+or command-surface escalation.

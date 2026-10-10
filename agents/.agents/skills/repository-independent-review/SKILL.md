@@ -1,6 +1,6 @@
 ---
 name: repository-independent-review
-description: "Independently inspect a concrete repository change without receiving specialist conclusions, expected findings, or validator diagnoses. Use as review-graph's required independent change-review leaf for branch, staged, pull-request, or review-and-fix scopes with a concrete diff; do not use for whole-repository baselines without a change target."
+description: "Provide conclusion-blind review of a concrete change from a review-graph dispatch with captured source identity."
 ---
 
 # Repository Independent Review

@@ -12,19 +12,14 @@ repository recipe or Cargo command, inspect what it selects, decide whether
 repository policy requires an indivisible full gate, and reuse still-valid
 evidence.
 
-Choose the smallest single selection that proves the touched risk: a named
-test, doctest, property replay, fuzz regression, compile-fail target, model
-check, affected package, or feature tier. Do not run that selection and then
-its containing target, package, workspace, and full CI as successive tiers. If
-a broader gate is independently required, select it initially or run only the
-portion not already recorded as passing.
+Avoid a ladder of overlapping test tiers solely for reassurance. Run focused
+red/green checks when useful during a fix, then any required final aggregate gate
+on the final source state even if it repeats those checks. Record the reason for
+overlap without counting it as independent evidence. Reuse valid evidence where
+the required validation contract permits it; overlap alone requires no approval
+or command-surface escalation.
 
-If an indivisible policy gate is discovered only after overlapping tests pass
-and offers no reliable exclusion, report the conflict and route command-surface
-ownership to `project-tooling-review`. Do not silently replay tests or count
-duplicate execution as new evidence.
-
-Rerun only after relevant source, fixture, build, or configuration changes
+Beyond required final gates, rerun only after relevant source, fixture, build, or configuration changes
 invalidate the result, or when diagnosing nondeterminism. Different
 toolchains, targets, features, Miri or sanitizer modes, and material runtime
 configurations are distinct evidence. Repeated property, fuzz, concurrency, or

@@ -1,6 +1,6 @@
 ---
 name: javascript-test-quality
-description: "Design, write, or review JavaScript/TypeScript unit and UI integration tests using the repository's runner, commonly Vitest, Testing Library, and MSW. Covers async state, network errors, runtime parsing, and account isolation."
+description: "Design or review JavaScript and TypeScript tests for observable behavior using the repository's existing test stack."
 ---
 
 # JavaScript Test Quality
@@ -22,7 +22,9 @@ large snapshots and coverage-only tests rarely prove a contract.
 
 ## React and HTTP integration
 
-Use Testing Library queries by role/name and user-event for interactions.
+Use this section when React UI or its HTTP integration is in scope; keep pure
+JavaScript/domain tests at their existing layer. With the installed React stack,
+use Testing Library queries by role/name and user-event for interactions.
 Assert visible pending, empty, partial, stale, error, and reauthentication states.
 Test components through the router/query providers they actually depend on.
 

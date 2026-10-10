@@ -15,6 +15,7 @@ from test_review_graph_runtime import (
     SKILL_ROOT,
     _compact_audit_payload,
     _compile_repair_fixture_entry,
+    _complete_structural_fixture_routing,
     _json_plan,
     _publish_worker_bytes,
     _sparse_plan_document,
@@ -41,6 +42,7 @@ def _fixture(tmp_path: Path, *, profile: str = "grouped", mixed_surfaces: bool =
         )
     for catalog_id in ("rust.errors", "rust.api-design", "rust.trait-bounds", "rust.tests", "rust.style"):
         planning["routing_overrides"].append({**planning["routing_overrides"][0], "catalog_id": catalog_id})
+    _complete_structural_fixture_routing(planning, planning["captured_paths"])
     plan = plan_from_document(planning, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
     lifecycle = {"plan": _json_plan(plan), "source_state": ["scope", "worktree", "repository"]}
     dispatches = materialize_dispatches(

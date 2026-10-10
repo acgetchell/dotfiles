@@ -222,7 +222,15 @@ def _sparse_plan_document() -> dict[str, Any]:
                 "owners": ["rust"],
                 "reason": "state transition behavior changed",
                 "review_surface": [STATE_FIXTURE],
-            }
+            },
+            {
+                "catalog_id": "rust.build",
+                "disposition": "selected",
+                "reason": "Fixture explicitly exercises the Rust build owner and its independent evidence",
+                "applicability_evidence": ["The synthetic source participates in a build contract"],
+                "owners": ["rust"],
+                "review_surface": [STATE_FIXTURE],
+            },
         ],
         "scope_mode": "baseline",
         "validation_requirements": [
@@ -763,6 +771,32 @@ def test_bootstrap_binds_capture_and_validation_fingerprints_without_field_renam
     assert Path(materialized_receipt["output"]["path"]).is_file()
 
 
+def _set_fixture_routing(document: dict[str, Any], decision: dict[str, Any]) -> None:
+    """Replace a fixture judgment when a test changes that owner's contract."""
+    document["routing_overrides"] = [item for item in document["routing_overrides"] if item["catalog_id"] != decision["catalog_id"]]
+    document["routing_overrides"].append(decision)
+
+
+def _complete_structural_fixture_routing(document: dict[str, Any], paths: list[str]) -> None:
+    """Make this broad protocol fixture's intentional all-owner selection explicit."""
+    projection = build_routing_projection_document(
+        {"captured_paths": paths, "consulted_routers": document["consulted_routers"]}, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,)
+    )
+    existing = {item["catalog_id"] for item in document["routing_overrides"]}
+    document["routing_overrides"].extend(
+        {
+            "catalog_id": entry["catalog_id"],
+            "disposition": "selected",
+            "reason": "Protocol fixture deliberately exercises every candidate owner",
+            "applicability_evidence": ["Synthetic multi-owner lifecycle and identity coverage"],
+            "review_surface": entry["matched_paths"],
+            "owners": ["documentation" if entry["catalog_id"].startswith("docs.") else entry["catalog_id"].split(".")[0]],
+        }
+        for entry in projection["entries"]
+        if entry["target_kind"] == "leaf" and entry["matched_paths"] and entry["catalog_id"] not in existing and not entry["catalog_id"].startswith("repo.")
+    )
+
+
 def _baseline_mutation_fixture(tmp_path: Path) -> tuple[str, Path, dict[str, Any], dict[str, Any], GraphPlan]:
     git = shutil.which("git")
     assert git is not None
@@ -780,9 +814,11 @@ def _baseline_mutation_fixture(tmp_path: Path) -> tuple[str, Path, dict[str, Any
     _run_test_git(git, "-C", str(repository), "commit", "-m", "initial")
     template = _sparse_plan_document()
     template["consulted_routers"] = ["review-graph", "rust-review-orchestrator", "python-review-orchestrator"]
-    template["routing_overrides"][0]["review_surface"] = ["state.rs"]
+    for override in template["routing_overrides"]:
+        override["review_surface"] = ["state.rs"]
     template["validation_requirements"][0]["working_directories"] = [str(repository)]
     capture = _scope_data(git, repository, "baseline", None, ())
+    _complete_structural_fixture_routing(template, cast("list[str]", capture["captured_scope_paths"]))
     plan = plan_from_document(bootstrap_document(capture, template), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)
     return git, repository, template, capture, plan
 
@@ -962,6 +998,7 @@ def test_repeated_mutation_retains_or_expires_prior_nonexecutable_reuse(tmp_path
             **request["planning_template"],
             "consulted_routers": [*request["planning_template"]["consulted_routers"], "docs-review-orchestrator"],
         }
+        _complete_structural_fixture_routing(next_request["planning_template"], cast("list[str]", next_request["new_capture"]["captured_scope_paths"]))
 
     second = advance_after_mutation(next_request)
 
@@ -1153,6 +1190,11 @@ def test_new_baseline_file_invalidates_its_expanded_owners_not_unrelated_leaves(
     git = shutil.which("git")
     assert git is not None
     request.update({"changed_paths": ["extra.py"], "new_capture": _scope_data(git, repository, "baseline", None, ())})
+    # The coordinator reassesses affected contracts and expands their owned paths.
+    for decision in request["planning_template"]["routing_overrides"]:
+        if decision["catalog_id"].startswith("python."):
+            decision["review_surface"].append("extra.py")
+            decision["applicability_evidence"].append("extra.py extends the existing Python contract")
 
     result = advance_after_mutation(request)
 
@@ -1852,6 +1894,60 @@ def test_isolated_validation_workspace_audit_binds_artifacts_and_changes_to_root
         )
 
 
+def _assessed_fixture_candidates(paths: list[str], routers: list[str], selected: dict[str, str]) -> list[dict[str, Any]]:
+    """Supply explicit judgments for structural fixtures; never production routing."""
+    projection = build_routing_projection_document(
+        {"captured_paths": paths, "consulted_routers": routers}, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,)
+    )
+    return [
+        {
+            "catalog_id": entry["catalog_id"],
+            "disposition": "selected" if entry["catalog_id"] in selected else "not-applicable",
+            "reason": selected.get(entry["catalog_id"], "Fixture contract has no change to this specialist's concern"),
+            "applicability_evidence": [selected.get(entry["catalog_id"], "Explicit fixture scope excludes this concern; path match is only a candidate")],
+            "review_surface": entry["matched_paths"],
+            "owners": ["documentation" if entry["catalog_id"].startswith("docs.") else entry["catalog_id"].split(".")[0]],
+        }
+        for entry in projection["entries"]
+        if entry["target_kind"] == "leaf" and entry["matched_paths"] and not entry["catalog_id"].startswith("repo.")
+    ]
+
+
+@pytest.mark.review_contract
+@pytest.mark.parametrize(
+    ("path", "router"),
+    [
+        ("src/lib.rs", "rust-review-orchestrator"),
+        ("include/api.hpp", "cpp-review-orchestrator"),
+        ("src/app.py", "python-review-orchestrator"),
+        ("README.md", "docs-review-orchestrator"),
+    ],
+)
+def test_path_matches_require_semantic_assessment_before_planning(path: str, router: str) -> None:
+    catalog = load_routing_catalog(ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
+    with pytest.raises(ValueError, match="semantic applicability decisions required"):
+        expand_compact_routing(catalog, consulted_routers=["review-graph", router], captured_paths=[path], overrides=[])
+
+
+@pytest.mark.review_contract
+@pytest.mark.parametrize(
+    ("path", "router", "missing_catalog_id"),
+    [("src/app.py", "python-review-orchestrator", "python.parse"), ("README.md", "docs-review-orchestrator", "docs.repository")],
+)
+def test_partial_assessment_reports_the_remaining_candidate(path: str, router: str, missing_catalog_id: str) -> None:
+    catalog = load_routing_catalog(ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
+    routers = ["review-graph", router]
+    assessments = _assessed_fixture_candidates([path], routers, {})
+    assert any(entry["catalog_id"] == missing_catalog_id for entry in assessments)
+    partial_assessments = [entry for entry in assessments if entry["catalog_id"] != missing_catalog_id]
+    assert partial_assessments
+
+    with pytest.raises(ValueError, match="semantic applicability decisions required") as error:
+        expand_compact_routing(catalog, consulted_routers=routers, captured_paths=[path], overrides=partial_assessments)
+
+    assert str(error.value) == f"semantic applicability decisions required for path-matched candidates: {missing_catalog_id}"
+
+
 @pytest.mark.review_contract
 def test_sparse_routing_expands_to_exhaustive_catalog_records() -> None:
     catalog = load_routing_catalog(ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
@@ -1859,15 +1955,10 @@ def test_sparse_routing_expands_to_exhaustive_catalog_records() -> None:
         catalog,
         consulted_routers=("review-graph", "rust-review-orchestrator"),
         captured_paths=("src/lib.rs",),
-        overrides=(
-            {
-                "applicability_evidence": ["src/lib.rs changes typed error propagation"],
-                "catalog_id": "rust.errors",
-                "disposition": "selected",
-                "owners": ["rust"],
-                "reason": "typed error behavior changed",
-                "review_surface": ["src/lib.rs"],
-            },
+        overrides=_assessed_fixture_candidates(
+            ["src/lib.rs"],
+            ["review-graph", "rust-review-orchestrator"],
+            {"rust.errors": "Only typed error propagation changed; no shared state or scheduling contract"},
         ),
         change_target="git diff origin/main...HEAD",
     )
@@ -1879,7 +1970,14 @@ def test_sparse_routing_expands_to_exhaustive_catalog_records() -> None:
     assert by_id["repo.rust"].disposition == "selected"
     assert by_id["rust.errors"].skill_id == "rust-error-variants"
     assert by_id["rust.errors"].disposition == "selected"
-    assert by_id["rust.concurrency"].disposition == "selected"
+    assert by_id["rust.concurrency"].disposition == "not-applicable"
+    assert {item.catalog_id for item in decisions if item.disposition == "selected"} == {
+        "repo.rust",
+        "repo.independent",
+        "repo.synthesis",
+        "rust.errors",
+        "rust.synthesis",
+    }
     assert by_id["rust.concurrency"].review_surface == ("src/lib.rs",)
     assert by_id["rust.synthesis"].disposition == "selected"
 
@@ -1965,14 +2063,19 @@ def test_routing_regression_fixtures_enforce_selected_and_excluded_ownership() -
         for catalog_id, expected_matches in case["expected_matches"].items():
             assert projected[catalog_id]["matched_paths"] == expected_matches, case["id"]
         catalog = load_routing_catalog(ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
-        decisions = expand_compact_routing(catalog, consulted_routers=case["consulted_routers"], captured_paths=case["paths"], overrides=[])
+        decisions = expand_compact_routing(
+            catalog,
+            consulted_routers=case["consulted_routers"],
+            captured_paths=case["paths"],
+            overrides=_assessed_fixture_candidates(case["paths"], case["consulted_routers"], {}),
+        )
         decisions_by_id = {decision.catalog_id: decision for decision in decisions}
         # Projection fixtures deliberately consult extra routers to test exclusions.
         assert set(decisions_by_id) == {entry.catalog_id for entry in catalog if entry.router_id in case["consulted_routers"]}
         for catalog_id, expected_matches in case["expected_matches"].items():
             decision = decisions_by_id[catalog_id]
             assert decision.review_surface == tuple(expected_matches), case["id"]
-            assert decision.disposition == ("selected" if expected_matches else "not-applicable"), case["id"]
+            assert decision.disposition == ("selected" if catalog_id == "repo.tooling" and expected_matches else "not-applicable"), case["id"]
 
 
 @pytest.mark.parametrize(
@@ -1994,6 +2097,7 @@ def test_tooling_scope_combines_classifier_and_projection_unless_overridden(path
         else []
     )
     routers = ["review-graph", router]
+    overrides.extend(_assessed_fixture_candidates(paths, routers, {}))
     decisions = expand_compact_routing(catalog, consulted_routers=routers, captured_paths=paths, overrides=overrides)
     tooling = next(decision for decision in decisions if decision.catalog_id == "repo.tooling")
     expected = paths[:1] if explicit_scope else paths
@@ -2023,7 +2127,10 @@ def test_projection_exclusions_preserve_semantic_overrides(catalog_id: str, path
         catalog,
         consulted_routers=routers,
         captured_paths=[path, "README.md"],
-        overrides=[{"catalog_id": catalog_id, "disposition": "selected", "reason": reason, "applicability_evidence": [reason], "review_surface": [path]}],
+        overrides=[
+            *[item for item in _assessed_fixture_candidates([path, "README.md"], routers, {}) if item["catalog_id"] != catalog_id],
+            {"catalog_id": catalog_id, "disposition": "selected", "reason": reason, "applicability_evidence": [reason], "review_surface": [path]},
+        ],
     )
     decision = next(item for item in decisions if item.catalog_id == catalog_id)
     assert decision.disposition == "selected"
@@ -2054,7 +2161,11 @@ def test_baseline_plan_assigns_references_markdown_to_citation_audit() -> None:
     document = _sparse_plan_document()
     document["captured_paths"] = ["REFERENCES.md"]
     document["consulted_routers"] = ["review-graph", "docs-review-orchestrator"]
-    document["routing_overrides"] = []
+    document["routing_overrides"] = _assessed_fixture_candidates(
+        ["REFERENCES.md"],
+        ["review-graph", "docs-review-orchestrator"],
+        {"docs.citations": "Bibliography identities and attribution changed", "docs.repository": "Bibliography navigation changed"},
+    )
     requirement = cast("dict[str, Any]", document["validation_requirements"][0])
     requirement["captured_paths"] = ["REFERENCES.md"]
 
@@ -2072,16 +2183,11 @@ def test_readme_citation_claim_can_semantically_route_to_citation_audit() -> Non
     document = _sparse_plan_document()
     document["captured_paths"] = ["README.md"]
     document["consulted_routers"] = ["review-graph", "docs-review-orchestrator"]
-    document["routing_overrides"] = [
-        {
-            "applicability_evidence": ["README.md contains public DOI and citation guidance"],
-            "catalog_id": "docs.citations",
-            "disposition": "selected",
-            "owners": ["documentation"],
-            "reason": "public citation claims require bibliographic verification",
-            "review_surface": ["README.md"],
-        }
-    ]
+    document["routing_overrides"] = _assessed_fixture_candidates(
+        ["README.md"],
+        ["review-graph", "docs-review-orchestrator"],
+        {"docs.citations": "README.md contains public DOI and citation guidance", "docs.repository": "README release navigation changed"},
+    )
     requirement = cast("dict[str, Any]", document["validation_requirements"][0])
     requirement["captured_paths"] = ["README.md"]
 
@@ -2096,7 +2202,7 @@ def test_readme_citation_claim_can_semantically_route_to_citation_audit() -> Non
 
 
 @pytest.mark.parametrize("mode", ["branch", "staged", "worktree", "baseline"])
-def test_readme_citations_are_owned_without_overrides_in_each_capture_scope(tmp_path: Path, mode: str) -> None:
+def test_readme_citations_remain_owned_with_semantic_decisions_in_each_capture_scope(tmp_path: Path, mode: str) -> None:
     git = shutil.which("git")
     assert git is not None
     repository = tmp_path / "repository"
@@ -2120,6 +2226,11 @@ def test_readme_citations_are_owned_without_overrides_in_each_capture_scope(tmp_
     template.update({"consulted_routers": ["review-graph", "docs-review-orchestrator"], "routing_overrides": [], "concrete_change_target": mode != "baseline"})
     if mode != "baseline":
         template["change_target"] = "git diff " + ("--cached " if mode == "staged" else "") + "HEAD -- README.md docs/RELEASING.md"
+    template["routing_overrides"] = _assessed_fixture_candidates(
+        cast("list[str]", capture["captured_scope_paths"]),
+        ["review-graph", "docs-review-orchestrator"],
+        {"docs.citations": "Changed release documentation preserves concept DOI and citation guidance", "docs.repository": "Release instructions changed"},
+    )
     template["validation_requirements"][0].update(
         {"baseline": True, "requested_scope": mode, "commands": ["just ci"], "canonical_recipe": "just ci", "working_directories": [str(repository)]}
     )
@@ -2162,7 +2273,7 @@ def test_missing_baseline_validator_explains_the_field_without_changing_review_s
     assert not output_path.exists()
 
 
-def test_sparse_mixed_lockfile_fixture_selects_every_projection_match_and_coalesces_aliases() -> None:
+def test_mixed_lockfile_fixture_preserves_explicit_semantic_choices_and_coalesces_aliases() -> None:
     fixture = Path(__file__).with_name("fixtures") / "sparse_mixed_lockfiles.json"
     document = json.loads(fixture.read_text(encoding="utf-8"))
     plan = plan_from_document(document, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
@@ -3692,7 +3803,7 @@ def test_invalid_execution_fields_get_no_approval_and_preserve_persisted_evidenc
 
 
 @pytest.mark.parametrize("validation_status", ["passed", "failed"])
-def test_compact_branch_runs_from_bootstrap_through_journal_and_final_proof(tmp_path: Path, validation_status: str, capsys: pytest.CaptureFixture[str]) -> None:  # noqa: PLR0915
+def test_compact_branch_runs_from_bootstrap_through_journal_and_final_proof(tmp_path: Path, validation_status: str, capsys: pytest.CaptureFixture[str]) -> None:  # noqa: C901, PLR0915
     git = shutil.which("git")
     assert git is not None
     repository = tmp_path / "repository"
@@ -3711,7 +3822,8 @@ def test_compact_branch_runs_from_bootstrap_through_journal_and_final_proof(tmp_
     template = _sparse_plan_document()
     template.update({"change_target": "git diff HEAD~1...HEAD -- state.rs", "concrete_change_target": True, "scope_mode": "branch"})
     template["captured_paths"] = ["state.rs"]
-    template["routing_overrides"][0]["review_surface"] = ["state.rs"]
+    for override in template["routing_overrides"]:
+        override["review_surface"] = ["state.rs"]
     validation_template = template["validation_requirements"][0]
     validation_template["capture_command"] = "capture_scope.py --mode branch --base HEAD~1"
     validation_template["captured_paths"] = ["state.rs"]

@@ -5,7 +5,7 @@ Use this reference for tool-version drift across local installers, lockfiles, Gi
 ## Ground Rules
 
 - Do not claim a tool is latest from memory. Verify currentness through live authoritative sources or local package-manager metadata.
-- Do not install or uninstall unrelated tools unless the user explicitly asks. When the requested scope includes tool-version currentness, update drift, or "latest" tooling review, update stale tools through the repository's existing manager.
+- Review currentness without changing installed tools or pins. Upgrade only when the user requests updates or maintenance, through the existing manager and within the authorized scope.
 - Keep "currentness" separate from "consistency." A repo can be internally consistent while not latest, and that is often acceptable.
 - Prefer the repository's existing tool manager. Do not introduce a new manager just to solve one pin.
 
@@ -32,9 +32,9 @@ Before comparing a tool to repo pins or remote latest metadata, inspect the loca
 
 For `uv` itself, always check `command -v uv` and `uv --version` first. If it is Homebrew-managed, also use Homebrew metadata such as `brew list --versions uv`, `brew info uv`, or Homebrew JSON metadata when available. Use `uv tool list` for tools installed by `uv`, not as the source of truth for the `uv` executable's own version.
 
-For tools managed by `uv tool`, run `uv tool list` before updating. When version updates are in scope, run `uv tool upgrade --all` or `uv tool upgrade <name>` for targeted review, then run `uv tool list` again and record before/after versions. If a `uv tool` command needs network or cache access, request approval rather than substituting a global Python install.
+For tools managed by `uv tool`, run `uv tool list` before updating. When version updates are in scope, run `uv tool upgrade <name>` for the requested tools; use `--all` only for an authorized all-tools update, then run `uv tool list` again and record before/after versions. If a `uv tool` command needs network or cache access, request approval rather than substituting a global Python install.
 
-For tools managed by `cargo install`, run `cargo install --list` and `cargo install-update -l` before updating. When version updates are in scope, run `cargo install-update --all` or `cargo install-update <package>` for targeted review, preserving repository-required flags such as `--locked` when applicable. Run `cargo install --list` or `<tool> --version` after updating and record before/after versions.
+For tools managed by `cargo install`, run `cargo install --list` and `cargo install-update -l` before updating. When version updates are in scope, run `cargo install-update <package>` for requested tools; use `--all` only for an authorized all-tools update, preserving repository-required flags such as `--locked` when applicable. Run `cargo install --list` or `<tool> --version` after updating and record before/after versions.
 
 ## Version Source Of Truth
 
@@ -109,4 +109,4 @@ Use repository guidance first. Otherwise prefer read-only checks:
 - `rustup show` and `rustup check` for Rust toolchain status.
 - `just --summary` plus relevant check recipes for command-surface consistency.
 
-Do not run broad ecosystem updates such as `brew upgrade`, `uv lock --upgrade`, `cargo update`, or `rustup update` unless the user explicitly asks. `uv tool upgrade` and `cargo install-update` are in scope when reviewing managed CLI version drift.
+Do not run broad ecosystem updates such as `brew upgrade`, `uv lock --upgrade`, `cargo update`, or `rustup update` unless the user explicitly asks. `uv tool upgrade` and `cargo install-update` also require an update or maintenance request; reviewing drift alone does not authorize them.

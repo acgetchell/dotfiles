@@ -1,6 +1,6 @@
 ---
 name: rust-simplification-review
-description: "Review Rust code and tests for safe deletion, deduplication, and simplification without weakening behavior, invariants, API orthogonality, performance, diagnostics, or regression coverage. Use for dead or redundant helpers, duplicate tests, accidental complexity, and unnecessarily broad public or crate-internal surfaces."
+description: "Find justified Rust deletions and simplifications while preserving behavior, invariants, compatibility, and regression value."
 ---
 
 # rust-simplification-review
@@ -62,27 +62,15 @@ When apparent duplication protects different invariants, classify it as `Keep`.
 
 ## Workflow
 
-1. Inspect the changed surface.
-   - Use read-only git commands such as `git --no-pager status --short`, `git --no-pager diff --stat`, `git --no-pager diff --name-status`, and `git --no-pager diff`.
-   - For staged reviews, inspect `git --no-pager diff --cached`.
-   - Identify production code, tests, examples, benches, docs, and public exports touched by the change.
+Use the supplied scope or inspect the requested diff. For each concrete candidate,
+classify it as `Delete`, `Simplify`, `Keep`, or `Split` and explain the invariant,
+behavior, and cost that justify that choice. Implement authorized high-confidence
+changes and run validation that can detect a changed contract.
 
-2. Classify each candidate.
-   - `Delete`: dead code, stale comments, obsolete scaffolding, redundant assertions, unused helpers.
-   - `Simplify`: clearer control flow, less indirection, fewer allocations, existing API replacing custom logic.
-   - `Keep`: apparent redundancy that protects a distinct invariant.
-   - `Split`: worthwhile cleanup that belongs in a separate patch.
-
-3. Check invariants before recommending edits.
-   - Name the affected behavior or invariant.
-   - Explain why the simplification is behavior-preserving.
-   - Call out possible performance effects.
-   - Identify focused validation needed.
-
-4. Prefer conservative implementation.
-   - If asked to edit, apply only high-confidence `Delete` and low-risk `Simplify` items unless the user explicitly asks for broader refactoring.
-   - Avoid merging tests unless their inputs, assertions, failure modes, dimensions, and feature gates are genuinely equivalent.
-   - Prefer existing public constructors, validators, helpers, and iterators over new local abstractions.
+Merge tests only when their inputs, assertions, failure modes, dimensions, and
+feature gates are equivalent. Preserve existing abstractions that name a useful
+concept or protect a distinct invariant. Do not manufacture cleanup to fill a
+checklist; a justified `Keep` or no-finding result is complete.
 
 ## Review Checklist
 
@@ -120,27 +108,10 @@ Orthogonality:
 - public types or helpers that duplicate existing concepts
 - feature flags with unclear or overlapping responsibilities
 
-## Output Format
+## Results
 
-Start with findings, ordered by severity and confidence.
-
-Use this structure:
-
-```text
-Summary: PASS | NEEDS IMPROVEMENT | FAIL
-
-Findings
-- [Delete/Simplify/Keep/Split] path:line - recommendation and rationale.
-
-Applied Changes
-- List only if edits were made.
-
-Validation
-- Commands run and results.
-- Note any checks that could not be run.
-
-Residual Risk
-- Anything still uncertain or worth a follow-up issue.
-```
-
-When there are no safe simplifications, say so directly and identify the strongest invariants that justify keeping the code as-is.
+Use the parent result contract when dispatched. Otherwise list findings by
+severity and confidence with `Delete`, `Simplify`, `Keep`, or `Split`, a source
+location, and rationale. Include applied changes, validation, and residual risks
+only when present. If no safe simplification exists, say so and identify the
+invariants that justify retaining the code.

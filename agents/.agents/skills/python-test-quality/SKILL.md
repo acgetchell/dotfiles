@@ -1,6 +1,6 @@
 ---
 name: python-test-quality
-description: "Review Python tests, pytest fixtures, properties, stateful scenarios, async or subprocess evidence, package and configuration matrices, and regression coverage for meaningful behavioral confidence. Use for pytest, Hypothesis, parametrization, tmp_path, monkeypatch, capsys, doctests, golden files, malformed inputs, failure atomicity, nondeterminism, and focused coverage gaps. Route Codecov report triage to codecov-test-gaps."
+description: "Review Python tests and fixtures for meaningful assertions, isolation, failure coverage, and durable regression evidence."
 ---
 
 # Python Test Quality

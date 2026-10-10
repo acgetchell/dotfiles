@@ -1,6 +1,6 @@
 ---
 name: cpp-scientific-correctness
-description: "Audit C++ numerical, geometric, combinatorial, stochastic, and scientific code for mathematical validity, numerical robustness, reproducibility, and independently testable claims. Use when changes affect formulas, predicates, tolerances, topology, random sampling, Monte Carlo behavior, scientific fixtures, or research-facing results."
+description: "Audit scientific C++ algorithms for mathematical validity, numerical robustness, stochastic correctness, and independent evidence."
 ---
 
 # C++ Scientific Correctness Review
@@ -9,7 +9,7 @@ Review scientific C++ by establishing the intended model first, then checking th
 
 ## Ground Rules
 
-- Do not mutate git state unless the user explicitly asks in the current turn.
+- Do not mutate git state unless the user has explicitly authorized that operation and scope.
 - Honor repository-local instructions, the documented scientific scope, and primary references.
 - Verify current library or algorithm claims from authoritative sources when they are unstable or uncertain.
 - Preserve scientific behavior unless fixing a verified defect. Do not bundle cosmetic modernization or broad architecture changes into a correctness fix.

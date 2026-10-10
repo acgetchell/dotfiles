@@ -11,7 +11,7 @@ explicit baseline or release-readiness audit.
 
 ## Focused Validation
 
-Prefer repository recipes. Otherwise select from:
+Use repository recipes and the established toolchain. For projects using uv, Ruff, and ty, select relevant checks from:
 
 - `uv lock --check`
 - `uv run --locked ruff check .`
@@ -30,6 +30,6 @@ sandbox.
 
 Lead with build or portability blockers. For each finding, identify the
 affected artifact or configuration, declared contract, and smallest correction.
-End with uv, Ruff, and ty commands; artifacts and configurations validated;
+End with the commands executed; artifacts and configurations validated;
 external-consumer evidence; remaining matrix gaps; and tooling or test-quality
 handoffs.

@@ -17,7 +17,7 @@ from review_graph_plan import DEFAULT_ROUTING_CATALOG, DEFAULT_SKILL_ROOT, plan_
 from review_graph_runtime import main as runtime_main
 from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
 from review_graph_starter import STARTER_EXAMPLE, STARTER_SCHEMA, starter_template
-from test_review_graph_runtime import STATE_FIXTURE
+from test_review_graph_runtime import STATE_FIXTURE, _assessed_fixture_candidates
 
 
 @cache
@@ -41,6 +41,11 @@ def _fixture(tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
         consulted_routers=["review-graph", "rust-review-orchestrator"],
         ignored_outputs=[{"path": ".pytest_cache", "kind": "cache"}],
         command_policy={"disposition": "allowed", "reason": "Deterministic stand-in emits text and exits; no Git or source mutation."},
+    )
+    choices["routing_overrides"] = _assessed_fixture_candidates(
+        capture["captured_scope_paths"],
+        choices["consulted_routers"],
+        {"rust.invariants": "Scripted fixture exercises invariant-owner dispatch", "rust.build": "Scripted fixture exercises build-owner dispatch"},
     )
     host = tmp_path / "host"
     host.mkdir()

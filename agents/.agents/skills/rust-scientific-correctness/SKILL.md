@@ -1,6 +1,6 @@
 ---
 name: rust-scientific-correctness
-description: "Audit Rust scientific and numerical code for mathematical validity, numerical robustness, independent validation, reproducibility, and truthful claims. Use for floating-point or exact arithmetic, linear algebra, computational geometry and topology, predicates, solvers, stochastic algorithms, tolerances, error bounds, scientific fixtures, and benchmark validity."
+description: "Audit scientific Rust algorithms for mathematical validity, numerical robustness, stochastic semantics, and independent evidence."
 ---
 
 # Rust Scientific Correctness
@@ -53,7 +53,7 @@ For direct invocation, read [the standalone workflow](references/standalone-work
 
 ## Workflow
 
-### 1. Establish The Scientific Contract
+### Establish The Scientific Contract
 
 Before judging implementation details, state:
 
@@ -66,7 +66,7 @@ Before judging implementation details, state:
 
 Treat an absent, contradictory, or materially ambiguous contract as a finding. Do not silently choose a scientific convention when that choice changes public meaning.
 
-### 2. Trace The Algorithm Against The Contract
+### Trace The Algorithm Against The Contract
 
 Verify the implemented formula and every branch, fallback, and feature backend. Check:
 
@@ -80,23 +80,12 @@ Verify the implemented formula and every branch, fallback, and feature backend. 
 
 Prefer a derivation, invariant trace, or counterexample over intuition. If a branch changes the scientific question, report that directly.
 
-### 3. Audit Numerical Behavior
+### Numerical behavior
 
-Distinguish a poorly conditioned problem from an unstable implementation. Identify whether a claimed bound is absolute, relative, forward, backward, or residual-based, and verify that its units and assumptions match the result.
+For changed arithmetic, tolerances, predicates, or numerical representations,
+read [numerical behavior](references/numerical-behavior.md).
 
-Inspect:
-
-- overflow, underflow, cancellation, absorption, rounding accumulation, and unsafe reassociation
-- NaN, infinity, signed zero, subnormal values, and non-finite intermediates
-- arithmetic order, fused multiply-add behavior, reduction order, and platform-dependent backends
-- tolerance scale, units, monotonicity, validation, and behavior under rescaling
-- whether computing an error bound can itself overflow, underflow, or round non-conservatively
-- exact-to-inexact conversion, representability, rounding mode, and loss-of-precision contracts
-- consistency between approximate classification and exact results near decision boundaries
-
-Do not accept a numeric sentinel, panic, or silent rounding where the public contract requires a typed failure or exact result.
-
-### 4. Require Independent Evidence
+### Require Independent Evidence
 
 Choose an oracle that does not reuse the algorithm, representation, error-bound helper, conversion path, or core assumption under test. Strong evidence includes:
 
@@ -111,11 +100,12 @@ Agreement between two wrappers around the same implementation is supplementary e
 
 Cover the supported dimension and feature matrix, plus adversarial regimes such as degeneracy, near-degeneracy, ill-conditioning, extreme magnitudes, mixed scales, duplicate values, and conversion boundaries. Preserve discovered counterexamples as deterministic regression fixtures; use hexadecimal floats or bit patterns when exact IEEE-754 boundaries matter.
 
-### 5. Review Stochastic Semantics And Reproducibility
+### Stochastic semantics
 
-For random or Monte Carlo code, establish the target distribution or transition contract, the assumptions required by any convergence claim, acceptance corrections, seed and stream semantics, statistical error model, and promised level of reproducibility. Require calibrated evidence rather than one lucky sample or an unexplained empirical threshold. Load the matching crate reference for concrete proposal, checkpoint, ensemble, or move invariants.
+For stochastic algorithms, RNG ownership, checkpoints, or reproducibility, read
+[stochastic semantics](references/stochastic-semantics.md).
 
-### 6. Validate Scientific Benchmarks And Claims
+### Validate Scientific Benchmarks And Claims
 
 A benchmark is valid scientific evidence only when it measures a supported operation on valid inputs and checks that each implementation computes the same mathematical result.
 
@@ -141,11 +131,12 @@ Do not broaden scope into unrelated style cleanup. If correctness depends on a d
 
 ## Validation
 
-Use repository-local commands when available. Select the smallest
-non-overlapping checks that cover the corrected contract. If repository
-guidance or cross-cutting risk requires a full gate that subsumes focused
-tests, choose that gate initially or run only its uncovered checks; do not
-replay the same tests merely to escalate.
+Use repository-local commands and focused checks that cover the corrected
+scientific contract. Reuse valid evidence where the workflow accepts it. Run a
+required final aggregate gate even if it repeats focused checks, recording the
+overlap without counting it as independent evidence. Relevant changes, distinct
+configurations, and deliberate statistical or nondeterminism checks also justify
+reruns; avoid repetition solely for reassurance.
 
 Typical evidence includes:
 

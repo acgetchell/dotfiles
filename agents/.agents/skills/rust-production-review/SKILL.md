@@ -1,6 +1,6 @@
 ---
 name: rust-production-review
-description: "Review Rust for production readiness as either a directly requested standalone broad or release-readiness audit, or final synthesis after focused Rust reviews. In standalone mode, cover cross-cutting correctness, API, safety, performance, and maintainability risks. In orchestrated mode, reconcile prior evidence and assess only residual dependency, unsafe, performance, simplification, validation, and integration risk without repeating specialist passes."
+description: "Perform a broad Rust production audit, or reconcile specialist evidence and residual integration risks."
 ---
 
 # Rust Production Review
@@ -58,6 +58,10 @@ Record:
 Provide table-ready evidence when invoked by an orchestrator or `review-graph`.
 
 ## Residual Workflow
+
+In graph synthesis, assess these concerns only through accepted evidence and
+return gaps to the coordinator. Source inspection and new checks below apply to
+standalone or non-graph orchestration within its authorized scope.
 
 ### 1. Reconcile dependencies and integration
 

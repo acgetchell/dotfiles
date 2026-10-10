@@ -1,4 +1,4 @@
 interface:
   display_name: "TypeScript Async UI"
   short_description: "React query state, identity, and cancellation"
-  default_prompt: "Use $typescript-async-ui to improve the relevant boundaries and behavior in this project."
+  default_prompt: "Use $typescript-async-ui to review TypeScript React state for stale results, account isolation, cancellation, and errors."

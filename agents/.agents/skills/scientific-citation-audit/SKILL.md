@@ -1,6 +1,6 @@
 ---
 name: scientific-citation-audit
-description: Audit scientific/research-software citations for existence, bibliographic correctness, relevance, and credit alignment. Use when reviewing REFERENCES.md, CITATION.cff, paper bibliographies, DOI links, algorithm provenance, source-code citations, literature-review completeness, or claims that a scientific crate gives appropriate credit for algorithms, data structures, numerical methods, topology, benchmarks, and research-software practice.
+description: "Verify scientific citations, DOI metadata, algorithm provenance, and credit when references or scientific attribution are in scope."
 ---
 
 # Scientific Citation Audit

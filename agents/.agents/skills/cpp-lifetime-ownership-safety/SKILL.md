@@ -1,6 +1,6 @@
 ---
 name: cpp-lifetime-ownership-safety
-description: "Audit C++ source, headers, and tests for RAII, ownership, lifetime, invalidation, resource leaks, undefined behavior, and exception-safe cleanup. Use when code changes raw or smart pointers, references, views, spans, iterators, handles, callbacks, coroutines, promises, awaiters, suspension points, container mutation, resource wrappers, C interfaces, or sanitizer-sensitive paths."
+description: "Audit changed C++ ownership and borrowing for dangling references, invalidation, resource leaks, and unsafe cleanup."
 ---
 
 # C++ Lifetime and Ownership Safety
@@ -9,7 +9,7 @@ Review C++ for concrete lifetime and resource-safety defects. Establish who owns
 
 ## Ground Rules
 
-- Do not mutate git state unless the user explicitly asks in the current turn.
+- Do not mutate git state unless the user has explicitly authorized that operation and scope.
 - Honor repository-local instructions and the project's documented C++ standard, compiler support, and dependency contracts.
 - Prefer changed-file review plus nearby ownership and invariant owners. Expand scope only when a lifetime crosses the changed boundary.
 - Report observable correctness risks, not stylistic preferences. Do not replace a valid non-owning raw pointer merely to introduce a smart pointer.

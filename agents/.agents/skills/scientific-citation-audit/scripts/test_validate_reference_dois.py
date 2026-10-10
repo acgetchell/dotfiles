@@ -206,7 +206,7 @@ def test_resolved_badge_needs_context_instead_of_reporting_mismatch(
     monkeypatch.setattr(
         MODULE,
         "validate_entries",
-        lambda entries, timeout, score: original(entries, timeout, score, lambda *_: metadata("Project", family="Author", year=2026)),
+        lambda entries, timeout, score, **kwargs: original(entries, timeout, score, lambda *_: metadata("Project", family="Author", year=2026), **kwargs),
     )
     assert MODULE.run([str(path), "--json"]) == 1
     result = json.loads(capsys.readouterr().out)[0]

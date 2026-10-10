@@ -1,6 +1,6 @@
 ---
 name: cpp-invariant-state-transitions
-description: "Audit C++ constructors, factories, mutation workflows, caches, state machines, and graph or topology operations for preserved invariants and failure-atomic behavior. Use when changes coordinate multiple fields, update derived state, invalidate handles, implement inverse operations, or can fail after mutation begins."
+description: "Audit C++ construction and coordinated mutation for preserved invariants, consistent derived state, and failure atomicity."
 ---
 
 # C++ Invariant and State-Transition Review
@@ -9,7 +9,7 @@ Review C++ state changes as transitions between valid states. Identify the canon
 
 ## Ground Rules
 
-- Do not mutate git state unless the user explicitly asks in the current turn.
+- Do not mutate git state unless the user has explicitly authorized that operation and scope.
 - Honor repository-local instructions and documented domain contracts.
 - Prefer changed files plus the constructors, mutators, caches, and callers that own the affected invariant.
 - Do not mandate parse-don't-validate, wrapper types, builders, or a broad API redesign. Recommend architectural change only when it is the smallest credible fix for a verified defect.

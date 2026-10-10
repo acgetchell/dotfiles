@@ -1,6 +1,6 @@
 ---
 name: rust-invariant-state-transitions
-description: "Audit Rust construction and mutation workflows for invariant preservation, coordinated state changes, failure atomicity, rollback, cache and index consistency, generation or provenance updates, and valid operation sequences. Use for fallible mutators, transactions and guards, topology or graph edits, state machines, builders that publish state, repair workflows, inverse operations, snapshot/restore logic, and mutations spanning canonical plus derived storage."
+description: "Audit Rust construction and coordinated mutation for failure atomicity, rollback, and consistent canonical and derived state."
 ---
 
 # Rust Invariant State Transitions

@@ -1,6 +1,6 @@
 ---
 name: cpp-api-docs
-description: "Audit C++ public API documentation for caller contracts, Doxygen or generated-doc quality, headers and modules, templates and concepts, ownership and lifetime, invalidation, errors and exceptions, thread safety, complexity, examples, links, and discoverability. Use for public comments, API guides, generated reference sites, canonical examples, documentation warnings, and semver-relevant documentation changes. Route API design truth and executable test evidence to their focused C++ skills."
+description: "Review C++ public documentation and examples for accurate caller contracts, discoverability, and generated-documentation failures."
 ---
 
 # C++ API Documentation

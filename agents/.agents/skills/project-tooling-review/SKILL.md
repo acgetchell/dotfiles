@@ -1,6 +1,6 @@
 ---
 name: project-tooling-review
-description: "Review and fix just recipes, GitHub Actions, CI drift, Clippy/Semgrep usefulness and coverage, tool versions, installers, linters, formatters, type checks, support scripts, and command docs. Use for tooling correctness and static-analysis policy maintenance; route application behavior and test quality to language reviewers."
+description: "Review repository commands, CI, tool pins, and static-analysis policy; apply changes when maintenance or fixes are requested."
 ---
 
 # project-tooling-review
@@ -13,8 +13,8 @@ Keep, add, adjust, or remove checks based on evidence and requested scope.
 
 ## Ground Rules
 
-- Do not perform git state mutations. Do not stage, commit, push, tag, checkout, reset, or stash unless the user explicitly asks in the current turn.
-- Do not install or uninstall unrelated tools. When requested scope includes tool-version currentness, update drift, or "latest" tooling review, update stale tools through the existing manager and reconcile tracked pins.
+- Do not perform git state mutations. Do not stage, commit, push, tag, checkout, reset, or stash unless the user has explicitly authorized that operation and scope.
+- A currentness or "latest" review is read-only: report drift and recommended updates. Upgrade tools and reconcile pins only when updates or maintenance are requested, using the existing manager and the authorized scope.
 - Respect repository-local agent instructions before editing. If the repository documents development commands, read that guidance before changing recipes or workflows.
 - Honor an exact scope supplied by a parent coordinator instead of rediscovering
   a narrower staged or worktree-only scope.
@@ -95,17 +95,12 @@ before expensive execution, preserving prerequisites and coalescing; see the
 Fix canonical recipes; dispatched workers must not add out-of-scope checks or
 reorder validator-owned commands.
 
-Do not run overlapping tiers in sequence when they would replay
-tests whose source/build/configuration state has not changed. Choose the
-broader tier initially or add only the evidence missing from completed focused
-checks. Post-fix reruns, materially different configurations, nondeterminism
-diagnosis, and deliberately repeated measurements remain justified.
-
-Require policy-mandated aggregate gates to expose enough component recipes or
-selection/exclusion controls for an orchestrator to add missing evidence
-without replaying completed tests. Treat an indivisible gate that forces
-duplicate execution as a command-surface defect and make the overlap visible
-rather than counting it twice.
+Avoid redundant nested validation tiers. Reuse valid evidence where the required
+contract permits it. Focused red/green tests during a fix may precede a required
+final aggregate gate even when that gate repeats them. Run the required gate on
+the final source state, record why coverage overlaps, and do not count repeated
+checks as independent evidence. Composable recipes can reduce cost, but an
+indivisible gate is not itself a defect or an approval blocker.
 
 ### 4. Cross-Language Coordination
 

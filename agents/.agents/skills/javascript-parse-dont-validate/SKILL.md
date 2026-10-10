@@ -1,6 +1,6 @@
 ---
 name: javascript-parse-dont-validate
-description: "Parse untrusted JavaScript or TypeScript inputs into validated domain values. Use for API JSON, configuration, forms, URL parameters, storage, and schema libraries such as Zod; not for ordinary component styling."
+description: "Design or review JavaScript and TypeScript runtime input parsing so untrusted data becomes validated domain values."
 ---
 
 # JavaScript Parse Don't Validate

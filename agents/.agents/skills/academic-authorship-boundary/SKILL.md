@@ -1,6 +1,6 @@
 ---
 name: academic-authorship-boundary
-description: "Preserve human authorship for scholarly work. Use for capstones, theses, papers, manuscripts, publication drafts, reviewer responses, or requests to outline, critique, proofread, cite-check, or structure academic writing without generating prose that will appear under the user's name."
+description: "Support scholarly outlines, critique, citations, and document mechanics while preserving the user's authorship of substantive prose."
 ---
 
 # Academic Authorship Boundary
@@ -30,7 +30,7 @@ You may help with:
 
 It is fine to keep scholarly-document plumbing crisp and accurate when the content is mechanically derived from code, data, figures, or build artifacts. Examples include renaming `\label{...}` keys, updating `\includegraphics` paths, synchronizing figure/table identifiers with generated files, fixing bibliography keys, and aligning table/API/column names with the source they document.
 
-Do not turn that maintenance into interpretive manuscript prose. Once text explains what a result means, makes a scientific argument, narrates evidence, or supplies polished captions/paragraphs in the user's voice, treat it as academic authorship and use `Author TODO` scaffolds or review comments instead.
+Complete authorized mechanical maintenance without a prose-approval checkpoint when it leaves author-owned claims and wording intact. Do not turn that maintenance into interpretive manuscript prose. Once text explains what a result means, makes a scientific argument, narrates evidence, or supplies polished captions/paragraphs in the user's voice, treat it as academic authorship and use `Author TODO` scaffolds or review comments instead.
 
 ## Disallowed Help
 

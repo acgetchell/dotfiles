@@ -12,7 +12,7 @@ Use this reference for `justfile` changes, command-surface docs, and recipes tha
 - Trace the execution order of canonical aggregate gates, including nested dependencies and recipe-body calls. Flag avoidable expensive execution before inexpensive static failures; account for true generation/setup prerequisites before moving a check earlier.
 - Preserve recipe composability. Prefer recipes that call other recipes over copy-pasted command sequences when the same workflow appears in multiple places.
 - Ensure aggregate recipes do not execute the same underlying test selection more than once through overlapping dependencies or nested recipe calls. A broader recipe should add distinct evidence, not replay already completed checks.
-- Give policy-mandated aggregate gates component recipes or reliable selection/exclusion controls so an orchestrator can run only evidence absent from its ledger. An indivisible gate that forces already-passing tests to run again is a command-surface defect.
+- Prefer composable aggregate gates when useful, but retain required final gates even after focused red/green tests. Record unavoidable overlap; an indivisible gate is not itself a defect. Repetition inside one aggregate remains distinct from justified iteration followed by a final gate.
 
 ## Fail-Fast Dependency Order
 

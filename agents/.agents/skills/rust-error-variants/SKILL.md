@@ -1,6 +1,6 @@
 ---
 name: rust-error-variants
-description: "Audit Rust error enums and pathways for correctness, debuggability, and orthogonality. Use for typed variants, thiserror and Display messages, anyhow or Result mapping, missing or overly generic errors, preserved error evidence, and mutually exclusive actionable failure categories. Route naming-only issues and general test coverage to their focused skills."
+description: "Review Rust error categories and propagation when callers need actionable, typed, compatible failure information."
 ---
 
 # rust-error-variants
@@ -98,42 +98,11 @@ Flag:
 - variants whose names imply one invariant but whose fields/messages describe another
 - broad variants that become dumping grounds for unrelated failures
 
-### 3.5. Enum-able categories
+### Typed categories
 
-Finite, caller-visible categories should be typed as enums instead of strings.
-Treat string fields as display/detail payloads, not semantic schema. A string
-field in an error is acceptable only when the value is genuinely unbounded or
-opaque, no caller should branch on it, tests do not need exact string matching
-for behavior, and no importer/exporter, retry path, diagnostics aggregator, or
-compatibility check will parse it later.
-
-Flag string fields when:
-
-- the value comes from a fixed or nearly fixed set of literals
-- tests compare the field to a string literal
-- callers may branch on the value
-- the field identifies a validation check, invariant level, resume reason,
-  output/checkpoint operation, topology, move type, mode, format, or subsystem
-- a typed enum already exists for the concept and the error stores `format!("{x:?}")`
-  or `x.to_string()` instead
-
-Prefer:
-
-- small enums with `Display` implementations that preserve user-facing wording
-- reusing existing domain enums such as topology, move type, output format, or
-  validation level
-- `#[non_exhaustive]` on public category enums when downstream exhaustive
-  matching would be semver-hostile
-- tests that pattern-match enum values instead of comparing strings
-
-Leave string fields alone when:
-
-- the value is genuinely open-ended context such as a path, identifier, handle,
-  lower-level diagnostic, or free-form detail
-- the value names a private helper operation used only for debugging and callers
-  should not branch on it
-- enum variants would mirror unbounded upstream errors without adding useful
-  structure
+Finite caller-visible categories belong in typed fields. Keep strings for opaque
+or open-ended context that callers do not parse or branch on. When choosing a
+representation, read [the taxonomy examples](references/typed-categories.md).
 
 ### 4. Debuggable messages
 
@@ -182,22 +151,18 @@ When a `Box<dyn Error>` pattern appears:
   implementations, tests that explicitly verify `std::error::Error` behavior, or
   lint fixtures whose purpose is to exercise the generic error pattern.
 
-### 6. `#[non_exhaustive]` for forward compatibility
+### 6. Forward compatibility
 
-Public error enums and their variants benefit from `#[non_exhaustive]` so adding variants or fields later is not a breaking change.
+Choose exhaustiveness from the crate's compatibility policy and actual caller
+needs. `#[non_exhaustive]` is useful when a newly introduced public enum or
+variant needs future extension; an intentionally closed taxonomy may remain
+exhaustive. Internal module boundaries alone do not require the attribute.
 
-Check that:
-
-- public error enums are `#[non_exhaustive]` unless there is a reason to lock the surface
-- variants with public fields are `#[non_exhaustive]` when future fields are likely
-- removing `#[non_exhaustive]` is treated as a breaking change
-- internal error enums consumed only inside the crate are not marked `#[non_exhaustive]` for no reason; the attribute is most useful at the public API boundary
-
-Flag:
-
-- public error enums without `#[non_exhaustive]` that are likely to gain variants
-- mixing exhaustive and non-exhaustive errors inconsistently across the public API
-- callers (or doctests) that pattern-match on `#[non_exhaustive]` errors without a fallback arm
+Adding it to an already published exhaustive enum or variant can break downstream
+matches or construction. Check the direction of the change against the
+[Cargo SemVer rules](https://doc.rust-lang.org/cargo/reference/semver.html#major-adding-non_exhaustive-to-an-existing-enum-variant-or-struct-with-no-private-fields)
+and test the affected caller contract. Do not classify attribute presence or
+absence alone as a correctness finding.
 
 ### 7. Tests
 

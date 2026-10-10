@@ -1,6 +1,6 @@
 ---
 name: cpp-concurrency-reentrancy
-description: "Audit C++ threads, mutexes, atomics, task systems, signal handlers, callbacks, and RNG state for races, deadlocks, lifetime hazards, cancellation errors, and reentrancy defects. Use when changes involve TBB, OpenMP, standard threads, executors, synchronization, asynchronous signals, shared state, or ThreadSanitizer-sensitive paths."
+description: "Review C++ concurrency, callbacks, and signal handlers for synchronization, lifetime, cancellation, and reentrancy defects."
 ---
 
 # C++ Concurrency and Reentrancy Review
@@ -9,7 +9,7 @@ Review concurrent C++ by identifying shared state, proving its ownership and hap
 
 ## Ground Rules
 
-- Do not mutate git state unless the user explicitly asks in the current turn.
+- Do not mutate git state unless the user has explicitly authorized that operation and scope.
 - Honor repository-local concurrency and library contracts.
 - Review changed code plus the state it shares and the code that starts, joins, cancels, or destroys its work.
 - Establish sequential invariants before recommending parallelization or lock-free techniques.

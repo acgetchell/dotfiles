@@ -1,7 +1,4 @@
 interface:
   display_name: "Review Graph"
   short_description: "Run complete auditable repository reviews"
-  default_prompt: >-
-    Use $review-graph to run every applicable review skill, prefer parallel
-    subagents with coordinator fallback, validate through $review-validator,
-    and return one verified repository proof.
+  default_prompt: "Use $review-graph to review every applicable contract in this scope and return a verified repository proof."

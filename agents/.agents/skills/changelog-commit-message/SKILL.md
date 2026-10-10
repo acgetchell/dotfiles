@@ -1,6 +1,6 @@
 ---
 name: changelog-commit-message
-description: "Write repository-aware commit messages from staged changes that produce useful Keep a Changelog entries. Use for Conventional Commits, semver-sensitive type/scope/body/footer decisions, and git-cliff, release-plz, or cocogitto compatibility. Do not stage or commit unless explicitly asked."
+description: "Draft one changelog-ready commit message from the intended diff, following repository conventions and the user's message preferences."
 ---
 
 # changelog-commit-message
@@ -29,8 +29,6 @@ Do not stage files or run `git commit` unless the user explicitly asks.
 ### 2. Find repository-specific rules
 
 Before drafting, look for local commit and changelog conventions. Prefer explicit repo rules over generic rules.
-
-Exception: if local rules require test results or validation summaries in commit messages, note that convention internally but do not follow it unless the user explicitly asks for validation text in the commit message.
 
 Check likely sources:
 

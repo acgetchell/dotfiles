@@ -1,6 +1,6 @@
 ---
 name: rust-test-quality
-description: "Review Rust unit, integration, doctest, property, fuzz, compile-fail, Miri, sanitizer, concurrency-model, benchmark-fixture, and example tests for meaningful risk coverage, fail-closed production errors, precise assertions, deterministic reproduction, and reliable failure diagnostics. Use when tests change or production behavior needs durable regression evidence."
+description: "Review Rust tests and fixtures for meaningful failure detection, independent assertions, and reproducible regression evidence."
 ---
 
 # Rust Test Quality
@@ -78,7 +78,7 @@ Property tests fail closed: reject only from raw facts independent of
 production. After admission, unexpected `Err` fails with replay context—never
 `prop_assume!`, `if let Ok`, or a successful
 early return. Require deterministic success or enforced acceptance counts; test
-unsupported domains as typed rejections. For fallible production calls, read
+unsupported domains as typed rejections. When affected property tests call fallible production code, read
 [`references/fail-closed-property-testing-fixture.md`](references/fail-closed-property-testing-fixture.md)
 for the required finding and repair.
 

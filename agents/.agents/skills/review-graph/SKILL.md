@@ -1,6 +1,6 @@
 ---
 name: review-graph
-description: "Coordinate provenance-preserving mixed-surface repository reviews across C++, Rust, Python, tooling, and documentation. Capture one source state, route every applicable specialist, run fresh-context review nodes, validate exact requirements, and compile persisted evidence into one verified repository proof. Use for branch, PR, staged, release-readiness, whole-repository, fix-all, or review-and-fix work spanning multiple surfaces."
+description: "Coordinate an exhaustive review across code, tooling, and docs with isolated judgments and a verified evidence record."
 ---
 
 # Review Graph
@@ -45,19 +45,19 @@ which owns catalog/router/rule IDs, skill paths, priorities, and synthesis depen
 
 1. Apply the deterministic repository classifier to captured paths.
 2. Run `review_graph_runtime.py routing-projection` for the consulted routers.
-   Use its complete candidate list, path matches, and semantic triggers as the
-   ordinary routing context. Inspect a surface `references/check-routing.md`
+   Inspect its candidates, path matches, and semantic triggers. Inspect a surface `references/check-routing.md`
    only when shared ownership or ambiguity is not resolved by the projection.
-   Do not load the surface orchestrator body merely to produce routing records.
-3. Return sparse `routing_overrides` only for semantic additions, exact reuse,
-   exclusions, blockers, or corrections to projection matches. Do not repeat
-   catalog-owned identity fields.
-4. Let `plan_from_document` select projection matches, classifier-signaled
-   repository surfaces, and required syntheses; it expands other omissions to
-   `not-applicable`, validates closure, and derives synthesis nodes.
+   Do not load orchestrator bodies for routing.
+3. Inspect the affected contracts and return `routing_overrides` for each matched
+   specialist: select it, justify `not-applicable`, reuse exact evidence, or record
+   an exclusion/blocker. Include semantic additions even without path matches.
+   Do not repeat catalog-owned identity fields or select a whole language suite
+   from file extensions alone.
+4. The planner rejects unassessed path-matched specialists. It retains mandatory
+   classifier surfaces, independent review, and syntheses, expands unmatched
+   omissions to `not-applicable`, and verifies exhaustive closure.
 
-Every applicable leaf remains required. Resolve late handoffs before dependent
-validation or synthesis.
+Every applicable leaf remains required; resolve late handoffs before dependent work.
 
 Run the dormant [TypeSafe experiment](references/routing-experiment.md) only when
 requested. Freeze ordinary routing first; preserve its decisions and proof gates.
@@ -120,7 +120,9 @@ through the same reviewed persistence flow before returning it. Invoke
 `snapshot-workspace` immediately before and after execution, then compile the
 node from its bound payload path with both runtime-owned snapshots. Cache/build
 manifests bind metadata for every immediate entry. Accept only when both gates pass.
-Never replay equivalent checks. A validator failure is owner evidence, not
+Reuse equivalent checks when permitted. A required final gate may follow focused
+red/green checks with a recorded reason for overlap; keep one owner for each
+exact planned execution and do not count repeated coverage as independent. A validator failure is owner evidence, not
 itself a finding. The compiler rejects unexpected outputs;
 source-adjacent build intermediates require an isolated working tree.
 `recover-validation-launch` handles failures before checks start;

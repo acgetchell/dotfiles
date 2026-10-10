@@ -1,6 +1,6 @@
 ---
 name: repository-docs-review
-description: "Review and fix an active repository documentation suite for navigation, operational clarity, generated-file ownership, and cross-document consistency. Use for README, AGENTS, CONTRIBUTING, SECURITY, codes of conduct, docs/**, runbooks, architecture guides, and ADRs. Route command truth, language behavior, scientific claims, citations, C++ or Rust API docs, and scholarly prose to focused owners."
+description: "Review repository documentation for navigation, operational clarity, source ownership, and consistency within the requested scope."
 ---
 
 # Repository Documentation Review
@@ -13,7 +13,7 @@ software.
 
 - Read repository-local agent guidance, documentation configuration, and navigation
   files before editing.
-- Do not mutate git state unless the user explicitly asks in the current turn.
+- Do not mutate git state unless the user has explicitly authorized that operation and scope.
 - Preserve unrelated worktree changes and use read-only git discovery.
 - Treat source code, configuration, inventories, fixtures, and generators as
   authoritative. Preserve supplied data and report discrepancies unless the user
@@ -26,7 +26,9 @@ software.
 
 ## Scope
 
-Inventory existing documentation, including:
+Start with the requested documents and their affected sources and consumers.
+Inventory the whole active suite only for a suite-wide request or demonstrated
+cross-document impact. Relevant surfaces include:
 
 - `README*`, `AGENTS.md`, `CONTRIBUTING*`, `SECURITY*`, and `CODE_OF_CONDUCT*`
 - active `docs/**` content, including runbooks, architecture guides, ADRs, policies,

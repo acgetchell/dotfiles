@@ -1,6 +1,6 @@
 ---
 name: review-validator
-description: "Plan and execute repository validation against a captured source state, either standalone or from an exact review-graph dispatch. Return reproducible fingerprinted validation evidence without reviewing code, diagnosing findings, applying fixes, or broadening scope."
+description: "Run repository checks and report source-bound validation evidence, either directly or from an explicit graph dispatch."
 ---
 
 # Review Validator
@@ -19,9 +19,9 @@ before loading references:
 
 ## Graph-Dispatched Mode
 
-Use graph mode whenever the request names `review-graph`, even if the dispatch
-is incomplete. Follow the compact graph-dispatch contract exactly; omissions
-are `blocked` and never trigger standalone discovery.
+Use graph mode for an actual graph dispatch or an explicit request to execute
+a graph validation unit. Mentioning `review-graph` alone does not select this mode. Follow the compact contract exactly: an incomplete actual
+dispatch is `blocked` and never falls back to standalone discovery.
 
 Honor placement and the coalesced unit. Do not re-plan, split or broaden it,
 create another worker, or inspect implementation semantics. The coordinator

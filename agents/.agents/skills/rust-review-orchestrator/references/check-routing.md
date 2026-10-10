@@ -85,17 +85,12 @@ Run the repository full gate when required locally, when no smaller set covers c
 
 Do not escalate solely because orchestration is ending. Focused evidence is normally sufficient for docs-only, config-only, tests-only, examples-only, or narrowly isolated changes.
 
-Decide whether repository policy or known cross-layer scope requires the full
-gate before executing the first test, and inspect the gate's composition then.
-If it contains tests already passing for the current
-source/build/configuration state, choose the full gate as the single test
-selection from the outset or run only its uncovered validators. Do not run a
-named test, its containing target or package, the workspace suite, and full CI
-as nested tiers. If a mandatory indivisible gate is discovered late and offers
-no reliable exclusion, report the command-surface blocker and route it to
-`project-tooling-review`; do not silently replay tests or count them twice. A
-relevant edit invalidates earlier evidence; a request for a broader summary
-does not.
+Avoid a ladder of overlapping test tiers solely for reassurance. Run focused
+red/green checks when useful during a fix, then any required final aggregate gate
+on the final source state even if it repeats those checks. Record the reason for
+overlap without counting it as independent evidence. Reuse valid evidence where
+the required validation contract permits it; overlap alone requires no approval
+or command-surface escalation.
 
 ## Handoff Evidence
 

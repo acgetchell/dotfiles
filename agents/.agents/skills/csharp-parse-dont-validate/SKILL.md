@@ -1,6 +1,6 @@
 ---
 name: csharp-parse-dont-validate
-description: "Design or audit C# boundary parsing so JSON, configuration, claims, identifiers, and database values become trusted domain values before use. Covers nullable types, System.Text.Json, ASP.NET binding, records, and factories."
+description: "Design or review C# runtime input boundaries so parsing, serialization, and mutation preserve domain invariants."
 ---
 
 # C# Parse Don't Validate
