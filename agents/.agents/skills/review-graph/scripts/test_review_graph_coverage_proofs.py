@@ -23,7 +23,7 @@ from test_review_graph_runtime import (
 from test_review_graph_transitions import _materialize, _payload
 
 
-def _proof_fixture(tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+def _proof_fixture(tmp_path: Path, *, validation_change: str | None = None) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Recheck one test while reusing its configuration in a 100-path repository."""
     git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
     owned = ["pyproject.toml", "tests/tooling/test_adoption.py"]
@@ -88,6 +88,10 @@ def _proof_fixture(tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any], dict
     )
     Path(fresh["artifact_path"]).write_bytes(content)
     Path(fresh["metadata_path"]).write_text(json.dumps(metadata))
+    if validation_change == "renamed-requirement":
+        template["validation_requirements"][0]["requirement_id"] += "-replacement"
+    elif validation_change == "environment":
+        template["validation_requirements"][0]["environment"] += "; changed executor"
     (repository / owned[1]).write_text("def test_adoption():\n    assert 1 == 1\n")
     result = runtime.advance_after_mutation(
         {
@@ -120,6 +124,33 @@ def _proof_fixture(tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any], dict
 def _compile(entry: dict[str, Any], result: dict[str, Any], payload: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:
     state = result["new_source_state"]
     return runtime.compile_review({"dispatch": {**entry["dispatch"], "before_state": state, "after_state": state}, "payload": payload})
+
+
+@pytest.mark.parametrize("change", ["renamed-requirement", "environment"])
+def test_changed_validation_contract_requires_fresh_partitioned_audit(tmp_path: Path, change: str) -> None:
+    fresh, replacement, result, _partial_payload = _proof_fixture(tmp_path, validation_change=change)
+    original = {key: Path(fresh[key]).read_bytes() for key in ("artifact_path", "metadata_path")}
+    assert not replacement["dispatch"].get("coverage_reuse")
+    decision = next(item for item in result["coverage_reuse_decisions"] if item["node_id"] == replacement["dispatch"]["node_id"])
+    assert decision["reason_code"] == "validation-requirements-changed"
+    validation = replacement["dispatch"]["command_policy"]["planned_validation_units"][0]
+    payload = {
+        **_payload(["pyproject.toml", "tests/tooling/test_adoption.py"]),
+        "validation_requirements": [
+            {
+                "requirement_id": validation["requirement_ids"][0],
+                "planned_validation_digest": validation["planned_validation_digest"],
+                "owner": "review-validator",
+                "reason": "Delegate the current execution contract",
+                "expected_evidence": "Checks pass",
+            }
+        ],
+    }
+    contract = json.loads(Path(replacement["worker_payload_contract_path"]).read_bytes())
+    runtime.publish_worker_payload_bytes(contract, json.dumps(payload).encode())
+    _content, metadata = _compile(replacement, result, payload)
+    assert metadata["normalized_record"]["validation_requirements"] == payload["validation_requirements"]
+    assert {key: Path(fresh[key]).read_bytes() for key in original} == original
 
 
 def test_fixed_partial_recheck_dispatch_bytes_and_seeded_findings(tmp_path: Path) -> None:

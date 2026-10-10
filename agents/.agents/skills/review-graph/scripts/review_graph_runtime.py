@@ -4630,7 +4630,7 @@ def _blocked_coverage_reviews(record: dict[str, Any], candidate: GraphPlan) -> l
     ]
 
 
-def _plan_delta_audits(
+def _plan_delta_audits(  # noqa: C901 - keep source and validation eligibility gates together before publishing a reuse proof.
     document: dict[str, Any], previous: GraphPlan, candidate: GraphPlan, sources: dict[str, tuple[dict[str, Any], dict[str, Any]]]
 ) -> tuple[GraphPlan, list[dict[str, Any]]]:
     """Retain full specialist ownership while dispatching only stale partitions for reads."""
@@ -4676,6 +4676,19 @@ def _plan_delta_audits(
                 chain,
             )
             transition = replace(transition, source_state=audit_origin.source_state)
+            reconciliation = _validation_reconciliation(replace(candidate, audit_reuse_transitions=(transition,)), [record])
+            if reconciliation["blockers"]:
+                reviews.append(
+                    {
+                        "node_id": node.node_id,
+                        "evidence_id": evidence.evidence_id,
+                        "disposition": "recheck",
+                        "reason_code": "validation-requirements-changed",
+                        "reason": "; ".join(reconciliation["blockers"]),
+                        "units": [],
+                    }
+                )
+                continue
             units = coverage_decisions(record, audit_origin, target, inputs, transition)
             reviews.append(
                 {

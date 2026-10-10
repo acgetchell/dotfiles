@@ -110,11 +110,11 @@ owned files stayed unchanged. This check applies to whole audits, coverage units
 and replay of their immutable evidence. A fresh audit on the latest metadata
 state can be reused when its complete input proof still holds.
 Changed commands, directories, environment, toolchain, features, platform,
-artifacts, or mutation contracts prevent automatic whole-audit reuse. The
+artifacts, or mutation contracts prevent whole-audit and coverage-partition reuse. The
 transition schedules the affected audit with `validation-requirements-changed`
 and names the conflicting or missing requirement before fanout. The worker
 reassesses the current validation requirement; original evidence and execution
-digests remain immutable. Coverage-partition reuse, when eligible, still requires
+digests remain immutable. Eligible coverage-partition reuse still requires
 the worker to reconcile every original validation need in its new payload.
 Metadata reconciliation itself does not run validation; the replacement graph
 retains its required gates.
