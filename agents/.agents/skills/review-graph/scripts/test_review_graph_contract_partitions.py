@@ -154,7 +154,7 @@ def _contract_request(
 
 
 def _replay_contract_repair(
-    tmp_path: Path, request: dict[str, Any], original: dict[str, Any], payload: dict[str, Any]
+    tmp_path: Path, request: dict[str, Any], original: dict[str, Any], payload: dict[str, Any], *, fresh_findings: list[dict[str, Any]] | None = None
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Publish and verify the new audit, retaining original immutable judgments."""
     original_bytes = {key: Path(original[key]).read_bytes() for key in ("artifact_path", "metadata_path")}
@@ -167,7 +167,7 @@ def _replay_contract_repair(
     updated = {
         **_payload(sorted(rechecked)),
         "status": "completed",
-        "findings": [finding for finding in payload["findings"] if finding["location"].split(":")[0] in rechecked],
+        "findings": fresh_findings if fresh_findings is not None else [finding for finding in payload["findings"] if finding["location"].split(":")[0] in rechecked],
         "nearby_contract_owners": sorted(
             {path for unit in decision["units"] if unit["disposition"] == "recheck" for path in unit["dependency_paths"] if path != request["changed_paths"][0]}
         ),
@@ -185,8 +185,9 @@ def _replay_contract_repair(
     record = runtime._load_evidence_source(entry, require_normalized=True)[4]
     assert record is not None
     assert record["files_inspected"] == sorted(rechecked)
-    assert len(record["findings"]) == len(payload["findings"])
-    for expected in payload["findings"]:
+    expected_findings = [finding for finding in payload["findings"] if finding["location"].split(":")[0] not in rechecked] + updated["findings"]
+    assert len(record["findings"]) == len(expected_findings)
+    for expected in expected_findings:
         actual = next(finding for finding in record["findings"] if finding["summary"] == expected["summary"])
         assert {field: actual[field] for field in expected} == expected
     reused_indices = {index for unit in decision["units"] if unit["disposition"] == "reused" for index in unit["finding_indices"]}
@@ -215,6 +216,32 @@ def _replay_contract_repair(
         "model_review_seconds": None,
     }
     return decision, record, measurement
+
+
+@pytest.mark.parametrize("resolved", [True, False], ids=["resolved", "replaced"])
+def test_rechecked_capability_reconciles_fresh_findings_with_immutable_history(tmp_path: Path, resolved: bool) -> None:
+    request, original, payload = _contract_request(tmp_path, change="operations")
+    replacement = {
+        "severity": "P3",
+        "location": "tool.py:2",
+        "summary": "Clarify the repaired diagnostic contract",
+        "evidence": "The repaired contract needs an example of its new obligation.",
+        "remediation": "Add a current diagnostic example.",
+    }
+    _decision, record, _measurement = _replay_contract_repair(tmp_path, request, original, payload, fresh_findings=[] if resolved else [replacement])
+    assert {finding["summary"] for finding in record["findings"]} == {
+        "Missing notebook failure regression",
+        "Missing scientific failure regression",
+        *([] if resolved else [replacement["summary"]]),
+    }
+    assert all(finding["summary"] != "Missing operations failure regression" for finding in record["findings"])
+    historical = record["coverage_reuse"]["original_findings"]
+    assert {field: historical[2][field] for field in payload["findings"][2]} == payload["findings"][2]
+    if not resolved:
+        fresh = next(finding for finding in record["findings"] if finding["summary"] == replacement["summary"])
+        assert {field: fresh[field] for field in replacement} == replacement
+        assert "source_findings" not in fresh
+        assert record["evidence_id"] != record["coverage_reuse"]["evidence_id"]
 
 
 @pytest.mark.parametrize("change", ["operations", "notebook", "scientific", "implementation"])
