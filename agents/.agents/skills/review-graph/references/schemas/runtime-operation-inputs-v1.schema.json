@@ -3,6 +3,183 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Review Graph Runtime Operation Inputs v1",
   "$defs": {
+      "resume-after-authorized-commit": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifact_store",
+          "dispatches_path",
+          "journal_path",
+          "plan",
+          "source_state",
+          "previous_capture",
+          "new_capture",
+          "authorization",
+          "native_ci"
+        ],
+        "properties": {
+          "artifact_store": {
+            "type": "string",
+            "minLength": 1
+          },
+          "dispatches_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "journal_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "plan": {
+            "type": "object"
+          },
+          "source_state": {
+            "$ref": "#/$defs/sourceState"
+          },
+          "previous_capture": {
+            "type": "object"
+          },
+          "new_capture": {
+            "type": "object"
+          },
+          "external_metadata_transitions": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "authorization": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "operation",
+              "repository_root",
+              "branch",
+              "source_state",
+              "user_authorization"
+            ],
+            "properties": {
+              "operation": {
+                "const": "branch-commit"
+              },
+              "repository_root": {
+                "type": "string",
+                "minLength": 1
+              },
+              "branch": {
+                "type": "string",
+                "minLength": 1
+              },
+              "source_state": {
+                "$ref": "#/$defs/sourceState"
+              },
+              "user_authorization": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "local_validation": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "execution_identity",
+                "git_dependencies",
+                "environment_unchanged",
+                "reason"
+              ],
+              "properties": {
+                "execution_identity": {
+                  "type": "object"
+                },
+                "git_dependencies": {
+                  "type": "array",
+                  "maxItems": 0
+                },
+                "environment_unchanged": {
+                  "const": true
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          },
+          "independent_reviews": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "change_target",
+                "comparison_commit",
+                "reason"
+              ],
+              "properties": {
+                "change_target": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "comparison_commit": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          },
+          "native_ci": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "commands",
+                "checks"
+              ],
+              "properties": {
+                "commands": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "checks": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "name",
+                      "target"
+                    ],
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "target": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
     "preflight-validation": {
       "type": "object",
       "additionalProperties": false,
