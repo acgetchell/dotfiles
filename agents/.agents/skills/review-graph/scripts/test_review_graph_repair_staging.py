@@ -192,9 +192,13 @@ def test_repair_then_external_staging_preserves_only_eligible_evidence(tmp_path:
     assert retained["historical_evidence_sources"] == request["sources"]
     old_id = audit["dispatch"]["evidence_id"]
     assert (old_id in result["reused_evidence_ids"]) is (dependency in {"source", "source-discovery"})
+    lineage = {item["node_id"]: item["replaces_node_ids"] for item in result["replacement_lineage"]}
+    assert set(lineage) == {node["node_id"] for node in result["new_plan"]["actual_worker_nodes"]}
     if dependency == "index":
         assert old_id in result["stale_evidence_ids"]
-        assert any(old_id in item.get("replaced_evidence_ids", []) for item in result["node_decisions"])
+        restored = next(item for item in result["node_decisions"] if old_id in item.get("replaced_evidence_ids", []))
+        assert lineage[restored["node_id"]] == [audit["node_id"]]
+        assert restored["node_id"] not in {item["node_id"] for item in retained["replacement_lineage"]}
         assert audit["node_id"] in {item["node_id"] for item in result["invalidated_nodes"]}
         assert audit["node_id"] not in result["unaffected_node_ids"]
     executed = _finish_repair(tmp_path, result)

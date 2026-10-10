@@ -5006,6 +5006,23 @@ def resume_after_external_metadata(document: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _replacement_lineage(previous: GraphPlan, current: GraphPlan) -> list[dict[str, object]]:
+    """Map every final executable node to the prior contracts it replaces."""
+    return [
+        {
+            "node_id": node.node_id,
+            "replaces_node_ids": [
+                old.node_id
+                for old in previous.actual_worker_nodes
+                if old.skill_id == node.skill_id
+                and old.mode == node.mode
+                and (set(old.requirement_ids).intersection(node.requirement_ids) or node.mode == "synthesis")
+            ],
+        }
+        for node in current.actual_worker_nodes
+    ]
+
+
 def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa: PLR0915
     """Close one repair epoch, recapture once, and emit a fresh final-state graph."""
     raw_plan = document.get("plan")
@@ -5085,16 +5102,6 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
     old_paths = set(_text_list(previous_capture, "captured_scope_paths"))
     newly_touched_paths = tuple(sorted(set(captured_paths) - old_paths))
     unaffected = tuple(node for node in old_plan.actual_worker_nodes if node.node_id not in invalidated)
-    replacement_lineage: list[dict[str, object]] = []
-    for node in new_plan.actual_worker_nodes:
-        predecessors = tuple(
-            old.node_id
-            for old in old_plan.actual_worker_nodes
-            if old.skill_id == node.skill_id
-            and old.mode == node.mode
-            and (set(old.requirement_ids).intersection(node.requirement_ids) or node.mode == "synthesis")
-        )
-        replacement_lineage.append({"node_id": node.node_id, "replaces_node_ids": list(predecessors)})
     fix_node_id = f"fix-epoch-{epoch:03d}"
     result = {
         "authorization_transition": {"after": authorization_after, "before": authorization_before},
@@ -5123,7 +5130,7 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
             "ordinal": epoch,
             "recapture_count": 1,
         },
-        "replacement_lineage": replacement_lineage,
+        "replacement_lineage": _replacement_lineage(old_plan, new_plan),
         "schema_version": 1,
         "stale_evidence_ids": [
             *(_expected_evidence_id(node, old_plan) for node in old_plan.actual_worker_nodes if _expected_evidence_id(node, old_plan) not in reused_ids),
@@ -5174,6 +5181,7 @@ def _resume_after_repair_metadata(document: dict[str, Any], repair: dict[str, An
             )
         },
         "new_plan": resumed["lifecycle_input"]["plan"],
+        "replacement_lineage": _replacement_lineage(_graph_plan(document["plan"]), _graph_plan(resumed["lifecycle_input"]["plan"])),
         "capture": document["post_repair_capture"],
         "repair_transition_path": str(history_path),
         "reused_evidence_ids": sorted(reused_ids),
