@@ -1,6 +1,11 @@
 """Capability-specific whole-file contracts across unrelated and relevant repairs."""
 
 import json
+import platform
+import stat
+import sys
+from datetime import UTC, datetime
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any, cast
 
@@ -8,6 +13,7 @@ import pytest
 import review_graph_runtime as runtime
 from capture_scope import _scope_data
 from review_graph_bootstrap import bootstrap_document
+from review_graph_integrity import digest_bytes, digest_json
 from review_graph_plan import plan_from_document
 from test_review_graph_reuse import _compile_args
 from test_review_graph_runtime import (
@@ -116,6 +122,13 @@ def _contract_request(
         (repository / path).write_text(files[path].replace('version = "0.1.0"', 'version = "0.1.1"'), encoding="utf-8")
     elif change == "implementation":
         (repository / path).write_text(files[path].replace("return cell()", "return cell(), None"), encoding="utf-8")
+    elif change == "mode":
+        (repository / path).chmod((repository / path).stat().st_mode ^ stat.S_IXUSR)
+    elif change == "symlink":
+        target = tmp_path / "notebook-contract.md"
+        target.write_text(files[path], encoding="utf-8")
+        (repository / path).unlink()
+        (repository / path).symlink_to(target)
     else:
         (repository / path).write_text(files[path] + "\nAdditional contract obligation.\n", encoding="utf-8")
     repaired = _scope_data(git, repository, "baseline", None, ())
@@ -249,6 +262,57 @@ def test_deleted_contract_cannot_preserve_its_capability_proof(tmp_path: Path) -
     assert decision["units"][0]["input_changes"] == {"owned_paths": [], "dependency_paths": ["docs/contracts/notebook.md"]}
 
 
+@pytest.mark.parametrize("change", ["mode", "symlink"])
+def test_contract_identity_change_reports_recheck_without_changing_read_bytes(tmp_path: Path, change: str) -> None:
+    request, original, payload = _contract_request(tmp_path, change=change)
+    path = "docs/contracts/notebook.md"
+    contract = Path(request["new_capture"]["repository_root"]) / path
+    assert contract.read_bytes() == b"# Notebook execution\n\nCells execute in order in one shared namespace.\n"
+    before = request["previous_capture"]["repository_path_fingerprints"]
+    after = request["new_capture"]["repository_path_fingerprints"]
+    assert before[path] != after[path]
+    target = tmp_path / "notebook-contract.md"
+    link_value = contract.readlink() if change == "symlink" else None
+    decision, record, _measurement = _replay_contract_repair(tmp_path, request, original, payload)
+    assert {unit["unit_id"]: unit["disposition"] for unit in decision["units"]} == {"notebook": "recheck", "scientific": "reused", "operations": "reused"}
+    assert decision["units"][0]["input_changes"] == {"owned_paths": [], "dependency_paths": [path]}
+    assert all("input_changes" not in unit for unit in record["coverage_reuse"]["units"])
+    if change == "symlink":
+        assert contract.is_symlink()
+        assert contract.readlink() == link_value
+        assert contract.samefile(target)
+    else:
+        assert contract.stat().st_mode & stat.S_IXUSR
+
+
+def _measurement_provenance(snapshots: tuple[Any, Any], dispatch: dict[str, Any]) -> dict[str, Any]:
+    """Bind scripted byte measurements to captured inputs and the running toolchain."""
+    graph = Path(runtime.__file__).resolve().parents[1]
+    scripts = {path.name: digest_bytes(path.read_bytes()) for path in sorted((graph / "scripts").glob("*.py"))}
+    schemas = {path.name: digest_bytes(path.read_bytes()) for path in sorted((graph / "references/schemas").glob("*.json"))}
+    project = SKILL_ROOT.parents[2]
+    return {
+        "measured_at_utc": datetime.now(UTC).isoformat(),
+        "graph_scripts_digest": digest_json(scripts),
+        "graph_schemas_digest": digest_json(schemas),
+        "routing_catalog_digest": digest_bytes(ROUTING_CATALOG.read_bytes()),
+        "fixture_snapshot_digests": {"origin": digest_json(snapshots[0]), "target": digest_json(snapshots[1])},
+        "audit_skill": {
+            "skill_id": dispatch["skill_id"],
+            "skill_digest": digest_bytes(Path(dispatch["skill_path"]).read_bytes()),
+            "reference_digests": {Path(path).name: digest_bytes(Path(path).read_bytes()) for path in dispatch["reference_paths"]},
+        },
+        "environment": {
+            "python": sys.version,
+            "platform": platform.platform(),
+            "research_repo_tools": version("research-repo-tools"),
+            "pytest": version("pytest"),
+            "pyproject_digest": digest_bytes((project / "pyproject.toml").read_bytes()),
+            "uv_lock_digest": digest_bytes((project / "uv.lock").read_bytes()),
+        },
+    }
+
+
 def test_broad_vs_capability_dependencies_measure_context_without_inferred_provider_cost(tmp_path: Path) -> None:
     measurements = {}
     snapshots = []
@@ -269,4 +333,11 @@ def test_broad_vs_capability_dependencies_measure_context_without_inferred_provi
     assert measurements["capability"]["rechecked_paths"] == 1
     assert all(item["worker_input_bytes"] > 0 for item in measurements.values())
     assert measurements["capability"]["coverage_proof_bytes"] > 0
-    print(json.dumps({"fixture": "capability-contract-partitions", "measurements": measurements}, sort_keys=True))
+    report = {
+        "fixture": "capability-contract-partitions",
+        "measurements": measurements,
+        "provenance": _measurement_provenance(snapshots[0], original["dispatch"]),
+    }
+    assert report["provenance"]["fixture_snapshot_digests"]["origin"] != report["provenance"]["fixture_snapshot_digests"]["target"]
+    assert all(report["provenance"]["environment"].values())
+    print(json.dumps({**report, "report_digest": digest_json(report)}, sort_keys=True))

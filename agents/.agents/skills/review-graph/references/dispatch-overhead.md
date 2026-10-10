@@ -35,6 +35,19 @@ The 2026-10-10 local paired run measured:
 | External coverage-proof bytes | 0 | 6,674 |
 | Publication / compilation calls | 1 / 1 | 1 / 1 |
 
+The sample ran on macOS arm64 with Python 3.14.7, pytest 9.1.1, and
+`research-repo-tools` 0.1.8. Its report identity is
+`sha256:5b2b862161cdf7677012a144d667348a395031d5812b0c43318361d3b74242bb`;
+the measured graph-script identity is
+`sha256:1afd677a24aca51936eab2e330b58b2dc9fe6f702c8e2a0d2d38627bfcbe159b`.
+The printed report retains the UTC measurement time, origin/target fixture
+path-map identities, graph script/schema identities, routing catalog, audit
+skill/references, runtime versions, and project/lockfile identities. Script and
+schema identities hash canonical sorted filename-to-content-digest maps of the
+respective directories, including the fixture and its helpers. `report_digest`
+hashes the complete canonical report before that field is added. Save the JSON
+report with each later sample to keep its measurements attributable.
+
 The printed report measures worker-input and external-proof bytes separately.
 Proof transport can increase worker-input bytes even when source inspection
 shrinks. Temporary path lengths affect the exact sizes. Publication/compilation
@@ -44,7 +57,8 @@ and model review time remain `null`; this comparison establishes no provider
 cost saving.
 
 Separate regressions edit each capability contract, change the shared manifest
-or applicable instructions, delete a contract, and declare uncertain dependency
+or applicable instructions, delete a contract, change its executable mode or
+replace it with a symlink retaining identical read bytes, and declare uncertain dependency
 ownership. Each checks the required rechecks and finding provenance through
 native publication, compilation, and evidence verification. The current proof
 still binds complete file identities; see the
