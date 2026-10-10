@@ -120,6 +120,11 @@ just review-workflow-benchmark
 just review-workflow-benchmark HEAD
 ```
 
+The Just recipe defaults to `eeead7c646a45ca8227bc7fc057e6f2e1bdf52bf`,
+the earlier publication comparison. The direct Python entrypoint defaults to
+`da0e045d420a890d53a1e0993a0ecdfee5057c72`, the #87 comparison. Pass the
+chosen revision explicitly when comparing results from these entrypoints.
+
 The command prints an external `report.json` path. It reads the selected trusted
 Git revision with `git show`; it does not change Git state or execute repository
 validation recipes. The baseline revision must be available locally. For a

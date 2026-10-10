@@ -178,7 +178,7 @@ review base="origin/main": _ensure-uv
 review-uncommitted: _ensure-uv
     uv run --locked --only-group tooling --inexact research-repo-tools review uncommitted
 
-# Paired 18-file protocol benchmark; artifacts go to a unique temporary directory.
+# Paired protocol benchmark; artifacts go to a unique temporary directory.
 review-workflow-benchmark baseline="eeead7c646a45ca8227bc7fc057e6f2e1bdf52bf" repeats="5": _ensure-uv
     uv run --locked python agents/.agents/skills/review-graph/scripts/review_graph_benchmark.py --baseline-ref {{ quote(baseline) }} --repeats {{ quote(repeats) }}
 
