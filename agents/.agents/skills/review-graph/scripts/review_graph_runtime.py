@@ -5152,6 +5152,12 @@ def _resume_after_repair_metadata(document: dict[str, Any], repair: dict[str, An
     )
     reused_ids = {evidence_id for _requirement, evidence_id in resumed["lifecycle_input"]["plan"]["exact_reused_review_evidence"]}
     invalidated_nodes = {item["node_id"] for item in repair["preserved_evidence"] if item["evidence_id"] not in reused_ids}
+    discarded_coverage = set(resumed["discarded_coverage_node_ids"])
+    coverage_recheck = {
+        "disposition": "recheck",
+        "reason_code": "metadata-dependencies-changed",
+        "reason": "External staging requires a fresh Git-sensitive judgment; see node_decisions.",
+    }
     return {
         **repair,
         **{
@@ -5186,6 +5192,10 @@ def _resume_after_repair_metadata(document: dict[str, Any], repair: dict[str, An
             if item["node_id"] in invalidated_nodes
             else item
             for item in repair["reuse_decisions"]
+        ],
+        "coverage_reuse_decisions": [
+            {**item, **coverage_recheck, "units": [{**unit, **coverage_recheck} for unit in item["units"]]} if item["node_id"] in discarded_coverage else item
+            for item in repair["coverage_reuse_decisions"]
         ],
         "preserved_evidence": [item for item in repair["preserved_evidence"] if item["evidence_id"] in reused_ids],
         "stale_evidence_ids": sorted(set(repair["stale_evidence_ids"]) | (set(repair["reused_evidence_ids"]) - reused_ids)),

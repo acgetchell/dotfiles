@@ -23,7 +23,9 @@ from test_review_graph_runtime import (
 from test_review_graph_transitions import _materialize, _payload
 
 
-def _proof_fixture(tmp_path: Path, *, validation_change: str | None = None) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+def _proof_fixture(
+    tmp_path: Path, *, validation_change: str | None = None, stage_after_repair: bool = False
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Recheck one test while reusing its configuration in a 100-path repository."""
     git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
     owned = ["pyproject.toml", "tests/tooling/test_adoption.py"]
@@ -83,6 +85,8 @@ def _proof_fixture(tmp_path: Path, *, validation_change: str | None = None) -> t
         ],
         "handoffs": [{"catalog_id": "python.build", "observed_trigger": "Test configuration", "reason": "Check installation", "scope": owned}],
     }
+    if stage_after_repair:
+        payload["git_dependencies"] = [{"kind": "index", "reason": "The judgment depends on staging."}]
     content, metadata = runtime.compile_review(
         {"dispatch": {**fresh["dispatch"], "before_state": lifecycle["source_state"], "after_state": lifecycle["source_state"]}, "payload": payload}
     )
@@ -93,11 +97,17 @@ def _proof_fixture(tmp_path: Path, *, validation_change: str | None = None) -> t
     elif validation_change == "environment":
         template["validation_requirements"][0]["environment"] += "; changed executor"
     (repository / owned[1]).write_text("def test_adoption():\n    assert 1 == 1\n")
+    repaired_capture = _scope_data(git, repository, "baseline", None, ())
+    metadata_transition = {}
+    if stage_after_repair:
+        _run_test_git(git, "-C", str(repository), "add", owned[1])
+        metadata_transition["post_repair_capture"] = _scope_data(git, repository, "baseline", None, ())
     result = runtime.advance_after_mutation(
         {
             **lifecycle,
+            **metadata_transition,
             "previous_capture": capture,
-            "new_capture": _scope_data(git, repository, "baseline", None, ()),
+            "new_capture": repaired_capture,
             "planning_template": template,
             "authorization_before": "review-only",
             "authorization_after": "review-and-fix",
@@ -124,6 +134,21 @@ def _proof_fixture(tmp_path: Path, *, validation_change: str | None = None) -> t
 def _compile(entry: dict[str, Any], result: dict[str, Any], payload: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:
     state = result["new_source_state"]
     return runtime.compile_review({"dispatch": {**entry["dispatch"], "before_state": state, "after_state": state}, "payload": payload})
+
+
+def test_repair_then_staging_reports_discarded_partial_coverage(tmp_path: Path) -> None:
+    _fresh, replacement, result, _partial_payload = _proof_fixture(tmp_path, stage_after_repair=True)
+    assert "coverage_reuse" not in replacement["dispatch"]
+    node_id = replacement["node_id"]
+    decision = next(item for item in result["coverage_reuse_decisions"] if item["node_id"] == node_id)
+    assert decision["units"]
+    assert all(unit["disposition"] == "recheck" for unit in decision["units"])
+    assert all(unit["reason_code"] == "metadata-dependencies-changed" for unit in decision["units"])
+    assert decision["reason_code"] == "metadata-dependencies-changed"
+    assert next(item for item in result["node_decisions"] if item["node_id"] == node_id)["disposition"] == "recheck"
+    history = json.loads(Path(result["repair_transition_path"]).read_text())
+    original = next(item for item in history["coverage_reuse_decisions"] if item["node_id"] == node_id)
+    assert [(unit["unit_id"], unit["disposition"]) for unit in original["units"]] == [("configuration", "reused"), ("adoption-tests", "recheck")]
 
 
 @pytest.mark.parametrize("change", ["renamed-requirement", "environment"])
