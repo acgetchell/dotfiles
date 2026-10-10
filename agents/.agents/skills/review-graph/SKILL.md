@@ -149,6 +149,7 @@ For external staging with unchanged content, use `resume-after-external-metadata
 Declare semantic `git_dependencies` to preserve source-discovery audits; follow
 its continuation and [state transitions](references/state-transitions.md).
 Retain both Git captures and the user's index.
+Authorized commits: [commit/CI handoff](references/state-transitions.md#authorized-commit-and-native-ci-handoff).
 Run `finalize-proof` with the signed dispatch set and journal after every
 applicable review and validation requirement has accepted non-stale evidence.
 It derives the mappings, manifest, and `RepositoryReviewProof`; report complete

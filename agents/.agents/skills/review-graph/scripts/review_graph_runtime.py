@@ -21,6 +21,17 @@ from typing import TYPE_CHECKING, Any, cast
 from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics, run_command_bytes
 from review_graph_bench import benchmark_identity, benchmark_recipes, equivalent_recipe
 from review_graph_bootstrap import bootstrap_document
+from review_graph_commit import (
+    commit_node_reasons,
+    history_files,
+    native_target,
+    pin_independent_rechecks,
+    reconciliation_policy,
+    replacement_native_units,
+    verify_commit_identity,
+    verify_live_commit,
+    verify_native_results,
+)
 from review_graph_coverage import combined_findings, coverage_decisions, coverage_execution_view, reused_paths, validate_coverage_units
 from review_graph_doi import captured_doi_inputs, captured_software_inputs, inspect_canonical_recheck
 from review_graph_executor import executor_permissions, remedied_features
@@ -107,6 +118,7 @@ from review_graph_reuse import (
     SNAPSHOT_FORMAT,
     AuditInputIdentity,
     AuditReuseTransition,
+    CommitHandoffTransition,
     ExternalMetadataTransition,
     metadata_states,
     metadata_transition,
@@ -1637,7 +1649,9 @@ def _independent_normalized_record(content: bytes, expectation: ReviewEvidenceEx
             }
         )
     limitations = _native_field_values(sections["## Review Graph Envelope"], "Limitations")
+    context = _canonical_worker_payload(content) if b"- Canonical worker payload: " in content else {}
     return {
+        **{key: context[key] for key in ("commands_executed", "git_dependencies", "git_sensitive", "nearby_contract_owners") if key in context},
         "artifact_digest": evidence.raw_result_digest,
         "artifact_id": evidence.raw_result_artifact_id,
         "changes": [],
@@ -2107,6 +2121,7 @@ def _validation_reuse_body(unit: ValidationUnit, evidence: ValidationEvidence, c
 
 def _validation_normalized_record(payload: dict[str, Any], evidence: ValidationEvidence, capture: dict[str, Any] | None = None) -> dict[str, Any]:
     record = {
+        **({"native_ci": payload["native_ci"]} if "native_ci" in payload else {}),
         "observed_source_state": list(evidence.fingerprints.after),
         "artifact_digest": evidence.raw_result_digest,
         "artifact_id": evidence.raw_result_artifact_id,
@@ -2383,6 +2398,7 @@ def compile_validation(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]
         raise ValueError(msg)
     expected = unit.source_state
     fingerprints = _dispatch_fingerprints({**dispatch, "source_state": list(expected)})
+    verify_native_results(payload, native_target(fingerprints.metadata_transitions, unit.node_id))
     if fingerprints.metadata_transitions and (
         fingerprints.before != fingerprints.after or fingerprints.after != fingerprints.metadata_transitions[-1].after.source_state or status == "reused"
     ):
@@ -2684,6 +2700,7 @@ def _graph_plan(raw: dict[str, Any]) -> GraphPlan:
         audit_delta_reviews=_records(raw, "audit_delta_reviews"),
         validation_recoveries=_records(raw, "validation_recoveries"),
         pre_review_validation_nodes=_string_tuple(raw, "pre_review_validation_nodes"),
+        commit_handoffs=tuple(metadata_transition(item) for item in _records(raw, "commit_handoffs")),
         validation_exclusions=tuple(
             ValidationExclusion(
                 originating_evidence_id=_required_text(item, "originating_evidence_id"),
@@ -2888,6 +2905,7 @@ def _load_evidence_source(  # noqa: C901, PLR0912, PLR0915
                 msg = f"validation metadata has mismatched typed evidence: {metadata_path}"
                 raise TypeError(msg)
             payload = _canonical_worker_payload(content)
+            verify_native_results(payload, native_target(evidence.fingerprints.metadata_transitions, evidence.node_id))
             payload_digest = digest_bytes(canonical_json(payload).encode())
             if metadata.get("payload_digest") != payload_digest:
                 msg = f"worker payload digest does not match compiled artifact: {artifact_path}"
@@ -2963,6 +2981,9 @@ def _validation_reconciliation(plan: GraphPlan, records: list[dict[str, Any]]) -
                 compatible_digests.add(_planned_validation_digest(prior))
             exclusion = exclusions.get((origin, requirement_id, digest))
             reuse_binding = None
+            commit_binding = _commit_validation_reference(plan, record, requirement, unit) if unit is not None else None
+            if commit_binding is not None:
+                compatible_digests.add(commit_binding["original_planned_validation_digest"])
             if "planned_validation_digest" in requirement:
                 if unit is not None and unit.required:
                     reuse_binding = _reused_validation_reference(plan, record, requirement, unit, prior)
@@ -2990,9 +3011,33 @@ def _validation_reconciliation(plan: GraphPlan, records: list[dict[str, Any]]) -
                     "reason": exclusion.reason if exclusion and not matches else None,
                     "validation_unit_id": unit.node_id if matches and unit else None,
                     **({"reuse_binding": reuse_binding} if reuse_binding is not None else {}),
+                    **({"commit_handoff_binding": commit_binding} if commit_binding is not None else {}),
                 }
             )
     return {"blockers": blockers, "requirements": sorted(results, key=lambda item: (item["requirement_id"], item["originating_evidence_id"]))}
+
+
+def _commit_validation_reference(plan: GraphPlan, record: dict[str, Any], requirement: dict[str, Any], unit: ValidationUnit) -> dict[str, Any] | None:
+    """Reconcile a retained audit's native obligation with its exact-commit replacement."""
+    for transition in reversed(plan.commit_handoffs):
+        if not isinstance(transition, CommitHandoffTransition):
+            continue
+        proof = transition.commit_handoff
+        target = proof["native_ci"].get(unit.node_id)
+        if target is None or unit.commands != tuple(target["commands"]):
+            continue
+        prior = _validation_unit(proof["previous_native_units"][unit.node_id])
+        identity = proof["source_records"].get(record["evidence_id"])
+        if identity != digest_bytes(canonical_json(record).encode()) or metadata_audit_blockers(record, transition):
+            continue
+        if requirement.get("planned_validation_digest") == _planned_validation_digest(prior):
+            return {
+                "original_planned_validation_digest": _planned_validation_digest(prior),
+                "replacement_planned_validation_digest": _planned_validation_digest(unit),
+                "commit": transition.after.head,
+                "reason": "The pending native obligation is superseded by checks of the exact reviewed commit.",
+            }
+    return None
 
 
 def _synthesis_plan_context(plan: GraphPlan, records: list[dict[str, Any]]) -> dict[str, Any]:
@@ -3017,6 +3062,7 @@ def _synthesis_plan_context(plan: GraphPlan, records: list[dict[str, Any]]) -> d
         "validation_environments": {unit.node_id: json.loads(_validation_environment_identity(unit)) for unit in plan.coalesced_validation_units},
         "validation_exclusions": [asdict(item) for item in plan.validation_exclusions],
         "validation_recoveries": list(plan.validation_recoveries),
+        **({"commit_handoffs": [asdict(item) for item in plan.commit_handoffs]} if plan.commit_handoffs else {}),
         "validation_reconciliation": _validation_reconciliation(plan, records),
         "handoff_reconciliation": {"handoffs": handoffs, "unresolved_handoff_ids": list(unresolved), "blockers": list(blockers)},
     }
@@ -3071,6 +3117,8 @@ def build_synthesis_bundle(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
     bundle: dict[str, Any] = {"schema_version": 1, "source_state": list(source_state), "records": sorted(records, key=lambda item: item["evidence_id"])}
     if plan is not None:
         bundle["plan_context"] = _synthesis_plan_context(plan, bundle["records"])
+        if document.get("external_metadata_transitions"):
+            bundle["plan_context"]["external_metadata_transitions"] = document["external_metadata_transitions"]
     bundle["bundle_digest"] = digest_bytes(canonical_json(bundle).encode())
     return bundle
 
@@ -3943,7 +3991,14 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             _kind, _expectation, evidence, _content, _record = _load_evidence_source(source, require_normalized=True)
             if evidence.evidence_id in reused_ids:
                 reuse_sources.append(source)
-        plan_bytes = canonical_json({"plan": asdict(plan), "source_state": list(source_state), "sources": reuse_sources}).encode()
+        plan_bytes = canonical_json(
+            {
+                "plan": asdict(plan),
+                "source_state": list(source_state),
+                "sources": reuse_sources,
+                **({"external_metadata_transitions": document["external_metadata_transitions"]} if document.get("external_metadata_transitions") else {}),
+            }
+        ).encode()
         plan_path = artifact_store / "synthesis-publication-plan.json"
         _queue_materialized_write(pending_writes, plan_path, plan_bytes, mode=0o444)
         synthesis_plan_reference = {"path": str(plan_path), "digest": digest_bytes(plan_bytes)}
@@ -4765,16 +4820,26 @@ def _metadata_evidence_blockers(document: dict[str, Any], records: list[dict[str
         return []
     current = _current_metadata_state(document)
     transition = metadata_transition(document["external_metadata_transitions"][-1])
-    return [
+    blockers = [
         f"Evidence requires revalidation after external staging: {record['evidence_id']}: {canonical_json(reasons)}"
         for record in records
         if tuple(record.get("observed_source_state", ())) != current
         if (reasons := _metadata_node_reasons(record.get("mode", "validation"), (), record, transition))
     ]
+    transitions = tuple(metadata_transition(item) for item in _records(document, "external_metadata_transitions"))
+    for record in records:
+        if record.get("mode") == "validation":
+            try:
+                verify_native_results(record, native_target(transitions, record["node_id"]))
+            except ValueError as error:
+                blockers.append(str(error))
+    return blockers
 
 
 def _metadata_node_reasons(mode: str, predecessors: tuple[str, ...], record: dict[str, Any], transition: ExternalMetadataTransition) -> list[dict[str, str]]:
     """Keep fresh review, execution, and synthesis policies separate from audit dependencies."""
+    if isinstance(transition, CommitHandoffTransition):
+        return commit_node_reasons(mode, record, transition)
     policies = {
         "independent-review": "Fresh independent review must inspect the current change target.",
         "validation": "Validation execution and workspace evidence must bind to the current metadata state.",
@@ -4813,6 +4878,11 @@ def _metadata_resume_decisions(
                     }
                 ],
                 **({"discovery_reconciliation": discovery_reconciliation(record, transition)} if not reasons and record else {}),
+                **(
+                    {"reconciliation_policy": transition.commit_handoff["preserved_evidence"].get(record.get("evidence_id"))}
+                    if isinstance(transition, CommitHandoffTransition) and not reasons
+                    else {}
+                ),
             }
         )
     return decisions
@@ -4910,7 +4980,7 @@ def _preserve_metadata_barrier_history(
         migrated.append(event)
     _fold_execution_journal(plan, _state(continuation, "source_state"), tuple(migrated))
     _write_text_once(path, "".join(canonical_json(event) + "\n" for event in migrated))
-    for node_id in plan.pre_review_validation_nodes:
+    for node_id in set(plan.pre_review_validation_nodes) - set(preserved):
         if state.get(node_id) in {"accepted", "blocked", "in-flight"}:
             append_journal_event(
                 path,
@@ -4922,6 +4992,71 @@ def _preserve_metadata_barrier_history(
 def resume_after_external_metadata(document: dict[str, Any]) -> dict[str, Any]:
     """Publish a new continuation while preserving original audit and Git provenance."""
     transition = metadata_transition({"before": document["previous_capture"], "after": document["new_capture"]})
+    return _resume_metadata(document, transition)
+
+
+def resume_after_authorized_commit(document: dict[str, Any]) -> dict[str, Any]:
+    """Observe an explicitly authorized commit; this operation never mutates Git."""
+    require_schema_definition(document, _RUNTIME_OPERATION_INPUT_SCHEMA, "resume-after-authorized-commit")
+    verify_live_commit(document["previous_capture"], document["new_capture"])
+    transition = CommitHandoffTransition(source_snapshot(document["previous_capture"]), source_snapshot(document["new_capture"]), {})
+    return _resume_metadata(document, transition)
+
+
+def _prepare_commit_handoff(  # noqa: PLR0913 - the continuation binds the complete accepted execution context.
+    document: dict[str, Any],
+    plan: GraphPlan,
+    transition: CommitHandoffTransition,
+    lifecycle: dict[str, str],
+    *,
+    sources: dict[str, dict[str, Any]],
+    records: dict[str, dict[str, Any]],
+    entries: dict[str, dict[str, Any]],
+) -> tuple[GraphPlan, CommitHandoffTransition]:
+    if any(status in {"in-flight", "awaiting-replan"} for status in lifecycle.values()):
+        msg = "commit handoff requires quiescent execution"
+        raise ValueError(msg)
+    updated = replacement_native_units(document, plan, lifecycle, transition.after.head)
+    proof = {
+        "authorization": document["authorization"],
+        "parent_commit": transition.before.head,
+        "commit": transition.after.head,
+        "preserved_evidence": {},
+        "native_ci": document["native_ci"],
+        "previous_native_units": {unit.node_id: asdict(unit) for unit in plan.coalesced_validation_units if unit.node_id in document["native_ci"]},
+        "source_records": {record["evidence_id"]: digest_bytes(canonical_json(record).encode()) for record in records.values()},
+    }
+    transition = replace(transition, commit_handoff=proof)
+    verify_commit_identity(transition)
+    proof["preserved_evidence"] = reconciliation_policy(document, records, entries, transition)
+    updated = pin_independent_rechecks(updated, transition)
+    root = Path(document["artifact_store"]).resolve()
+    repository = Path(transition.after.repository_root)
+    if root.is_relative_to(repository) or repository.is_relative_to(root):
+        msg = "commit handoff artifact store must be outside the repository"
+        raise ValueError(msg)
+    history = root / "commit-history"
+    if history.resolve() != history:
+        msg = "commit handoff history directory must not traverse symlinks"
+        raise ValueError(msg)
+    history.mkdir(parents=True, exist_ok=True)
+    retained = []
+    history_sources = dict(sources)
+    for source in _verified_reused_sources(plan, _state(document, "source_state")):
+        key = "reused-" + digest_bytes(canonical_json(source).encode())[7:23]
+        history_sources[key] = source
+    for name, content in history_files(document, history_sources).items():
+        path = history / name
+        _write_bytes_atomically_once(path, content, mode=0o444)
+        retained.append({"path": str(path), "digest": digest_bytes(content)})
+    proof["preserved_files"] = retained
+    transition = replace(transition, commit_handoff=proof)
+    transition.verify()
+    return replace(updated, commit_handoffs=(*plan.commit_handoffs, transition)), transition
+
+
+def _resume_metadata(document: dict[str, Any], transition: ExternalMetadataTransition) -> dict[str, Any]:
+    """Share publication machinery while retaining distinct transition contracts."""
     if transition.before.source_state != _current_metadata_state(document):
         msg = "external metadata previous capture differs from the current reviewed state"
         raise ValueError(msg)
@@ -4944,6 +5079,8 @@ def resume_after_external_metadata(document: dict[str, Any]) -> dict[str, Any]:
         ):
             msg = "external metadata resume requires unchanged applicable instructions, skills, and references"
             raise ValueError(msg)
+    if isinstance(transition, CommitHandoffTransition):
+        plan, transition = _prepare_commit_handoff(document, plan, transition, lifecycle, sources=sources, records=by_node, entries=entries)
     decisions = _metadata_resume_decisions(plan, lifecycle, by_node, transition)
     preserved = {item["node_id"]: entries[item["node_id"]] for item in decisions if item["disposition"] == "preserved"}
     discarded_coverage = {item["node_id"] for item in decisions if any("evidence_id" in reason for reason in item["reasons"])}
@@ -4962,7 +5099,7 @@ def resume_after_external_metadata(document: dict[str, Any]) -> dict[str, Any]:
             "plan": continuation["plan"],
             "source_state": list(state),
             "external_metadata_transitions": transitions,
-            "artifact_store": str(root),
+            "artifact_store": str(root / "dispatch" if isinstance(transition, CommitHandoffTransition) else root),
             "repository_root": transition.after.repository_root,
             "authorization": first_entry["dispatch"]["authorization"],
             "state_verification_command": first_entry["dispatch"]["state_verification_command"],
@@ -4987,7 +5124,7 @@ def resume_after_external_metadata(document: dict[str, Any]) -> dict[str, Any]:
             append_journal_event(paths["journal_path"], continuation, request)
     return {
         "status": "resumed",
-        "transition_kind": "observed-external-git-metadata",
+        "transition_kind": "authorized-commit-handoff" if isinstance(transition, CommitHandoffTransition) else "observed-external-git-metadata",
         "lifecycle_input": continuation,
         "dispatch_set": materialized,
         "original_source_state": list(state),
@@ -6938,6 +7075,9 @@ def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     resume_parser = _runtime_subparser(subparsers, "resume-after-external-metadata", "resume after verified external staging without changing Git")
     resume_parser.add_argument("--input", type=Path, required=True)
     resume_parser.add_argument("--output", type=Path, required=True)
+    commit_parser = _runtime_subparser(subparsers, "resume-after-authorized-commit", "reconcile reviewed bytes with an authorized commit and exact-commit CI")
+    commit_parser.add_argument("--input", type=Path, required=True)
+    commit_parser.add_argument("--output", type=Path, required=True)
     compile_parser = _runtime_subparser(subparsers, "compile-review", "compile a compact review payload")
     compile_parser.add_argument("--input", type=Path, required=True)
     compile_parser.add_argument("--artifact", type=Path, required=True)
@@ -7460,6 +7600,8 @@ def _json_operation_output(document: dict[str, Any], args: argparse.Namespace) -
         return advance_after_mutation(document)
     if args.operation == "resume-after-external-metadata":
         return resume_after_external_metadata(document)
+    if args.operation == "resume-after-authorized-commit":
+        return resume_after_authorized_commit(document)
     if args.operation == "reconcile-handoffs":
         return reconcile_handoffs(document)
     if args.operation in {"reconcile-validation-requirements", "fallback-to-coordinator", "recover-validation-launch", "recover-validation-execution"}:

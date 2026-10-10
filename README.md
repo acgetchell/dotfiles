@@ -29,8 +29,10 @@ dotfiles/
 ├── zsh/
 │   └── .zshrc              # stows to ~/.zshrc
 └── agents/
-    └── .agents/skills/     # stows to ~/.agents/skills/
-        └── */SKILL.md
+    └── .agents/
+        ├── AGENTS.md       # stows to ~/.agents/AGENTS.md
+        └── skills/         # stows to ~/.agents/skills/
+            └── */SKILL.md
 ```
 
 ## Platform scope
@@ -435,6 +437,36 @@ The cloud process receives a placeholder; its HTTPS proxy supplies the real
 credential for the allowed destination. The local 1Password session is not
 needed for cloud runs. See the official
 [cloud environment secret configuration](https://learn.chatgpt.com/docs/environments/cloud-environments#configure-environment-variables-and-network-secrets).
+
+## Global agent instructions
+
+The `agents` package keeps shared defaults in `agents/.agents/AGENTS.md`,
+installed as `~/.agents/AGENTS.md` for
+[Warp](https://github.com/warpdotdev/warp/pull/9325).
+[Codex](https://learn.chatgpt.com/docs/agent-configuration/agents-md) uses the same
+file through a local `~/.codex/AGENTS.md` symlink. These defaults apply across
+repositories; each repository can supply more specific instructions.
+
+Branch creation follows the repository's documented or established convention,
+with `<type>/<short-kebab-description>` as the fallback. Agent or model prefixes
+such as `codex/` require an explicit request. Choose the final name before the
+first push or pull request.
+
+Install with `just stow-check agents`, then `just stow-apply agents` and
+`just stow-verify`. Connect Codex once per host:
+
+```sh
+mkdir -p ~/.codex
+ln -s ../.agents/AGENTS.md ~/.codex/AGENTS.md
+```
+
+If either instruction path already contains a regular file, review and preserve
+its contents before moving it aside. Stow and `ln -s` report conflicts rather
+than overwriting files. Keep `~/.codex` itself as a local directory; only the
+instruction file links to the shared source. Start a new Codex session to load
+the instructions. A nonempty `~/.codex/AGENTS.override.md` takes precedence;
+a custom `CODEX_HOME` needs the link there instead. Remote and cloud agents need
+the same setup on their own execution host.
 
 ## Codex config
 

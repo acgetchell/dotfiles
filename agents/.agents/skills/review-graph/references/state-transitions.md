@@ -300,3 +300,84 @@ the full decisions. Independent fresh reviews, validators, and synthesis have
 separate explicit restart policies. Restarting these nodes does not invalidate
 unrelated source audit leaves. Scheduling, workspace snapshots, and final proof
 accept only the latest verified capture. Never rewrite fingerprints or undo staging.
+
+## Authorized Commit And Native CI Handoff
+
+When the user explicitly authorizes committing the reviewed source, retain a
+capture immediately before the operation and capture again afterward. Use
+`resume-after-authorized-commit --input <request.json> --output <result.json>`
+to continue the review. This is optional; ordinary reviews need no commit step.
+A review/fix request does not authorize branch creation, commits, push, or PR
+publication. Existing explicit authorization for the same operation and scope
+remains valid across turns; record it without asking again. The runtime observes
+Git and never changes it or publishes anything.
+
+Supply the existing lifecycle `plan`, logical `source_state`, any
+`external_metadata_transitions`, `dispatches_path`, `journal_path`, both real
+captures (`previous_capture`, `new_capture`), and a new external `artifact_store`.
+Execution must be quiescent. The post-commit repository must be clean, on a named
+branch, and exactly one commit beyond the captured HEAD. Baseline and worktree
+captures are supported; other comparison modes, merges, and rebases require
+replanning. The complete path map, file modes, repository boundary, instructions,
+skills, and references must remain proved. The runtime independently recaptures
+the repository and compares the committed tree against the captured bytes, so
+clean status alone cannot hide an index flag or content-filter mismatch.
+Submodule trees and changed path inventories require replanning. Symlink text
+is bound, but reads through symlinks still require fresh inspection.
+
+The request's `authorization` records `operation: branch-commit`,
+`repository_root`, destination `branch`, the immediately preceding capture's
+`source_state`, and the actual user's `user_authorization` text. This records
+authorization; it does not create permission to execute Git mutations.
+
+Reconciliation is explicit and defaults to rechecking uncertain evidence:
+
+- Source-only audits retain their immutable evidence when their recorded reads
+  and dependencies remain proved. Semantic `head`, `history`, or `index`
+  dependencies and unclassified commands require current-state review.
+- To retain an independent review, provide an `independent_reviews` entry keyed
+  by node ID with its original `change_target`, immutable `comparison_commit`
+  (the captured pre-commit HEAD), and `reason`. Supported comparison targets are
+  plain local worktree diffs naming `HEAD` or its explicit SHA.
+  Staged comparisons and unresolved moving refs require a fresh review. The
+  original target remains attributed to its original evidence.
+  Fresh independent reviews pin that same comparison to the pre-commit SHA;
+  they must not compare against the new `HEAD` and silently inspect an empty
+  diff. An unprovable comparison target requires replanning.
+- To retain passed local validation, provide a `local_validation` entry keyed
+  by node ID: copy its entire unchanged `validation_unit` as `execution_identity`,
+  declare `git_dependencies: []` and `environment_unchanged: true`, and explain
+  the inspected recipe's source-only inputs in `reason`. Check aggregate recipes
+  and their tools, including version derivation, file discovery, and history
+  assertions. Matching source bytes alone never establishes Git independence or
+  unchanged external inputs. Git-sensitive, mixed, uncertain, failed, and omitted
+  units run again in full. No successful old execution is rewritten or called
+  a new run. Required final gates may run with disclosed overlap.
+
+`native_ci` must map pending/blocked native validator node IDs to replacement
+`commands` and required `checks` (`name`, `target`). Every replacement command
+must name the new exact commit SHA. Keep the same platform, environment,
+toolchain, workspace contract, and requirement ownership; a changed execution
+environment needs its supported reconciliation or a fresh plan. The handoff
+reconciles retained audits' original planned native-validation digest with this
+specific replacement and explains the supersession. Old blocked evidence and
+its journal remain available as history.
+
+The native validator runs/queries the declared checks and records a `native_ci`
+array in its payload. Each result supplies `name`, `target`, `head_sha`,
+`conclusion`, and its HTTPS run `url`, alongside the normal command ledger.
+Passing requires exactly the named targets, each with the new SHA and
+`conclusion: success`; skipped, missing, duplicate, differently named targets
+and old-commit results cannot satisfy it. Inspect the actual native execution;
+do not infer native results from local success or substitute emulation.
+
+Follow the returned lifecycle, dispatches, capture, and journal paths together.
+The logical reviewed source identity remains unchanged; the full metadata chain
+records both actual identities. Immutable history retains both raw captures,
+the original plan, journal, dispatches, evidence, sealed payloads, and declarations.
+Node decisions explain preservation/rechecking. Synthesis and final proof replay
+the transition and exact-commit native evidence and reject changed history.
+The index-only staging operation keeps its existing contract; use the immediately
+preceding real capture and retain its chain when composing the two operations.
+Never synthesize a bridging capture, edit sealed artifacts, or undo a commit to
+make historical fingerprints appear current.
