@@ -167,7 +167,9 @@ def _replay_contract_repair(
     updated = {
         **_payload(sorted(rechecked)),
         "status": "completed",
-        "findings": fresh_findings if fresh_findings is not None else [finding for finding in payload["findings"] if finding["location"].split(":")[0] in rechecked],
+        "findings": fresh_findings
+        if fresh_findings is not None
+        else [finding for finding in payload["findings"] if finding["location"].split(":")[0] in rechecked],
         "nearby_contract_owners": sorted(
             {path for unit in decision["units"] if unit["disposition"] == "recheck" for path in unit["dependency_paths"] if path != request["changed_paths"][0]}
         ),
