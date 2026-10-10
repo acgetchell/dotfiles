@@ -72,7 +72,8 @@ def test_invalid_usage_identifies_failure_without_echoing_values(tmp_path: Path,
 
 @pytest.fixture
 def deeply_nested_usage(tmp_path: Path) -> Path:
-    depth = 50_000
+    # Decoder stack limits vary by Python build; keep the input below the four MiB cap.
+    depth = 1_000_000
     path = tmp_path / "private-filename.json"
     path.write_text('{"private-value":' + "[" * depth + '"private-value"' + "]" * depth + "}", encoding="utf-8")
     return path
