@@ -5940,8 +5940,8 @@ def _fallback_to_coordinator_locked(document: dict[str, Any], args: argparse.Nam
     _sources, records = _accepted_journal_sources(plan, source_state, events, entries, include_blocked=True)
     if blockers := _metadata_evidence_blockers(document, records):
         raise ValueError("; ".join(blockers))
-    if node_id not in entries or node_id in state:
-        msg = "fallback requires a planned node with no prior execution or lifecycle event"
+    if node_id not in entries or state.get(node_id) not in {None, "invalidated"}:
+        msg = "fallback requires a planned node with an unstarted pending or invalidated current attempt"
         raise ValueError(msg)
     ready = next_ready_nodes({**document, "current_source_state": list(current_state)}, journal_events=events, dispatch_set=dispatch_set)
     if node_id not in ready["ready_node_ids"]:

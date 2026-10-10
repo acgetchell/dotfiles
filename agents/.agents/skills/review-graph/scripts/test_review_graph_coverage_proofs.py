@@ -223,33 +223,56 @@ def test_fixed_partial_recheck_dispatch_bytes_and_seeded_findings(tmp_path: Path
     print(json.dumps({**sizes, "seeded_findings_retained": 2, "model_tokens": None, "model_cost": None, "model_review_seconds": None}, sort_keys=True))
 
 
-@pytest.mark.parametrize("tamper", ["missing", "bytes", "symlink"])
+@pytest.mark.parametrize("tamper", ["missing", "bytes", "relative-symlink", "absolute-symlink"])
 def test_missing_or_altered_external_proof_blocks_publication_compilation_and_verification(tmp_path: Path, tamper: str) -> None:
     _fresh, partial, result, payload = _proof_fixture(tmp_path)
     content, metadata = _compile(partial, result, payload)
     Path(partial["artifact_path"]).write_bytes(content)
     Path(partial["metadata_path"]).write_text(json.dumps(metadata))
+    compiled = {Path(partial[key]): Path(partial[key]).read_bytes() for key in ("artifact_path", "metadata_path")}
     proof_path = Path(partial["dispatch"]["coverage_reuse"]["proof_reference"]["path"])
     proof_bytes = proof_path.read_bytes()
     proof_path.unlink()
+    substitute = tmp_path / "substitute.json"
     if tamper == "bytes":
         proof_path.write_bytes(proof_bytes + b"\n")
-    elif tamper == "symlink":
-        substitute = tmp_path / "substitute.json"
+    elif tamper.endswith("symlink"):
         substitute.write_bytes(proof_bytes)
-        proof_path.symlink_to(substitute)
+        target = substitute.relative_to(proof_path.parent, walk_up=True) if tamper == "relative-symlink" else substitute
+        proof_path.symlink_to(target)
+    invalid_bytes = proof_path.read_bytes() if proof_path.exists() else None
+    link_target = proof_path.readlink() if proof_path.is_symlink() else None
+
+    def assert_unchanged() -> None:
+        assert not Path(partial["worker_payload_path"]).exists(follow_symlinks=False)
+        assert all(not path.is_symlink() and path.read_bytes() == original for path, original in compiled.items())
+        if link_target is not None:
+            assert proof_path.is_symlink()
+            assert proof_path.readlink() == link_target
+            assert proof_path.samefile(substitute)
+            assert substitute.read_bytes() == proof_bytes
+        else:
+            assert not proof_path.is_symlink()
+        if invalid_bytes is None:
+            assert not proof_path.exists(follow_symlinks=False)
+        else:
+            assert proof_path.read_bytes() == invalid_bytes
+
     contract = json.loads(Path(partial["worker_payload_contract_path"]).read_bytes())
     message = "coverage proof digest|regular non-symlink file"
     with pytest.raises(ValueError, match=message):
         runtime.publish_worker_payload_bytes(contract, json.dumps(payload).encode())
-    assert not Path(partial["worker_payload_path"]).exists()
+    assert_unchanged()
     with pytest.raises(ValueError, match=message):
         _compile(partial, result, payload)
+    assert_unchanged()
     with pytest.raises(ValueError, match=message):
         runtime._load_evidence_source(partial, require_normalized=True)
+    assert_unchanged()
     lifecycle = json.loads(Path(result["lifecycle_input_path"]).read_bytes())
     with pytest.raises(ValueError, match=message):
         runtime.next_ready_nodes({**lifecycle, "current_source_state": result["new_source_state"]}, dispatch_set=result["dispatch_set"], journal_events=())
+    assert_unchanged()
 
 
 @pytest.mark.parametrize("tamper", ["partition", "dependency", "instructions", "unsupported", "finding", "view", "mode"])
