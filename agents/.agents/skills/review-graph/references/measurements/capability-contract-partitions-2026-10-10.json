@@ -1,0 +1,55 @@
+{
+  "fixture": "capability-contract-partitions",
+  "measurements": {
+    "broad": {
+      "compilation_calls": 1,
+      "coverage_proof_bytes": 0,
+      "materialized_capability_audits": 1,
+      "model_review_seconds": null,
+      "model_worker_launches": 0,
+      "provider_cost": null,
+      "provider_tokens": null,
+      "publication_calls": 1,
+      "rechecked_paths": 3,
+      "reused_paths": 0,
+      "worker_input_bytes": 17784
+    },
+    "capability": {
+      "compilation_calls": 1,
+      "coverage_proof_bytes": 6674,
+      "materialized_capability_audits": 1,
+      "model_review_seconds": null,
+      "model_worker_launches": 0,
+      "provider_cost": null,
+      "provider_tokens": null,
+      "publication_calls": 1,
+      "rechecked_paths": 1,
+      "reused_paths": 2,
+      "worker_input_bytes": 20729
+    }
+  },
+  "provenance": {
+    "audit_skill": {
+      "reference_digests": {},
+      "skill_digest": "sha256:aaeb1e6a4bc551594e41c2c441407146eefca6b39e9bb488dd241af8dfc43feb",
+      "skill_id": "python-cli-review"
+    },
+    "environment": {
+      "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+      "pyproject_digest": "sha256:31af5f0fa09c8c4c07149940640b20c29f76779339b0e2f541de64a23e96417c",
+      "pytest": "9.1.1",
+      "python": "3.14.7 (main, Sep 24 2026, 17:46:50) [Clang 22.1.3 ]",
+      "research_repo_tools": "0.1.8",
+      "uv_lock_digest": "sha256:2ec8101e13876e10141145c5b92f1dd8a14131079ee2b9aef87b2bf681f5a09e"
+    },
+    "fixture_snapshot_digests": {
+      "origin": "sha256:ada3e43d9ad8d2c503b11231751a9af498acad4aae88ea650fb0dd2bd44177ac",
+      "target": "sha256:ae477c34056dc6b209c6ea784c19f3314bb424d2c5f85110f2fb542e0cc66a6a"
+    },
+    "graph_schemas_digest": "sha256:568a5dce4b53f104cce8ab2da4a992b4bd63b097131cf986cbf00675ac654da2",
+    "graph_scripts_digest": "sha256:1afd677a24aca51936eab2e330b58b2dc9fe6f702c8e2a0d2d38627bfcbe159b",
+    "measured_at_utc": "2026-10-10T21:21:31.534999+00:00",
+    "routing_catalog_digest": "sha256:5d7127323ad9a0919be7c2cc2c6819f630cda93412e610d5f3f972b0439a3ce0"
+  },
+  "report_digest": "sha256:5b2b862161cdf7677012a144d667348a395031d5812b0c43318361d3b74242bb"
+}

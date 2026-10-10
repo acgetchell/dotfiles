@@ -40,6 +40,8 @@ The sample ran on macOS arm64 with Python 3.14.7, pytest 9.1.1, and
 `sha256:5b2b862161cdf7677012a144d667348a395031d5812b0c43318361d3b74242bb`;
 the measured graph-script identity is
 `sha256:1afd677a24aca51936eab2e330b58b2dc9fe6f702c8e2a0d2d38627bfcbe159b`.
+The exact [retained JSON sample](measurements/capability-contract-partitions-2026-10-10.json)
+contains no private filesystem paths and remains the historical source for this table.
 The printed report retains the UTC measurement time, origin/target fixture
 path-map identities, graph script/schema identities, routing catalog, audit
 skill/references, runtime versions, and project/lockfile identities. Script and
