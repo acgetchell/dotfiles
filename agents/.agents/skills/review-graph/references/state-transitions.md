@@ -231,6 +231,16 @@ instructions, HEAD, branch, and boundaries unchanged. Staged/branch targets
 require replanning. No Git command changes the index and no repair epoch is
 consumed.
 
+Use the full returned lifecycle input, including `external_metadata_transitions`,
+for `reconcile-validation-requirements`, `fallback-to-coordinator`,
+`recover-validation-launch`, and `recover-validation-execution`. Supply the latest
+observed capture through `--current-capture`; keep `source_state` at its original
+logical identity. These operations verify and preserve the chain in their
+continuations and recovery history. Validation and failure evidence must bind to
+the latest observed state; execution recovery also requires before/after capture
+and workspace snapshots from that state. This applies equally after an ordinary
+metadata resume and a composed repair followed by staging.
+
 Follow the returned continuation paths. The review's original `source_state`
 remains its identity; actual before/after fingerprints and both snapshots are
 retained in `external_metadata_transitions`. Declare semantic `git_dependencies`

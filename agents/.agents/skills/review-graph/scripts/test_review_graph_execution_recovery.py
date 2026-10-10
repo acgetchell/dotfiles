@@ -100,6 +100,8 @@ def _compile_aggregate(lifecycle: dict[str, Any], args: Namespace, entry: dict[s
     }
     _publish_worker_bytes(entry, json.dumps(payload).encode())
     for phase, snapshot in (("before", before), ("after", after)):
+        if lifecycle.get("external_metadata_transitions"):
+            snapshot["observed_source_state"] = lifecycle["current_source_state"]
         (directory / f"workspace-{phase}.json").write_text(json.dumps(snapshot))
     lifecycle_path = directory / "lifecycle.json"
     lifecycle_path.write_text(json.dumps(lifecycle))

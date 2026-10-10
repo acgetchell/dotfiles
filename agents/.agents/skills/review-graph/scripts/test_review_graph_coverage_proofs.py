@@ -102,6 +102,7 @@ def _proof_fixture(
     if stage_after_repair:
         _run_test_git(git, "-C", str(repository), "add", owned[1])
         metadata_transition["post_repair_capture"] = _scope_data(git, repository, "baseline", None, ())
+    original = {key: Path(fresh[key]).read_bytes() for key in ("artifact_path", "metadata_path")}
     result = runtime.advance_after_mutation(
         {
             **lifecycle,
@@ -118,6 +119,7 @@ def _proof_fixture(
             "sources": [{key: fresh[key] for key in ("artifact_path", "metadata_path")}],
         }
     )
+    assert {key: Path(fresh[key]).read_bytes() for key in original} == original
     partial = next(entry for entry in result["dispatch_set"]["dispatches"] if entry["dispatch"]["skill_id"] == "python-test-quality")
     validation = partial["dispatch"]["command_policy"]["planned_validation_units"][0]
     updated = {

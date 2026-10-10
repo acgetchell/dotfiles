@@ -5006,17 +5006,19 @@ def resume_after_external_metadata(document: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _replacement_lineage(previous: GraphPlan, current: GraphPlan) -> list[dict[str, object]]:
+def _replacement_lineage(previous: GraphPlan, current: GraphPlan, sources: dict[str, tuple[dict[str, Any], dict[str, Any]]]) -> list[dict[str, object]]:
     """Map every final executable node to the prior contracts it replaces."""
+    contracts = {node.node_id: asdict(node) for node in previous.actual_worker_nodes}
+    contracts.update({node_id: record for node_id, (_source, record) in sources.items() if node_id not in contracts})
     return [
         {
             "node_id": node.node_id,
             "replaces_node_ids": [
-                old.node_id
-                for old in previous.actual_worker_nodes
-                if old.skill_id == node.skill_id
-                and old.mode == node.mode
-                and (set(old.requirement_ids).intersection(node.requirement_ids) or node.mode == "synthesis")
+                node_id
+                for node_id, old in contracts.items()
+                if old.get("skill_id") == node.skill_id
+                and old.get("mode") == node.mode
+                and (set(old["requirement_ids"]).intersection(node.requirement_ids) or node.mode == "synthesis")
             ],
         }
         for node in current.actual_worker_nodes
@@ -5130,7 +5132,7 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
             "ordinal": epoch,
             "recapture_count": 1,
         },
-        "replacement_lineage": _replacement_lineage(old_plan, new_plan),
+        "replacement_lineage": _replacement_lineage(old_plan, new_plan, sources),
         "schema_version": 1,
         "stale_evidence_ids": [
             *(_expected_evidence_id(node, old_plan) for node in old_plan.actual_worker_nodes if _expected_evidence_id(node, old_plan) not in reused_ids),
@@ -5138,10 +5140,12 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
         ],
         "status": "advanced",
     }
-    return _resume_after_repair_metadata(document, result) if metadata is not None else result
+    return _resume_after_repair_metadata(document, result, sources) if metadata is not None else result
 
 
-def _resume_after_repair_metadata(document: dict[str, Any], repair: dict[str, Any]) -> dict[str, Any]:
+def _resume_after_repair_metadata(
+    document: dict[str, Any], repair: dict[str, Any], sources: dict[str, tuple[dict[str, Any], dict[str, Any]]]
+) -> dict[str, Any]:
     """Compose two verified transitions without synthesizing captures or changing Git."""
     history_path = Path(repair["lifecycle_input_path"]).parent / "repair-transition.json"
     history = {"previous_capture": document["previous_capture"], "historical_evidence_sources": document.get("sources", []), **repair}
@@ -5181,7 +5185,7 @@ def _resume_after_repair_metadata(document: dict[str, Any], repair: dict[str, An
             )
         },
         "new_plan": resumed["lifecycle_input"]["plan"],
-        "replacement_lineage": _replacement_lineage(_graph_plan(document["plan"]), _graph_plan(resumed["lifecycle_input"]["plan"])),
+        "replacement_lineage": _replacement_lineage(_graph_plan(document["plan"]), _graph_plan(resumed["lifecycle_input"]["plan"]), sources),
         "capture": document["post_repair_capture"],
         "repair_transition_path": str(history_path),
         "reused_evidence_ids": sorted(reused_ids),
@@ -5880,7 +5884,8 @@ def fallback_to_coordinator(document: dict[str, Any], args: argparse.Namespace) 
 def _fallback_to_coordinator_locked(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
     plan = _graph_plan(document["plan"])
     source_state = _state(document, "source_state")
-    if _capture_source_state(args.current_capture) != source_state:
+    current_state = _current_metadata_state(document)
+    if _capture_source_state(args.current_capture) != current_state:
         msg = "fallback current capture differs from plan-bound source state"
         raise ValueError(msg)
     if plan.execution_profile not in {"grouped", "mixed"} or document.get("worker_created") is not False:
@@ -5891,10 +5896,13 @@ def _fallback_to_coordinator_locked(document: dict[str, Any], args: argparse.Nam
     events, state, head = read_execution_journal(args.journal, plan=plan, source_state=source_state)
     dispatch_set = _read_json_object(args.dispatches)
     entries = _dispatches_by_node(dispatch_set, plan=plan, source_state=source_state)
+    _sources, records = _accepted_journal_sources(plan, source_state, events, entries, include_blocked=True)
+    if blockers := _metadata_evidence_blockers(document, records):
+        raise ValueError("; ".join(blockers))
     if node_id not in entries or node_id in state:
         msg = "fallback requires a planned node with no prior execution or lifecycle event"
         raise ValueError(msg)
-    ready = next_ready_nodes({**document, "current_source_state": list(source_state)}, journal_events=events, dispatch_set=dispatch_set)
+    ready = next_ready_nodes({**document, "current_source_state": list(current_state)}, journal_events=events, dispatch_set=dispatch_set)
     if node_id not in ready["ready_node_ids"]:
         msg = f"fallback node is not dependency-ready: {node_id}"
         raise ValueError(msg)
@@ -5910,6 +5918,8 @@ def _fallback_to_coordinator_locked(document: dict[str, Any], args: argparse.Nam
     updated.pop("dispatch_set_digest")
     updated["dispatch_set_digest"] = digest_bytes(canonical_json(updated).encode())
     lifecycle = {"plan": document["plan"], "source_state": list(source_state)}
+    if "external_metadata_transitions" in document:
+        lifecycle["external_metadata_transitions"] = document["external_metadata_transitions"]
     dispatches_path = store / "dispatches.json"
     lifecycle_path = store / "lifecycle.json"
     for path, content in ((dispatches_path, updated), (lifecycle_path, lifecycle)):
@@ -6064,12 +6074,14 @@ def reconcile_validation_requirements(document: dict[str, Any], args: argparse.N
     """Inspect late requirements or publish a source-preserving plan revision."""
     plan = _graph_plan(document["plan"])
     source_state = _state(document, "source_state")
-    if _capture_source_state(args.current_capture) != source_state:
+    if _capture_source_state(args.current_capture) != _current_metadata_state(document):
         msg = "validation reconciliation current capture differs from plan-bound source state"
         raise ValueError(msg)
     events, state, head = read_execution_journal(args.journal, plan=plan, source_state=source_state)
     entries = _dispatches_by_node(_read_json_object(args.dispatches), plan=plan, source_state=source_state)
     sources, records = _accepted_journal_sources(plan, source_state, events, entries)
+    if blockers := _metadata_evidence_blockers(document, records):
+        raise ValueError("; ".join(blockers))
     reconciliation = _validation_reconciliation(plan, records)
     if document.get("software_doi_rechecks") and not document.get("validation_requirements"):
         msg = "software DOI rechecks require new canonical validation requirements"
@@ -6126,12 +6138,15 @@ def _publish_validation_continuation(  # noqa: PLR0913, PLR0917
             "plan": json.loads(canonical_json(asdict(expanded))),
             "repository_root": sample["repository_root"],
             "source_state": list(source_state),
+            "external_metadata_transitions": document.get("external_metadata_transitions", []),
             "state_verification_command": sample["state_verification_command"],
             "sources": _continuation_synthesis_sources(entries),
         },
         preserved_entries=retained,
     )
     lifecycle = {"plan": json.loads(canonical_json(asdict(expanded))), "source_state": list(source_state)}
+    if "external_metadata_transitions" in document:
+        lifecycle["external_metadata_transitions"] = document["external_metadata_transitions"]
     # Rebind verified states to the new plan, preserving every original artifact.
     # Publish this journal once; never append to or rewrite the historical journal.
     migrated: list[dict[str, Any]] = []
@@ -6374,13 +6389,19 @@ def _execution_failure_snapshots(
         raise ValueError(msg)
     snapshots = {"failure.log": log_bytes}
     dispatch = {**entry["dispatch"]}
+    current_state = _current_metadata_state(document)
     for phase in ("before", "after"):
         capture_path = Path(failure[f"{phase}_capture"])
-        if _capture_source_state(capture_path) != unit.source_state:
+        if _capture_source_state(capture_path) != current_state:
             msg = "execution recovery requires unchanged before/after source captures"
             raise ValueError(msg)
         workspace_path = Path(failure[f"workspace_{phase}"])
-        dispatch[f"workspace_{phase}"] = _workspace_records(workspace_path, node_id=unit.node_id, source_state=unit.source_state)
+        dispatch[f"workspace_{phase}"] = _workspace_records(
+            workspace_path,
+            node_id=unit.node_id,
+            source_state=unit.source_state,
+            observed_state=current_state if document.get("external_metadata_transitions") else None,
+        )
         snapshots[f"{phase}-capture.json"] = _read_regular_file_no_follow(capture_path)
         snapshots[f"{phase}-workspace.json"] = _read_regular_file_no_follow(workspace_path)
     if _validation_workspace_audit(dispatch, unit) != metadata.get("workspace_audit"):
@@ -6403,7 +6424,7 @@ def _recover_validation(document: dict[str, Any], args: argparse.Namespace, *, c
     plan = _graph_plan(document["plan"])
     _verify_validation_recoveries(plan)
     source_state = _state(document, "source_state")
-    if _capture_source_state(args.current_capture) != source_state:
+    if _capture_source_state(args.current_capture) != _current_metadata_state(document):
         msg = "validation recovery requires unchanged source state"
         raise ValueError(msg)
     events, state, head = read_execution_journal(args.journal, plan=plan, source_state=source_state)
@@ -6443,6 +6464,8 @@ def _recover_validation(document: dict[str, Any], args: argparse.Namespace, *, c
         msg = "recovery requires a recorded environment or permission change"
         raise ValueError(msg)
     sources, records = _accepted_journal_sources(plan, source_state, events, entries, include_blocked=True)
+    if blockers := _metadata_evidence_blockers(document, records):
+        raise ValueError("; ".join(blockers))
     failed_source = sources.get(node_id)
     if failed_source is None:
         msg = "recovery requires compiled, journal-bound launch-failure evidence"
@@ -6483,7 +6506,7 @@ def _recover_validation(document: dict[str, Any], args: argparse.Namespace, *, c
     # Snapshot the journal: future appends must not invalidate historical evidence.
     snapshots = {
         **execution_snapshots,
-        "lifecycle.json": canonical_json({"plan": asdict(plan), "source_state": source_state}).encode(),
+        "lifecycle.json": canonical_json({key: document[key] for key in ("plan", "source_state", "external_metadata_transitions") if key in document}).encode(),
         "execution.jsonl": _read_regular_file_no_follow(args.journal),
         "dispatches.json": _read_regular_file_no_follow(args.dispatches),
     }
