@@ -627,8 +627,7 @@ def run(argv: Sequence[str] | None = None) -> int:
         print(message, file=sys.stderr)
         return 2
 
-    options = {"citation": citation} if citation else {}
-    results = validate_entries(entries, args.timeout, args.min_title_score, **options)
+    results = validate_entries(entries, args.timeout, args.min_title_score, citation=citation)
 
     if args.json:
         source = {

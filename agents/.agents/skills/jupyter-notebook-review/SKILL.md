@@ -1,6 +1,6 @@
 ---
 name: jupyter-notebook-review
-description: "Review and fix Jupyter notebooks for reproducible execution, stable cell identity, output hygiene, safe data boundaries, portable environments, and reliable generated artifacts. Use for .ipynb cleanup, hidden state, output clearing, notebook lint or execution, data loading, plots, headless or HPC use, experiment tracking, and notebook CI. Route substantial reusable, scientific, CLI, parsing, support-script, and test behavior to focused Python skills."
+description: "Review or fix notebook reproducibility, cell identity, outputs, environments, and generated artifacts."
 ---
 
 # Jupyter Notebook Review
@@ -51,7 +51,7 @@ Avoid package-install cells that mutate global environments. Prefer the reposito
 
 ### Notebook Structure
 
-Keep cells concise and purposeful. Move reusable algorithms and long helpers into importable code. Group imports near the top, document interpretation rather than restating implementation, and preserve stable descriptive cell IDs across edits.
+Keep cells concise and purposeful. Move reusable algorithms and long helpers into importable code. Group imports near the top, document interpretation rather than restating implementation, and preserve valid stable cell IDs across edits. Do not rename an existing ID merely to make it descriptive.
 
 Flag hidden late imports, duplicated helpers, monolithic cells mixing I/O/computation/plotting, user-input validation through `assert`, broad exception swallowing, and import-time or cell-order side effects.
 
@@ -69,7 +69,7 @@ Prefer one canonical tracked asset when documentation and papers consume the sam
 
 ### Output, Metadata, And Privacy
 
-Flag committed execution counts or outputs unless policy requires them, huge embedded images, widget state, stale exceptions, random-looking cell IDs, secrets, tokens, private records, absolute local paths, and machine-specific metadata.
+Flag committed execution counts or outputs unless policy requires them, huge embedded images, widget state, stale exceptions, missing or duplicate cell IDs, secrets, tokens, private records, absolute local paths, and machine-specific metadata.
 
 Ensure human-facing output is intentional and machine-consumed data remains parseable. Do not print raw private records or secrets as diagnostics.
 

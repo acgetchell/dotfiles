@@ -127,17 +127,11 @@ Let each selected orchestrator choose focused validators from its own routing gu
 - If lockfiles, toolchain pins, or latest-version claims changed, verify with live authoritative sources or local package-manager metadata before declaring them current.
 - Escalate to full CI only when cross-surface changes make focused validators insufficient or repository instructions require it.
 
-Treat every candidate command as a set of underlying validators and exact test
-selections. Reuse results already valid for the same source/build/environment
-and material configuration. Decide whether repository policy or known
-cross-surface scope requires full CI before the first test, then inspect its
-composition: either use it as the single test selection or run only checks
-absent from the repository-wide ledger. Do not replay focused language tests
-through a tooling recipe or final meta-review merely to obtain a broader
-summary. If a mandatory indivisible gate is discovered late and cannot exclude
-completed tests, report it as a project-tooling blocker rather than silently
-rerunning or double-counting them. Rerun only after a relevant change
-invalidates the earlier result, for a materially different configuration, or
-when controlled repetition is itself the test.
+Inspect each candidate command's underlying checks before execution and reuse
+valid source/build/environment evidence where policy permits. Avoid successive
+nested tiers solely for reassurance. Focused red/green tests may precede a
+required final aggregate gate, including unavoidable overlap. Run that gate on
+the final source state, record the reason, and do not count repetitions as
+independent evidence or turn overlap into an approval blocker.
 
 If a validator needs network access, installation, or approval, run the strongest local read-only substitute and report the gap.

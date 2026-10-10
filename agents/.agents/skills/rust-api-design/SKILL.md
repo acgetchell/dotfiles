@@ -1,6 +1,6 @@
 ---
 name: rust-api-design
-description: "Design, review, and refactor Rust public and cross-crate APIs for cohesive concept ownership, orthogonal capabilities, canonical workflows, minimal surface area, usable downstream contracts, and deliberate compatibility. Use for public modules, types, traits, functions, constructors, adapters, wrappers, aliases, cross-crate boundaries, or repository-wide API architecture; do not use for documentation-only, re-export-only, or implementation-only changes."
+description: "Design or review material Rust public API changes for cohesive concepts, downstream usability, and compatibility."
 ---
 
 # Rust API Design
@@ -25,7 +25,7 @@ not only from the implementation that currently satisfies it.
   Distinguish source, behavioral, feature, and ecosystem compatibility.
 - Prefer the smallest cohesive surface. Do not add traits, genericity, aliases,
   wrappers, builders, or extension points without a concrete caller benefit.
-- Do not mutate Git state unless explicitly requested in the current turn.
+- Do not mutate Git state unless explicitly authorized for that operation and scope.
 
 This skill owns why a public concept exists, where it belongs, how it composes
 with neighboring concepts, which path callers should use, and how the contract

@@ -1,6 +1,6 @@
 ---
 name: cpp-exception-safety-error-contracts
-description: "Audit modern C++23 exception safety and error contracts for correctness, consistency, and preserved failure guarantees. Use when changes touch throw/try/catch, noexcept, constructors, destructors, move operations, std::expected, std::error_code, result/status/optional returns, assertions, termination, rollback or transaction logic, parsing, serialization, filesystem, networking, callbacks, plugin interfaces, threads, coroutines, C interoperability, ABI boundaries, or partial mutation before failure."
+description: "Review C++ failure propagation, noexcept, and recovery guarantees when an operation's error contract changes."
 ---
 
 # C++ Exception Safety and Error Contracts
@@ -84,7 +84,7 @@ For each finding, state the promised failure contract, the path that violates it
 
 ## Reference
 
-Use [references/review-checklist.md](references/review-checklist.md) as a final coverage check after tracing the concrete failure paths.
+Use [references/review-checklist.md](references/review-checklist.md) when the changed failure contract needs a broader coverage check. Read only the relevant sections after tracing its concrete failure paths.
 
 ## Handoff
 

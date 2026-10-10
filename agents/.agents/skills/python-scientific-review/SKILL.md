@@ -1,6 +1,6 @@
 ---
 name: python-scientific-review
-description: "Review Python numerical, geometric, statistical, stochastic, and scientific-computing behavior for mathematical validity, numerical robustness, reproducibility, independent scientific oracles, data conventions, and interoperability. Use for NumPy, SciPy, scientific dataframe computation, generated scientific fixtures, and Python validation of native libraries. Route generic parsing, packaging, support tooling, notebook structure, and test mechanics to focused skills."
+description: "Audit scientific Python computations for mathematical validity, numerical stability, reproducibility, and independent evidence."
 ---
 
 # Python Scientific Review

@@ -1,6 +1,7 @@
 interface:
   display_name: "C++ Review Orchestrator"
-  short_description: "Review C++23 with the CDT++ toolchain"
+  short_description: "Coordinate C++ reviews across contracts"
   default_prompt: >-
-    Use $cpp-review-orchestrator to review changed C++23 code with the CMake/vcpkg/doctest/just toolchain, apply fixes only when requested, and run focused
-    validators.
+    Use $cpp-review-orchestrator to review the changed C++ contracts with the
+    project's declared toolchain, applying fixes when authorized and validating
+    the affected behavior.

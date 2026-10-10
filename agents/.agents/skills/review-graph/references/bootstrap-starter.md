@@ -26,7 +26,10 @@ Edit `operator.json` before bootstrap:
   JSON paths are literal; `$HOME`, shell variables, and `~` are not expanded.
 - Record the authorized review mode, consulted routers, applicable instruction
   paths, execution profile, environment, toolchain, platform, features, and budget.
-  Add sparse `routing_overrides` only when semantic routing needs them.
+  Use `routing-projection` on the captured paths to inspect candidates. Supply
+  semantic `routing_overrides` for every matched specialist (including justified
+  `not-applicable`) and for applicable contracts beyond path matches. Missing
+  assessments fail planning with the unresolved catalog IDs.
 - List concrete repository-relative `ignored_outputs` with their artifact kinds.
   The example's Python directories are illustrative; inspect the recipe's actual
   outputs, including nested caches and source-adjacent intermediates. Planning
@@ -90,8 +93,9 @@ preflight policy to its exact command and node ID, and runs the existing
 materialization/lifecycle inputs. No hand-authored plan or capture placeholders
 are needed.
 
-An invalid schema or artifact contract fails before saving a bundle. A routing
-or execution blocker saves the bundle for inspection, returns exit code 2,
+An invalid schema, artifact contract, or missing semantic candidate decision
+fails before saving a bundle. A modeled routing or execution blocker saves the
+bundle for inspection, returns exit code 2,
 sets receipt `dispatch_allowed: false`, and leaves `next_command` null. Resolve
 planning choices and bootstrap to a new output path. For preflight-only changes
 to `command_policy` or `execution_prerequisites`, edit the operator file and run

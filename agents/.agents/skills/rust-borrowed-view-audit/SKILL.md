@@ -1,6 +1,6 @@
 ---
 name: rust-borrowed-view-audit
-description: Audit Rust APIs for opportunities to replace owned snapshots, caches, handles, and cloned topology with lifetime-bound borrowed views over canonical storage. Use when reviewing Rust libraries for stale-cache prevention, snapshot/view API design, transaction/rollback guard design, generation or identity checks, or performance/correctness tradeoffs around cloning versus borrowing.
+description: "Review Rust views, snapshots, caches, and handles when ownership or lifetime design affects correctness or performance."
 ---
 
 # Rust Borrowed View Audit
@@ -50,10 +50,10 @@ This skill owns lifetime, aliasing, canonical-owner, snapshot/view, handle-prove
    - Tests reaching through storage internals instead of using narrow
      invariant-specific test hooks.
 
-4. Recommend the narrowest lifetime change that encodes the invariant.
+4. Recommend a lifetime change only for a demonstrated stale-use, aliasing, or ownership risk, or a supported performance improvement. Preserve a sound owned design when borrowing would impede valid detached work.
    - Convert owned cache fields to `&'a CanonicalIndex` when the view should not
      outlive the owner.
-   - Keep owned maps only for derived data not already stored canonically.
+   - Keep owned maps when snapshot isolation, detached analysis, persistence, or concurrency requires them; duplicated canonical data alone does not prove a defect.
    - For query helpers that accept a derived index or cache, make the owner
      lifetime explicit in the function signature, e.g. `&'tds Owner` with
      `&AdjacencyIndex<'tds>`. If the returned iterator borrows only the derived

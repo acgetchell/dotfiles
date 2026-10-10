@@ -1,4 +1,4 @@
 interface:
   display_name: "C# Parse Don't Validate"
   short_description: "C# boundary parsing and invariant-bearing values"
-  default_prompt: "Use $csharp-parse-dont-validate to improve the relevant boundaries and behavior in this project."
+  default_prompt: "Use $csharp-parse-dont-validate to review C# parsing and serialization boundaries for invalid stored states."

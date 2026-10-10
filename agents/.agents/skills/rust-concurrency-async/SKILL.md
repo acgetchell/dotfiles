@@ -1,6 +1,6 @@
 ---
 name: rust-concurrency-async
-description: "Audit Rust concurrency and async code for Send/Sync discipline, task and borrow lifetimes, blocking hazards, cancellation safety, structured concurrency, lock and channel design, atomic memory ordering, backpressure, shutdown, determinism, and mutation observed across scheduling boundaries. Use for runtimes, futures, streams, threads, tasks, callbacks, shared state, atomics, or owner-bound work crossing await or task boundaries."
+description: "Audit Rust scheduling, cancellation, synchronization, and shutdown when concurrent or async behavior changes."
 ---
 
 # Rust Concurrency and Async
@@ -86,7 +86,7 @@ One-time initialization should use established once-cell primitives rather than 
 
 Require a written invariant for each atomic relationship. Check producer/consumer pairing, compare-exchange retry, spurious failure, ABA risk, and interaction with non-atomic state.
 
-Use the weakest ordering that is demonstrably correct, not the weakest imaginable. Flag both unjustified `SeqCst` and insufficient relaxed/acquire/release relationships.
+Require a demonstrated happens-before argument for the chosen ordering. Conservative `SeqCst` is acceptable; recommend weakening it only when a measured cost or a concrete design need justifies the extra proof burden. Flag insufficient relaxed/acquire/release relationships as correctness defects.
 
 ### 7. Preserve determinism and error behavior
 

@@ -1,6 +1,6 @@
 ---
 name: rust-prelude-exports
-description: "Audit Rust prelude modules and public re-exports for minimality, orthogonality, and usability. Use for crate or scoped preludes, public use decisions, doctest and example imports, integration-test or benchmark ergonomics, and avoiding bloated or overlapping export surfaces. Route implementation import style to rust-style-hygiene."
+description: "Review Rust preludes, visibility, and re-exports when downstream import paths or public surface boundaries change."
 ---
 
 # rust-prelude-exports
@@ -65,41 +65,18 @@ Flag:
 - prelude names that imply one domain but export unrelated items
 - broad preludes that pull in both construction, simulation, testing, and backend internals
 
-### 3. Doctest ergonomics
+### 3. Downstream usage
 
-Doctests should demonstrate the intended public import path.
+Use doctests, integration tests, examples, or benchmarks that exercise the changed
+public import path. Common workflows may use a main or scoped prelude; specialist
+APIs can use direct public module imports. Repeated awkward imports can indicate
+a missing scoped prelude, but do not justify exporting internals automatically.
 
-Check that new public APIs can be used in doctests with concise imports, for example:
+Check that examples compile without private modules, hidden in-crate context,
+or `super::*` imports unavailable to downstream users. Choose the smallest
+consumer example that demonstrates the actual export contract.
 
-- `use crate_name::prelude::*;` for common workflows
-- `use crate_name::prelude::geometry::*;` for backend/geometry-specific examples
-- direct module imports when the API is intentionally not prelude-worthy
-
-Flag:
-
-- doctests requiring long chains of internal module paths for ordinary usage
-- doctests importing private or unstable modules
-- examples using `super::*` patterns that downstream users cannot copy
-- doctests that only compile because of hidden in-crate context
-
-### 4. Integration tests, examples, and benchmarks
-
-Integration tests, examples, and benchmarks act like downstream users. Their imports should validate the public surface.
-
-Check:
-
-- integration tests use public crate paths rather than internal-only modules
-- examples show the recommended import style
-- benchmarks import exactly the APIs needed to construct realistic workloads
-- repeated awkward import bundles point to a missing scoped prelude
-
-Flag:
-
-- many files repeating the same long list of imports
-- examples importing from deep internal modules for core use cases
-- benchmarks relying on non-public helpers that downstream users cannot access
-
-### 5. Module organization and visibility
+### 4. Module organization and visibility
 
 The public re-export surface is only useful if the underlying modules expose the right items at the right scope. Review module organization and visibility together with the prelude.
 
@@ -118,7 +95,7 @@ Flag:
 - feature-gated items whose re-export is not feature-gated, leaving broken links when the feature is off
 - private modules (`mod foo;`) referenced from doctests or examples that downstream users cannot reach
 
-### 6. Public API stability and feature boundaries
+### 5. Public API stability and feature boundaries
 
 Preludes are part of the crate's user-facing surface.
 
@@ -129,15 +106,9 @@ Check:
 - adding an export does not accidentally stabilize an internal type
 - removing or moving an export is treated as a breaking change when appropriate
 
-### 7. Tests and documentation
+### 6. Validation
 
-When prelude/export behavior changes, add tests or docs that lock in the intended surface.
-
-Prefer:
-
-- doctests that compile using the new prelude path
-- integration tests that import from the public prelude
-- examples updated to use the recommended scoped prelude
-- documentation comments explaining what each scoped prelude is for
-
-Avoid tests that only compile because they live inside the same module as the implementation.
+When exports change, validate the intended public import paths and relevant
+feature boundaries with downstream-style evidence. Reuse an existing doctest or
+consumer check when it proves that contract. Document each scoped prelude's
+purpose; do not duplicate equivalent examples just to satisfy a report format.

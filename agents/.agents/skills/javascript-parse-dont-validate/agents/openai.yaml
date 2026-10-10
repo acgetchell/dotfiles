@@ -1,4 +1,4 @@
 interface:
   display_name: "JavaScript Parse Don't Validate"
   short_description: "JavaScript and TypeScript runtime boundary parsing"
-  default_prompt: "Use $javascript-parse-dont-validate to improve the relevant boundaries and behavior in this project."
+  default_prompt: "Use $javascript-parse-dont-validate to review JS/TS input parsing for runtime validation and preserved invariants."

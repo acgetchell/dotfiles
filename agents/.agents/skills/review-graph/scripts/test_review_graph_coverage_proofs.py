@@ -3,7 +3,7 @@
 import json
 from copy import deepcopy
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import review_graph_runtime as runtime
@@ -12,7 +12,14 @@ from review_graph_bootstrap import bootstrap_document
 from review_graph_coverage import coverage_execution_view
 from review_graph_integrity import canonical_json, digest_bytes
 from review_graph_plan import plan_from_document
-from test_review_graph_runtime import ROUTING_CATALOG, SKILL_ROOT, _baseline_mutation_fixture, _run_test_git
+from test_review_graph_runtime import (
+    ROUTING_CATALOG,
+    SKILL_ROOT,
+    _baseline_mutation_fixture,
+    _complete_structural_fixture_routing,
+    _run_test_git,
+    _set_fixture_routing,
+)
 from test_review_graph_transitions import _materialize, _payload
 
 
@@ -29,7 +36,8 @@ def _proof_fixture(tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any], dict
     _run_test_git(git, "-C", str(repository), "add", ".")
     _run_test_git(git, "-C", str(repository), "commit", "-m", "fixed coverage fixture")
     template["consulted_routers"].append("docs-review-orchestrator")
-    template["routing_overrides"].append(
+    _set_fixture_routing(
+        template,
         {
             "catalog_id": "python.tests",
             "disposition": "selected",
@@ -37,9 +45,10 @@ def _proof_fixture(tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any], dict
             "applicability_evidence": owned,
             "owners": ["python"],
             "review_surface": owned,
-        }
+        },
     )
     capture = _scope_data(git, repository, "baseline", None, ())
+    _complete_structural_fixture_routing(template, cast("list[str]", capture["captured_scope_paths"]))
     plan = plan_from_document(bootstrap_document(capture, template), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)
     assert plan.dispatch_allowed, plan.blockers
     lifecycle, entries, _dispatches = _materialize(tmp_path, capture, plan)

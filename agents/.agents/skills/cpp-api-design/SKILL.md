@@ -1,6 +1,6 @@
 ---
 name: cpp-api-design
-description: "Design, review, and refactor modern C++23 public and cross-module APIs for cohesive contracts, safe ownership and value categories, constrained generic interfaces, predictable overload resolution, usable customization, and deliberate source/ABI evolution. Use when changes touch public headers or modules, exported types and functions, constructors or conversions, overload sets, templates, concepts, deduction guides, customization points, builders or fluent APIs, virtual interfaces, symbol visibility, exposed layout, or downstream consumer ergonomics."
+description: "Design or review changed C++ public interfaces for caller usability, ownership contracts, generic constraints, and compatibility."
 ---
 
 # C++ API Design
@@ -11,7 +11,7 @@ Design public and cross-module C++ interfaces as long-lived caller contracts. Ju
 
 - Read repository-local guidance and determine the supported compiler, standard-library, source-compatibility, and binary-compatibility contracts before changing an interface.
 - Follow an explicitly declared language standard. When none is declared, use C++23 as the working design baseline but report the missing build contract. Treat C++26 as opt-in and do not introduce it until the user or repository explicitly chooses it after standardization and the supported toolchains implement the required facilities.
-- Do not mutate git state unless the user explicitly asks in the current turn.
+- Do not mutate git state unless the user has explicitly authorized that operation and scope.
 - Default to changed public or cross-module declarations plus representative consumers, implementations, tests, examples, and bindings needed to evaluate them.
 - Preserve compatibility unless the user authorized a breaking change. Distinguish source, behavior, and binary compatibility rather than calling every signature edit an ABI break.
 - Prefer the smallest cohesive surface. Do not add abstraction, genericity, overloads, fluent chaining, or customization points merely because C++ can express them.
@@ -22,7 +22,7 @@ When a public signature exposes a likely dangling lifetime, invalid state, or br
 
 ## Workflow
 
-### 1. Map the contract and its consumers
+### Map the contract and its consumers
 
 Record:
 
@@ -34,7 +34,7 @@ Record:
 
 Do not infer a stable ABI solely from a shared-library build. Verify whether the project publishes such a promise and which platforms, compilers, build modes, and dependency versions it covers.
 
-### 2. Keep the surface cohesive and minimal
+### Keep the surface cohesive and minimal
 
 Check:
 
@@ -48,7 +48,7 @@ Check:
 
 Prefer ordinary value types and free functions when identity, inheritance, customization, or staged construction is not part of the contract.
 
-### 3. Make parameters and results honest
+### Make parameters and results honest
 
 Check that signatures communicate:
 
@@ -60,7 +60,7 @@ Check that signatures communicate:
 
 Use values by default when they are naturally small or independently owned. Use references, `std::span`, `std::string_view`, ranges, or other views only when the borrowing contract is safe and useful. Avoid returning `const` values, exposing mutable storage by accident, or using output parameters where a value result is clearer.
 
-### 4. Control construction, conversion, and overload resolution
+### Control construction, conversion, and overload resolution
 
 Check:
 
@@ -74,21 +74,12 @@ Check:
 
 Require a concrete caller benefit before adding an overload. A large overload set is not automatically an ergonomic API.
 
-### 5. Constrain generic interfaces semantically
+### Generic interfaces
 
-For templates, concepts, and customization points, check:
+For changed templates, concepts, or constraints, read
+[generic contracts](references/generic-contracts.md).
 
-- constraints state the operations and semantic category the implementation actually requires
-- requirements are neither accidentally stronger than the algorithm nor too weak to protect its body
-- overload ordering and subsumption select one intended candidate
-- diagnostics fail near the caller's mistake rather than deep inside an implementation
-- deduction guides and class template argument deduction preserve the intended type and ownership semantics
-- customization uses an established repository or standard-library pattern, with ADL exposure and fallback behavior understood
-- hidden friends, tag dispatch, callable objects, and extension points do not expose implementation details or create collision-prone global hooks
-
-Do not turn a closed set of supported types into a public template without a real extension requirement. Do not promise duck-typed behavior that tests cover for only one concrete type.
-
-### 6. Preserve encapsulation and evolution paths
+### Preserve encapsulation and evolution paths
 
 Check:
 
@@ -103,7 +94,7 @@ Do not recommend ABI indirection for a header-only or source-compatible library 
 
 Use `cpp-build-portability` to prove that inline entities, explicit instantiations, module partitions, export annotations, and configuration-sensitive declarations compile and link consistently across translation units and supported configurations. This pass decides whether the exposed contract and its evolution are coherent.
 
-### 7. Test the API as an external caller
+### Test the API as an external caller
 
 Require the smallest evidence appropriate to the contract:
 
@@ -117,7 +108,7 @@ Use `cpp-test-quality` to assess assertion strength and harness reliability. Mat
 
 Route multi-translation-unit, module-consumer, header self-containment, visibility, and explicit-instantiation evidence to `cpp-build-portability`; keep API tests focused on caller expressions and contract semantics.
 
-### 8. Validate
+### Validate
 
 Use the narrowest repository-documented validators that exercise downstream use. Prefer:
 

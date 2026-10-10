@@ -1,6 +1,6 @@
 ---
 name: typescript-async-ui
-description: "Implement or fix TypeScript React interfaces backed by asynchronous APIs, especially TanStack Query/Router, account-scoped data, cancellation, and partial or stale results. Follow the project's existing UI framework."
+description: "Implement or fix TypeScript React async UI behavior involving loading, errors, stale results, cancellation, or account-scoped data."
 ---
 
 # TypeScript Async UI
@@ -45,8 +45,8 @@ instructions to execute.
 
 ## Evidence
 
-With Vitest and Testing Library, assert accessible states and user actions rather
-than component internals. Use MSW for HTTP contracts when already installed.
+Use the installed test stack. When Vitest and Testing Library are present, assert
+accessible states and user actions rather than component internals. Use MSW for HTTP contracts when already installed.
 Exercise failed requests, aborts, response reordering, partial results, and account
 switches when affected. A visual-only edit does not require a new test framework.
 Run the repository's typecheck/build, lint, and relevant test commands.

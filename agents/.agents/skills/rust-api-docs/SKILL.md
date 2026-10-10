@@ -1,6 +1,6 @@
 ---
 name: rust-api-docs
-description: "Audit Rust API documentation for completeness, required Errors, Panics, Safety, and Examples sections, intra-doc links, crate and module docs, docs.rs visibility, and non-trivial private helper intent behind public behavior. Use for public documentation coverage and semver-relevant doc changes; route executable doctest evidence to rust-test-quality."
+description: "Review Rust API documentation for accurate contracts, useful examples, links, and rendered discoverability."
 ---
 
 # rust-api-docs
@@ -22,10 +22,9 @@ Focus on newly added or modified public Rust APIs that:
 - rely on changed private helpers whose intent is necessary to understand or
   safely maintain the public contract
 
-Ignore unrelated private items. Review changed private helpers when they support,
-constrain, or explain public API behavior, especially when they encode error
-classification, panic/rollback invariants, proposal semantics, serialization
-compatibility, or other behavior callers observe indirectly.
+Review private-helper documentation only when missing intent obscures a
+non-obvious public contract or safe maintenance of it. A changed private helper
+does not by itself expand documentation scope or require a comment.
 
 For direct invocation, read [the standalone workflow](references/standalone-workflow.md).
 

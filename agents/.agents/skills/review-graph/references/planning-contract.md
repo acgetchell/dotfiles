@@ -62,10 +62,14 @@ priority, requirement, and synthesis identity; sparse inputs containing those
 catalog-owned fields are rejected. After expansion, reject missing, duplicated,
 unknown, unconsulted, or mismatched entries exactly as before.
 
-An omitted leaf with a projection path match is selected with those matched
-paths as its surface. An override may add a semantic trigger when paths alone
-do not match, or explicitly exclude/block a projected candidate. Only an
-unmatched, untriggered omission becomes `not-applicable`.
+Each path-matched specialist needs an explicit semantic decision: selected,
+exactly reused, evidence-backed `not-applicable`, excluded, or blocked. Missing
+decisions fail planning with the unresolved catalog IDs; inspect the captured
+contracts and supply decisions before retrying. A file extension is not evidence
+that every language specialist applies. Overrides may also add semantic triggers
+beyond path matches. Only unmatched, untriggered omissions become
+`not-applicable`. Mandatory classifier surfaces, independent review, synthesis,
+and package-build safeguards retain their existing requirements.
 
 Selected leaves require a concrete scope, evidence, reason, priority, owners,
 references, validators, and synthesis dependency. Convert every selected leaf

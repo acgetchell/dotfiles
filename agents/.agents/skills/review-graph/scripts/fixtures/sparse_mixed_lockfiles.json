@@ -13,7 +13,134 @@
   ],
   "execution_profile": "grouped",
   "release_readiness": false,
-  "routing_overrides": [],
+  "routing_overrides": [
+    {
+      "catalog_id": "rust.build",
+      "disposition": "selected",
+      "reason": "Rust lock resolution changes the supported build configuration",
+      "applicability_evidence": [
+        "Rust lock resolution changes the supported build configuration"
+      ],
+      "review_surface": [
+        "Cargo.lock"
+      ],
+      "owners": [
+        "rust"
+      ]
+    },
+    {
+      "catalog_id": "rust.cargo",
+      "disposition": "selected",
+      "reason": "Cargo.lock dependency versions changed",
+      "applicability_evidence": [
+        "Cargo.lock dependency versions changed"
+      ],
+      "review_surface": [
+        "Cargo.lock"
+      ],
+      "owners": [
+        "rust"
+      ]
+    },
+    {
+      "catalog_id": "rust.api-docs",
+      "disposition": "selected",
+      "reason": "README changes document the public Rust API",
+      "applicability_evidence": [
+        "README changes document the public Rust API"
+      ],
+      "review_surface": [
+        "README.md"
+      ],
+      "owners": [
+        "rust"
+      ]
+    },
+    {
+      "catalog_id": "python.build",
+      "disposition": "selected",
+      "reason": "uv.lock resolution must preserve installed-package support",
+      "applicability_evidence": [
+        "uv.lock resolution must preserve installed-package support"
+      ],
+      "review_surface": [
+        "uv.lock"
+      ],
+      "owners": [
+        "python"
+      ]
+    },
+    {
+      "catalog_id": "docs.repository",
+      "disposition": "selected",
+      "reason": "README navigation and installation guidance changed",
+      "applicability_evidence": [
+        "README navigation and installation guidance changed"
+      ],
+      "review_surface": [
+        "README.md"
+      ],
+      "owners": [
+        "documentation"
+      ]
+    },
+    {
+      "catalog_id": "docs.scientific-software",
+      "disposition": "selected",
+      "reason": "README documents scientific behavior of the changed dependencies",
+      "applicability_evidence": [
+        "README documents scientific behavior of the changed dependencies"
+      ],
+      "review_surface": [
+        "README.md"
+      ],
+      "owners": [
+        "documentation"
+      ]
+    },
+    {
+      "catalog_id": "docs.scientific-crate",
+      "disposition": "selected",
+      "reason": "README release/dependency metadata must agree with lockfiles",
+      "applicability_evidence": [
+        "README release/dependency metadata must agree with lockfiles"
+      ],
+      "review_surface": [
+        "README.md"
+      ],
+      "owners": [
+        "documentation"
+      ]
+    },
+    {
+      "catalog_id": "docs.rust-api",
+      "disposition": "selected",
+      "reason": "README changes document the public Rust API",
+      "applicability_evidence": [
+        "README changes document the public Rust API"
+      ],
+      "review_surface": [
+        "README.md"
+      ],
+      "owners": [
+        "documentation"
+      ]
+    },
+    {
+      "catalog_id": "docs.citations",
+      "disposition": "selected",
+      "reason": "README contains changed scientific credit and citation claims",
+      "applicability_evidence": [
+        "README contains changed scientific credit and citation claims"
+      ],
+      "review_surface": [
+        "README.md"
+      ],
+      "owners": [
+        "documentation"
+      ]
+    }
+  ],
   "schema_version": 1,
   "scope_mode": "baseline",
   "validation_requirements": [

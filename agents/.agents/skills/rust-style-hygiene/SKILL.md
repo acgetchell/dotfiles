@@ -1,11 +1,15 @@
 ---
 name: rust-style-hygiene
-description: "Audit Rust code for idiomatic naming, import placement and grouping, path clarity, redundant prefixes, and unnecessary fully qualified paths. Use for focused style and hygiene reviews; route behavior, correctness, documentation, and test-quality concerns to their focused skills."
+description: "Review Rust naming and imports when a style or readability audit is requested or the changed code obscures meaning."
 ---
 
 # rust-style-hygiene
 
 Enforce idiomatic Rust naming, import usage, and path clarity.
+
+Use this lens for requested style/readability work or naming that obscures a
+contract. Incidental Rust edits do not require a separate style pass. Keep optional
+preferences distinct from correctness or production-readiness blockers.
 
 ## Scope
 

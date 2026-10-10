@@ -1,6 +1,6 @@
 ---
 name: rust-trait-bounds
-description: "Audit Rust trait bounds, generic constraints, associated types, HRTBs, and where clauses for minimality and API clarity. Use for redundant or overly broad bounds, moving constraints from types to impls or methods, choosing inline versus where-clause placement, and public generic ergonomics."
+description: "Review Rust generic constraints when bound necessity, placement, or downstream usability is in question."
 ---
 
 # rust-trait-bounds
@@ -49,29 +49,12 @@ Prefer:
 - leaving data type definitions unconstrained when possible
 - deriving or implementing traits without forcing unrelated generic constraints onto every user
 
-### 2. Idiomatic placement
+### 2. Placement and readability
 
-Use the form that is easiest to read and maintain.
-
-Prefer inline bounds for simple cases:
-
-- one or two short bounds
-- obvious public API contracts
-- common patterns such as `T: Copy`
-
-Prefer `where` clauses for complex cases:
-
-- multiple type parameters
-- associated type equality or nested bounds
-- lifetime-heavy bounds
-- higher-ranked trait bounds
-- constraints that would make the signature visually noisy
-
-Flag:
-
-- long inline bounds that obscure parameters or return types
-- tiny `where` clauses that make a simple signature harder to scan
-- inconsistent placement across similar functions without a readability reason
+Use inline bounds for simple signatures and `where` clauses when associated
+types, lifetimes, or multiple constraints become hard to scan. Follow existing
+local conventions when both are clear. Report placement only when it obscures
+the caller contract, not to enforce one spelling everywhere.
 
 ### 3. Avoid over-generalization
 

@@ -1,6 +1,6 @@
 ---
 name: scientific-crate-docs-review
-description: "Review Rust-specific release documentation coupling for scientific crates across Cargo metadata, README installation and release claims, CITATION.cff synchronization, crates.io identity, docs.rs metadata, authorship, license, repository links, and generated changelogs. Use when scientific Rust crate release metadata is materially in scope; route language-neutral scientific claims and validation documentation to scientific-software-docs-review."
+description: "Review scientific Rust release metadata for consistency across Cargo, README, citation, package, and generated-release surfaces."
 ---
 
 # Scientific Crate Documentation Review

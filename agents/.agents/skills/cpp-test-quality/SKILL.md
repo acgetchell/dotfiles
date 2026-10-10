@@ -1,6 +1,6 @@
 ---
 name: cpp-test-quality
-description: "Review doctest and CTest-based C++23 unit, integration, compile-contract, property, fuzz, sanitizer, benchmark, and example tests for meaningful behavior coverage, deterministic fixtures, independent assertions, and reliable failure diagnostics. Use when changes touch doctest BDD scenarios, CTest registration, public-header or template consumers, test data, fuzzers, sanitizer regressions, or tests for C++ production behavior."
+description: "Review C++ test assertions, fixtures, and harnesses for meaningful regression evidence when tests or their reliability are in scope."
 ---
 
 # C++ Test Quality Review
@@ -9,13 +9,13 @@ Review C++ tests as executable evidence for behavior and invariants. Strengthen 
 
 ## Ground Rules
 
-- Do not mutate git state unless the user explicitly asks in the current turn.
-- Use doctest as the C++ test framework, CTest as the registration/execution layer, CMake for test targets, and `just` as the maintainer command surface. Do not add another test framework unless the user explicitly changes this contract.
+- Do not mutate git state unless the user has explicitly authorized that operation and scope.
+- Use the existing C++ test stack. When establishing one without project policy, prefer doctest, CTest, CMake, and `just`. Apply the doctest-specific guidance below only where doctest is in use; a review does not authorize a framework migration.
 - Honor repository-local naming, exact recipe/preset names, filters, labels, and sanitizer configuration.
 - Prefer changed tests plus the production behavior and risk they claim to cover.
 - Prefer doctest behavior-driven development for domain behavior, state transitions, and regression scenarios. Express the contract as `SCENARIO` / `GIVEN` / `WHEN` / `THEN`, using `AND_*` clauses only when they improve the narrative.
 - Use ordinary doctest cases or templates when BDD would add ceremony to table-driven algorithms, compile-time properties, fuzz/property harnesses, benchmarks, or narrow crash regressions.
-- Maintain a validation ledger keyed by source state, built binary, compiler/library/configuration, instrumentation, and selected test IDs. Never rerun a test whose evidence is still valid.
+- Maintain a validation ledger keyed by source state, built binary, compiler/library/configuration, instrumentation, and selected test IDs. Reuse still-valid evidence where the required workflow accepts it; focused checks may precede a required final gate with recorded overlap.
 - Keep CI wiring and command-surface mechanics under `project-tooling-review`; this skill owns the semantic quality of C++ tests.
 - Keep header self-containment, ODR/linkage, module-build, and supported-matrix correctness under `cpp-build-portability`; this skill owns whether durable compile-contract tests detect regressions in those guarantees.
 
@@ -107,14 +107,17 @@ exists:
 - TSan for concurrency regressions on supported platforms
 - property or fuzz replay for discovered counterexamples
 
-Do not run a named case, its containing suite, its containing CTest entry, and a full gate in sequence. Choose the smallest selection that proves the change. If broader coverage is independently required, exclude tests already recorded as passing or choose the broader selection initially. Check registration without execution using CTest discovery/listing.
+Avoid a ladder of overlapping test tiers solely for reassurance. Run focused
+red/green checks when useful during a fix, then any required final aggregate gate
+on the final source state even if it repeats those checks. Record the reason for
+overlap without counting it as independent evidence. Reuse valid evidence where
+the required validation contract permits it; overlap alone requires no approval
+or command-surface escalation.
 
-If an indivisible policy-mandated gate is discovered only after overlapping
-tests have passed and it offers no reliable exclusion, report the validation
-and command-surface conflict and route it to `project-tooling-review`; do not
-silently replay the tests or count the duplicate execution as new evidence.
-
-Rerun a test only after relevant source, fixture, build, or configuration changes invalidate its result, or to diagnose suspected nondeterminism. The same logical test under a different compiler, standard library, sanitizer, linkage mode, or material configuration is distinct evidence rather than a duplicate.
+A relevant edit, configuration change, or nondeterminism diagnosis can justify
+another run. Different compilers, standard libraries, sanitizers, linkage modes,
+and material configurations supply distinct evidence. Check CTest registration
+without execution using discovery/listing.
 
 Keep doctest discovery deliberate. Never add a filtered `add_test()` entry that reruns scenarios already covered by another CTest entry merely for reporting or convenience. Use direct doctest filters for focused local runs. Use `doctest_discover_tests()` only as an intentional registration design that replaces or remains disjoint from existing entries and justifies its configuration and cross-compilation costs.
 
@@ -124,4 +127,4 @@ For each finding, state what incorrect implementation could still pass, the miss
 
 ## Handoff
 
-Summarize doctest scenarios and consumer contracts inspected and changed, risks covered, independent oracles, deterministic seeds, compile-pass or compile-fail evidence, the validation ledger and non-overlapping `just`/CTest/sanitizer results, remaining gaps, and confirmation that no git state mutations were performed when true.
+Summarize doctest scenarios and consumer contracts inspected and changed, risks covered, independent oracles, deterministic seeds, compile-pass or compile-fail evidence, the validation ledger, check results, and any justified overlap, remaining gaps, and confirmation that no git state mutations were performed when true.

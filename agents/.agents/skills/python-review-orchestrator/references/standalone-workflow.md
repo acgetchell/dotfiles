@@ -50,7 +50,7 @@ appear accidental.
 
 ## Pass Order And Individual Selection
 
-Run applicable skills in this order, selecting only skills whose triggers
+Order applicable skills by actual contract dependencies, selecting only those whose triggers
 match.
 
 ### 1. Build, Install, And Configuration

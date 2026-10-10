@@ -510,7 +510,20 @@ Use for a temporary `brew bundle dump` snapshot of the current machine. It is fo
 
 ## Skills
 
-Codex and Warp/Oz both load skills from `~/.agents/skills/`, so the `agents` stow package provides one global source of truth across Rust repos.
+Codex and Warp/Oz both load skills from `~/.agents/skills/`, so the `agents` stow package provides one global source of truth across languages, activities, and repositories.
+
+Following the [Astra skill guidance](https://developers.openai.com/blog/rethinking-skills-and-prompts-for-gpt-6-astra),
+keep discovery descriptions short and select by language or activity. Repository
+references provide conditional context; they are not invocation gates. Preserve
+automatic discovery, load only relevant modes and references, and keep scientific
+oracles, human authorship, source identity, and immutable evidence requirements
+explicit. Existing authorization remains valid for the same action and scope.
+Reviews alone do not authorize upgrades or publication. Focused regression checks
+may precede a required final gate; disclose overlap without double-counting it.
+
+Review-graph path matches nominate specialists. The coordinator must assess each
+matched candidate semantically, including justified non-applicability; the planner
+rejects missing decisions. Mandatory coverage and proof gates remain authoritative.
 
 To add a skill:
 
@@ -544,7 +557,7 @@ Recommended frontmatter style:
 ```yaml
 ---
 name: rust-example
-description: "Short trigger description. USE FOR: specific situations. DO NOT USE FOR: exclusions."
+description: "Review Rust generic constraints when bound necessity or downstream usability is in question."
 ---
 ```
 

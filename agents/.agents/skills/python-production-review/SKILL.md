@@ -1,6 +1,6 @@
 ---
 name: python-production-review
-description: "Review Python code for production readiness as a lean final synthesis after focused Python specialists or as a standalone broad review. Use for ordinary reusable modules, public APIs, exception and resource contracts, object lifecycle, import behavior, security-sensitive integration, async or concurrency risks, cross-cutting correctness, and release-readiness concerns not owned by CLI, parsing, scientific, support-script, notebook, packaging, or test specialists."
+description: "Perform a broad Python production audit, or reconcile specialist evidence and remaining integration risks."
 ---
 
 # Python Production Review
@@ -15,9 +15,9 @@ Use when `review-graph` or `python-review-orchestrator` supplies accepted focuse
 review evidence.
 
 - Do not load the standalone checklist in orchestrated mode.
-- In a `review-graph` synthesis node, read only this skill, the supplied
-  handoff and accepted evidence ledger, and the changed files needed to assess
-  cross-cutting integration.
+- In a `review-graph` synthesis node, use this skill, the supplied handoff,
+  and accepted evidence only. Report missing integration evidence to the
+  coordinator; do not start a new source review.
 - Treat specialist findings and validation as established evidence.
 - Inspect cross-cutting integration and concerns that remain genuinely unowned.
 - Do not repeat parsing, CLI, scientific, notebook, support-tooling, packaging, or test checklists.
@@ -53,17 +53,17 @@ Retain final responsibility for integration among those surfaces and for ordinar
 
 ## Residual Review
 
+For standalone and non-graph orchestration, inspect the relevant contracts below.
+Graph synthesis evaluates only accepted evidence for those concerns.
+
 ### Public And Cross-Module Contracts
 
 Check that public functions, classes, protocols, and module exports have cohesive responsibilities, precise inputs and outputs, stable exception behavior, and no accidental exposure of implementation details. Verify that typing strengthens rather than disguises runtime behavior.
 
 Flag unused generic constraints, ambiguous sentinel values, widening to `Any`, incompatible override behavior, or callers required to know undocumented sequencing rules.
 
-Check the declared Python floor before preserving compatibility imports. For
-Python 3.14-or-newer-only projects, flag
-`from __future__ import annotations` unless a documented runtime annotation
-consumer intentionally requires legacy stringified annotations; Python 3.14
-defers annotations by default.
+When annotation evaluation or the Python floor changes, read
+[annotation compatibility](../python-build-portability/references/annotation-compatibility.md).
 
 ### Correctness And State
 

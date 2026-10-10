@@ -9,7 +9,7 @@ authors = [{ name = "Adam Getchell", email = "adam@adamgetchell.org" }]
 
 [tool.uv]
 package = false
-required-version = "==0.12.24"
+required-version = "==0.13.0"
 
 [tool.research-repo-tools.toolchain]
 inherit-python = true
@@ -219,9 +219,9 @@ dev = [
   "nbformat==5.11.1",
   "PyYAML>=6.0",
   "pytest==9.1.1",
-  "ruff==0.16.10",
+  "ruff==0.17.0",
   "semgrep==1.180.0",
-  "ty==0.0.85",
+  "ty==0.0.86",
   "yamllint==1.38.0",
   "zizmor==1.30.1",
 ]

@@ -1,6 +1,6 @@
 ---
 name: rust-parse-dont-validate
-description: "Audit Rust boundary parsing and invalid-state prevention with proof-bearing domain types. Use for smart constructors, private invariant-bearing fields, fallible setters and builders, raw DTO conversion, deserialization, refined numeric or enum types, validation evidence, infallible getters, and APIs where invalid values remain representable or validation is repeated after acceptance."
+description: "Design or audit Rust input boundaries and invariant-bearing types so accepted values retain meaningful validity evidence."
 ---
 
 # Rust Parse Don't Validate

@@ -1,24 +1,28 @@
 ---
 name: python-build-portability
-description: "Audit uv-managed Python packaging, locking, building, installation, imports, runtime and platform support, optional dependencies, entry points, native extensions, and configuration-sensitive behavior. Use for pyproject.toml, uv.lock, uv build/sync/run behavior, wheels, sdists, package discovery/data, extras, markers, supported Python or OS matrices, editable-versus-built differences, and external consumers. Use Ruff for lint and format validation and ty for type validation; do not introduce alternate Python project, lint, format, or type-check toolchains."
+description: "Audit Python package builds, installed consumers, and supported runtime or platform configurations."
 ---
 
 # Python Build Portability
 
-Audit the boundary between a Python checkout and the environments that consume it. Prove that declared support matches uv-built and uv-installed behavior rather than assuming success from an in-tree test run.
+Audit the boundary between a Python checkout and the environments that consume it. Prove that declared support matches built and installed behavior rather than assuming success from an in-tree test run.
 
-## Fixed Toolchain Contract
+## Toolchain Defaults
 
-Use the repository's `just` recipes when present and require their Python commands to resolve through the following toolchain:
+Select this skill from the language and affected contract in any repository.
+Use the following defaults when no project policy exists; respect an existing
+project toolchain and support policy without requiring a profile or migration.
+
+Use the repository's validation recipes and established tools. When no project policy exists, use these defaults:
 
 - uv owns Python acquisition, project environments, dependency resolution and locking, command execution, builds, and isolated installation.
 - Ruff owns linting, import sorting, and formatting.
 - ty owns static type checking.
 - `pyproject.toml` owns project metadata and tool configuration; `uv.lock` records the reproducible development resolution.
 
-Do not add or preserve parallel project/environment, lint/format, or type-check workflows unless the user explicitly requests interoperability with another tool. A published wheel remaining standards-compliant is a distribution requirement, not a reason to maintain another project workflow.
+Do not add a parallel project/environment, lint/format, or type-check workflow merely to perform this review. Preserve an established alternative stack unless a migration is requested. A published wheel remaining standards-compliant is a distribution requirement, not a reason to maintain another project workflow.
 
-Use uv as the build frontend while auditing the configured `[build-system]` backend: the backend still determines artifact contents, metadata, and filenames. Route command wiring, installer recipes, and uv/Ruff/ty version drift to `project-tooling-review`.
+Use the established build frontend while auditing the configured `[build-system]` backend: the backend determines artifact contents, metadata, and filenames. Route command wiring, installer recipes, and tool-version drift to `project-tooling-review`.
 
 ## Scope
 
@@ -47,19 +51,19 @@ changes or explicit platform branches.
 ## Audit Workflow
 
 1. Identify the declared Python, operating-system, architecture, dependency, and artifact matrix.
-2. Check `uv lock --check`; do not silently refresh `uv.lock` during an audit.
-3. Ensure uv, Ruff, and ty target settings agree with `requires-python` and the supported source surface.
+2. Check the repository lockfile with its established tool (`uv lock --check` for uv); do not silently refresh it during an audit.
+3. Ensure environment, lint, and type-check target settings agree with `requires-python` and the supported source surface.
 4. Map changed files to build, install, import, entry-point, optional-feature, platform, or native-extension risks.
-5. Run the smallest relevant Ruff and ty checks through repository recipes or `uv run --locked`.
-6. Use `uv build` to produce the wheel and sdist when artifact semantics changed.
-7. Inspect artifacts, install the wheel into an isolated uv environment outside the checkout, and exercise the affected public consumer.
+5. Select the smallest relevant lint and type checks through repository recipes, respecting parent-owned validation commands.
+6. Produce the wheel and sdist with the established build frontend when artifact semantics changed (`uv build` for uv projects).
+7. Inspect artifacts, install the wheel into an isolated environment outside the checkout using the established environment tooling, and exercise the affected public consumer.
 8. Report proven configurations separately from declared but untested support.
 
-Ruff and ty are source/configuration evidence; neither substitutes for building and installing the distribution.
+Lint and type checks are source/configuration evidence; neither substitutes for building and installing the distribution.
 
-## uv Project And Locking Semantics
+## Project And Locking Semantics
 
-Check:
+For uv projects, check the following; apply equivalent checks to the established toolchain in other projects:
 
 - `[project]`, dependency groups, optional dependencies, scripts, entry points, and `[tool.uv]` express distinct runtime, development, and source-resolution concerns
 - `uv.lock` is current, committed when repository policy requires it, and resolves the declared marker space
@@ -71,28 +75,16 @@ Check:
 
 Do not use a successful rich development sync as evidence that minimal or optional installations work.
 
-## Packaging And Installation
+## Packaging
 
-Check:
-
-- build requirements and backend configuration are complete and mutually consistent
-- package discovery, namespace packages, and source layout include the intended modules
-- wheels and sdists contain required modules, type information, templates, schemas, licenses, and package data
-- imports do not succeed only because the repository root is on `sys.path`
-- generated version/source files exist in clean builds without untracked state
-- editable installs do not mask failures in built artifacts
-- package resources replace source-relative file access
-- build hooks do not depend on ambient executables, network, working directory, locale, or machine paths without an explicit contract
-
-Compare wheel and sdist contents when either could diverge. Test the built wheel from outside the repository.
-
-Inspect archives and metadata with uv, platform archive tools, the standard library, or an existing repository validator. Do not add one-off packaging checker dependencies when direct inspection provides the required evidence.
+When distribution contents, build hooks, resources, or installation change, read
+[packaging and installation](references/packaging.md).
 
 ## Ruff And ty Alignment
 
-Check that Ruff's target version, selected rules, exclusions, import policy, and formatter configuration match the supported Python surface. Run lint before format checking when import sorting or fixable lint rules are part of the repository contract.
+When the project uses Ruff, check that its target version, selected rules, exclusions, import policy, and formatter configuration match the supported Python surface. Run lint before format checking when import sorting or fixable lint rules are part of the repository contract.
 
-Check that ty discovers the installed packages and source roots intended by the project, targets a compatible Python version, includes public modules, and does not pass only because the checkout exposes undeclared import paths or development dependencies.
+When the project uses ty, check that it discovers the installed packages and source roots intended by the project, targets a compatible Python version, includes public modules, and does not pass only because the checkout exposes undeclared import paths or development dependencies.
 
 Treat tool suppressions and per-file exclusions as configuration-sensitive behavior. Route policy quality to production or tooling review when it is not specifically a portability issue.
 
@@ -104,4 +96,4 @@ Check console/plugin entry points, public imports, optional-feature failures, me
 
 For native components, check wheel tags, ABI/runtime requirements, shared-library discovery, build isolation, representation boundaries, and explicit unsupported-platform failures. Route native algorithm correctness to the owning language specialist.
 
-Exercise only the configurations needed to distinguish the risk. Use uv's interpreter/environment selection rather than adding a second matrix runner, and record unavailable runtimes or platforms as evidence gaps.
+Exercise only the configurations needed to distinguish the risk. Use the established interpreter/environment selection rather than adding a second matrix runner, and record unavailable runtimes or platforms as evidence gaps.

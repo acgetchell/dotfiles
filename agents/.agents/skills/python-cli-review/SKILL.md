@@ -1,6 +1,6 @@
 ---
 name: python-cli-review
-description: "Review Python CLI and small application behavior for argument contracts, exit status, stdout and stderr, privacy-sensitive output, date and time semantics, local file workflows, and user-visible failures. Use for argparse, Click, Typer, command front ends, import/export applications, and machine-consumed command output. Route invariant-bearing raw input parsing, support tooling, scientific code, packaging, and test design to their focused skills."
+description: "Review Python command behavior, output contracts, diagnostics, and file effects when CLI behavior changes."
 ---
 
 # Python CLI Review

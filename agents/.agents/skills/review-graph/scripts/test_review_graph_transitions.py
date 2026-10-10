@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from capture_scope import _scope_data
@@ -33,9 +33,11 @@ from test_review_graph_runtime import (
     SKILL_ROOT,
     _baseline_mutation_fixture,
     _compact_independent_payload,
+    _complete_structural_fixture_routing,
     _json_plan,
     _publish_worker_bytes,
     _run_test_git,
+    _set_fixture_routing,
     _sparse_plan_document,
 )
 
@@ -117,7 +119,8 @@ def test_manifest_delta_reuses_implementation_and_preserves_findings(tmp_path: P
     (repository / "pyproject.toml").write_text('[project]\nname = "example"\nversion = "0.1.0"\ndependencies = []\n')
     _run_test_git(git, "-C", str(repository), "add", "pyproject.toml")
     _run_test_git(git, "-C", str(repository), "commit", "-m", "manifest")
-    template["routing_overrides"].append(
+    _set_fixture_routing(
+        template,
         {
             "catalog_id": "python.cli",
             "disposition": "selected",
@@ -125,9 +128,10 @@ def test_manifest_delta_reuses_implementation_and_preserves_findings(tmp_path: P
             "applicability_evidence": ["tool.py"],
             "owners": ["python"],
             "review_surface": ["tool.py", "pyproject.toml"],
-        }
+        },
     )
     capture = _scope_data(git, repository, "baseline", None, ())
+    _complete_structural_fixture_routing(template, cast("list[str]", capture["captured_scope_paths"]))
     plan = plan_from_document(bootstrap_document(capture, template), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)
     lifecycle, entries, _dispatches = _materialize(tmp_path, capture, plan)
     entry = next(item for item in entries["dispatches"] if item["dispatch"]["skill_id"] == "python-cli-review")
@@ -239,6 +243,7 @@ def _staging_fixture(
     if independent:
         template.update(concrete_change_target=True, change_target="git diff -- state.rs tool.py")
     capture = _scope_data(git, repository, mode, None, ())
+    _complete_structural_fixture_routing(template, cast("list[str]", capture["captured_scope_paths"]))
     plan = plan_from_document(bootstrap_document(capture, template), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)
     lifecycle, entries, dispatches = _materialize(tmp_path, capture, plan)
     journal = tmp_path / "old.jsonl"
@@ -399,9 +404,11 @@ def test_external_staging_between_dispatch_and_compile_completes_without_rollbac
     assert _scope_data(git, repository, "baseline", None, ())["index_fingerprint"] == request["new_capture"]["index_fingerprint"]
     template = _sparse_plan_document()
     template["consulted_routers"] = ["review-graph", "rust-review-orchestrator", "python-review-orchestrator"]
-    template["routing_overrides"][0]["review_surface"] = ["state.rs"]
+    for override in template["routing_overrides"]:
+        override["review_surface"] = ["state.rs"]
     template["validation_requirements"][0]["working_directories"] = [str(repository)]
     (repository / "tool.py").write_text("value = 3\n")
+    _complete_structural_fixture_routing(template, ["state.rs", "tool.py", "LICENSE", "cliff.toml", ".codecov.yml"])
     advanced = advance_after_mutation(
         {
             **lifecycle,
@@ -557,7 +564,8 @@ def test_partitioned_audit_retains_original_capture_across_multiple_repairs(tmp_
     _run_test_git(git, "-C", str(repository), "add", "pyproject.toml")
     _run_test_git(git, "-C", str(repository), "commit", "-m", "manifest")
     (repository / "tool.py").write_text("value = 2\n")
-    template["routing_overrides"].append(
+    _set_fixture_routing(
+        template,
         {
             "catalog_id": "python.cli",
             "disposition": "selected",
@@ -565,9 +573,10 @@ def test_partitioned_audit_retains_original_capture_across_multiple_repairs(tmp_
             "applicability_evidence": ["tool.py"],
             "owners": ["python"],
             "review_surface": ["tool.py", "pyproject.toml"],
-        }
+        },
     )
     capture = _scope_data(git, repository, "baseline", None, ())
+    _complete_structural_fixture_routing(template, cast("list[str]", capture["captured_scope_paths"]))
     plan = plan_from_document(bootstrap_document(capture, template), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)
     lifecycle, entries, _dispatches = _materialize(tmp_path, capture, plan)
     entry = next(item for item in entries["dispatches"] if item["dispatch"]["skill_id"] == "python-cli-review")
@@ -635,6 +644,7 @@ def test_synthesis_uses_bound_validator_platform_and_exposes_execution_configura
         {"platform": "macos-arm64", "environment": "Linux boundary emulation on macOS", "features": ["mode=emulated"]}
     )
     capture = _scope_data(git, repository, "baseline", None, ())
+    _complete_structural_fixture_routing(template, cast("list[str]", capture["captured_scope_paths"]))
     plan = plan_from_document(bootstrap_document(capture, template), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)
     lifecycle, entries, _dispatches = _materialize(tmp_path, capture, plan)
     entry = next(item for item in entries["dispatches"] if item["result_contract"] == "compact-validation")

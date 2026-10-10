@@ -33,9 +33,10 @@ retains `requested_scope: branch`.
 Supply `consulted_routers`, validation requirements, and sparse schema-defined
 `routing_overrides`, including applicable instructions, references, and reuse
 `evidence_id`. The planner derives catalog identities, classifies surfaces,
-marks omissions `not-applicable`, and selects independent review for concrete
+requires explicit semantic decisions for matched specialists, marks only
+unmatched omissions `not-applicable`, and selects independent review for concrete
 changes plus surface/repository syntheses. `routing-projection` lists candidates
-and signals.
+and signals; path matches alone are not applicability evidence.
 
 ## Materialize And Schedule
 

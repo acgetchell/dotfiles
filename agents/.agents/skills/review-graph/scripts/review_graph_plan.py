@@ -1529,11 +1529,10 @@ def expand_compact_routing(  # noqa: C901, PLR0912, PLR0913, PLR0915
 ) -> tuple[RoutingDecision, ...]:
     """Expand sparse semantic routing choices into the exhaustive trusted ledger.
 
-    Catalog-owned identity fields are always derived here. Reviewers only need to
-    return semantic exceptions: selected leaves, exclusions, blockers, or exact
-    evidence reuse. Unmentioned leaf candidates become explicit not-applicable
-    records, while repository classifier signals and required synthesis nodes are
-    selected deterministically.
+    Catalog-owned identity fields are always derived here. Path-matched leaves
+    require explicit semantic decisions, including justified non-applicability.
+    Unmatched omissions become not-applicable; repository classifier signals,
+    independent review, and required synthesis retain their mandatory defaults.
     """
     consulted = tuple(dict.fromkeys(consulted_routers))
     if REPOSITORY_ROUTER_ID not in consulted:
@@ -1558,6 +1557,18 @@ def expand_compact_routing(  # noqa: C901, PLR0912, PLR0913, PLR0915
             raise ValueError(msg)
         overrides_by_id[str(item["catalog_id"])] = item
 
+    unresolved = [
+        entry.catalog_id
+        for entry in active_entries
+        if entry.target_kind == "leaf"
+        and entry.catalog_id not in overrides_by_id
+        and _catalog_matched_paths(entry, normalized_paths, signals)
+        and not (entry.router_id == REPOSITORY_ROUTER_ID and entry.layer == "repository" and entry.surface in signals)
+    ]
+    if unresolved:
+        msg = "semantic applicability decisions required for path-matched candidates: " + ", ".join(unresolved)
+        raise ValueError(msg)
+
     signal_paths = {
         surface: tuple(dict.fromkeys(value.split(":", 1)[0] for value in evidence if not value.startswith("<"))) for surface, evidence in signals.items()
     }
@@ -1569,7 +1580,7 @@ def expand_compact_routing(  # noqa: C901, PLR0912, PLR0913, PLR0915
         selected_by_projection = entry.target_kind == "leaf" and bool(matched_paths)
         selected_independent = entry.target_kind == "independent" and bool(change_target)
         selected_synthesis = entry.target_kind == "synthesis"
-        default_selected = selected_by_classifier or selected_by_projection or selected_independent or selected_synthesis
+        default_selected = selected_by_classifier or selected_independent or selected_synthesis
         disposition = str(override.get("disposition")) if override is not None else ("selected" if default_selected else "not-applicable")
 
         if override is not None:

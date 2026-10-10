@@ -12,12 +12,16 @@ Inspect the supplied captured paths and the surface routing matrix. Return only
 records whose disposition is one of:
 
 - `selected`
+- `not-applicable`, with evidence for a matched candidate
 - `exact-evidence-reused`
 - `user-excluded`
 - `budget-deferred`, `capability-blocked`, or `failed`
 
-Omit ordinary `not-applicable` candidates. The planner expands every omission
-into an explicit catalog record and verifies total closure.
+Assess every path-matched specialist explicitly, including evidence-backed
+`not-applicable` decisions. Omit only unmatched, semantically untriggered
+candidates. The planner rejects unassessed matches and expands other omissions
+into explicit catalog records. Uncertainty is a visible blocker, not a negative
+applicability judgment.
 
 Each returned record contains:
 
@@ -44,7 +48,7 @@ rejected.
 The planner:
 
 - applies the conservative repository classifier
-- selects every projection-matched leaf unless explicitly overridden
+- requires semantic decisions for projection-matched leaves; a path alone never dispatches a language specialist
 - applies catalog `excluded_path_patterns` to default projection matches only;
   semantic overrides can still select an excluded path with concrete evidence
 - selects required repository and consulted-surface syntheses

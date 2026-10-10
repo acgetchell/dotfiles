@@ -1,11 +1,11 @@
 ---
 name: scientific-software-docs-review
-description: "Review language-neutral scientific software documentation for mathematical and numerical claims, algorithms and invariants, validation methodology, limitations, benchmark interpretation, reproducibility, data and coordinate conventions, provenance handoffs, figures, generated research artifacts, and release-facing scientific consistency. Use for scientific C++, Rust, Python, mixed-language projects, and research software docs; add ecosystem-specific overlays only when their metadata is in scope."
+description: "Review scientific documentation claims, conventions, reproducibility, and generated artifacts against their supporting evidence."
 ---
 
 # Scientific Software Documentation Review
 
-Review the scientific layer that connects implementation, validation evidence, reproducibility, and public claims. Establish technical truth through the owning scientific-code reviewer before polishing language.
+Review the scientific layer that connects implementation, validation evidence, reproducibility, and public claims. Check straightforward claims directly against available source and evidence. Route unresolved mathematical or numerical correctness to the owning scientific-code reviewer before rewriting the claim; a separate pass is not required for every factual check.
 
 ## Scope
 

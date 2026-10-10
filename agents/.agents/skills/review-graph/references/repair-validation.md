@@ -22,8 +22,10 @@ An omitted or empty selector preserves ordinary scheduling; it does not claim
 that an early check ran. The same selector can be used in an initial plan when
 early validation is useful there too.
 
-Preserve the ordinary aggregate gate's complete coverage. Do not add a cheap
-recipe here if a later aggregate reruns it on the same source. If the repository
+Preserve the ordinary aggregate gate's complete coverage. Avoid adding a cheap
+recipe solely to repeat evidence. A focused diagnostic or red/green check may
+precede a required final aggregate; record its purpose and overlapping coverage.
+Each graph execution still needs its exact planned requirement and owner. If the repository
 only exposes a combined command such as `just check ci`, move that whole unit
 early or keep its ordinary placement; do not infer a split or substitute a
 lint-only pass for the aggregate. Separately exposed, nonoverlapping canonical

@@ -1,6 +1,6 @@
 ---
 name: cpp-functional-style
-description: "Design, write, refactor, and review modern C++23 around explicit data transformations, value semantics, immutable interfaces, standard algorithms and ranges, higher-order functions, algebraic result types, and controlled effects. Use when work materially involves pipelines, range/view lifetimes, folds, callbacks, optional/expected/variant composition, or replacing difficult mutating workflows with value-returning state transitions; do not trigger for incidental lambdas or ranges."
+description: "Design or review substantial C++ data-transformation pipelines for clear effects, safe views, and preserved semantics."
 ---
 
 # C++ Functional Style
@@ -24,7 +24,7 @@ loops, local mutation, and value-oriented classes when those are clearer or fast
 
 ## Workflow
 
-### 1. State the transformation
+### State the transformation
 
 Describe the code as inputs, outputs, invariants, and effects before selecting
 syntax. Identify:
@@ -46,7 +46,7 @@ an unobservable candidate is compatible with functional design. Avoid copying
 large state blindly; use moves, ownership transfer, or a transaction-style
 implementation where appropriate.
 
-### 2. Model values and alternatives
+### Model values and alternatives
 
 Prefer value semantics and types that express the domain:
 
@@ -62,7 +62,7 @@ Use `const` to communicate stable bindings and interfaces, but do not scatter it
 onto locals when it obstructs moves or adds no useful constraint. Avoid getters
 that expose mutable storage merely to enable a pipeline.
 
-### 3. Choose the clearest control form
+### Choose the clearest control form
 
 Prefer a standard algorithm or ranges pipeline when it names the operation and
 keeps the data flow linear. Common fits include:
@@ -87,7 +87,7 @@ Prefer an ordinary loop when it makes any of these clearer:
 Do not use `map`-like operations for side effects. Keep effects in a loop,
 `for_each`, or a named boundary whose purpose is explicit.
 
-### 4. Control ownership, borrowing, and laziness
+### Control ownership, borrowing, and laziness
 
 Ranges and views are often lazy and non-owning. Verify:
 
@@ -103,44 +103,12 @@ Prefer an owning result when the lifetime contract would otherwise be subtle.
 Materialize once at a deliberate boundary rather than inserting multiple
 intermediate containers between adaptors.
 
-### 5. Compose callables deliberately
+### Callable and failure composition
 
-Prefer named functions for reusable domain operations and small lambdas for
-local glue. For every callable:
+For higher-order or fallible pipelines, read
+[callable composition](references/callable-composition.md).
 
-- capture only what it needs, by reference or value according to lifetime
-- use `mutable` only when stateful callable behavior is part of the contract
-- constrain only the call form and argument/return requirements the API needs,
-  using `std::invocable`, `std::predicate`, `std::regular_invocable`, or a small
-  project concept when a public generic API benefits from it
-- use templates or `auto` parameters for static composition; use
-  `std::function` only when runtime type erasure, storage, or ABI shape warrants
-  its allocation and indirection costs
-- avoid returning lambdas that capture local references
-
-Do not build a generic combinator framework when two named functions express
-the domain more directly.
-
-### 6. Keep failure in the data flow
-
-Follow the repository's established error model. Keep expected rejection,
-absence, exceptions, and invariant violations distinct.
-
-- compose fallible stages without discarding structured errors
-- avoid converting failure to `bool` or `std::optional` when callers need the
-  reason
-- avoid throwing inside algorithm predicates or transformations unless the
-  surrounding exception contract and partial-work behavior are deliberate
-- validate raw inputs before starting a transformation that publishes output
-- keep accessors and later transformations infallible once a validated type
-  carries the required invariant
-
-Use `cpp-parse-dont-validate` when the pipeline repeatedly checks raw input or
-should begin from a proof-bearing domain type. Use
-`cpp-exception-safety-error-contracts` when exceptions, `noexcept`, rollback, or
-partial output require a dedicated audit.
-
-### 7. Preserve semantics and performance
+### Preserve semantics and performance
 
 Check behavior hidden by compact expressions:
 

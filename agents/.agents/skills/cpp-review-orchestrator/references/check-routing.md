@@ -56,7 +56,7 @@ Use this table to select optional specialist groups 1–11. Always run Final Syn
 
 ## Focused Validators
 
-Prefer project recipes and presets. Inspect their expanded test selections before execution and maintain a ledger keyed by source/build/configuration and test IDs. Never rerun still-valid test evidence; a different compiler, standard library, sanitizer, linkage mode, or material configuration is a distinct matrix cell. If no recipe exists, use the configured tool directly and report the command-surface gap.
+Prefer project recipes and presets. Inspect their expanded test selections before execution and maintain a ledger keyed by source/build/configuration and test IDs. Reuse still-valid evidence where the required workflow accepts it, and record overlap when focused checks precede a required final gate. A different compiler, standard library, sanitizer, linkage mode, or material configuration is a distinct matrix cell. If no recipe exists, use the configured tool directly and report the command-surface gap.
 
 | Risk or files touched | Focused validation |
 |---|---|
@@ -87,16 +87,12 @@ Escalate when repository instructions require it, public contracts and core inva
 
 Keep focused validation for docs-only, config-only, tests-only, examples-only, or benchmark-only changes when repository guidance permits it.
 
-Decide whether repository policy or known cross-layer scope requires the full
-gate before executing the first test, and inspect the gate's composition then.
-If it would rerun tests already passing for the current
-source/build/configuration state, run only its uncovered validators or choose
-the full gate as the single selection instead of preceding it with overlapping
-focused tiers. If a mandatory indivisible gate is discovered late and offers
-no reliable exclusion, report the command-surface blocker and route it to
-`project-tooling-review`; do not silently replay tests or count them twice. A
-relevant edit invalidates prior evidence; mere desire for a broader summary
-does not.
+Avoid a ladder of overlapping test tiers solely for reassurance. Run focused
+red/green checks when useful during a fix, then any required final aggregate gate
+on the final source state even if it repeats those checks. Record the reason for
+overlap without counting it as independent evidence. Reuse valid evidence where
+the required validation contract permits it; overlap alone requires no approval
+or command-surface escalation.
 
 ## Review Summary Template
 
