@@ -98,12 +98,11 @@ For published crates with shared README and rustdoc learning paths, read
 
 ### 5. API-supporting private helper docs
 
-This skill is primarily about public rendered documentation, but changed private
-helpers can be part of API documentation quality when they carry the logic behind
-public contracts. Do not defer these automatically.
+Review changed private helpers when missing intent obscures a non-obvious public
+contract or its safe maintenance. Clear helper intent does not require a comment
+merely because the helper is non-trivial or supports a public API.
 
-For changed private functions, methods, and helper types that support public API
-behavior, check for `///` comments explaining:
+Where documentation is needed, check that `///` comments explain:
 
 - why the helper exists (intent)
 - what it does (behavior)
@@ -112,12 +111,11 @@ behavior, check for `///` comments explaining:
 
 Flag:
 
-- missing docs on non-trivial changed helpers behind public APIs
+- missing docs when helper intent obscures a non-obvious public contract or its
+  safe maintenance
 - comments that only restate the helper name
 - helper docs that explain implementation mechanics but omit the public contract
   or invariant they protect
-- changed private helpers that should be covered by
-  `RUSTDOCFLAGS='-D warnings -D missing-docs' cargo doc --workspace --no-deps --document-private-items`
 
 For broad private-helper coverage, test assertion quality, doctest realism, or
 panic-path testing, coordinate with `rust-test-quality`.
@@ -129,8 +127,8 @@ Check:
 - `#![deny(missing_docs)]` or `#![warn(missing_docs)]` is configured for published crates
 - broken intra-doc links are treated as errors when feasible (`#![deny(rustdoc::broken_intra_doc_links)]`)
 - `[package.metadata.docs.rs]` enables the right features so docs.rs renders the documented API
-- private items are documented when they help maintainers or protect public API
-  contracts, even if the lint does not enforce it
+- private items are documented when missing intent obscures a non-obvious public
+  contract or its safe maintenance, even if the lint does not enforce it
 
 ### 7. Examples reflect the public API
 

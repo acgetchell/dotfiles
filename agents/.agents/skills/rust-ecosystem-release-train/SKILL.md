@@ -44,9 +44,9 @@ explicit authorization even when the rest of the train is already approved.
 ## Enforce The Release Contract
 
 - For the maintained ecosystem, synchronize releases at intentional stable Rust boundaries; for other trains, honor their stated release/MSRV policy.
-- Treat the selected stable Rust release as a public MSRV boundary. Align each
-  repository's manifest, pinned toolchain, Clippy MSRV, active documentation,
-  and CI before publishing its release.
+- When the selected train's policy uses a stable Rust release as a public MSRV
+  boundary, align each repository's manifest, pinned toolchain, Clippy MSRV,
+  active documentation, and CI with that boundary before publishing its release.
 - Use crates.io versions for inter-repository dependencies. Never commit Git or
   path dependencies as a substitute for an upstream release.
 - Distinguish **code merged** from **crate available downstream**. A downstream

@@ -25,7 +25,9 @@ Ignore unrelated, unchanged files.
 
 Default mode:
 
-- Audit newly added or modified Rust code for naming, imports, and path clarity.
+- Audit newly added or modified Rust code when style, readability, or naming work
+  is requested, or when naming or imports obscure meaning. Incidental Rust edits
+  do not require a separate style audit.
 - Ignore unrelated unchanged files.
 
 Whole-repo baseline mode:

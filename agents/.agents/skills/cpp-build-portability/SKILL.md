@@ -109,7 +109,7 @@ When configuration variants or modules affect the change, read
 
 ### Validate the matrix proportionally
 
-Use repository `just` recipes first; require them to delegate to the declared CMake presets and vcpkg manifest. If a needed recipe is absent, use the checked-in preset directly and report the missing command-surface coverage rather than inventing another workflow. Select the smallest evidence that proves the affected contract:
+Use repository `just` recipes when available, following the established toolchain and support policy. For CMake projects, require recipes to delegate to the declared presets; require a vcpkg manifest only when the project uses vcpkg. If a needed recipe is absent, use the checked-in preset or established toolchain command directly and report the missing command-surface coverage. Select the smallest evidence that proves the affected contract:
 
 1. compile minimal consumers with each changed public header first
 2. compile and link a two-or-more-translation-unit consumer for ODR, visibility, and explicit-instantiation risks

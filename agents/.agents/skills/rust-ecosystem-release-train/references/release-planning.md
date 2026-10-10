@@ -29,8 +29,9 @@ official Rust release sources for schedules and final release notes.
 
 ## Build The Release Plan
 
-1. Identify or propose one Rust-adoption issue and one release-capstone issue
-   for each participating release; create them only after authorization.
+1. Identify or propose one release-capstone issue for each participating release.
+   Include a Rust-adoption issue only when the selected train's policy includes
+   that work; create either issue only after authorization.
 2. Treat a release milestone as a publication contract. Review every open item;
    keep genuine release gates and move unrelated work rather than silently
    delaying the train.
@@ -48,10 +49,10 @@ official Rust release sources for schedules and final release notes.
 7. Keep the final ecosystem capstone open until the published crates resolve
    without overrides and the complete downstream validation passes.
 
-Before stable ships, finish compatible feature and defect work, audit beta
-compatibility, and prepare release candidates. Do not close the stable-Rust
-adoption gate until the final release notes and stable toolchain have been
-checked.
+When the selected train's policy includes stable-Rust adoption, finish compatible
+feature and defect work, audit beta compatibility, and prepare release candidates
+before stable ships. Do not close that adoption gate until the final release
+notes and stable toolchain have been checked.
 
 ## Coordinate Focused Skills
 

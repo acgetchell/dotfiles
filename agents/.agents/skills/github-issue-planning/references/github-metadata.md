@@ -78,8 +78,8 @@ gh api graphql \
 ## Example 5
 
 ```bash
-gh label list --limit 200
-gh api repos/:owner/:repo/milestones --jq '.[] | {number,title,state,due_on}'
+gh api --paginate 'repos/:owner/:repo/labels?per_page=100' --jq '.[] | {name,description,color}'
+gh api --paginate 'repos/:owner/:repo/milestones?state=all&per_page=100' --jq '.[] | {number,title,state,due_on}'
 ```
 
 ## Example 6
