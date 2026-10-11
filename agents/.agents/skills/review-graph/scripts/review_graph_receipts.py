@@ -70,6 +70,11 @@ def stage_receipt(operation: str, output_path: Path, output: dict[str, Any]) -> 
         "node_counts",
         "recheck_reason_counts",
         "phase_accounting",
+        "review_lifecycle",
+        "repair_epoch",
+        "stop_reason",
+        "cancel_node_ids",
+        "incomplete_node_ids",
     ):
         if key in output:
             receipt[key] = output[key]

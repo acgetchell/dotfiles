@@ -121,6 +121,12 @@ def _inherited_metadata_context(record: dict[str, Any]) -> dict[str, Any] | None
 
 def _metadata_context_blockers(record: dict[str, Any], transition: ExternalMetadataTransition) -> list[dict[str, str]]:
     blockers = git_dependency_blockers(record)
+    if transition.before.capture_mode == "branch" and transition.before.merge_base == transition.after.merge_base:
+        blockers = [
+            blocker
+            for blocker in blockers
+            if not (blocker.get("dependency") == "head" and fixed_branch_comparison(blocker.get("command", ""), transition.before.merge_base))
+        ]
     paths = set(record.get("files_inspected", [])) | set(record.get("nearby_contract_owners", []))
     before = dict(transition.before.repository_path_fingerprints)
     after = dict(transition.after.repository_path_fingerprints)
@@ -135,6 +141,22 @@ def _metadata_context_blockers(record: dict[str, Any], transition: ExternalMetad
         elif any(key in snapshot.repository_symlink_paths for snapshot in (transition.before, transition.after)):
             blockers.append({"reason_code": "unproven-source-read", "path": path, "reason": "The capture does not prove a read without symlink traversal."})
     return blockers
+
+
+def fixed_branch_comparison(command: str, base: str | None) -> bool:
+    """Prove a plain worktree diff against a captured immutable branch base."""
+    if base is None or re.fullmatch(r"[0-9a-f]{40,64}", base) is None:
+        return False
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return False
+    options = words[: words.index("--")] if "--" in words else words
+    return (
+        base in options
+        and not {"HEAD", "--cached", "--staged"}.intersection(options)
+        and _source_discovery_command(shlex.join(["HEAD" if word == base else word for word in words]))
+    )
 
 
 def metadata_audit_blockers(record: dict[str, Any], transition: ExternalMetadataTransition, *, fresh_current: bool = False) -> list[dict[str, str]]:

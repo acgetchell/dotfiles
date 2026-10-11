@@ -5,9 +5,8 @@ description: "Run a comprehensive repository review through review-graph; use a 
 
 # Repo Review
 
-Delegate complete mixed-surface repository review to
-[`review-graph`](../review-graph/SKILL.md). This skill preserves the familiar
-`$repo-review` entrypoint; it does not implement a second coordinator.
+Delegate comprehensive repository review to
+[`review-graph`](../review-graph/SKILL.md).
 
 ## Delegation
 
@@ -17,13 +16,12 @@ Delegate complete mixed-surface repository review to
 3. Follow the selected `review-graph` profile once and return its native final
    result without adding a second routing, validation, or synthesis pass.
 
-Do not independently capture scope, inspect worker capacity, consult surface
-routers, invoke `review-validator`, run surface orchestrators, or synthesize a
-compatibility report. `review-graph` owns those actions and derives the
-five-surface compatibility view from its final proof.
+Preserve its repair budget and stop reason; report unfinished proof as partial.
 
-For a request confined to one narrow review contract, use the applicable
-focused skill directly instead of this compatibility entrypoint.
+`review-graph` owns capture, capacity, routing, validators, orchestrators,
+synthesis, and the five-surface compatibility view. Do not repeat those actions.
+
+For one narrow contract, use its focused skill directly.
 
 ## Behavioral Equivalence
 
@@ -34,7 +32,6 @@ coalesced validators, exact evidence reuse, and coordinator fallback may change
 execution order or location, but never coverage, findings, validation
 attribution, or completion status.
 
-Require the final `RepositoryReviewProof` produced and verified by the
-`review-graph` runtime. Do not load its maintainer-facing evidence specification
-unless diagnosing a verifier rejection. Do not claim completion from an
-orchestrator table, routing ledger, worker plan, or conversation summary alone.
+Require the runtime's verified `RepositoryReviewProof`; tables, plans, and
+conversation summaries cannot establish completion. Load the evidence
+specification only to diagnose verifier rejection.

@@ -1,4 +1,11 @@
 {
+  "review-control": {
+    "action": "begin-repair",
+    "authorization": "review-and-fix",
+    "artifact_store": "/tmp/review-control",
+    "plan": {},
+    "source_state": ["scope", "worktree", "repository"]
+  },
   "schedule-ready": {
     "artifact_store": "/tmp/review-schedules",
     "plan": {},

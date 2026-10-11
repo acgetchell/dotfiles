@@ -45,6 +45,7 @@ from review_graph_executor import executor_permissions, remedied_features
 from review_graph_git import audit_git_context, discovery_reconciliation, intervening_metadata_blockers, metadata_audit_blockers, validate_git_dependencies
 from review_graph_independent import CHECK_LABELS, SCHEMA as _INDEPENDENT_PAYLOAD_SCHEMA, render_independent_payload
 from review_graph_integrity import canonical_json, digest_bytes
+from review_graph_lifecycle import lifecycle_from_document, validate_restart
 from review_graph_metrics import projected_waves, source_demand
 from review_graph_phases import pending_validation_barrier, phase_accounting, require_validation_barrier, validate_validation_barrier
 from review_graph_plan import (
@@ -2708,6 +2709,7 @@ def _graph_plan(raw: dict[str, Any]) -> GraphPlan:
         validation_recoveries=_records(raw, "validation_recoveries"),
         pre_review_validation_nodes=_string_tuple(raw, "pre_review_validation_nodes"),
         commit_handoffs=tuple(metadata_transition(item) for item in _records(raw, "commit_handoffs")),
+        review_lifecycle=lifecycle_from_document(raw.get("review_lifecycle")),
         validation_exclusions=tuple(
             ValidationExclusion(
                 originating_evidence_id=_required_text(item, "originating_evidence_id"),
@@ -3888,6 +3890,7 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         msg = "materialize-dispatches requires a plan object"
         raise TypeError(msg)
     plan = _graph_plan(raw_plan)
+    _require_running_review(document)
     _verify_validation_recoveries(plan)
     if not plan.dispatch_allowed:
         msg = "cannot materialize dispatches from a blocked graph plan"
@@ -4340,6 +4343,16 @@ def _mutation_path_delta(document: dict[str, Any], previous: dict[str, Any], cur
 
 def _mutation_evidence_sources(document: dict[str, Any], plan: GraphPlan) -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
     """Verify historical evidence without relabeling it as final-state evidence."""
+    if document.get("journal_path") and document.get("dispatches_path"):
+        state = _state(document, "source_state")
+        events, statuses, _head = read_execution_journal(Path(document["journal_path"]), plan=plan, source_state=state)
+        if any(status == "in-flight" for status in statuses.values()):
+            msg = "repair transition requires quiescent execution"
+            raise ValueError(msg)
+        entries = _dispatches_by_node(_read_json_object(Path(document["dispatches_path"])), plan=plan, source_state=state)
+        accepted, _accepted_records = _accepted_journal_sources(plan, state, events, entries)
+        sources = {canonical_json(source): source for source in [*_records(document, "sources"), *accepted.values()]}
+        document = {**document, "sources": list(sources.values())}
     by_id = {node.node_id: node for node in plan.actual_worker_nodes}
     result: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
     reused_ids = {evidence_id for _, evidence_id in plan.exact_reused_review_evidence}
@@ -4989,12 +5002,14 @@ def _preserve_metadata_barrier_history(
 
 def resume_after_external_metadata(document: dict[str, Any]) -> dict[str, Any]:
     """Publish a new continuation while preserving original audit and Git provenance."""
+    _require_running_review(document)
     transition = metadata_transition({"before": document["previous_capture"], "after": document["new_capture"]})
     return _resume_metadata(document, transition)
 
 
 def resume_after_authorized_commit(document: dict[str, Any]) -> dict[str, Any]:
     """Observe an explicitly authorized commit; this operation never mutates Git."""
+    _require_running_review(document)
     require_schema_definition(document, _RUNTIME_OPERATION_INPUT_SCHEMA, "resume-after-authorized-commit")
     verify_live_commit(document["previous_capture"], document["new_capture"])
     transition = CommitHandoffTransition(source_snapshot(document["previous_capture"]), source_snapshot(document["new_capture"]), {})
@@ -5160,6 +5175,167 @@ def _replacement_lineage(previous: GraphPlan, current: GraphPlan, sources: dict[
     ]
 
 
+def _review_stop_reason(document: dict[str, Any], journal: Path | None = None) -> str | None:
+    """Reject old continuation files as well as the terminal replacement plan."""
+    lifecycle = lifecycle_from_document(document["plan"].get("review_lifecycle"))
+    if lifecycle.stop_reason is not None:
+        return lifecycle.stop_reason
+    journal_path = journal or (Path(document["journal_path"]) if document.get("journal_path") else None)
+    if journal_path is not None:
+        marker = journal_path.with_name(journal_path.name + ".stop.json")
+        if marker.exists():
+            return _required_text(_read_json_object(marker), "stop_reason")
+    return None
+
+
+def _require_running_review(document: dict[str, Any], journal: Path | None = None) -> None:
+    if (reason := _review_stop_reason(document, journal)) is not None:
+        raise ValueError(f"review stopped: {reason}")
+
+
+def review_control(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    """Check a batch budget, explicitly extend it, or stop without new audit work."""
+    require_schema_definition(document, _RUNTIME_OPERATION_INPUT_SCHEMA, "review-control")
+    lock_path = args.journal.with_name(args.journal.name + ".lock")
+    with lock_path.open("a+b") as stream:
+        fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+        try:
+            return _review_control_locked(document, args)
+        finally:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+
+def _review_control_locked(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    """Bind the control decision to a stable journal while publishing its stop."""
+    plan = _graph_plan(document["plan"])
+    action = document["action"]
+    policy = plan.review_lifecycle
+    reason = _review_stop_reason(document, args.journal)
+    if reason is not None and not (action == "extend-budget" and reason.startswith("repair-budget-exhausted")):
+        raise ValueError(f"review stopped: {reason}")
+    events, state, _head = read_execution_journal(args.journal, plan=plan, source_state=_state(document, "source_state"))
+    entries = _dispatches_by_node(_read_json_object(args.dispatches), plan=plan, source_state=_state(document, "source_state"))
+    active = sorted(node_id for node_id, status in state.items() if status == "in-flight")
+    if action != "stop" and _capture_source_state(args.current_capture) != _current_metadata_state(document):
+        msg = "review control requires the current reviewed capture before authorizing more work"
+        raise ValueError(msg)
+    if action == "begin-repair" and policy.repairs_completed < policy.repair_budget:
+        if active:
+            msg = "repair batch requires quiescent execution"
+            raise ValueError(msg)
+        return {"status": "repair-authorized", "repair_epoch": policy.repairs_completed + 1, "review_lifecycle": asdict(policy)}
+    if action in {"extend-budget", "authorize-restart"} and active:
+        msg = "review control extension requires quiescent execution"
+        raise ValueError(msg)
+    if action == "extend-budget":
+        extension = {"additional_epochs": _required_int(document, "additional_epochs"), "user_authorization": _required_text(document, "user_authorization")}
+        policy = replace(
+            policy,
+            repair_budget=policy.repair_budget + extension["additional_epochs"],
+            budget_extensions=(*policy.budget_extensions, extension),
+            stop_reason=None,
+        )
+    elif action == "authorize-restart":
+        trigger = document["restart_trigger"]
+        validate_restart(trigger)
+        policy = replace(policy, comprehensive_restarts=(*policy.comprehensive_restarts, trigger))
+    else:
+        reason = "repair-budget-exhausted: explicit user extension required" if action == "begin-repair" else "user-stop: " + _required_text(document, "reason")
+        policy = replace(policy, stop_reason=reason)
+    result = _publish_review_control(document, args, replace(plan, review_lifecycle=policy), events, entries)
+    _sources, records = _accepted_journal_sources(plan, _state(document, "source_state"), events, entries, include_blocked=True)
+    result.update(
+        status="stopped" if policy.stop_reason is not None else action,
+        review_lifecycle=asdict(policy),
+        stop_reason=policy.stop_reason,
+        cancel_node_ids=active if policy.stop_reason is not None else [],
+        remaining_findings=[{"evidence_id": record["evidence_id"], "findings": record.get("findings", [])} for record in records if record.get("findings")],
+        incomplete_node_ids=sorted(node.node_id for node in plan.actual_worker_nodes if state.get(node.node_id) != "accepted"),
+        graph_proof_status="partial",
+    )
+    if policy.stop_reason is not None:
+        marker = args.journal.with_name(args.journal.name + ".stop.json")
+        _write_bytes_atomically_once(
+            marker, (canonical_json({"stop_reason": policy.stop_reason, "continuation_path": result["continuation_path"]}) + "\n").encode(), mode=0o444
+        )
+    return result
+
+
+def _publish_review_control(
+    document: dict[str, Any], args: argparse.Namespace, plan: GraphPlan, events: tuple[dict[str, Any], ...], entries: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
+    """Rebind only lifecycle identity; retain every dispatch and evidence byte."""
+    store = Path(document["artifact_store"]).resolve() / f"control-{_plan_digest(plan)[7:23]}"
+    repository = Path(_read_json_object(args.current_capture)["repository_root"]).resolve()
+    if store.is_relative_to(repository) or repository.is_relative_to(store):
+        msg = "review control artifact store must be outside the repository"
+        raise ValueError(msg)
+    store.mkdir(parents=True, exist_ok=True)
+    lifecycle = {key: value for key, value in document.items() if key in {"source_state", "external_metadata_transitions"}}
+    lifecycle["plan"] = json.loads(canonical_json(asdict(plan)))
+    migrated = []
+    for original in events:
+        event = {**original, "plan_digest": _plan_digest(plan), "previous_event_digest": migrated[-1]["event_digest"] if migrated else None}
+        event.pop("event_digest")
+        event["event_digest"] = digest_bytes(canonical_json(event).encode())
+        migrated.append(event)
+    _fold_execution_journal(plan, _state(document, "source_state"), tuple(migrated))
+    dispatches = {"schema_version": 1, "plan_digest": _plan_digest(plan), "source_state": document["source_state"], "dispatches": list(entries.values())}
+    dispatches["dispatch_set_digest"] = digest_bytes(canonical_json(dispatches).encode())
+    paths = {
+        key: str(store / filename)
+        for key, filename in (
+            ("lifecycle_input_path", "lifecycle.json"),
+            ("dispatches_path", "dispatches.json"),
+            ("journal_path", "execution.jsonl"),
+            ("current_capture_path", "capture.json"),
+        )
+    }
+    outputs = {
+        Path(paths["lifecycle_input_path"]): (json.dumps(lifecycle, indent=2, sort_keys=True) + "\n").encode(),
+        Path(paths["dispatches_path"]): (json.dumps(dispatches, indent=2, sort_keys=True) + "\n").encode(),
+        Path(paths["journal_path"]): "".join(canonical_json(event) + "\n" for event in migrated).encode(),
+        Path(paths["current_capture_path"]): _read_regular_file_no_follow(args.current_capture),
+        store / "continuation.json": (canonical_json(paths) + "\n").encode(),
+    }
+    for path, content in outputs.items():
+        _write_bytes_atomically_once(path, content, mode=0o600 if path.name == "execution.jsonl" else 0o444)
+    return {**paths, "continuation_path": str(store / "continuation.json"), "lifecycle_input": lifecycle, "dispatch_set": dispatches}
+
+
+def _exhausted_mutation(document: dict[str, Any], plan: GraphPlan) -> dict[str, Any]:
+    """Retain a partial result even when a caller edits past the pre-mutation gate."""
+    reason = "repair-budget-exhausted: explicit user extension required"
+    store = Path(_required_text(document, "artifact_store")).resolve()
+    repository = Path(document["previous_capture"]["repository_root"]).resolve()
+    if store.is_relative_to(repository) or repository.is_relative_to(store):
+        msg = "repair stop artifact store must be outside the repository"
+        raise ValueError(msg)
+    store.mkdir(parents=True, exist_ok=True)
+    sources = _mutation_evidence_sources(document, plan)
+    result = {
+        "status": "stopped",
+        "stop_reason": reason,
+        "graph_proof_status": "partial",
+        "review_lifecycle": asdict(replace(plan.review_lifecycle, stop_reason=reason)),
+        "incomplete_node_ids": [node.node_id for node in plan.actual_worker_nodes],
+        "remaining_findings": [
+            {"evidence_id": record["evidence_id"], "findings": record.get("findings", [])} for _source, record in sources.values() if record.get("findings")
+        ],
+        "previous_capture": document["previous_capture"],
+        "unverified_capture": document["new_capture"],
+        "preserved_sources": [source for source, _record in sources.values()],
+    }
+    stop_path = store / "repair-budget-exhausted.json"
+    _write_bytes_atomically_once(stop_path, (canonical_json(result) + "\n").encode(), mode=0o444)
+    if document.get("journal_path"):
+        journal = Path(document["journal_path"])
+        _write_bytes_atomically_once(
+            journal.with_name(journal.name + ".stop.json"), (canonical_json({"stop_reason": reason, "stop_path": str(stop_path)}) + "\n").encode(), mode=0o444
+        )
+    return {**result, "stop_path": str(stop_path)}
+
+
 def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa: PLR0915
     """Close one repair epoch, recapture once, and emit a fresh final-state graph."""
     raw_plan = document.get("plan")
@@ -5170,6 +5346,7 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
         msg = "advance-after-mutation requires plan, previous_capture, new_capture, and planning_template objects"
         raise TypeError(msg)
     old_plan = _graph_plan(raw_plan)
+    _require_running_review(document)
     old_source_state = _state(document, "source_state")
     if any(unit.source_state != old_source_state for unit in old_plan.coalesced_validation_units):
         msg = "prior plan validation units differ from source_state"
@@ -5191,11 +5368,16 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
     if epoch < 1:
         msg = "repair_epoch must be positive"
         raise ValueError(msg)
+    if epoch == old_plan.review_lifecycle.repairs_completed + 1 and epoch > old_plan.review_lifecycle.repair_budget:
+        return _exhausted_mutation(document, old_plan)
+    repair_lifecycle = old_plan.review_lifecycle.next_repair(epoch)
     changed_paths = _mutation_path_delta(document, previous_capture, new_capture)
     metadata = metadata_transition({"before": new_capture, "after": document["post_repair_capture"]}) if "post_repair_capture" in document else None
     captured_paths = _text_list(new_capture, "captured_scope_paths")
     sources = _mutation_evidence_sources(document, old_plan)
     planning_input = bootstrap_document(new_capture, planning_template)
+    planning_input["review_lifecycle"] = asdict(old_plan.review_lifecycle)
+    planning_input["planning_purpose"] = "repair-verification"
     planning_input["authorization"] = authorization_after
     _expire_mutation_reuse(planning_input)
     require_schema(planning_input, _PLANNING_INPUT_SCHEMA)
@@ -5213,6 +5395,7 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
     )
     new_plan, coverage_reviews = _plan_delta_audits(document, old_plan, new_plan, sources)
     new_plan = _epoch_scoped_plan(new_plan, epoch)
+    new_plan = replace(new_plan, review_lifecycle=repair_lifecycle)
     reused_ids = {item.evidence_id for item in new_plan.audit_reuse_transitions}
     artifact_store = Path(_required_text(document, "artifact_store")).resolve() / f"repair-epoch-{epoch:03d}"
     dispatch_set = materialize_dispatches(
@@ -5725,6 +5908,8 @@ def _prepare_journal_event(
 
 def append_journal_event(path: Path, document: dict[str, Any], request: JournalEventRequest) -> dict[str, Any]:
     """Append one graph-validated lifecycle event and return its canonical record."""
+    if request.status == "in-flight":
+        _require_running_review(document, path)
     raw_plan = document.get("plan")
     if not isinstance(raw_plan, dict):
         msg = "journal-append requires a plan object"
@@ -5738,6 +5923,8 @@ def append_journal_event(path: Path, document: dict[str, Any], request: JournalE
     with lock_path.open("a+b") as lock_stream:
         fcntl.flock(lock_stream.fileno(), fcntl.LOCK_EX)
         try:
+            if request.status == "in-flight":
+                _require_running_review(document, path)
             try:
                 content = path.read_bytes()
             except FileNotFoundError:
@@ -5854,7 +6041,7 @@ def _accepted_journal_sources(
     return sources, records
 
 
-def next_ready_nodes(document: dict[str, Any], *, journal_events: tuple[dict[str, Any], ...], dispatch_set: dict[str, Any]) -> dict[str, Any]:
+def next_ready_nodes(document: dict[str, Any], *, journal_events: tuple[dict[str, Any], ...], dispatch_set: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, PLR0915
     """Return only dependency-ready dispatches from a verified execution journal."""
     raw_plan = document.get("plan")
     if not isinstance(raw_plan, dict):
@@ -5881,6 +6068,9 @@ def next_ready_nodes(document: dict[str, Any], *, journal_events: tuple[dict[str
     blockers = ["blocked nodes prevent completion: " + ", ".join(sorted(blocked))] if blocked else []
     blockers.extend(validation_reconciliation["blockers"])
     blockers.extend(metadata_blockers)
+    stop_reason = _review_stop_reason(document)
+    if stop_reason is not None:
+        blockers.append("review stopped: " + stop_reason)
     failed_early = [
         node_id for node_id in plan.pre_review_validation_nodes if (latest.get(node_id, {}).get("evidence") or {}).get("evidence_status") == "failed"
     ]
@@ -5893,7 +6083,7 @@ def next_ready_nodes(document: dict[str, Any], *, journal_events: tuple[dict[str
         blockers.append("source mutation requires a fresh plan: " + ", ".join(sorted(awaiting_replan)))
     ready: list[str] = []
     waiting: list[dict[str, Any]] = []
-    for node in plan.actual_worker_nodes:
+    for node in () if stop_reason is not None else plan.actual_worker_nodes:
         if node.node_id in accepted | awaiting_replan | blocked | in_flight:
             continue
         barrier = pending_validation_barrier(plan, state, latest, node.node_id)
@@ -5912,6 +6102,7 @@ def next_ready_nodes(document: dict[str, Any], *, journal_events: tuple[dict[str
     complete = not blockers and accepted == node_ids
     return {
         "blockers": blockers,
+        "stop_reason": stop_reason,
         "complete": complete,
         "journal": {"event_count": len(journal_events), "head_digest": head_digest, "plan_digest": _plan_digest(plan), "source_state": list(source_state)},
         "lifecycle": {
@@ -5975,15 +6166,20 @@ def schedule_ready(document: dict[str, Any], args: argparse.Namespace) -> dict[s
 
 
 def _schedule_ready_locked(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    """Select the current lanes without reviving a terminal run."""
     plan = _graph_plan(document["plan"])
     if plan.execution_profile not in {"grouped", "mixed"}:
         msg = "schedule-ready requires an adaptive grouped or mixed profile"
         raise ValueError(msg)
-    current = _with_current_capture(document, args.current_capture)
+    current = _with_current_capture({**document, "journal_path": str(args.journal)}, args.current_capture)
     source_state = _state(document, "source_state")
     events, _state_view, head = read_execution_journal(args.journal, plan=plan, source_state=source_state)
     dispatch_set = _read_json_object(args.dispatches)
     ready = next_ready_nodes(current, journal_events=events, dispatch_set=dispatch_set)
+    if ready["stop_reason"] is not None:
+        result = {**ready, "status": "stopped", "worker_node_ids": [], "coordinator_node_id": None, "cancel_node_ids": ready["lifecycle"]["in_flight_node_ids"]}
+        _write_bytes_atomically_once(args.output, (json.dumps(result, indent=2, sort_keys=True) + "\n").encode(), mode=0o444)
+        return result
     entries = {entry["node_id"]: entry for entry in dispatch_set["dispatches"]}
     selection = select_execution_lanes(document, modes={node.node_id: node.mode for node in plan.actual_worker_nodes}, entries=entries, ready=ready)
     identity = digest_bytes(
@@ -6058,6 +6254,8 @@ def fallback_to_coordinator(document: dict[str, Any], args: argparse.Namespace) 
 
 
 def _fallback_to_coordinator_locked(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    """Rebind one unstarted node only while the review is active."""
+    _require_running_review(document, args.journal)
     plan = _graph_plan(document["plan"])
     source_state = _state(document, "source_state")
     current_state = _current_metadata_state(document)
@@ -6248,6 +6446,7 @@ def _expanded_validation_plan(
 
 def reconcile_validation_requirements(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
     """Inspect late requirements or publish a source-preserving plan revision."""
+    _require_running_review(document, args.journal)
     plan = _graph_plan(document["plan"])
     source_state = _state(document, "source_state")
     if _capture_source_state(args.current_capture) != _current_metadata_state(document):
@@ -6610,6 +6809,7 @@ def _execution_failure_snapshots(
 
 def _recover_validation(document: dict[str, Any], args: argparse.Namespace, *, checks_started: bool) -> dict[str, Any]:  # noqa: C901, PLR0912, PLR0915
     """Publish one source-preserving attempt without relaxing either entry gate."""
+    _require_running_review(document, args.journal)
     operation = "recover-validation-execution" if checks_started else "recover-validation-launch"
     require_schema_definition(document, _RUNTIME_OPERATION_INPUT_SCHEMA, operation)
     plan = _graph_plan(document["plan"])
@@ -6828,6 +7028,8 @@ def finalize_proof(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, P
             duplicate_evidence.add(evidence.evidence_id)
         loaded[evidence.evidence_id] = (kind, record_expectation, evidence, content, normalized)
     preblockers = list(_text_list(document, "lifecycle_blockers"))
+    if (reason := _review_stop_reason(document)) is not None:
+        preblockers.append("review stopped: " + reason)
     normalized_records = [record for *_rest, record in loaded.values() if record is not None]
     successful_validation = {
         record["node_id"] for record in normalized_records if record.get("mode") == "validation" and record["status"] in {"passed", "reused"}
@@ -7070,6 +7272,9 @@ def _runtime_subparser(subparsers: Any, operation: str, help_text: str, *, contr
 def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="operation", required=True)
+    control_parser = _runtime_subparser(subparsers, "review-control", "check repair budget, extend it explicitly, authorize a comprehensive restart, or stop")
+    for flag in ("input", "output", "journal", "dispatches", "current-capture"):
+        control_parser.add_argument("--" + flag, type=Path, required=True)
     resume_parser = _runtime_subparser(subparsers, "resume-after-external-metadata", "resume after verified external staging without changing Git")
     resume_parser.add_argument("--input", type=Path, required=True)
     resume_parser.add_argument("--output", type=Path, required=True)
@@ -7249,7 +7454,7 @@ def _next_ready_from_files(document: dict[str, Any], args: argparse.Namespace) -
     plan = _graph_plan(raw_plan)
     source_state = _state(document, "source_state")
     capture = _read_json_object(args.current_capture)
-    document = dict(document)
+    document = {**document, "journal_path": str(args.journal)}
     document["current_source_state"] = [
         capture.get("scope_fingerprint"),
         capture.get("captured_worktree_fingerprint"),
@@ -7286,6 +7491,8 @@ def _with_current_capture(document: dict[str, Any], capture_path: Path) -> dict[
 
 def _finalize_document_from_files(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
     output = _with_current_capture(document, args.current_capture)
+    if args.journal is not None:
+        output["journal_path"] = str(args.journal)
     if (args.dispatches is None) != (args.journal is None):
         msg = "finalize-proof source discovery requires both --dispatches and --journal"
         raise ValueError(msg)
@@ -7584,6 +7791,8 @@ def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace)
 
 
 def _json_operation_output(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:  # noqa: C901, PLR0911
+    if args.operation == "review-control":
+        return review_control(document, args)
     if args.operation == "preflight-validation":
         return preflight_validation(document)
     if args.operation == "compile-node":

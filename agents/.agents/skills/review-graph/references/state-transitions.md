@@ -1,6 +1,8 @@
 # Review State Transitions
 
 Load for content repairs, external staging, or late validation/routing changes.
+Apply the [bounded lifecycle](bounded-lifecycle.md) before another source-editing
+batch or comprehensive restart; transitions retain the run-wide repair count.
 
 For completed software DOI checks needing canonical metadata, use
 [software DOI reconciliation](software-doi-reconciliation.md). It adds a focused
@@ -322,8 +324,8 @@ Supply the existing lifecycle `plan`, logical `source_state`, any
 `external_metadata_transitions`, `dispatches_path`, `journal_path`, both real
 captures (`previous_capture`, `new_capture`), and a new external `artifact_store`.
 Execution must be quiescent. The post-commit repository must be clean, on a named
-branch, and exactly one commit beyond the captured HEAD. Baseline and worktree
-captures are supported; other comparison modes, merges, and rebases require
+branch, and exactly one commit beyond the captured HEAD. Baseline, worktree, and
+branch/PR captures are supported; staged comparisons, merges, and rebases require
 replanning. The complete path map, file modes, repository boundary, instructions,
 skills, and references must remain proved. The runtime independently recaptures
 the repository and compares the committed tree against the captured bytes, so
@@ -341,10 +343,15 @@ Reconciliation is explicit and defaults to rechecking uncertain evidence:
 - Source-only audits retain their immutable evidence when their recorded reads
   and dependencies remain proved. Semantic `head`, `history`, or `index`
   dependencies and unclassified commands require current-state review.
+  In branch scope, a plain `git diff <captured-merge-base-SHA> -- <paths>`
+  declared as `head` can retain evidence when that immutable base, scope, and
+  complete path identities remain unchanged. Moving refs remain uncertain.
 - To retain an independent review, provide an `independent_reviews` entry keyed
   by node ID with its original `change_target`, immutable `comparison_commit`
-  (the captured pre-commit HEAD), and `reason`. Supported comparison targets are
-  plain local worktree diffs naming `HEAD` or its explicit SHA.
+  (the captured pre-commit HEAD for baseline/worktree or the original merge base
+  SHA for branch scope), and `reason`. Supported comparison targets are
+  plain local worktree diffs naming `HEAD` or its explicit SHA; branch scope
+  requires the fixed merge base SHA with an unchanged captured path scope.
   Staged comparisons and unresolved moving refs require a fresh review. The
   original target remains attributed to its original evidence.
   Fresh independent reviews pin that same comparison to the pre-commit SHA;

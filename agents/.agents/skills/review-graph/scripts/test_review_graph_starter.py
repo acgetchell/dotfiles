@@ -2,6 +2,7 @@
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 from copy import deepcopy
@@ -13,6 +14,7 @@ import pytest
 from capture_scope import _scope_data
 from research_repo_tools.process import run_command_bytes
 from review_graph_bootstrap import PLANNING_SCHEMA, RUNTIME_SCHEMA, bootstrap_document, main
+from review_graph_git import fixed_branch_comparison
 from review_graph_plan import DEFAULT_ROUTING_CATALOG, DEFAULT_SKILL_ROOT, plan_from_document
 from review_graph_runtime import main as runtime_main
 from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
@@ -65,6 +67,13 @@ def _invoke(tmp_path: Path, capture: dict[str, Any], choices: dict[str, Any]) ->
     capture_path.write_text(json.dumps(capture, indent=2) + "\n")
     choices_path.write_text(json.dumps(choices, indent=2) + "\n")
     return main(["--capture", str(capture_path), "--starter-config", str(choices_path), "--output", str(output)]), output
+
+
+def test_starter_comparison_is_commit_handoff_eligible(tmp_path: Path) -> None:
+    capture, choices = _fixture(tmp_path)
+    target = starter_template(capture, choices)["change_target"]
+    assert fixed_branch_comparison(target, capture["merge_base"])
+    assert shlex.split(target) == ["git", "diff", capture["merge_base"], "--", *capture["captured_scope_paths"]]
 
 
 def test_starter_bootstrap_fixture(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

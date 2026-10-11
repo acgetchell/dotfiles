@@ -3,6 +3,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
+    "review_lifecycle": {"type": "object"},
+    "planning_purpose": {"enum": ["initial-review", "repair-verification", "comprehensive-restart"]},
     "additional_nodes": {
       "items": {"$ref": "#/$defs/node"},
       "type": "array"

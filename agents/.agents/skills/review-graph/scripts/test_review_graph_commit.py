@@ -76,6 +76,16 @@ def _validation_payload(entry: dict[str, Any], *, blocked: bool = False) -> dict
     }
 
 
+def _commit_audit_payload(dispatch: dict[str, Any], *, mode: str, change_target: str) -> dict[str, Any]:
+    payload = _payload(dispatch["owned_paths"])
+    if mode == "branch":
+        payload.update(
+            commands_executed=[change_target],
+            git_dependencies=[{"kind": "head", "command": change_target, "reason": "Compare inspected bytes against the immutable branch base."}],
+        )
+    return payload
+
+
 def _commit_fixture(
     tmp_path: Path, *, mode: str = "baseline", git_sensitive_review: bool = False
 ) -> tuple[dict[str, Any], dict[str, dict[str, Any]], dict[str, dict[str, str]]]:
@@ -94,7 +104,10 @@ def _commit_fixture(
     )
     template["validation_requirements"].append(native)
     template["pre_review_validation_requirement_ids"] = [local["requirement_id"]]
-    capture = _scope_data(git, repository, mode, None, ())
+    base_ref = _run_git(git, repository, ("rev-parse", "HEAD^")).decode().strip() if mode == "branch" else None
+    capture = _scope_data(git, repository, mode, base_ref, ())
+    if mode == "branch":
+        template["change_target"] = f"git diff {capture['merge_base']} -- tool.py state.rs"
     _complete_structural_fixture_routing(template, cast("list[str]", capture["captured_scope_paths"]))
     plan = plan_from_document(bootstrap_document(capture, template), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)
     assert plan.dispatch_allowed, plan.blockers
@@ -110,7 +123,7 @@ def _commit_fixture(
     for entry in entries.values():
         dispatch = entry["dispatch"]
         if dispatch["mode"] == "audit":
-            payload = _payload(dispatch["owned_paths"])
+            payload = _commit_audit_payload(dispatch, mode=mode, change_target=template["change_target"])
             planned = next(unit for unit in dispatch["command_policy"]["planned_validation_units"] if "native-ci" in unit["requirement_ids"])
             payload["validation_requirements"] = [
                 {
@@ -133,7 +146,7 @@ def _commit_fixture(
     _run_test_git(git, "-C", str(repository), "switch", "-c", "fix/reviewed-commit")
     _run_test_git(git, "-C", str(repository), "add", ".")
     _run_test_git(git, "-C", str(repository), "commit", "-m", "Reviewed source")
-    current = _scope_data(git, repository, mode, None, ())
+    current = _scope_data(git, repository, mode, base_ref, ())
     request = {
         **lifecycle,
         "previous_capture": capture,
@@ -159,7 +172,7 @@ def _commit_fixture(
         "independent_reviews": {
             entry["node_id"]: {
                 "change_target": entry["dispatch"]["change_target"],
-                "comparison_commit": capture["head"],
+                "comparison_commit": capture["merge_base"] if mode == "branch" else capture["head"],
                 "reason": "Same captured worktree compared with the same immutable HEAD.",
             }
             for entry in entries.values()
@@ -173,11 +186,12 @@ def _commit_fixture(
 
 
 def _assert_original_comparison(request: dict[str, Any], dispatch: dict[str, Any]) -> None:
-    target = f"git diff {request['previous_capture']['head']} -- tool.py state.rs"
+    comparison = request["previous_capture"]["merge_base"] or request["previous_capture"]["head"]
+    target = f"git diff {comparison} -- tool.py state.rs"
     assert dispatch["change_target"] == target
     git = shutil.which("git")
     assert git is not None
-    diff = _run_git(git, Path(request["new_capture"]["repository_root"]), ("diff", request["previous_capture"]["head"], "--", "tool.py"))
+    diff = _run_git(git, Path(request["new_capture"]["repository_root"]), ("diff", comparison, "--", "tool.py"))
     assert b"+value = 2" in diff
 
 
@@ -251,6 +265,8 @@ def test_reused_audit_native_requirement_survives_a_repair_then_commit(tmp_path:
             },
         }
     )
+    assert result["lifecycle_input"]["plan"]["review_lifecycle"]["repairs_completed"] == 1
+    assert result["lifecycle_input"]["plan"]["review_lifecycle"]["repair_budget"] == 2
     bundle = runtime.build_synthesis_bundle(result["lifecycle_input"])
     reconciliation = bundle["plan_context"]["validation_reconciliation"]
     assert reconciliation["blockers"] == []
@@ -280,12 +296,12 @@ def _native_synthesis_payload(dispatch: dict[str, Any], bundle: dict[str, Any], 
     return _synthesis_payload(dispatch, bundle)
 
 
-@pytest.mark.parametrize("mode", ["baseline", "worktree"])
+@pytest.mark.parametrize("mode", ["baseline", "worktree", "branch"])
 @pytest.mark.parametrize("git_sensitive_review", [False, True])
 def test_commit_handoff_preserves_evidence_and_finalizes_exact_commit(tmp_path: Path, mode: str, git_sensitive_review: bool) -> None:
     request, entries, sources = _commit_fixture(tmp_path, mode=mode, git_sensitive_review=git_sensitive_review)
     originals = {path: Path(path).read_bytes() for source in sources.values() for path in source.values()}
-    with pytest.raises(ValueError, match="only the index"):
+    with pytest.raises(ValueError, match=r"only the index|require replanning"):
         runtime.resume_after_external_metadata(request)
     result = runtime.resume_after_authorized_commit(request)
     native_id = next(iter(request["native_ci"]))

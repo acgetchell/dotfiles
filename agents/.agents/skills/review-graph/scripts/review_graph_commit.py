@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from capture_scope import _run_git, _scope_data, _update_part
-from review_graph_git import _source_discovery_command, metadata_audit_blockers
+from review_graph_git import _source_discovery_command, fixed_branch_comparison, metadata_audit_blockers
 from review_graph_integrity import canonical_json, digest_bytes
 from review_graph_reuse import CommitHandoffTransition, regular_file_fingerprint, source_snapshot
 from review_graph_schema import require_schema_definition
@@ -93,8 +93,11 @@ def verify_commit_identity(transition: CommitHandoffTransition) -> None:
     """Check identity and scope before publishing any history files."""
     before, after = transition.before, transition.after
     stable = ("repository_root", "capture_mode", "base_ref", "merge_base", "requested_paths", "repository_path_fingerprints", "repository_symlink_paths")
-    if before.capture_mode not in {"baseline", "worktree"} or any(getattr(before, key) != getattr(after, key) for key in stable):
-        msg = "commit handoff requires identical complete paths, modes, and repository boundaries in baseline/worktree scope"
+    if before.capture_mode not in {"baseline", "worktree", "branch"} or any(getattr(before, key) != getattr(after, key) for key in stable):
+        msg = "commit handoff requires identical complete paths, modes, and repository boundaries in baseline/worktree/branch scope"
+        raise ValueError(msg)
+    if before.capture_mode == "branch" and (before.captured_scope_paths != after.captured_scope_paths or before.merge_base is None):
+        msg = "branch commit handoff requires unchanged scope and a fixed comparison base"
         raise ValueError(msg)
     if before.head == after.head or not bool(after.branch):
         msg = "commit handoff requires a new commit on a named branch"
@@ -215,10 +218,10 @@ def reconciliation_policy(
             dispatch.get("mode") != "independent-review"
             or record.get("status") not in {"completed", "no-findings"}
             or policy.get("change_target") != dispatch["change_target"]
-            or policy.get("comparison_commit") != transition.before.head
+            or policy.get("comparison_commit") != comparison_commit(transition)
             or not policy.get("reason", "").strip()
             or "commands_executed" not in record
-            or not _unchanged_comparison(dispatch["change_target"], transition.before.head)
+            or not _handoff_comparison(dispatch["change_target"], transition)
         ):
             msg = "independent review reuse requires its original change target and captured comparison commit"
             raise ValueError(msg)
@@ -245,6 +248,19 @@ def _unchanged_comparison(target: str, head: str) -> bool:
     return _source_discovery_command(shlex.join(["HEAD" if word == head else word for word in words]))
 
 
+def comparison_commit(transition: ExternalMetadataTransition) -> str:
+    """Branch repairs keep their original merge base even as HEAD advances."""
+    return transition.before.merge_base if transition.before.capture_mode == "branch" and transition.before.merge_base is not None else transition.before.head
+
+
+def _handoff_comparison(target: str, transition: ExternalMetadataTransition) -> bool:
+    """Accept branch comparisons only against an immutable captured base SHA."""
+    comparison = comparison_commit(transition)
+    if transition.before.capture_mode != "branch":
+        return _unchanged_comparison(target, comparison)
+    return fixed_branch_comparison(target, comparison)
+
+
 def pin_independent_rechecks(plan: GraphPlan, transition: CommitHandoffTransition) -> GraphPlan:
     """Keep fresh reviews on the original comparison even after HEAD moves."""
     preserved = {item["node_id"] for item in transition.commit_handoff["preserved_evidence"].values()}
@@ -252,12 +268,12 @@ def pin_independent_rechecks(plan: GraphPlan, transition: CommitHandoffTransitio
     for node in plan.actual_worker_nodes:
         if node.mode == "independent-review" and node.node_id not in preserved:
             target = node.change_target or ""
-            if not _unchanged_comparison(target, transition.before.head):
+            if not _handoff_comparison(target, transition):
                 msg = "commit handoff cannot pin the independent comparison target; replan required"
                 raise ValueError(msg)
             words = shlex.split(target)
             boundary = words.index("--") if "--" in words else len(words)
-            pinned = [transition.before.head if word == "HEAD" else word for word in words[:boundary]]
+            pinned = [comparison_commit(transition) if word == "HEAD" else word for word in words[:boundary]]
             node = replace(node, change_target=shlex.join([*pinned, *words[boundary:]]))
         nodes.append(node)
     return replace(plan, actual_worker_nodes=tuple(nodes))

@@ -3,6 +3,180 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Review Graph Runtime Operation Inputs v1",
   "$defs": {
+    "review-control": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "plan": {
+              "type": "object"
+            },
+            "source_state": {
+              "$ref": "#/$defs/sourceState"
+            },
+            "artifact_store": {
+              "type": "string",
+              "minLength": 1
+            },
+            "external_metadata_transitions": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "action": {
+              "const": "begin-repair"
+            },
+            "authorization": {
+              "const": "review-and-fix"
+            }
+          },
+          "required": [
+            "plan",
+            "source_state",
+            "artifact_store",
+            "action",
+            "authorization"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "plan": {
+              "type": "object"
+            },
+            "source_state": {
+              "$ref": "#/$defs/sourceState"
+            },
+            "artifact_store": {
+              "type": "string",
+              "minLength": 1
+            },
+            "external_metadata_transitions": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "action": {
+              "const": "stop"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "plan",
+            "source_state",
+            "artifact_store",
+            "action",
+            "reason"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "plan": {
+              "type": "object"
+            },
+            "source_state": {
+              "$ref": "#/$defs/sourceState"
+            },
+            "artifact_store": {
+              "type": "string",
+              "minLength": 1
+            },
+            "external_metadata_transitions": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "action": {
+              "const": "extend-budget"
+            },
+            "additional_epochs": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "user_authorization": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "plan",
+            "source_state",
+            "artifact_store",
+            "action",
+            "additional_epochs",
+            "user_authorization"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "plan": {
+              "type": "object"
+            },
+            "source_state": {
+              "$ref": "#/$defs/sourceState"
+            },
+            "artifact_store": {
+              "type": "string",
+              "minLength": 1
+            },
+            "external_metadata_transitions": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "action": {
+              "const": "authorize-restart"
+            },
+            "restart_trigger": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "trigger",
+                "evidence",
+                "targeted_verification_insufficient"
+              ],
+              "properties": {
+                "trigger": {
+                  "enum": [
+                    "confirmed-new-defect",
+                    "expanded-source-scope",
+                    "explicit-user-request"
+                  ]
+                },
+                "evidence": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "targeted_verification_insufficient": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          },
+          "required": [
+            "plan",
+            "source_state",
+            "artifact_store",
+            "action",
+            "restart_trigger"
+          ]
+        }
+      ]
+    },
     "commitHandoff": {
       "type": "object",
       "additionalProperties": false,
@@ -361,6 +535,8 @@
     "advance-after-mutation": {
       "additionalProperties": false,
       "properties": {
+        "journal_path": {"type": "string", "minLength": 1},
+        "dispatches_path": {"type": "string", "minLength": 1},
         "external_metadata_transitions": {
           "type": "array",
           "items": {

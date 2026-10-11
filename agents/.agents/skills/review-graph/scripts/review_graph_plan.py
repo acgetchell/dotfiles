@@ -20,6 +20,7 @@ from research_repo_tools.process import ExecutableNotFoundError, format_exceptio
 from review_graph_coverage import coverage_reference
 from review_graph_executor import executor_permissions
 from review_graph_integrity import digest_bytes, digest_json
+from review_graph_lifecycle import ReviewLifecycle, lifecycle_from_document
 from review_graph_provenance import review_scope_body
 from review_graph_reuse import (
     AuditInputIdentity,
@@ -543,6 +544,7 @@ class GraphPlan:
     validation_recoveries: tuple[dict[str, Any], ...] = ()
     pre_review_validation_nodes: tuple[str, ...] = ()
     commit_handoffs: tuple[ExternalMetadataTransition, ...] = ()
+    review_lifecycle: ReviewLifecycle = field(default_factory=ReviewLifecycle)
 
 
 @dataclass(frozen=True)
@@ -2432,6 +2434,8 @@ def _identifier_tuple_blockers(values: Sequence[str], *, label: str) -> tuple[st
 def graph_plan_digest(plan: GraphPlan) -> str:
     """Hash a plan without empty optional fields absent from legacy identities."""
     document = asdict(plan)
+    if plan.review_lifecycle == ReviewLifecycle():
+        document.pop("review_lifecycle")
     if not plan.commit_handoffs:
         document.pop("commit_handoffs")
     if not plan.pre_review_validation_nodes:
@@ -2454,6 +2458,8 @@ def graph_plan_digest_matches(plan: GraphPlan, digest: str) -> bool:
     if digest == graph_plan_digest(plan):
         return True
     legacy = asdict(plan)
+    if plan.review_lifecycle == ReviewLifecycle():
+        legacy.pop("review_lifecycle")
     if not plan.commit_handoffs:
         legacy.pop("commit_handoffs")
     if not plan.pre_review_validation_nodes:
@@ -5786,6 +5792,18 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0915
     observed_metadata_transition: ExternalMetadataTransition | None = None,
 ) -> GraphPlan:
     """Build a graph plan from the exhaustive fixture/CLI JSON schema."""
+    lifecycle = lifecycle_from_document(document.get("review_lifecycle"))
+    lifecycle.require_active()
+    purpose = document.get("planning_purpose", "initial-review")
+    if purpose not in {"initial-review", "repair-verification", "comprehensive-restart"}:
+        msg = "unknown planning_purpose"
+        raise ValueError(msg)
+    if lifecycle != ReviewLifecycle() and purpose == "initial-review":
+        msg = "an existing review lifecycle requires targeted repair verification or an explicitly authorized comprehensive restart"
+        raise ValueError(msg)
+    if purpose == "comprehensive-restart" and not lifecycle.comprehensive_restarts:
+        msg = "comprehensive restart requires a recorded concrete trigger"
+        raise ValueError(msg)
     execution_profile = document.get("execution_profile", "grouped")
     if not isinstance(execution_profile, str) or execution_profile not in {"grouped", "isolated", "isolated-only", "mixed"}:
         msg = "execution_profile must be exactly grouped, isolated, isolated-only, or mixed"
@@ -6006,7 +6024,7 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0915
                 change_target=(str(item["change_target"]) if item.get("change_target") is not None else None),
             )
         )
-    return plan_graph(
+    plan = plan_graph(
         review_requirements,
         validation_requirements,
         synthesis_nodes,
@@ -6022,6 +6040,7 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0915
         routing_decisions=routing_decisions,
         pre_review_validation_requirement_ids=_tuple_field(document, "pre_review_validation_requirement_ids"),
     )
+    return replace(plan, review_lifecycle=lifecycle)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

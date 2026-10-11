@@ -1,0 +1,86 @@
+# Bounded Repair And Delivery Lifecycle
+
+Use one comprehensive initial review. Batch all authorized findings, including
+optional findings when requested, then verify affected contracts and reuse
+independently proved unchanged evidence. Scientific checks, initial exhaustive
+coverage, immutable evidence, and exact-commit native CI retain their existing
+requirements.
+
+## Repair Budget
+
+The runtime owns a default budget of **two content-changing repair batches**
+after the initial review barrier. One epoch is one serialized batch of source
+edits, including optional fixes and required formatting, closed by a content
+recapture and `advance-after-mutation`. Individual findings, formatting commands,
+red/green checks, metadata staging, commits, pushes, and waiting for CI do not
+increment this counter. A no-content-change batch is not a repair epoch. Epochs
+must be consecutive; replanning, continuation, or publication never resets them.
+
+Before editing, run `review-control` with `action: begin-repair` and
+`authorization: review-and-fix`. Use the lifecycle `plan` and `source_state`, an
+external `artifact_store`, and these CLI arguments:
+
+```sh
+review_graph_runtime.py review-control --input <request.json> \
+  --journal <execution.jsonl> --dispatches <dispatches.json> \
+  --current-capture <capture.json> --output <control-result.json>
+```
+
+`repair-authorized` returns the next ordinal. Finish compatible edits together;
+do not turn each newly discovered optional cleanup into another batch. Pass
+`journal_path` and `dispatches_path` to `advance-after-mutation` so it collects
+accepted evidence automatically; also retain historical reuse sources. Its
+per-node decisions explain which changed or uncertain inputs require inspection.
+Keep a branch review's captured merge base fixed across repairs.
+
+At exhaustion, the control operation publishes an immutable stopped continuation
+and a stop marker on the old journal. It reports remaining findings, incomplete
+nodes, and a partial proof status. Disclose deferred optional cleanup, affected
+verification still needed, and required scientific or CI obligations. Do not
+bootstrap another run or renumber epochs to bypass the boundary.
+
+Further source edits require an explicit user budget extension. Use
+`action: extend-budget`, positive `additional_epochs`, and the user's exact
+`user_authorization`. Follow the returned continuation paths together. This
+preserves the counter, dispatches, journal history, and accepted evidence;
+the original stopped continuation stays stopped. An extension may clear budget
+exhaustion but cannot undo an explicit user stop.
+
+## Delivery, CI, And Comprehensive Restarts
+
+Track requested fixes delivered, affected verification, hosted CI, and formal
+proof completion separately. Committing/pushing fixes, pending CI, and incomplete
+proof bookkeeping are not new defects and do not authorize another comprehensive
+review. Continue eligible evidence through the authorized commit handoff,
+including branch/PR scope, with the original immutable comparison base. Await or
+report pending hosted results. A failed CI check can reopen its relevant contract
+and necessary validation within the remaining repair budget.
+
+A fresh comprehensive pass requires `review-control` with
+`action: authorize-restart` and a `restart_trigger` containing:
+
+- `trigger`: `confirmed-new-defect`, `expanded-source-scope`, or
+  `explicit-user-request`.
+- `evidence`: the concrete defect, scope delta, or user's request.
+- `targeted_verification_insufficient`: why affected-contract verification cannot
+  cover this trigger.
+
+The operation records authorization without scheduling any audits itself. Carry
+the run-wide lifecycle into any replacement plan; it does not grant more repairs.
+Planning inputs use `review_lifecycle` from that continuation and
+`planning_purpose: comprehensive-restart`; ordinary repair transitions set
+`planning_purpose: repair-verification` themselves. The planner rejects a stopped
+run or a comprehensive restart lacking its recorded trigger.
+Default repair replanning uses unchanged evidence rather than a comprehensive
+restart. Never describe an unfinished fresh pass as a completed formal review.
+
+## Explicit User Stop
+
+Immediately interrupt active worker agents when the user stops the run. Run
+`review-control` with `action: stop` and the user's `reason`; it preserves
+incomplete evidence and returns `cancel_node_ids`. Cancel every listed worker
+using the actual worker tool and terminate active coordinator commands. The
+runtime records cancellation obligations; it does not operate agent tools.
+Do not wait for an audit to finish before honoring the stop. Scheduling,
+fallback, repair, and recovery cannot revive the stopped plan or its old journal.
+Report the stopping reason and unfinished obligations with partial status.
