@@ -11,7 +11,7 @@ untracked file with a file-appropriate reader before routing it; a status entry
 or filename alone is insufficient. Classify the resulting complete scope by
 behavior:
 
-- Python modules and scripts
+- Python modules, scripts, and type stubs
 - pytest tests, fixtures, and configuration
 - notebooks and notebook helpers
 - packaging, dependency, uv, Ruff, ty, and runtime metadata
@@ -23,6 +23,7 @@ behavior:
 | Skill | Select when | Skip when |
 |---|---|---|
 | `python-build-portability` | Wheels, sdists, package discovery/data, installed imports, entry points, extras, markers, supported runtimes/platforms, native extensions, external consumers; platform-sensitive scripts and fixtures, including unpackaged tooling | Only workflow commands or tool pins changed and no Python platform contract is affected |
+| `python-api-design` | Material public or cross-module concepts, imports/exports, callable signatures, return shapes, protocols, callbacks, stubs, extension hooks, or compatibility changed | Private helper changes with no material shared caller contract |
 | `jupyter-notebook-review` | Notebook cells, metadata, outputs, execution, plotting, environments, or notebook artifacts changed | A normal Python module merely supports a notebook |
 | `python-cli-review` | User-visible arguments, output, privacy, application files, dates/times, or exit behavior changed | Pure parser/model or support-transform change |
 | `python-parse-dont-validate` | Raw external values carry structural or semantic invariants into trusted code | Passive reports or already-validated values |
@@ -50,6 +51,8 @@ selected skill names.
 - Scientific notebook plotting existing artifacts: notebook, then production; add scientific only when cells perform or validate scientific computation.
 - Release script with a user-facing CLI: support scripts; add CLI only for a substantial public output/argument contract.
 - Packaging metadata or installed import change: build portability, then production; add tooling only for command or workflow mechanics.
+- Public library interface or stub change: API design, then production; add
+  parsing for input invariants and portability for distribution/runtime concerns.
 - Tests-only change: test quality plus the domain specialist only when the tests encode a domain assumption that could hide a production bug.
 - Ordinary reusable module: production; add a focused specialist only for a matching concern.
 
@@ -60,6 +63,7 @@ Prefer repository commands. Otherwise choose the smallest applicable evidence:
 | Surface | Focused evidence |
 |---|---|
 | Python source | Compile/import check, `uv run --locked ruff check`, `uv run --locked ruff format --check`, `uv run --locked ty check`, targeted pytest |
+| Public API/stubs | Representative public imports and caller expressions, configured type checks, affected runtime tests; installed consumers through portability when needed |
 | CLI | Targeted tests plus safe `--help` or entry-point smoke check |
 | Parser/model | Rejection and acceptance tests plus `uv run --locked ty check` |
 | Scientific | Targeted numerical/property/fixture tests; benchmark only for performance claims |

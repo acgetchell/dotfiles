@@ -19,6 +19,12 @@
       "expected_surfaces": ["python", "tooling"]
     },
     {
+      "id": "python-public-stubs-only",
+      "mode": "branch",
+      "paths": ["src/library/__init__.pyi", "api.pyi"],
+      "expected_surfaces": ["python"]
+    },
+    {
       "id": "cpp-build-api-scientific-tests",
       "mode": "branch",
       "paths": ["CMakeLists.txt", "include/model.hpp", "src/model.cpp", "tests/model.cpp"],

@@ -64,7 +64,7 @@ Select `rust-review-orchestrator` for:
 
 Select `python-review-orchestrator` for:
 
-- `*.py`, `scripts/**/*.py`, `tests/**/*.py`, Python packages, Python fixtures, and generated Python utilities
+- `*.py`, `*.pyi`, `scripts/**/*.py`, `tests/**/*.py`, Python packages, type stubs, Python fixtures, and generated Python utilities
 - `.ipynb`, notebook runners, notebook dependency groups, and rendered notebook workflows
 - `pyproject.toml`, `uv.lock`, and pytest/Ruff/ty/coverage configuration
 - workflows or recipes that change Python validation, release helpers, notebooks, or coverage

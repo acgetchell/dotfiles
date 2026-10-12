@@ -73,6 +73,10 @@ match.
 
 ### 3. Application And Boundary Behavior
 
+- Select `python-api-design` for material public or cross-module concepts,
+  import/export paths, callable signatures, return shapes, protocols, callbacks,
+  type stubs, subclassing hooks, or compatible evolution. Skip private helper
+  changes with no material shared caller contract.
 - Select `python-cli-review` for user-visible application contracts, arguments,
   output channels, privacy-sensitive output, file workflows, and date/time
   behavior.

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python API Design"
+  short_description: "Review Python caller contracts and API evolution"
+  default_prompt: "Use $python-api-design to review this Python public API for cohesive concepts, usable signatures, precise typing, and compatible evolution."

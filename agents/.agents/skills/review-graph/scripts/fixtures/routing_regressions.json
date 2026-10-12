@@ -1,6 +1,15 @@
 {
   "cases": [
     {
+      "id": "python-api-source-and-stubs-exclude-unrelated-text",
+      "consulted_routers": ["review-graph", "python-review-orchestrator"],
+      "paths": ["api.py", "src/library/__init__.py", "src/library/__init__.pyi", "api.pyi", "notes.txt"],
+      "expected_matches": {
+        "python.api-design": ["api.py", "src/library/__init__.py", "src/library/__init__.pyi", "api.pyi"],
+        "python.build": ["src/library/__init__.py", "src/library/__init__.pyi"]
+      }
+    },
+    {
       "id": "support-and-fixture-portability-without-packaging-or-workflow-edits",
       "consulted_routers": ["review-graph", "python-review-orchestrator"],
       "paths": ["scripts/benchmark.py", "scripts/tests/test_commands.py", "tools/release.py", "tests/test_paths.py"],
