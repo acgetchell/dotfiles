@@ -42,7 +42,7 @@ def _absolute_command() -> str:
 def test_absolute_validator_command_materializes_with_source_path_ownership(tmp_path: Path) -> None:
     planning = _sparse_plan_document()
     planning["validation_requirements"][0].update(commands=[_absolute_command()], canonical_recipe=None)
-    plan = plan_from_document(planning, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
+    plan = plan_from_document(planning, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=SKILL_ROOT.parents[2])
     request = {
         "plan": _json_plan(plan),
         "source_state": ["scope", "worktree", "repository"],

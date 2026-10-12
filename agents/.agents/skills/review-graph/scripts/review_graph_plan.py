@@ -2386,13 +2386,8 @@ def plan_graph(  # noqa: C901, PLR0913, PLR0915
 
 def _initialize_plan_control(plan: GraphPlan, *, control_root: Path | None, repository_root: Path | None) -> GraphPlan:
     """Issue shared authority for initialized plans while retaining unbound drafts as data."""
-    directories = {
-        Path(directory).resolve() for unit in plan.coalesced_validation_units for directory in unit.working_directories if Path(directory).is_absolute()
-    }
-    repository = (
-        _validated_repository_root(repository_root) if repository_root is not None else next(iter(directories), None) if len(directories) == 1 else None
-    )
-    if repository is None or not repository.is_dir():
+    repository = _validated_repository_root(repository_root)
+    if repository is None:
         return plan
     binding = issue_run_control(asdict(plan), repository=repository, root=control_root)
     return replace(plan, review_lifecycle=replace(plan.review_lifecycle, run_control=binding))

@@ -140,7 +140,7 @@ def _recovery_fixture(tmp_path: Path, *, late: bool = False, extra_validator: bo
         planning = _sparse_plan_document()
         extra = {**planning["validation_requirements"][0], "requirement_id": "second-validation", "baseline": False, "environment": "second executor"}
         planning["validation_requirements"].append(extra)
-        lifecycle["plan"] = _json_plan(plan_from_document(planning, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,)))
+        lifecycle["plan"] = _json_plan(plan_from_document(planning, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=SKILL_ROOT.parents[2]))
         dispatches = materialize_dispatches(
             {
                 **lifecycle,

@@ -271,7 +271,7 @@ def _sparse_plan_document() -> dict[str, Any]:
 
 
 def _sparse_plan() -> GraphPlan:
-    return plan_from_document(_sparse_plan_document(), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
+    return plan_from_document(_sparse_plan_document(), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=SKILL_ROOT.parents[2])
 
 
 def _late_handoff_replan() -> GraphPlan:
@@ -311,7 +311,7 @@ def _late_handoff_replan() -> GraphPlan:
             "review_surface": [STATE_FIXTURE],
         },
     ]
-    return plan_from_document(document, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
+    return plan_from_document(document, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=SKILL_ROOT.parents[2])
 
 
 def _json_plan(plan: GraphPlan) -> dict[str, object]:

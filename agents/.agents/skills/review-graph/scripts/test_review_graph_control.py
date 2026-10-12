@@ -223,6 +223,41 @@ def test_control_references_are_immutable_and_bound_to_the_repository(tmp_path: 
 
 
 @pytest.mark.parametrize("constructor", ["document", "graph"])
+def test_initialization_does_not_infer_repository_from_validation_directory(tmp_path: Path, constructor: str) -> None:
+    _git, repository, template, capture, _plan = _baseline_mutation_fixture(tmp_path)
+    document = bootstrap_document(capture, template)
+    validation_directory = tmp_path / "validation-workspace"
+    validation_directory.mkdir()
+    document["validation_requirements"][0]["working_directories"] = [str(validation_directory)]
+    store = tmp_path / "unissued-control"
+    if constructor == "document":
+        plan = plan_from_document(document, control_root=store)
+    else:
+        plan = plan_graph((), validation_requirements_from_document(document, repository), (), control_root=store)
+    assert plan.review_lifecycle.run_control is None
+    assert not store.exists()
+
+
+@pytest.mark.parametrize("constructor", ["document", "graph"])
+def test_initialization_binds_explicit_repository_with_external_validation_directory(tmp_path: Path, constructor: str) -> None:
+    _git, repository, template, capture, _plan = _baseline_mutation_fixture(tmp_path)
+    document = bootstrap_document(capture, template)
+    validation_directory = tmp_path / "validation-workspace"
+    validation_directory.mkdir()
+    document["validation_requirements"][0]["working_directories"] = [str(validation_directory)]
+    store = tmp_path / "issued-control"
+    if constructor == "document":
+        plan = plan_from_document(document, repository_root=repository, control_root=store)
+    else:
+        plan = plan_graph((), validation_requirements_from_document(document, repository), (), repository_root=repository, control_root=store)
+    binding = plan.review_lifecycle.run_control
+    assert binding is not None
+    verify_run_control(binding, repository=repository)
+    with pytest.raises(ValueError, match="repository_root differs"):
+        verify_run_control(binding, repository=validation_directory)
+
+
+@pytest.mark.parametrize("constructor", ["document", "graph"])
 def test_initialization_rejects_repository_control_store_before_writes(tmp_path: Path, constructor: str) -> None:
     _git, repository, template, capture, _plan = _baseline_mutation_fixture(tmp_path)
     document = bootstrap_document(capture, template)

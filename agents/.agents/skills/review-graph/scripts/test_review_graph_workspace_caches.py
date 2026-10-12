@@ -142,7 +142,10 @@ def test_declared_cache_policy_preserves_symlink_identity_without_following_cont
     payload = target / "payload"
     payload.write_bytes(b"initial")
     link = tmp_path / "custom-cache"
-    link.symlink_to(target, target_is_directory=True)
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"Symlink creation unavailable: {error}")
     before = _workspace_content_digest(link, declared_cache=True)
     payload.write_bytes(b"changed")
     after_contents = _workspace_content_digest(link, declared_cache=True)
