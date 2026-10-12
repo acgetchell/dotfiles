@@ -73,16 +73,7 @@ MAX_NATIVE_IDENTIFIER_LENGTH = 4_096
 MAX_NATIVE_IDENTIFIER_COUNT = 1_024
 _SHA256_DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}")
 VALIDATION_ARTIFACT_DIGEST_MODES = frozenset(
-    {
-        "bounded-directory-metadata-v1",
-        "bounded-directory-metadata-v2",
-        "bounded-directory-metadata-v3",
-        "content-sha256-v1",
-        "recursive-content-sha256-v1",
-        "recursive-content-sha256-v2",
-        "special-metadata-v1",
-        "symlink-target-v1",
-    }
+    {"bounded-directory-metadata-v3", "content-sha256-v1", "recursive-content-sha256-v2", "special-metadata-v1", "symlink-target-v1"}
 )
 _REVIEW_RESULT_SECTIONS = (
     "## Skill Loading",
@@ -546,6 +537,7 @@ class GraphPlan:
     pre_review_validation_nodes: tuple[str, ...] = ()
     commit_handoffs: tuple[ExternalMetadataTransition, ...] = ()
     review_lifecycle: ReviewLifecycle = field(default_factory=ReviewLifecycle)
+    independent_review_after_audits: bool = False
 
 
 @dataclass(frozen=True)
@@ -2246,6 +2238,7 @@ def plan_graph(  # noqa: C901, PLR0913, PLR0915
     validator_skill_digest: str = "",
     validator_reference_digests: tuple[tuple[str, str], ...] = (),
     execution_profile: str = "grouped",
+    independent_review_after_audits: bool = False,
     captured_path_line_bounds: tuple[tuple[str, int], ...] = (),
     routing_decisions: tuple[RoutingDecision, ...] = (),
     pre_review_validation_requirement_ids: tuple[str, ...] = (),
@@ -2258,6 +2251,9 @@ def plan_graph(  # noqa: C901, PLR0913, PLR0915
         msg = "execution_profile must be exactly grouped, isolated, isolated-only, or mixed"
         raise ValueError(msg)
     budget = budget or WorkerBudget()
+    if type(independent_review_after_audits) is not bool:
+        msg = "independent_review_after_audits must be a boolean"
+        raise ValueError(msg)
     if budget.total < 1 or budget.recovery_finalization_reserve < 0:
         msg = "worker budget must be positive and recovery/finalization reserve nonnegative"
         raise ValueError(msg)
@@ -2380,6 +2376,7 @@ def plan_graph(  # noqa: C901, PLR0913, PLR0915
         blockers=routing_assessment.blockers if routing_assessment is not None else (),
         pre_review_validation_nodes=early,
         review_lifecycle=review_lifecycle or ReviewLifecycle(),
+        independent_review_after_audits=independent_review_after_audits,
     )
     return _initialize_plan_control(plan, control_root=control_root, repository_root=repository_root) if review_lifecycle is None else plan
 
@@ -2449,6 +2446,8 @@ def _identifier_tuple_blockers(values: Sequence[str], *, label: str) -> tuple[st
 def graph_plan_digest(plan: GraphPlan) -> str:
     """Hash a plan without empty optional fields absent from legacy identities."""
     document = asdict(plan)
+    if not plan.independent_review_after_audits:
+        document.pop("independent_review_after_audits")
     if plan.review_lifecycle == ReviewLifecycle():
         document.pop("review_lifecycle")
     if not plan.commit_handoffs:
@@ -2473,6 +2472,8 @@ def graph_plan_digest_matches(plan: GraphPlan, digest: str) -> bool:
     if digest == graph_plan_digest(plan):
         return True
     legacy = asdict(plan)
+    if not plan.independent_review_after_audits:
+        legacy.pop("independent_review_after_audits")
     if plan.review_lifecycle == ReviewLifecycle():
         legacy.pop("review_lifecycle")
     if not plan.commit_handoffs:
@@ -6056,6 +6057,7 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0913, PLR0915
         additional_nodes=(*routed_additional_nodes, *declared_additional_nodes),
         routing_assessment=routing_assessment,
         execution_profile=execution_profile,
+        independent_review_after_audits=_boolean_field(document, "independent_review_after_audits", default=False),
         budget=WorkerBudget(
             total=int(document.get("worker_budget", DEFAULT_TOTAL_FRESH_WORKER_BUDGET)),
             recovery_finalization_reserve=int(document.get("recovery_finalization_reserve", DEFAULT_RECOVERY_FINALIZATION_RESERVE)),
@@ -6117,4 +6119,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    from review_graph_session import verify_current_snapshot
+
+    verify_current_snapshot()
     raise SystemExit(main())

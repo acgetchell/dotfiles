@@ -12,6 +12,7 @@ from review_graph_bootstrap import bootstrap_document
 from review_graph_coverage import coverage_execution_view
 from review_graph_integrity import canonical_json, digest_bytes
 from review_graph_plan import plan_from_document
+from review_graph_views import execution_view_bytes
 from test_review_graph_runtime import (
     ROUTING_CATALOG,
     SKILL_ROOT,
@@ -393,6 +394,9 @@ def test_self_consistent_dispatch_still_requires_its_planned_coverage(tmp_path: 
     worker_input = Path(partial["worker_input_path"])
     worker_input.chmod(0o644)
     worker_input.write_text(json.dumps(partial, indent=2, sort_keys=True) + "\n")
+    execution_view = Path(partial["worker_execution_path"])
+    execution_view.chmod(0o644)
+    execution_view.write_bytes(execution_view_bytes(partial, worker_input.read_bytes()))
     dispatches = result["dispatch_set"]
     dispatches["dispatch_set_digest"] = digest_bytes(canonical_json({key: value for key, value in dispatches.items() if key != "dispatch_set_digest"}).encode())
     lifecycle = json.loads(Path(result["lifecycle_input_path"]).read_bytes())

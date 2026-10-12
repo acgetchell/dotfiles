@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "contracts": [
+    {
+      "contract_id": "git-config",
+      "commands": [
+        "just git-config-check"
+      ],
+      "working_directories": [
+        "."
+      ],
+      "implementation_paths": [
+        "justfile",
+        "git/.gitconfig",
+        "pyproject.toml"
+      ],
+      "input_scope": "prefixes",
+      "input_prefixes": [
+        "git"
+      ],
+      "git_inputs": [],
+      "deterministic": true,
+      "rationale": "Parses repository Git configuration from an explicit file; execution does not read repository Git state."
+    },
+    {
+      "contract_id": "justfile-format",
+      "commands": [
+        "just justfile-fmt-check"
+      ],
+      "working_directories": [
+        "."
+      ],
+      "implementation_paths": [
+        "justfile",
+        "pyproject.toml"
+      ],
+      "input_scope": "prefixes",
+      "input_prefixes": [
+        "justfile"
+      ],
+      "git_inputs": [],
+      "deterministic": true,
+      "rationale": "Checks only the explicitly discovered root justfile using the environment-bound just executable."
+    },
+    {
+      "contract_id": "repository-ci",
+      "commands": [
+        "just ci"
+      ],
+      "working_directories": [
+        "."
+      ],
+      "implementation_paths": [
+        "justfile",
+        "pyproject.toml",
+        "uv.lock"
+      ],
+      "input_scope": "repository",
+      "input_prefixes": [],
+      "git_inputs": [
+        "index",
+        "head",
+        "history"
+      ],
+      "deterministic": false,
+      "rationale": "Includes Git-aware discovery and integration fixtures; no narrower or deterministic source-failure reuse claim is made."
+    }
+  ]
+}

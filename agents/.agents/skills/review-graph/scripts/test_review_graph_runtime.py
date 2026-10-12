@@ -596,6 +596,7 @@ def test_planning_schema_rejects_boolean_schema_versions(value: bool) -> None:
 @pytest.mark.parametrize("exit_code", ["signal", "1.0", "+ 1", "+12", ""])
 def test_validation_payload_schema_rejects_nonnumeric_exit_code_strings(exit_code: str) -> None:
     payload = {
+        "schema_version": 3,
         "artifacts": [],
         "executions": [
             {
@@ -614,7 +615,7 @@ def test_validation_payload_schema_rejects_nonnumeric_exit_code_strings(exit_cod
     }
 
     with pytest.raises(SchemaValidationError) as captured:
-        require_schema(payload, SCHEMA_ROOT / "validation-payload-v2.schema.json")
+        require_schema(payload, SCHEMA_ROOT / "validation-payload-v3.schema.json")
 
     diagnostics = cast("list[dict[str, Any]]", captured.value.as_dict()["diagnostics"])
     assert any(item["path"] == "$.executions[0].exit_code" and item["code"] == "pattern" for item in diagnostics)
@@ -624,6 +625,7 @@ def test_validation_payload_schema_rejects_nonnumeric_exit_code_strings(exit_cod
 def test_validation_payload_schema_accepts_supported_exit_codes(exit_code: int | str | None) -> None:
     require_schema(
         {
+            "schema_version": 3,
             "artifacts": [],
             "executions": [
                 {
@@ -640,58 +642,31 @@ def test_validation_payload_schema_accepts_supported_exit_codes(exit_code: int |
             "limitations": [],
             "status": "passed",
         },
-        SCHEMA_ROOT / "validation-payload-v2.schema.json",
+        SCHEMA_ROOT / "validation-payload-v3.schema.json",
     )
 
 
-def test_validation_payload_v1_remains_legacy_compatible_while_v2_requires_stronger_fields() -> None:
-    legacy_artifact_payload = {
-        "artifacts": [
-            {"artifact_digest": "sha256:" + "a" * 64, "artifact_id": None, "kind": "log", "path": "legacy.log", "repository_status": "outside-repository"}
-        ],
-        "executions": [],
-        "limitations": [],
-        "status": "not-applicable",
-    }
-    legacy_execution_payload = {
-        "artifacts": [],
-        "executions": [
-            {
-                "artifact_paths": [],
-                "command": "true",
-                "evidence": "legacy execution",
-                "executor": "validation-legacy",
-                "result": "passed",
-                "working_directory": "/repo",
-            }
-        ],
-        "limitations": [],
-        "status": "passed",
-    }
-
-    require_schema(legacy_artifact_payload, SCHEMA_ROOT / "validation-payload-v1.schema.json")
-    require_schema(legacy_execution_payload, SCHEMA_ROOT / "validation-payload-v1.schema.json")
-    with pytest.raises(SchemaValidationError) as artifact_error:
-        require_schema(legacy_artifact_payload, SCHEMA_ROOT / "validation-payload-v2.schema.json")
-    with pytest.raises(SchemaValidationError) as execution_error:
-        require_schema(legacy_execution_payload, SCHEMA_ROOT / "validation-payload-v2.schema.json")
-
-    artifact_diagnostics = cast("list[dict[str, Any]]", artifact_error.value.as_dict()["diagnostics"])
-    execution_diagnostics = cast("list[dict[str, Any]]", execution_error.value.as_dict()["diagnostics"])
-    assert any(item["path"] == "$.artifacts[0].artifact_digest_mode" and item["code"] == "required" for item in artifact_diagnostics)
-    assert {item["path"] for item in execution_diagnostics if item["code"] == "required"} >= {"$.executions[0].elapsed", "$.executions[0].exit_code"}
+def test_validation_payload_v3_retires_older_formats() -> None:
+    assert not (SCHEMA_ROOT / "validation-payload-v1.schema.json").exists()
+    assert not (SCHEMA_ROOT / "validation-payload-v2.schema.json").exists()
+    for version in (None, 1, 2):
+        payload = {"status": "blocked", "executions": [], "limitations": ["Unavailable"]}
+        if version is not None:
+            payload["schema_version"] = version
+        with pytest.raises(SchemaValidationError):
+            require_schema(payload, SCHEMA_ROOT / "validation-payload-v3.schema.json")
 
 
 def test_schema_reference_reports_canonical_version_and_rejects_filename_mismatch(tmp_path: Path) -> None:
     review = _schema_reference(SCHEMA_ROOT / "review-payload-v1.schema.json")
-    validation = _schema_reference(SCHEMA_ROOT / "validation-payload-v2.schema.json")
+    validation = _schema_reference(SCHEMA_ROOT / "validation-payload-v3.schema.json")
     mismatched = tmp_path / "validation-payload-v1.schema.json"
     mismatched.write_text(
-        json.dumps({"$id": "https://openai.com/codex/review-graph/validation-payload-v2.schema.json", "required": [], "type": "object"}), encoding="utf-8"
+        json.dumps({"$id": "https://openai.com/codex/review-graph/validation-payload-v3.schema.json", "required": [], "type": "object"}), encoding="utf-8"
     )
 
     assert review["version"] == 1
-    assert validation["version"] == 2
+    assert validation["version"] == 3
     with pytest.raises(ValueError, match="filename does not match"):
         _schema_reference(mismatched)
 
@@ -1071,6 +1046,7 @@ def _compile_repair_fixture_entry(entry: dict[str, Any], lifecycle: dict[str, An
     if entry["result_contract"] == "compact-validation":
         unit = dispatch["validation_unit"]
         payload = {
+            "schema_version": 3,
             "artifacts": [],
             "executions": [
                 {
@@ -1485,6 +1461,7 @@ def test_compile_validation_builds_verified_artifact_from_execution_payload() ->
                 "worker_created": True,
             },
             "payload": {
+                "schema_version": 3,
                 "artifacts": [],
                 "executions": [
                     {
@@ -1642,6 +1619,7 @@ def test_runtime_snapshots_preserve_validation_artifact_digest_mode(tmp_path: Pa
     dispatch["workspace_before"] = before["records"]
     dispatch["workspace_after"] = after["records"]
     payload = {
+        "schema_version": 3,
         "executions": [
             {
                 "artifact_paths": [str(artifact_path)],
@@ -2387,9 +2365,9 @@ def test_dispatch_materialization_and_ready_nodes_are_plan_derived(tmp_path: Pat
     audit_dispatch = next(entry["dispatch"] for entry in result["dispatches"] if entry["result_contract"] == "compact-review")
     validation_dispatch = next(entry["dispatch"] for entry in result["dispatches"] if entry["result_contract"] == "compact-validation")
     assert audit_dispatch["payload_schema"]["id"].endswith("review-payload-v1.schema.json")
-    assert validation_dispatch["payload_schema"]["id"].endswith("validation-payload-v2.schema.json")
+    assert validation_dispatch["payload_schema"]["id"].endswith("validation-payload-v3.schema.json")
     assert audit_dispatch["payload_schema"]["version"] == 1
-    assert validation_dispatch["payload_schema"]["version"] == 2
+    assert validation_dispatch["payload_schema"]["version"] == 3
     _assert_planned_validation_policy(audit_dispatch, validation_dispatch)
     assert str(SKILL_ROOT.parents[2] / "AGENTS.md") in audit_dispatch["instruction_paths"]
     assert all(entry["worker_prompt"] for entry in result["dispatches"])
@@ -2838,6 +2816,7 @@ def test_validator_prompt_exposes_nested_required_shape_and_minimal_response_com
     execution_shape = dispatch["payload_schema"]["required_shape"]["executions"][0]
     unit = dispatch["validation_unit"]
     payload = {
+        "schema_version": 3,
         "executions": [
             {
                 "artifact_paths": [],
@@ -2858,7 +2837,7 @@ def test_validator_prompt_exposes_nested_required_shape_and_minimal_response_com
 
     assert set(execution_shape) == {"artifact_paths", "command", "elapsed", "evidence", "executor", "exit_code", "result", "working_directory"}
     assert "dispatch.payload_schema" in entry["worker_prompt"]
-    require_schema(payload, SCHEMA_ROOT / "validation-payload-v2.schema.json")
+    require_schema(payload, SCHEMA_ROOT / "validation-payload-v3.schema.json")
     content, metadata = compile_validation({"dispatch": dispatch, "payload": payload})
     assert content.startswith(b"# Validation Result\n")
     assert metadata["evidence"]["status"] == "passed"
@@ -2981,7 +2960,9 @@ def test_next_ready_compact_references_worker_inputs_without_embedding_dispatche
 
     assert result["compact"] is True
     assert result["ready_dispatches"]
-    assert {tuple(entry) for entry in result["ready_dispatches"]} == {("execution_location", "node_id", "result_contract", "worker_input_path")}
+    assert {tuple(entry) for entry in result["ready_dispatches"]} == {
+        ("execution_location", "node_id", "result_contract", "worker_execution_path", "worker_input_path")
+    }
     for entry in result["ready_dispatches"]:
         bound = json.loads(Path(entry["worker_input_path"]).read_text(encoding="utf-8"))
         assert entry["node_id"] == bound["node_id"]
@@ -3672,6 +3653,7 @@ _MISSING_ELAPSED = object()
 def _execution_payload(entry: dict[str, Any], result: str, exit_code: object, elapsed: object) -> dict[str, Any]:
     unit = entry["dispatch"]["validation_unit"]
     return {
+        "schema_version": 3,
         "status": "blocked" if result == "not-run" else result,
         "executions": [
             {
@@ -3838,6 +3820,7 @@ def test_compact_branch_runs_from_bootstrap_through_journal_and_final_proof(tmp_
         if entry["result_contract"] == "compact-validation":
             unit = dispatch["validation_unit"]
             payload = {
+                "schema_version": 3,
                 "artifacts": [],
                 "executions": [
                     {
@@ -3855,7 +3838,7 @@ def test_compact_branch_runs_from_bootstrap_through_journal_and_final_proof(tmp_
                 "limitations": [],
                 "status": validation_status,
             }
-            require_schema(payload, SCHEMA_ROOT / "validation-payload-v2.schema.json")
+            require_schema(payload, SCHEMA_ROOT / "validation-payload-v3.schema.json")
             contract = json.loads(Path(entry["worker_payload_contract_path"]).read_text(encoding="utf-8"))
             payload_bytes = json.dumps(payload).encode()
             approval = review_worker_payload_write(contract, payload_bytes)
@@ -4107,6 +4090,7 @@ def _compile_materialized_evidence(  # noqa: PLR0913
                 dispatch.update({"workspace_after": snapshot, "workspace_before": snapshot})
             unit = dispatch["validation_unit"]
             payload = {
+                "schema_version": 3,
                 "artifacts": [],
                 "executions": [
                     {
@@ -4625,6 +4609,9 @@ def test_plan_digest_retains_nonempty_reuse_fields(tmp_path: Path) -> None:
     document.pop("validation_recoveries")
     document.pop("audit_delta_reviews")
     document.pop("validation_exclusions")
+    assert plan.review_lifecycle.repairs_completed == 1
+    assert not plan.independent_review_after_audits
+    document.pop("independent_review_after_audits")
     expected = "sha256:" + hashlib.sha256(json.dumps(document, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
     assert plan.audit_reuse_transitions

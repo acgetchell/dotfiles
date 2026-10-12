@@ -16,10 +16,10 @@ Persist these records outside the reviewed repository:
   envelopes
 - independent-review native artifacts
 - validation requirements, coalesced units, executions, reuse, and artifacts
-- synthesis bundles, synthesis results, and predecessor mappings
+- synthesis bundles, synthesis results, and predecessor mappings when certification requires them
 - findings, changes, invalidation events, and replacement evidence
-- artifact manifest, resume manifest when incomplete, and final
-  `RepositoryReviewProof`
+- routine delivery report and resume metadata when unfinished; artifact manifest
+  and final `RepositoryReviewProof` for explicit certification
 
 The persisted journal is the audit surface. Keep exact records and raw artifacts
 unchanged; do not replace them with conversation summaries.
@@ -44,7 +44,8 @@ Lead with findings and blockers. Include:
 
 ### Review Outcome
 
-- `complete` or `incomplete` from the verified proof gate
+- routine delivery status from `report-delivery`, including `not-certified`, or
+  `complete`/`incomplete` from the explicit certification gate
 - execution profile
 - concise counts for selected and accepted review nodes, validation units,
   findings, changes, and blockers
@@ -99,8 +100,8 @@ semantic agreement or recall, which requires separate adjudication.
 ### Proof And Repository State
 
 State the final branch and HEAD, index/worktree mutation status, final
-repository-state fingerprint, proof status, verifier identity, artifact-manifest
-identity, and proof-store location.
+repository-state fingerprint, delivery/proof status and artifact-store location.
+Include verifier and artifact-manifest identities for explicit certification.
 
 ## Incomplete Results
 
@@ -123,7 +124,13 @@ persisted accepted bundle rather than regenerating it from memory.
 
 ## Reconciliation
 
-Before reporting `complete`, run `review_graph_runtime.py finalize-proof` with
+Routine work uses `report-delivery` against persisted evidence, without repeating
+commands or generating synthesis merely to report delivered fixes. Deferred
+certification nodes remain visible but do not block otherwise complete semantic
+verification. Unfinished reviews, failed/missing required validation, findings
+and unresolved routing still block readiness.
+
+Before reporting a `complete` formal proof, run `review_graph_runtime.py finalize-proof` with
 the current capture. It
 derives and verifies these equalities from the plan and persisted artifacts:
 

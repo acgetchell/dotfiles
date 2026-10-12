@@ -45,6 +45,7 @@ from review_graph_coverage import (
 from review_graph_doi import captured_doi_inputs, captured_software_inputs, inspect_canonical_recheck
 from review_graph_executor import executor_permissions, remedied_features
 from review_graph_git import audit_git_context, discovery_reconciliation, intervening_metadata_blockers, metadata_audit_blockers, validate_git_dependencies
+from review_graph_git_objects import GitPathIdentity
 from review_graph_independent import CHECK_LABELS, SCHEMA as _INDEPENDENT_PAYLOAD_SCHEMA, render_independent_payload
 from review_graph_integrity import canonical_json, digest_bytes
 from review_graph_lifecycle import ComprehensiveRestart, RepairBudgetExtension, ReviewLifecycle, lifecycle_from_document
@@ -139,9 +140,14 @@ from review_graph_scheduling import select_execution_lanes
 from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
 from review_graph_synthesis import synthesis_fields, validate_synthesis
 from review_graph_usage import digest as usage_digest, measure_call
+from review_graph_validation import ArtifactIdentity, ValidationPayload, ValidationRecord, VerifiedValidationRecord, bind_validation_payload
+from review_graph_validation_contracts import ContractBinding, load_contract_binding
+from review_graph_views import execution_view_bytes
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Sequence
+
+    from review_graph_reuse import ReviewSourceSnapshot
 
 _READ_ONLY_MODES = frozenset({"audit", "revalidation", "synthesis"})
 _REVIEW_MODES = _READ_ONLY_MODES | {"fix"}
@@ -152,7 +158,7 @@ _SCHEMA_ROOT = Path(__file__).resolve().parents[1] / "references" / "schemas"
 _PLANNING_INPUT_SCHEMA = _SCHEMA_ROOT / "planning-input-v1.schema.json"
 _REVIEW_PAYLOAD_SCHEMA = _SCHEMA_ROOT / "review-payload-v1.schema.json"
 _SYNTHESIS_PAYLOAD_SCHEMA = _SCHEMA_ROOT / "synthesis-payload-v1.schema.json"
-_VALIDATION_PAYLOAD_SCHEMA = _SCHEMA_ROOT / "validation-payload-v2.schema.json"
+_VALIDATION_PAYLOAD_SCHEMA = _SCHEMA_ROOT / "validation-payload-v3.schema.json"
 _RUNTIME_OPERATION_INPUT_SCHEMA = _SCHEMA_ROOT / "runtime-operation-inputs-v1.schema.json"
 _RUNTIME_OPERATION_EXAMPLES = Path(__file__).resolve().parents[1] / "references" / "runtime-operation-examples-v1.json"
 _INITIAL_JOURNAL_HELP = (
@@ -2107,30 +2113,13 @@ def _validation_artifact_reference_blockers(payload: dict[str, Any], permitted_p
     return tuple(blockers)
 
 
-def _validation_reuse_body(unit: ValidationUnit, evidence: ValidationEvidence, command_digest: str, environment_digest: str) -> str:
-    if evidence.status != "reused":
-        return "none"
-    bodies: list[str] = []
-    for evidence_id in unit.evidence_ids:
-        requirement_ids = tuple(requirement_id for requirement_id, *_rest, mapped_evidence_id in unit.requirement_plans if mapped_evidence_id == evidence_id)
-        requirements = ", ".join(requirement_ids)
-        bodies.append(
-            "\n".join(
-                (
-                    f"- Ledger entry: {evidence_id}",
-                    f"  - Requirement IDs: {requirements}",
-                    (
-                        f"  - Match basis: source={evidence.fingerprints.expected[2]}; command={command_digest}; "
-                        f"environment={environment_digest}; selection={requirements}"
-                    ),
-                )
-            )
-        )
-    return "\n".join(bodies) or "none"
-
-
-def _validation_normalized_record(payload: dict[str, Any], evidence: ValidationEvidence, capture: dict[str, Any] | None = None) -> dict[str, Any]:
+def _validation_normalized_record(
+    payload: dict[str, Any], evidence: ValidationEvidence, capture: dict[str, Any] | None = None, *, contract_binding: ContractBinding | None = None
+) -> dict[str, Any]:
     record = {
+        "schema_version": 3,
+        **({"failure_kind": payload["failure_kind"]} if "failure_kind" in payload else {}),
+        **({"git_dependencies": payload["git_dependencies"]} if "git_dependencies" in payload else {}),
         **({"native_ci": payload["native_ci"]} if "native_ci" in payload else {}),
         "observed_source_state": list(evidence.fingerprints.after),
         "artifact_digest": evidence.raw_result_digest,
@@ -2154,6 +2143,15 @@ def _validation_normalized_record(payload: dict[str, Any], evidence: ValidationE
             {"evidence_id": evidence.evidence_id, "requirement_id": requirement_id, "status": evidence.status} for requirement_id in evidence.requirement_ids
         ],
     }
+    if capture is not None and capture.get("repository_state_format") == SNAPSHOT_FORMAT:
+        inputs = source_snapshot(capture)
+        inputs.verify()
+        if inputs.source_state != evidence.fingerprints.after:
+            msg = "validation source capture differs from its observed source state"
+            raise ValueError(msg)
+        record["source_inputs"] = json.loads(canonical_json(asdict(inputs)))
+        if contract_binding is not None:
+            record["contract_binding"] = contract_binding.to_document()
     inputs = captured_software_inputs(record, capture) if capture is not None else {}
     if inputs:
         record["captured_software_inputs"] = inputs
@@ -2388,15 +2386,23 @@ def compile_validation(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]
     if not isinstance(dispatch, dict) or not isinstance(payload, dict):
         msg = "compile-validation input requires dispatch and payload objects"
         raise TypeError(msg)
+    try:
+        require_schema(payload, _VALIDATION_PAYLOAD_SCHEMA)
+        parsed_payload = ValidationPayload.from_raw(payload)
+    except (ValueError, TypeError) as error:
+        msg = "compiled validation artifact failed verification: " + str(error)
+        raise ValueError(msg) from error
     raw_unit = dispatch.get("validation_unit")
     if not isinstance(raw_unit, dict):
         msg = "compile-validation dispatch requires validation_unit"
         raise TypeError(msg)
     unit = _validation_unit(raw_unit)
-    status = _required_text(payload, "status")
-    if status not in {"passed", "failed", "blocked", "reused", "not-applicable"}:
-        msg = f"invalid validation status {status}"
-        raise ValueError(msg)
+    try:
+        bind_validation_payload(parsed_payload, unit)
+    except (ValueError, TypeError) as error:
+        msg = "compiled validation artifact failed verification: " + str(error)
+        raise ValueError(msg) from error
+    status = parsed_payload.status.value
     skill_path = Path(_required_text(dispatch, "skill_path")).resolve()
     reference_paths = tuple(Path(path).resolve() for path in _text_list(dispatch, "reference_paths"))
     if not skill_path.is_file() or any(not path.is_file() for path in reference_paths):
@@ -2538,7 +2544,7 @@ def compile_validation(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]
         "## State Verification": _validation_state_verification(dispatch, evidence),
         "## Requirements": _validation_requirements_expected_body(expectation, evidence),
         "## Executions": executions_body,
-        "## Reused Evidence": _validation_reuse_body(unit, evidence, expectation.command_identity_digest, expectation.environment_digest),
+        "## Reused Evidence": "none",
         "## Artifacts": artifacts_body,
         "## Source And Git State": "- Source-controlled files changed: none\n- Git state mutated: no",
         "## Validation Ledger Export": "\n".join(f"- {label}: {value}" for label, value in _validation_ledger_expected_fields(expectation, evidence)),
@@ -2576,14 +2582,25 @@ def compile_validation(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]
     if blockers:
         msg = "compiled validation artifact failed verification: " + "; ".join(blockers)
         raise ValueError(msg)
-    normalized = _validation_normalized_record(payload, evidence, dispatch.get("source_capture"))
+    capture = dispatch.get("source_capture")
+    binding = (
+        load_contract_binding(source_snapshot(capture), unit.commands, unit.working_directories)
+        if isinstance(capture, dict) and capture.get("repository_state_format") == SNAPSHOT_FORMAT
+        else None
+    )
+    normalized = _validation_normalized_record(payload, evidence, capture, contract_binding=binding)
+    ValidationRecord.from_raw(normalized)
     return content, {
         "expectation": asdict(expectation),
         "evidence": asdict(evidence),
         "payload_digest": digest_bytes(canonical_payload.encode()),
         "artifact_digest": evidence.raw_result_digest,
         "normalized_record": normalized,
-        **({"source_capture": dispatch["source_capture"]} if "captured_software_inputs" in normalized or "captured_doi_inputs" in normalized else {}),
+        **(
+            {"source_capture": dispatch["source_capture"]}
+            if any(key in normalized for key in ("source_inputs", "captured_software_inputs", "captured_doi_inputs"))
+            else {}
+        ),
         "workspace_audit": workspace_audit,
     }
 
@@ -2717,6 +2734,7 @@ def _graph_plan(raw: dict[str, Any]) -> GraphPlan:
         pre_review_validation_nodes=_string_tuple(raw, "pre_review_validation_nodes"),
         commit_handoffs=tuple(metadata_transition(item) for item in _records(raw, "commit_handoffs")),
         review_lifecycle=lifecycle_from_document(raw.get("review_lifecycle")),
+        independent_review_after_audits=_required_bool({"policy": raw.get("independent_review_after_audits", False)}, "policy"),
         validation_exclusions=tuple(
             ValidationExclusion(
                 originating_evidence_id=_required_text(item, "originating_evidence_id"),
@@ -2744,7 +2762,7 @@ def _operation_document(document: dict[str, Any], operation: str) -> dict[str, A
     field = {"materialize-dispatches": "materialization_input", "routing-projection": "planning_input", "preflight-validation": "preflight_input"}.get(
         operation
     )
-    if field is None and operation in {"compile-node", "finalize-proof", "journal-append", "next-ready", "snapshot-workspace"}:
+    if field is None and operation in {"compile-node", "finalize-proof", "report-delivery", "journal-append", "next-ready", "snapshot-workspace"}:
         field = "lifecycle_input"
     if field is None or field not in document:
         return document
@@ -2817,9 +2835,17 @@ def _verify_independent_payload_binding(content: bytes, metadata: dict[str, Any]
         raise ValueError(msg)
 
 
+type EvidenceRecord = dict[str, Any] | VerifiedValidationRecord
+
+
+def _record_document(record: EvidenceRecord) -> dict[str, Any]:
+    """Export passive report fields; validation policy consumes the typed record."""
+    return record.to_document() if isinstance(record, VerifiedValidationRecord) else record
+
+
 def _load_evidence_source(  # noqa: C901, PLR0912, PLR0915
     raw: dict[str, Any], *, require_normalized: bool = False
-) -> tuple[str, ReviewEvidenceExpectation | ValidationEvidenceExpectation, ReviewEvidence | ValidationEvidence, bytes, dict[str, Any] | None]:
+) -> tuple[str, ReviewEvidenceExpectation | ValidationEvidenceExpectation, ReviewEvidence | ValidationEvidence, bytes, EvidenceRecord | None]:
     metadata_path = Path(_required_text(raw, "metadata_path")).resolve()
     artifact_path = Path(_required_text(raw, "artifact_path")).resolve()
     metadata = _read_json_object(metadata_path)
@@ -2865,8 +2891,25 @@ def _load_evidence_source(  # noqa: C901, PLR0912, PLR0915
     else:
         expectation = _validation_expectation(expectation_raw)
         evidence = _validation_evidence(evidence_raw)
+        payload = _canonical_worker_payload(content)
+        require_schema(payload, _VALIDATION_PAYLOAD_SCHEMA)
+        if payload_bytes is not None:
+            submitted = json.loads(payload_bytes)
+            require_schema(submitted, _VALIDATION_PAYLOAD_SCHEMA)
+            submitted_payload = ValidationPayload.from_raw(submitted)
+            bind_validation_payload(submitted_payload, expectation.validation_unit)
+            if {**submitted, "artifacts": payload.get("artifacts", [])} != payload:
+                msg = "compiled validation payload differs from sealed worker bytes"
+                raise ValueError(msg)
+            observed_artifacts = {artifact["path"]: artifact for artifact in _records(payload, "artifacts")}
+            if any(
+                any(observed_artifacts.get(artifact["path"], {}).get(key) != value for key, value in artifact.items())
+                for artifact in _records(submitted, "artifacts")
+            ):
+                msg = "sealed worker artifact claims differ from compiled observations"
+                raise ValueError(msg)
         assessment = assess_validation_evidence(expectation, evidence)
-        blockers = (*assessment.blockers, *_validation_native_result_blockers(content, expectation, evidence))
+        blockers = assessment.blockers
     if blockers:
         msg = f"evidence source failed verification {artifact_path}: " + "; ".join(blockers)
         raise ValueError(msg)
@@ -2886,6 +2929,7 @@ def _load_evidence_source(  # noqa: C901, PLR0912, PLR0915
     if isinstance(expectation, ReviewEvidenceExpectation) and isinstance(evidence, ReviewEvidence) and expectation.mode == "independent-review":
         _verify_independent_payload_binding(content, metadata, expectation, evidence)
     normalized = metadata.get("normalized_record")
+    verified_validation: VerifiedValidationRecord | None = None
     if normalized is not None and not isinstance(normalized, dict):
         msg = f"normalized record must be an object: {metadata_path}"
         raise ValueError(msg)
@@ -2926,14 +2970,45 @@ def _load_evidence_source(  # noqa: C901, PLR0912, PLR0915
             if metadata.get("payload_digest") != payload_digest:
                 msg = f"worker payload digest does not match compiled artifact: {artifact_path}"
                 raise ValueError(msg)
-            recomputed = _validation_normalized_record(payload, evidence, metadata.get("source_capture"))
+            binding = ContractBinding.from_raw(normalized["contract_binding"]) if "contract_binding" in normalized else None
+            recomputed = _validation_normalized_record(payload, evidence, metadata.get("source_capture"), contract_binding=binding)
+            require_schema(payload, _VALIDATION_PAYLOAD_SCHEMA)
+            verified_validation = VerifiedValidationRecord(canonical_json(recomputed), expectation, evidence, content)
         if normalized != recomputed:
             msg = f"normalized record does not match compiled artifact: {metadata_path}"
             raise ValueError(msg)
-    if require_normalized and normalized is None:
+    if (require_normalized or kind == "validation") and normalized is None:
         msg = f"synthesis requires compiler-derived normalized metadata: {metadata_path}"
         raise ValueError(msg)
-    return kind, expectation, evidence, content, normalized
+    return kind, expectation, evidence, content, verified_validation if verified_validation is not None else normalized
+
+
+def load_validation_record(*, metadata_path: Path, artifact_path: Path) -> VerifiedValidationRecord:
+    """Load one standard handoff through the complete provenance trust boundary."""
+    _kind, _expectation, _evidence, _content, record = _load_evidence_source(
+        {"metadata_path": str(metadata_path), "artifact_path": str(artifact_path)}, require_normalized=True
+    )
+    if not isinstance(record, VerifiedValidationRecord):
+        msg = "validation handoff paths must identify verified version 3 validation evidence"
+        raise TypeError(msg)
+    return record
+
+
+def validation_applicability(record: VerifiedValidationRecord, *, target: ReviewSourceSnapshot, current_unit: ValidationUnit) -> list[dict[str, str]]:
+    """Assess typed source/execution bindings and observe required artifact roots."""
+    if any(not Path(directory).is_dir() for directory in current_unit.working_directories):
+        return [
+            {"reason_code": "validation-directory-unavailable", "reason": "A dispatched working directory is unavailable in the current execution context."}
+        ]
+
+    def observe(artifact: ArtifactIdentity) -> tuple[str, str]:
+        path = Path(artifact.path)
+        if not path.is_absolute():
+            path = Path(target.repository_root) / path
+        _exists, digest, mode = _workspace_content_digest(path, declared_cache=artifact.kind == "cache")
+        return digest, mode
+
+    return record.applicability_reasons(target, current_unit=current_unit, observe_artifact=observe)
 
 
 def _reused_validation_reference(
@@ -2965,19 +3040,30 @@ def _reused_validation_reference(
     }
 
 
-def _validation_reconciliation(plan: GraphPlan, records: list[dict[str, Any]]) -> dict[str, Any]:
+def _validation_requirement_unit(
+    units: dict[str, tuple[ValidationUnit, str]], requirement_id: str, planned_digest: str | None
+) -> tuple[ValidationUnit, str] | None:
+    """Bind a new reviewer alias to one exact existing execution contract."""
+    planned = units.get(requirement_id)
+    if planned is not None or planned_digest is None:
+        return planned
+    matches = {unit.node_id: (unit, digest) for unit, digest in units.values() if unit.required and digest == planned_digest}
+    return next(iter(matches.values()), None) if len(matches) == 1 else None
+
+
+def _validation_reconciliation(plan: GraphPlan, records: Sequence[EvidenceRecord]) -> dict[str, Any]:
     """Bind discovered needs to exact command plans, never to a generic CI pass."""
     units = {requirement: (unit, _planned_validation_digest(unit)) for unit in plan.coalesced_validation_units for requirement in unit.requirement_ids}
     exclusions = {(item.originating_evidence_id, item.requirement_id, item.requirement_digest): item for item in plan.validation_exclusions}
     results: list[dict[str, Any]] = []
     blockers: list[str] = []
-    for record in records:
+    for record in (item for item in records if isinstance(item, dict)):
         if record.get("status") not in {"completed", "no-findings"}:
             continue
         for requirement_id, requirement in _validation_records(record):
             digest = digest_bytes(canonical_json(requirement).encode())
             origin = _required_text(record, "evidence_id")
-            planned = units.get(requirement_id)
+            planned = _validation_requirement_unit(units, requirement_id, requirement.get("planned_validation_digest"))
             unit = planned[0] if planned is not None else None
             original = next(
                 (
@@ -3101,6 +3187,7 @@ def build_synthesis_bundle(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
     immutable_records: list[dict[str, Any]] = []
     for source in raw_sources:
         _kind, expectation, evidence, _content, normalized = _load_evidence_source(source, require_normalized=True)
+        normalized = _record_document(normalized) if normalized is not None else None
         if expectation.source_state != source_state:
             blockers = (
                 review_source_state_blockers(plan, expectation, evidence, source_state)
@@ -3154,6 +3241,7 @@ def _verified_reused_sources(plan: GraphPlan, source_state: tuple[str, str, str]
     for transition in plan.audit_reuse_transitions:
         source = {"artifact_path": transition.artifact_path, "metadata_path": transition.metadata_path}
         _kind, expectation, evidence, _content, record = _load_evidence_source(source, require_normalized=True)
+        record = _record_document(record) if record is not None else None
         if not isinstance(expectation, ReviewEvidenceExpectation) or not isinstance(evidence, ReviewEvidence):
             msg = "audit reuse source must contain review evidence"
             raise TypeError(msg)
@@ -3555,7 +3643,8 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
         "Legacy git_sensitive=true always requires rechecking. "
         'Put validator-owned nonexecution in execution_facts=["validators-not-executed"]; use source-captures-match and git-not-mutated only when true. '
         "Put platform/evidence caveats in validation_limits bound to an explicit validation_requirements entry: delegated means the validator still owes "
-        "that evidence, unavailable/failed block reuse. Put unresolved semantic/dependency questions in unresolved_uncertainties (kind, reason), "
+        "that evidence, unavailable blocks readiness and failed reopens its owning contract. "
+        "Put unresolved semantic/dependency questions in unresolved_uncertainties (kind, reason), "
         "or a single unit's dependency_uncertainty. Keep unknown caveats in limitations; these conservatively block reuse. Never omit truthful context."
         if dispatch.get("mode") == "audit"
         else ""
@@ -3644,6 +3733,10 @@ def _preflight_audit_payload(contract: dict[str, Any], payload: dict[str, Any]) 
         return None
     if contract.get("mode") == "validation":
         unit = _validation_unit(dispatch["validation_unit"])
+        bind_validation_payload(ValidationPayload.from_raw(payload), unit)
+        if payload.get("artifacts"):
+            observed = capture_workspace_snapshot(dispatch)
+            _validation_artifacts_body(payload, unit, _workspace_snapshot({"workspace_after": observed["records"]}, "workspace_after"))
         paths = tuple(artifact.path for artifact in unit.allowed_artifacts)
         root = Path(dispatch["repository_root"])
         absent = tuple(path for path in paths if not _workspace_path(path, root).exists(follow_symlinks=False))
@@ -3711,6 +3804,7 @@ def _validate_worker_payload_bytes(contract_document: dict[str, Any], payload_by
             if blockers:
                 msg = "worker payload failed execution-result validation: " + "; ".join(blockers)
                 raise ValueError(msg)
+            ValidationPayload.from_raw(payload)
         return payload
     msg = f"unsupported worker payload result contract: {contract}"
     raise ValueError(msg)
@@ -4219,6 +4313,7 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             "node_id": node.node_id,
             "result_contract": contract,
             "worker_input_path": str(worker_input_path),
+            "worker_execution_path": str(artifact_store / f"{node.node_id}.execution.json"),
             "worker_payload_contract_path": str(worker_payload_contract_path),
             "worker_payload_path": str(worker_payload_path),
             "worker_prompt": _worker_prompt(contract, common),
@@ -4230,11 +4325,13 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             pending_writes, worker_payload_contract_path, (json.dumps(persistence_contract, indent=2, sort_keys=True) + "\n").encode(), mode=0o444
         )
         _queue_materialized_write(pending_writes, worker_input_path, worker_input_bytes, mode=0o444)
+        _queue_materialized_write(pending_writes, Path(entry["worker_execution_path"]), execution_view_bytes(entry, worker_input_bytes), mode=0o444)
         dispatches.append(entry)
     output: dict[str, Any] = {"dispatches": dispatches, "plan_digest": _plan_digest(plan), "schema_version": 1, "source_state": list(source_state)}
     output["telemetry"] = {
         "worker_input_bytes": sum(len((json.dumps(entry, indent=2, sort_keys=True) + "\n").encode()) for entry in dispatches),
         "worker_prompt_bytes": sum(len(entry["worker_prompt"].encode()) for entry in dispatches),
+        "worker_execution_bytes": sum(len(execution_view_bytes(entry, (json.dumps(entry, indent=2, sort_keys=True) + "\n").encode())) for entry in dispatches),
         "shared_source_packets": len({str(record["artifact_path"]) for record in inspection_groups.values()}),
         "publication_invocations_per_worker": 1,
         "nodes": len(dispatches),
@@ -4299,6 +4396,14 @@ def _epoch_scoped_plan(plan: GraphPlan, epoch: int) -> GraphPlan:
 
 
 def _capture_path_fingerprints(capture: dict[str, Any], *, label: str) -> dict[str, str]:
+    if capture.get("repository_state_format") == SNAPSHOT_FORMAT:
+        parsed = source_snapshot(capture)
+        parsed.verify()
+        paths = dict(parsed.repository_path_fingerprints)
+        if not set(parsed.captured_scope_paths) <= paths.keys():
+            msg = f"{label} path fingerprints do not cover captured_scope_paths"
+            raise ValueError(msg)
+        return paths
     raw = capture.get("repository_path_fingerprints")
     if not isinstance(raw, dict) or any(not isinstance(path, str) for path in raw):
         msg = f"{label} requires repository_path_fingerprints; capture before repairing with the current capture_scope.py"
@@ -4307,15 +4412,17 @@ def _capture_path_fingerprints(capture: dict[str, Any], *, label: str) -> dict[s
     if tuple(raw) != paths:
         msg = f"{label}.repository_path_fingerprints requires canonical repository paths"
         raise ValueError(msg)
-    if any(not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None for value in raw.values()):
-        msg = f"{label}.repository_path_fingerprints must contain SHA-256 identities"
-        raise ValueError(msg)
+    for value in raw.values():
+        if not isinstance(value, str):
+            msg = f"{label}.repository_path_fingerprints must contain source identities"
+            raise TypeError(msg)
+        if value == "absent" or re.fullmatch(r"(?:submodule:)?[0-9a-f]{64}", value):
+            continue
+        GitPathIdentity.parse(value)
     if not set(_text_list(capture, "captured_scope_paths")) <= set(paths):
         msg = f"{label} path fingerprints do not cover captured_scope_paths"
         raise ValueError(msg)
-    if capture.get("repository_state_format") == SNAPSHOT_FORMAT:
-        source_snapshot(capture).verify()
-    return cast("dict[str, str]", raw)
+    return {path: value for path, value in raw.items() if isinstance(value, str)}
 
 
 def _mutation_path_delta(document: dict[str, Any], previous: dict[str, Any], current: dict[str, Any]) -> tuple[str, ...]:
@@ -4365,13 +4472,15 @@ def _mutation_evidence_sources(document: dict[str, Any], plan: GraphPlan) -> dic
     result: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
     reused_ids = {evidence_id for _, evidence_id in plan.exact_reused_review_evidence}
     for source in _evidence_sources(document, plan, check_current_inputs=False):
-        _kind, expectation, evidence, _content, normalized = _load_evidence_source(source, require_normalized=True)
+        loaded = _load_evidence_source(source, require_normalized=True)
+        _kind, expectation, evidence, _content, normalized = loaded
+        normalized = _record_document(normalized) if normalized is not None else None
         node = by_id.get(evidence.node_id)
         if (node is None and evidence.evidence_id not in reused_ids) or evidence.node_id in result:
             msg = f"mutation sources contain an unknown or duplicate node: {evidence.node_id}"
             raise ValueError(msg)
         if node is not None:
-            _verified_journal_evidence(source, plan=plan, node=node, source_state=_state(document, "source_state"))
+            _verified_journal_evidence(source, plan=plan, node=node, source_state=_state(document, "source_state"), loaded=loaded)
         elif isinstance(expectation, ReviewEvidenceExpectation) and isinstance(evidence, ReviewEvidence):
             blockers = review_source_state_blockers(plan, expectation, evidence, _state(document, "source_state"))
             if blockers:
@@ -4380,7 +4489,7 @@ def _mutation_evidence_sources(document: dict[str, Any], plan: GraphPlan) -> dic
         if normalized is None:
             msg = f"mutation source lacks normalized evidence: {evidence.node_id}"
             raise ValueError(msg)
-        result[evidence.node_id] = (source, normalized)
+        result[evidence.node_id] = (source, _record_document(normalized))
     return result
 
 
@@ -4467,9 +4576,13 @@ def _audit_reuse_blocker(record: dict[str, Any], *, invalidated: bool) -> tuple[
         return "unclassified-limitations", "Free-text caveats cannot prove independence from changed inputs or prior validation."
     if record.get("unresolved_uncertainties"):
         return "unresolved-uncertainty", "The audit declares unresolved semantic or dependency uncertainty."
-    if any(limit["status"] != "delegated" for limit in record.get("validation_limits", [])):
-        return "validation-evidence-limits", "Required environmental validation evidence is unavailable or failed."
     return ("invalidated-inputs", "Owned inputs, routing, or a predecessor changed.") if invalidated else None
+
+
+def _failed_validation_limits(record: dict[str, Any]) -> tuple[str, str] | None:
+    """Retain actual failures as owning dispositions after assessing source deltas."""
+    failed = [_required_text(limit, "requirement_id") for limit in _records(record, "validation_limits") if limit["status"] == "failed"]
+    return ("validation-evidence-failed", "Recheck the owning contract for failed requirements: " + ", ".join(failed)) if failed else None
 
 
 def _carry_forward_audits(  # noqa: C901, PLR0912, PLR0913, PLR0915 - preserve provenance and report every reuse rejection.
@@ -4558,6 +4671,9 @@ def _carry_forward_audits(  # noqa: C901, PLR0912, PLR0913, PLR0915 - preserve p
         except ValueError as error:
             # Incomplete/changed inputs are ordinary fresh review work, not reuse.
             decision(node_id, "input-proof-failed", str(error))
+            continue
+        if failed := _failed_validation_limits(record):
+            decision(node_id, *failed)
             continue
         reconciliation = _validation_reconciliation(replace(candidate_plan, audit_reuse_transitions=(transition,)), [record])
         if reconciliation["blockers"]:
@@ -4655,11 +4771,12 @@ def _verify_delta_context(context: dict[str, Any], dispatch: dict[str, Any]) -> 
         msg = "delta coverage target differs from the dispatched source state"
         raise ValueError(msg)
     _kind, expectation, evidence, _content, record = _load_evidence_source(context, require_normalized=True)
+    record = _record_document(record) if record is not None else None
     inputs = expectation.audit_input_identity if isinstance(expectation, ReviewEvidenceExpectation) else None
     if not isinstance(expectation, ReviewEvidenceExpectation) or not isinstance(evidence, ReviewEvidence) or inputs is None or record is None:
         msg = "delta coverage requires compiler-bound audit input identities"
         raise ValueError(msg)
-    if expectation.coverage_reuse is not None or _audit_reuse_blocker(record, invalidated=False) is not None:
+    if expectation.coverage_reuse is not None or _audit_reuse_blocker(record, invalidated=False) is not None or _failed_validation_limits(record) is not None:
         msg = "delta coverage origin must be a complete fresh audit without unresolved limitations"
         raise ValueError(msg)
     if (origin.source_state, inputs.owned_paths, evidence.skill_id, evidence.skill_path, evidence.requirement_ids) != (
@@ -4768,6 +4885,12 @@ def _plan_delta_audits(  # noqa: C901 - keep source and validation eligibility g
                 chain,
             )
             transition = replace(transition, source_state=audit_origin.source_state)
+            units = coverage_decisions(record, audit_origin, target, inputs, transition)
+            if failed := _failed_validation_limits(record):
+                units = [
+                    {**unit, "disposition": "recheck", "reason_code": failed[0], "reason": failed[1]} if unit["disposition"] == "reused" else unit
+                    for unit in units
+                ]
             reconciliation = _validation_reconciliation(replace(candidate, audit_reuse_transitions=(transition,)), [record])
             if reconciliation["blockers"]:
                 reviews.append(
@@ -4781,7 +4904,6 @@ def _plan_delta_audits(  # noqa: C901 - keep source and validation eligibility g
                     }
                 )
                 continue
-            units = coverage_decisions(record, audit_origin, target, inputs, transition)
             reviews.append({"node_id": node.node_id, "evidence_id": evidence.evidence_id, "units": coverage_decision_report(units, audit_origin, target)})
             if not any(unit["disposition"] == "reused" for unit in units):
                 continue
@@ -4834,19 +4956,22 @@ def _current_metadata_state(document: dict[str, Any]) -> tuple[str, str, str]:
     return metadata_states(_state(document, "source_state"), transitions)[-1]
 
 
-def _metadata_evidence_blockers(document: dict[str, Any], records: list[dict[str, Any]]) -> list[str]:
+def _metadata_evidence_blockers(document: dict[str, Any], records: Sequence[EvidenceRecord]) -> list[str]:
     if not document.get("external_metadata_transitions"):
         return []
     current = _current_metadata_state(document)
     transition = metadata_transition(document["external_metadata_transitions"][-1])
-    blockers = [
-        f"Evidence requires revalidation after external staging: {record['evidence_id']}: {canonical_json(reasons)}"
-        for record in records
-        if tuple(record.get("observed_source_state", ())) != current
-        if (reasons := _metadata_node_reasons(record.get("mode", "validation"), (), record, transition))
-    ]
-    transitions = tuple(metadata_transition(item) for item in _records(document, "external_metadata_transitions"))
+    blockers = []
     for record in records:
+        report = _record_document(record)
+        if tuple(report.get("observed_source_state", ())) != current and (
+            reasons := _metadata_node_reasons(report.get("mode", "validation"), (), record, transition)
+        ):
+            blockers.append(f"Evidence requires revalidation after Git context changed: {report['evidence_id']}: {canonical_json(reasons)}")
+
+    transitions = tuple(metadata_transition(item) for item in _records(document, "external_metadata_transitions"))
+    for item in records:
+        record = _record_document(item)
         if record.get("mode") == "validation":
             try:
                 verify_native_results(record, native_target(transitions, record["node_id"]))
@@ -4855,10 +4980,35 @@ def _metadata_evidence_blockers(document: dict[str, Any], records: list[dict[str
     return blockers
 
 
-def _metadata_node_reasons(mode: str, predecessors: tuple[str, ...], record: dict[str, Any], transition: ExternalMetadataTransition) -> list[dict[str, str]]:
+def _metadata_node_reasons(mode: str, predecessors: tuple[str, ...], record: EvidenceRecord, transition: ExternalMetadataTransition) -> list[dict[str, str]]:  # noqa: PLR0911 - separate variant-specific applicability gates.
     """Keep fresh review, execution, and synthesis policies separate from audit dependencies."""
+    if isinstance(record, VerifiedValidationRecord):
+        reasons = validation_applicability(record, target=transition.after, current_unit=record.expectation.validation_unit)
+        if isinstance(transition, CommitHandoffTransition) and record.evidence.node_id in transition.commit_handoff["native_ci"]:
+            reasons.append({"reason_code": "native-exact-commit", "reason": "Hosted CI must attest to the new exact commit."})
+        return reasons
+    if mode == "validation":
+        return [{"reason_code": "validation-unverified", "reason": "Validation applicability requires a verified version 3 record from the evidence loader."}]
     if isinstance(transition, CommitHandoffTransition):
         return commit_node_reasons(mode, record, transition)
+    if mode in {"audit", "independent-review"} and (
+        transition.before.captured_scope_paths != transition.after.captured_scope_paths
+        or (transition.before.base_ref, transition.before.merge_base) != (transition.after.base_ref, transition.after.merge_base)
+    ):
+        return [{"reason_code": "review-comparison-changed", "reason": "Review scope or comparison base changed; a current review is required."}]
+    if (
+        transition.before.head != transition.after.head
+        and not isinstance(transition, CommitHandoffTransition)
+        and (mode == "independent-review" or any(item.get("kind") == "source-discovery" for item in record.get("git_dependencies", [])))
+    ):
+        return [{"reason_code": "review-head-changed", "reason": "The comparison-based review must inspect the new Git context."}]
+    if (
+        mode == "independent-review"
+        and record.get("status") in {"completed", "no-findings"}
+        and "commands_executed" in record
+        and not record.get("limitations")
+    ):
+        return metadata_audit_blockers(record, transition)
     policies = {
         "independent-review": "Fresh independent review must inspect the current change target.",
         "validation": "Validation execution and workspace evidence must bind to the current metadata state.",
@@ -4870,16 +5020,17 @@ def _metadata_node_reasons(mode: str, predecessors: tuple[str, ...], record: dic
 
 
 def _metadata_resume_decisions(
-    plan: GraphPlan, lifecycle: dict[str, str], records: dict[str, dict[str, Any]], transition: ExternalMetadataTransition
+    plan: GraphPlan, lifecycle: dict[str, str], records: dict[str, EvidenceRecord], transition: ExternalMetadataTransition
 ) -> list[dict[str, Any]]:
     """Explain both preserved evidence and work awaiting a current-state execution."""
     decisions = []
     inherited = {context["node_id"]: {"coverage_reuse": context} for context in plan.audit_delta_reviews}
     for node in plan.actual_worker_nodes:
-        record = records.get(node.node_id, inherited.get(node.node_id, {}))
-        reasons = _metadata_node_reasons(node.mode, node.predecessors, record, transition)
+        trusted = records.get(node.node_id, inherited.get(node.node_id, {}))
+        reasons = _metadata_node_reasons(node.mode, node.predecessors, trusted, transition)
+        record = _record_document(trusted)
         status = lifecycle.get(node.node_id, "pending")
-        if status not in {"accepted", "in-flight"}:
+        if status not in {"accepted", "blocked", "in-flight"}:
             reasons.append({"reason_code": "no-active-evidence", "reason": f"Node lifecycle is {status}; no accepted or active review to preserve."})
         decisions.append(
             {
@@ -4908,9 +5059,10 @@ def _metadata_resume_decisions(
 
 
 def _restart_reused_metadata_audits(
-    plan: GraphPlan, records: list[dict[str, Any]], transition: ExternalMetadataTransition, catalog_path: Path
+    plan: GraphPlan, records: Sequence[EvidenceRecord], transition: ExternalMetadataTransition, catalog_path: Path
 ) -> tuple[GraphPlan, list[dict[str, Any]]]:
     """Turn invalidated non-executable audit reuse back into routed review work."""
+    records = [item for item in records if isinstance(item, dict)]
     reused_ids = {evidence_id for _requirement_id, evidence_id in plan.exact_reused_review_evidence}
     stale = {
         record["evidence_id"]: reasons
@@ -5011,7 +5163,13 @@ def _preserve_metadata_barrier_history(
 def resume_after_external_metadata(document: dict[str, Any]) -> dict[str, Any]:
     """Publish a new continuation while preserving original audit and Git provenance."""
     _require_running_review(document)
-    transition = metadata_transition({"before": document["previous_capture"], "after": document["new_capture"]})
+    transition = metadata_transition(
+        {
+            "before": document["previous_capture"],
+            "after": document["new_capture"],
+            **({"git_context_authorization": document["git_context_authorization"]} if "git_context_authorization" in document else {}),
+        }
+    )
     return _resume_metadata(document, transition)
 
 
@@ -5031,7 +5189,7 @@ def _prepare_commit_handoff(  # noqa: PLR0913 - the continuation binds the compl
     lifecycle: dict[str, str],
     *,
     sources: dict[str, dict[str, Any]],
-    records: dict[str, dict[str, Any]],
+    records: dict[str, EvidenceRecord],
     entries: dict[str, dict[str, Any]],
 ) -> tuple[GraphPlan, CommitHandoffTransition]:
     if any(status in {"in-flight", "awaiting-replan"} for status in lifecycle.values()):
@@ -5045,7 +5203,9 @@ def _prepare_commit_handoff(  # noqa: PLR0913 - the continuation binds the compl
         "preserved_evidence": {},
         "native_ci": document["native_ci"],
         "previous_native_units": {unit.node_id: asdict(unit) for unit in plan.coalesced_validation_units if unit.node_id in document["native_ci"]},
-        "source_records": {record["evidence_id"]: digest_bytes(canonical_json(record).encode()) for record in records.values()},
+        "source_records": {
+            _record_document(record)["evidence_id"]: digest_bytes(canonical_json(_record_document(record)).encode()) for record in records.values()
+        },
     }
     transition = replace(transition, commit_handoff=proof)
     verify_commit_identity(transition)
@@ -5066,7 +5226,13 @@ def _prepare_commit_handoff(  # noqa: PLR0913 - the continuation binds the compl
     for source in _verified_reused_sources(plan, _state(document, "source_state")):
         key = "reused-" + digest_bytes(canonical_json(source).encode())[7:23]
         history_sources[key] = source
-    for name, content in history_files(document, history_sources).items():
+    for name, content in history_files(
+        {
+            **document,
+            "validation_records": {item["node_id"]: item["policy"] for item in proof["preserved_evidence"].values() if item["kind"] == "validation_records"},
+        },
+        history_sources,
+    ).items():
         path = history / name
         _write_bytes_atomically_once(path, content, mode=0o444)
         retained.append({"path": str(path), "digest": digest_bytes(content)})
@@ -5086,7 +5252,7 @@ def _resume_metadata(document: dict[str, Any], transition: ExternalMetadataTrans
     entries = _dispatches_by_node(_read_json_object(Path(document["dispatches_path"])), plan=plan, source_state=state)
     events, lifecycle, _head = read_execution_journal(Path(document["journal_path"]), plan=plan, source_state=state)
     sources, records = _accepted_journal_sources(plan, state, events, entries, include_blocked=True)
-    by_node = {record["node_id"]: record for record in records}
+    by_node = {_record_document(record)["node_id"]: record for record in records}
     for context in plan.audit_delta_reviews:
         _verify_delta_context(context, entries[context["node_id"]]["dispatch"])
     for node in plan.actual_worker_nodes:
@@ -5221,7 +5387,8 @@ def _review_control_marker(lifecycle: ReviewLifecycle) -> Path | None:
 
 def _require_running_review(document: dict[str, Any], journal: Path | None = None) -> None:
     if (reason := _review_stop_reason(document, journal)) is not None:
-        raise ValueError(f"review stopped: {reason}")
+        msg = f"review stopped: {reason}"
+        raise ValueError(msg)
 
 
 def _review_control_inputs(document: dict[str, Any], args: argparse.Namespace) -> tuple[GraphPlan, dict[str, dict[str, Any]], dict[str, Any], Path]:
@@ -5268,7 +5435,8 @@ def _replay_review_control(marker: Path, request_identity: str) -> dict[str, Any
     """Recover the original complete cancellation result without stopping twice."""
     stopped = json.loads(read_control_file(marker))
     if stopped.get("request_identity") != request_identity:
-        raise ValueError(f"review stopped or control generation superseded: {stopped.get('stop_reason')}")
+        msg = f"review stopped or control generation superseded: {stopped.get('stop_reason')}"
+        raise ValueError(msg)
     retained = json.loads(read_control_file(Path(_required_text(stopped, "result_path"))))
     result = retained.get("result")
     if (
@@ -5307,7 +5475,8 @@ def _updated_review_control_policy(document: dict[str, Any], policy: ReviewLifec
     action = document["action"]
     if action == "extend-budget":
         if policy.stop_reason is not None and not policy.stop_reason.startswith("repair-budget-exhausted"):
-            raise ValueError(f"review stopped: {policy.stop_reason}")
+            msg = f"review stopped: {policy.stop_reason}"
+            raise ValueError(msg)
         extension = RepairBudgetExtension(_required_int(document, "additional_epochs"), _required_text(document, "user_authorization"))
         return replace(
             policy, repair_budget=policy.repair_budget + extension.additional_epochs, budget_extensions=(*policy.budget_extensions, extension), stop_reason=None
@@ -5352,7 +5521,8 @@ def _replayed_extension(
         msg = "budget generation already extended; use the returned child lifecycle for another extension"
         raise ValueError(msg)
     if marker is not None and str(_read_json_object(marker).get("stop_reason", "")).startswith("user-stop"):
-        raise ValueError(f"review stopped: {_required_text(_read_json_object(marker), 'stop_reason')}")
+        msg_0 = f"review stopped: {_required_text(_read_json_object(marker), 'stop_reason')}"
+        raise ValueError(msg_0)
     result = _replay_review_control(extension_marker, request_identity)
     if operation_output_path is not None:
         _review_control_output_destination(args, operation_output_path, store=Path(result["control_result_path"]).parent)
@@ -5381,7 +5551,8 @@ def _require_control_action_active(action: str, reason: str | None) -> None:
         return
     if action == "extend-budget" and reason.startswith("repair-budget-exhausted"):
         return
-    raise ValueError(f"review stopped: {reason}")
+    msg = f"review stopped: {reason}"
+    raise ValueError(msg)
 
 
 def _review_control_locked(  # noqa: PLR0913
@@ -5442,7 +5613,11 @@ def _review_control_locked(  # noqa: PLR0913
         "review_lifecycle": asdict(policy),
         "stop_reason": policy.stop_reason,
         "cancel_node_ids": active if policy.stop_reason is not None else [],
-        "remaining_findings": [{"evidence_id": record["evidence_id"], "findings": record.get("findings", [])} for record in records if record.get("findings")],
+        "remaining_findings": [
+            {"evidence_id": record["evidence_id"], "findings": record.get("findings", [])}
+            for record in records
+            if isinstance(record, dict) and record.get("findings")
+        ],
         "incomplete_node_ids": sorted(node.node_id for node in plan.actual_worker_nodes if state.get(node.node_id) != "accepted"),
         "graph_proof_status": "partial",
     }
@@ -5694,6 +5869,7 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
     captured_paths = _text_list(new_capture, "captured_scope_paths")
     sources = _mutation_evidence_sources(document, old_plan)
     planning_input = bootstrap_document(new_capture, planning_template)
+    planning_input["independent_review_after_audits"] = old_plan.independent_review_after_audits
     planning_input["review_lifecycle"] = json.loads(canonical_json(asdict(old_plan.review_lifecycle)))
     planning_input["planning_purpose"] = "repair-verification"
     planning_input["authorization"] = authorization_after
@@ -5951,9 +6127,16 @@ def _journal_evidence(raw: object, *, plan: GraphPlan, node: WorkerNode, status:
 
 
 def _verified_journal_evidence(
-    source: dict[str, Any], *, plan: GraphPlan, node: WorkerNode, source_state: tuple[str, str, str]
+    source: dict[str, Any],
+    *,
+    plan: GraphPlan,
+    node: WorkerNode,
+    source_state: tuple[str, str, str],
+    loaded: tuple[str, ReviewEvidenceExpectation | ValidationEvidenceExpectation, ReviewEvidence | ValidationEvidence, bytes, EvidenceRecord | None]
+    | None = None,
 ) -> tuple[dict[str, str], tuple[str, ...]]:
-    kind, expectation, evidence, _content, normalized = _load_evidence_source(source, require_normalized=True)
+    kind, expectation, evidence, _content, normalized = loaded if loaded is not None else _load_evidence_source(source, require_normalized=True)
+    normalized = _record_document(normalized) if normalized is not None else None
     if normalized is None:  # Defensive for type narrowing after require_normalized.
         msg = f"journal evidence has no normalized record: {node.node_id}"
         raise ValueError(msg)
@@ -6283,6 +6466,11 @@ def _dispatches_by_node(dispatch_set: dict[str, Any], *, plan: GraphPlan, source
             if _read_regular_file_no_follow(worker_input) != expected_input:
                 msg = f"worker input differs from its materialized dispatch: {node_id} ({worker_input})"
                 raise ValueError(msg)
+            if "worker_execution_path" in entry and _read_regular_file_no_follow(Path(entry["worker_execution_path"])) != execution_view_bytes(
+                entry, expected_input
+            ):
+                msg = f"worker execution view differs from its canonical dispatch: {node_id}"
+                raise ValueError(msg)
         planned_coverage = next((context for context in plan.audit_delta_reviews if context["node_id"] == node_id), None)
         coverage = dispatch.get("coverage_reuse")
         if (None if coverage is None else _coverage_proof(coverage)) != planned_coverage:
@@ -6311,6 +6499,7 @@ def _explicit_synthesis_reuse_sources(
     sources = []
     for source in _continuation_synthesis_sources(entries):
         _kind, expectation, evidence, _content, record = _load_evidence_source(source, require_normalized=True)
+        record = _record_document(record) if record is not None else None
         if evidence.evidence_id not in reused_ids:
             continue
         if not isinstance(evidence, ReviewEvidence) or evidence.mode != "audit" or evidence.status not in {"completed", "no-findings"}:
@@ -6331,22 +6520,23 @@ def _accepted_journal_sources(
     entries: dict[str, dict[str, Any]],
     *,
     include_blocked: bool = False,
-) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[dict[str, dict[str, Any]], list[EvidenceRecord]]:
     state, _head = _fold_execution_journal(plan, source_state, events)
     latest = {str(event["node_id"]): event for event in events}
     sources: dict[str, dict[str, Any]] = {}
-    records: list[dict[str, Any]] = []
+    records: list[EvidenceRecord] = []
     for node in plan.actual_worker_nodes:
         status = state.get(node.node_id)
         if status != "accepted" and not (include_blocked and status == "blocked" and latest[node.node_id]["evidence"] is not None):
             continue
         entry = entries[node.node_id]
         source = {"artifact_path": entry["artifact_path"], "metadata_path": entry["metadata_path"]}
-        verified, _limitations = _verified_journal_evidence(source, plan=plan, node=node, source_state=source_state)
+        loaded = _load_evidence_source(source, require_normalized=True)
+        verified, _limitations = _verified_journal_evidence(source, plan=plan, node=node, source_state=source_state, loaded=loaded)
         if verified != latest[node.node_id]["evidence"]:
             msg = f"{status} artifact differs from journal: {node.node_id}"
             raise ValueError(msg)
-        _kind, _expectation, _evidence, _content, record = _load_evidence_source(source, require_normalized=True)
+        _kind, _expectation, _evidence, _content, record = loaded
         if record is not None:
             records.append(record)
         sources[node.node_id] = source
@@ -6360,7 +6550,7 @@ def _accepted_journal_sources(
     return sources, records
 
 
-def next_ready_nodes(document: dict[str, Any], *, journal_events: tuple[dict[str, Any], ...], dispatch_set: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, PLR0915
+def next_ready_nodes(document: dict[str, Any], *, journal_events: tuple[dict[str, Any], ...], dispatch_set: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, PLR0912, PLR0915
     """Return only dependency-ready dispatches from a verified execution journal."""
     raw_plan = document.get("plan")
     if not isinstance(raw_plan, dict):
@@ -6405,6 +6595,11 @@ def next_ready_nodes(document: dict[str, Any], *, journal_events: tuple[dict[str
     for node in () if stop_reason is not None else plan.actual_worker_nodes:
         if node.node_id in accepted | awaiting_replan | blocked | in_flight:
             continue
+        if plan.independent_review_after_audits and node.mode == "independent-review":
+            pending_audits = [audit.node_id for audit in plan.actual_worker_nodes if audit.mode == "audit" and audit.node_id not in accepted]
+            if pending_audits:
+                waiting.append({"node_id": node.node_id, "pending_source_audits": pending_audits})
+                continue
         barrier = pending_validation_barrier(plan, state, latest, node.node_id)
         if barrier:
             waiting.append({"node_id": node.node_id, "pre_review_validation_blockers": list(barrier)})
@@ -6454,6 +6649,8 @@ def _coordinator_lane_entry(original: dict[str, Any], store: Path, pending: dict
     entry = json.loads(canonical_json(original))
     node_id = entry["node_id"]
     entry["worker_input_path"] = str(store / f"{node_id}.worker-input.json")
+    if "worker_execution_path" in entry:
+        entry["worker_execution_path"] = str(store / f"{node_id}.execution.json")
     contract_path = store / f"{node_id}.worker-payload-contract.json"
     entry["worker_payload_contract_path"] = str(contract_path)
     dispatch = entry["dispatch"]
@@ -6469,6 +6666,8 @@ def _coordinator_lane_entry(original: dict[str, Any], store: Path, pending: dict
     if "compiler_preflight" in contract:
         contract["compiler_preflight"] = {"worker_input_path": entry["worker_input_path"], "digest": digest_bytes(entry_bytes)}
     _queue_materialized_write(pending, Path(entry["worker_input_path"]), entry_bytes, mode=0o444)
+    if "worker_execution_path" in entry:
+        _queue_materialized_write(pending, Path(entry["worker_execution_path"]), execution_view_bytes(entry, entry_bytes), mode=0o444)
     _queue_materialized_write(pending, contract_path, (json.dumps(contract, indent=2, sort_keys=True) + "\n").encode(), mode=0o444)
     return entry
 
@@ -6696,7 +6895,7 @@ def _software_doi_recheck_ids(document: dict[str, Any], records: list[dict[str, 
 
 
 def _expanded_validation_plan(
-    document: dict[str, Any], plan: GraphPlan, records: list[dict[str, Any]], repository_root: Path, *, authorization: str
+    document: dict[str, Any], plan: GraphPlan, records: Sequence[EvidenceRecord], repository_root: Path, *, authorization: str
 ) -> GraphPlan:
     reconciliation = _validation_reconciliation(plan, records)
     pending = {item["requirement_id"] for item in reconciliation["requirements"] if item["resolution"] != "planned"}
@@ -6704,7 +6903,7 @@ def _expanded_validation_plan(
     for raw in raw_requirements:
         require_schema_definition(raw, _PLANNING_INPUT_SCHEMA, "validationRequirement")
     additions = validation_requirements_from_document({"validation_requirements": list(raw_requirements)}, repository_root)
-    pending.update(_software_doi_recheck_ids(document, records, additions))
+    pending.update(_software_doi_recheck_ids(document, [_record_document(record) for record in records], additions))
     existing = {requirement for unit in plan.coalesced_validation_units for requirement in unit.requirement_ids}
     source_state = _state(document, "source_state")
     for item in additions:
@@ -6844,7 +7043,7 @@ def _publish_validation_continuation(  # noqa: PLR0913, PLR0917
     expanded: GraphPlan,
     entries: dict[str, dict[str, Any]],
     sources: dict[str, dict[str, Any]],
-    records: list[dict[str, Any]],
+    records: Sequence[EvidenceRecord],
     head: str | None,
     *,
     status: str,
@@ -7183,6 +7382,7 @@ def _recover_validation(document: dict[str, Any], args: argparse.Namespace, *, c
         msg = "recovery requires compiled, journal-bound launch-failure evidence"
         raise ValueError(msg)
     _kind, _expectation, evidence, _content, normalized = _load_evidence_source(failed_source, require_normalized=True)
+    normalized = _record_document(normalized) if normalized is not None else None
     if not isinstance(evidence, ValidationEvidence) or normalized is None:
         msg = "recovery requires normalized validation evidence"
         raise ValueError(msg)
@@ -7239,7 +7439,7 @@ def _recover_validation(document: dict[str, Any], args: argparse.Namespace, *, c
         ),
     )
     retained_sources = {key: value for key, value in sources.items() if key != node_id}
-    retained_records = [record for record in records if record.get("node_id") != node_id]
+    retained_records = [record for record in records if _record_document(record).get("node_id") != node_id]
     return _publish_validation_continuation(
         document, args, plan, expanded, entries, retained_sources, retained_records, head, status="recovered", journal_events=events, replaced_node_id=node_id
     )
@@ -7302,6 +7502,7 @@ def reconcile_handoffs(document: dict[str, Any]) -> dict[str, Any]:
     accepted: list[str] = []
     for source in _evidence_sources(document, plan):
         kind, expectation, evidence, _content, record = _load_evidence_source(source, require_normalized=True)
+        record = _record_document(record) if record is not None else None
         if kind != "review" or not isinstance(expectation, ReviewEvidenceExpectation) or not isinstance(evidence, ReviewEvidence):
             continue
         if review_source_state_blockers(plan, expectation, evidence, source_state) or not assess_review_evidence(expectation, evidence).satisfies_requirements:
@@ -7319,6 +7520,97 @@ def reconcile_handoffs(document: dict[str, Any]) -> dict[str, Any]:
         "schema_version": 1,
         "status": "resolved" if not unresolved else "requires-expansion",
         "unresolved_handoff_ids": list(unresolved),
+    }
+
+
+def report_delivery(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, PLR0915 - preserve separate typed evidence, source and plan admission gates.
+    """Report verified current evidence and outstanding work without certifying a proof."""
+    plan = _graph_plan(document["plan"])
+    state = _state(document, "source_state")
+    if _state(document, "current_source_state") != _current_metadata_state(document):
+        msg = "delivery report requires the current reviewed capture"
+        raise ValueError(msg)
+    records = []
+    rejected = []
+    for source in _evidence_sources(document, plan):
+        _kind, expectation, evidence, _content, record = _load_evidence_source(source, require_normalized=True)
+        if isinstance(evidence, ReviewEvidence) and isinstance(expectation, ReviewEvidenceExpectation):
+            assessment = assess_review_evidence(expectation, evidence)
+            source_blockers = review_source_state_blockers(plan, expectation, evidence, state)
+        elif isinstance(evidence, ValidationEvidence) and isinstance(expectation, ValidationEvidenceExpectation):
+            assessment = assess_validation_evidence(expectation, evidence)
+            source_blockers = ()
+        else:
+            msg = "delivery source has mismatched typed evidence"
+            raise TypeError(msg)
+        if record is None or not assessment.feasible:
+            rejected.append(evidence.evidence_id)
+            continue
+        if source_blockers:
+            rejected.append(evidence.evidence_id)
+            continue
+        node = next((item for item in plan.actual_worker_nodes if item.node_id == evidence.node_id), None)
+        reused_ids = {identity for _requirement, identity in plan.exact_reused_review_evidence}
+        if node is None and evidence.evidence_id not in reused_ids:
+            rejected.append(evidence.evidence_id)
+            continue
+        if node is not None and (evidence.requirement_ids, evidence.skill_digest, evidence.reference_digests) != (
+            node.requirement_ids,
+            node.skill_digest,
+            node.reference_digests,
+        ):
+            rejected.append(evidence.evidence_id)
+            continue
+        if isinstance(expectation, ValidationEvidenceExpectation) and expectation.validation_unit not in plan.coalesced_validation_units:
+            rejected.append(evidence.evidence_id)
+            continue
+        records.append(record)
+    blockers = [*plan.blockers, *plan.routing_completion_blockers, *_metadata_evidence_blockers(document, records)]
+    records = [_record_document(record) for record in records]
+    accepted = {record["node_id"]: record for record in records}
+    incomplete = [node.node_id for node in plan.actual_worker_nodes if node.node_id not in accepted or accepted[node.node_id]["status"] == "blocked"]
+    pending_semantic = [node.node_id for node in plan.actual_worker_nodes if node.mode != "synthesis" and node.node_id in incomplete]
+    transitions = tuple(metadata_transition(item) for item in _records(document, "external_metadata_transitions"))
+    validations = [
+        {
+            "node_id": unit.node_id,
+            "requirement_ids": list(unit.requirement_ids),
+            "platform": unit.platform,
+            "execution": "hosted"
+            if native_target(transitions, unit.node_id) is not None or not unit.commands or accepted.get(unit.node_id, {}).get("native_ci")
+            else "local",
+            "required": unit.required,
+            "status": accepted.get(unit.node_id, {}).get("status", "pending-or-unavailable"),
+        }
+        for unit in plan.coalesced_validation_units
+    ]
+    blockers.extend(
+        f"required validation {item['node_id']}: {item['status']}" for item in validations if item["required"] and item["status"] not in {"passed", "reused"}
+    )
+    blockers.extend(f"rejected evidence: {identity}" for identity in rejected)
+    handoffs = reconcile_handoffs(document)
+    blockers.extend(handoffs["blockers"])
+    blockers.extend(_validation_reconciliation(plan, records)["blockers"])
+    if (reason := _review_stop_reason(document)) is not None:
+        blockers.append("review stopped: " + reason)
+    remaining = [{"evidence_id": record["evidence_id"], "findings": record["findings"]} for record in records if record.get("findings")]
+    return {
+        "schema_version": 1,
+        "status": "reported",
+        "delivery_profile": "routine",
+        "graph_proof_status": "not-certified",
+        "review_lifecycle": asdict(plan.review_lifecycle),
+        "repairs_completed": plan.review_lifecycle.repairs_completed,
+        "current_source_state": list(_current_metadata_state(document)),
+        "incomplete_node_ids": incomplete,
+        "pending_semantic_node_ids": pending_semantic,
+        "validation": validations,
+        "local_validation": [item for item in validations if item["execution"] == "local"],
+        "hosted_ci": [item for item in validations if item["execution"] == "hosted"],
+        "remaining_findings": remaining,
+        "blockers": blockers,
+        "repository_readiness": "blocked" if blockers or pending_semantic or remaining else "verification-complete",
+        "summary": {"accepted_evidence": len(records), "pending_nodes": len(incomplete), "remaining_finding_groups": len(remaining)},
     }
 
 
@@ -7340,7 +7632,7 @@ def finalize_proof(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, P
     sources = _evidence_sources(document, plan)
 
     loaded: dict[
-        str, tuple[str, ReviewEvidenceExpectation | ValidationEvidenceExpectation, ReviewEvidence | ValidationEvidence, bytes, dict[str, Any] | None]
+        str, tuple[str, ReviewEvidenceExpectation | ValidationEvidenceExpectation, ReviewEvidence | ValidationEvidence, bytes, EvidenceRecord | None]
     ] = {}
     duplicate_evidence: set[str] = set()
     for source in sources:
@@ -7351,7 +7643,7 @@ def finalize_proof(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, P
     preblockers = list(_text_list(document, "lifecycle_blockers"))
     if (reason := _review_stop_reason(document)) is not None:
         preblockers.append("review stopped: " + reason)
-    normalized_records = [record for *_rest, record in loaded.values() if record is not None]
+    normalized_records = [_record_document(record) for *_rest, record in loaded.values() if record is not None]
     successful_validation = {
         record["node_id"] for record in normalized_records if record.get("mode") == "validation" and record["status"] in {"passed", "reused"}
     }
@@ -7441,7 +7733,9 @@ def finalize_proof(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, P
     accepted_validation_ids = tuple(sorted(evidence_id for node_id, evidence_id in planned_node_evidence if node_id in validation_node_ids))
     accepted_ids = set(accepted_review_ids) | set(accepted_validation_ids)
     normalized_by_evidence = {
-        evidence_id: normalized for evidence_id, (_kind, _expectation, _evidence, _content, normalized) in loaded.items() if normalized is not None
+        evidence_id: _record_document(normalized)
+        for evidence_id, (_kind, _expectation, _evidence, _content, normalized) in loaded.items()
+        if normalized is not None
     }
     handoff_reconciliation, unresolved_handoff_ids, handoff_blockers = _reconciled_handoffs(plan, normalized_by_evidence, accepted_review_ids)
     resolved_handoff_ids = tuple(sorted(str(record["handoff_id"]) for record in handoff_reconciliation if record["resolution"] == "resolved-by-current-plan"))
@@ -7539,7 +7833,7 @@ def finalize_proof(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, P
         if isinstance(evidence, ReviewEvidence) and evidence.mode == "independent-review":
             accepted_independent_list.append(evidence_id)
     accepted_independent = tuple(accepted_independent_list)
-    final_record = loaded[final_synthesis_evidence_id][4] if final_synthesis_evidence_id in loaded else None
+    final_record = normalized_by_evidence.get(final_synthesis_evidence_id)
     return {
         "artifact_manifest": asdict(manifest),
         "blockers": list(blockers),
@@ -7736,6 +8030,9 @@ def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     final_parser.add_argument("--input", type=Path, required=True)
     final_parser.add_argument("--journal", type=Path, help=_INITIAL_JOURNAL_HELP)
     final_parser.add_argument("--output", type=Path, required=True)
+    delivery_parser = _runtime_subparser(subparsers, "report-delivery", "report fixes, verified evidence and pending CI without formal certification")
+    for flag in ("input", "output", "dispatches", "journal", "current-capture"):
+        delivery_parser.add_argument("--" + flag, type=Path, required=True)
     return parser
 
 
@@ -7793,6 +8090,7 @@ def _next_ready_from_files(document: dict[str, Any], args: argparse.Namespace) -
             "node_id": entry["node_id"],
             "result_contract": entry["result_contract"],
             "worker_input_path": entry["worker_input_path"],
+            **({"worker_execution_path": entry["worker_execution_path"]} if "worker_execution_path" in entry else {}),
         }
         for entry in result["ready_dispatches"]
     ]
@@ -8111,7 +8409,7 @@ def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace)
             fcntl.flock(lock_stream.fileno(), fcntl.LOCK_UN)
 
 
-def _json_operation_output(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:  # noqa: C901, PLR0911
+def _json_operation_output(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:  # noqa: C901, PLR0911, PLR0912
     if args.operation == "review-control":
         return review_control(document, args)
     if args.operation == "preflight-validation":
@@ -8142,6 +8440,8 @@ def _json_operation_output(document: dict[str, Any], args: argparse.Namespace) -
         return operation(document, args)
     if args.operation == "next-ready":
         return _next_ready_from_files(document, args)
+    if args.operation == "report-delivery":
+        return report_delivery(_finalize_document_from_files(document, args))
     return finalize_proof(_finalize_document_from_files(document, args))
 
 
@@ -8308,4 +8608,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    from review_graph_session import verify_current_snapshot
+
+    verify_current_snapshot()
     raise SystemExit(main())

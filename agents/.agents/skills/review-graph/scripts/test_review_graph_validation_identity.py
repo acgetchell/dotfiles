@@ -287,6 +287,7 @@ def test_reused_validation_reference_is_scoped_to_its_verified_audit(tmp_path: P
     lifecycle = json.loads(Path(result["lifecycle_input_path"]).read_bytes())
     plan = runtime._graph_plan(lifecycle["plan"])
     record = runtime._load_evidence_source(source, require_normalized=True)[4]
+    assert isinstance(record, dict)
     assert record is not None
     for changed in (
         {**record, "evidence_id": "review:other-audit"},

@@ -39,6 +39,20 @@ def _audit_request(tmp_path: Path, *, large: bool = False, caveat: str = "facts"
         _run_test_git(git, "-C", str(repository), "add", ".")
         _run_test_git(git, "-C", str(repository), "commit", "-m", "whole repository fixture")
     catalog = "python.scientific" if large else "python.cli"
+    if caveat == "native-unavailable":
+        template["validation_requirements"].append(
+            {
+                **template["validation_requirements"][0],
+                "requirement_id": "native-ci",
+                "baseline": False,
+                "commands": [],
+                "working_directories": [],
+                "canonical_recipe": None,
+                "environment": "GitHub Actions native matrix",
+                "platform": "native hosted CI",
+                "planning_blocker": "Required native jobs unavailable",
+            }
+        )
     _set_fixture_routing(
         template,
         {
@@ -73,8 +87,8 @@ def _audit_request(tmp_path: Path, *, large: bool = False, caveat: str = "facts"
         payload["unresolved_uncertainties"] = [{"kind": "semantic", "reason": "The input contract is unresolved"}]
     elif caveat == "dependency":
         payload["coverage_units"][0]["dependency_uncertainty"] = "Unknown dynamic dependency"
-    elif caveat in {"delegated", "unavailable", "failed"}:
-        planned = entry["dispatch"]["command_policy"]["planned_validation_units"][0]
+    elif caveat in {"delegated", "unavailable", "failed", "native-unavailable"}:
+        planned = entry["dispatch"]["command_policy"]["planned_validation_units"][-1 if caveat == "native-unavailable" else 0]
         requirement = planned["requirement_ids"][0]
         payload["validation_requirements"] = [
             {
@@ -86,7 +100,12 @@ def _audit_request(tmp_path: Path, *, large: bool = False, caveat: str = "facts"
             }
         ]
         payload["validation_limits"] = [
-            {"requirement_id": requirement, "environment": "current host", "status": caveat, "reason": "Execution belongs to the validator"}
+            {
+                "requirement_id": requirement,
+                "environment": "current host",
+                "status": "unavailable" if caveat == "native-unavailable" else caveat,
+                "reason": "Execution belongs to the validator",
+            }
         ]
     if caveat == "no-partition":
         del payload["coverage_units"]
@@ -229,8 +248,8 @@ def test_large_recheck_publishes_retries_and_finalizes_without_expanding_markdow
         ("scope", "coverage-limitations"),
         ("uncertainty", "unresolved-uncertainty"),
         ("dependency", "dependency-uncertainty"),
-        ("unavailable", "validation-evidence-limits"),
-        ("failed", "validation-evidence-limits"),
+        ("unavailable", "verified"),
+        ("failed", "validation-evidence-failed"),
         ("no-partition", "no-coverage-partition"),
     ],
 )
@@ -276,6 +295,7 @@ def test_saved_payload_compiles_unchanged_and_legacy_native_proof_still_verifies
     assert Path(result["dispatches_path"]).read_bytes() == saved_dispatch
     source = {key: entry[key] for key in ("artifact_path", "metadata_path")}
     _kind, _expectation, _evidence, content, record = runtime._load_evidence_source(source, require_normalized=True)
+    assert isinstance(record, dict)
     assert record is not None
     context = entry["dispatch"]["coverage_reuse"]
     legacy = "- Coverage reuse: " + json.dumps(context, sort_keys=True, separators=(",", ":"))

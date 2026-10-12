@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics, run_command_bytes
+from review_graph_git_objects import GitPathIdentity, git_object_id
 from review_graph_reuse import SNAPSHOT_FORMAT, source_snapshot
 
 if TYPE_CHECKING:
@@ -31,23 +32,6 @@ class _Digest(Protocol):
 
     def hexdigest(self) -> str:
         """Return the hexadecimal digest."""
-
-
-class _PathDigest:
-    """Collect a path identity from the same bytes as the repository digest."""
-
-    def __init__(self, parent: _Digest) -> None:
-        self.parent = parent
-        self.digest = hashlib.sha256()
-
-    def update(self, value: bytes) -> None:
-        """Feed bytes to both the parent and per-path digests."""
-        self.parent.update(value)
-        self.digest.update(value)
-
-    def hexdigest(self) -> str:
-        """Return the per-path digest as a hexadecimal string."""
-        return self.digest.hexdigest()
 
 
 def _run_git(git: str, repo: Path, arguments: Sequence[str]) -> bytes:
@@ -141,22 +125,6 @@ def _update_part(digest: _Digest, label: str, value: bytes) -> None:
     digest.update(value)
 
 
-def _update_file(digest: _Digest, path: Path, expected_size: int) -> None:
-    """Stream a regular file into a length-delimited digest part."""
-    label = b"file-content"
-    digest.update(len(label).to_bytes(8, "big"))
-    digest.update(label)
-    digest.update(expected_size.to_bytes(8, "big"))
-    bytes_read = 0
-    with path.open("rb") as stream:
-        while chunk := stream.read(_CHUNK_SIZE):
-            digest.update(chunk)
-            bytes_read += len(chunk)
-    if bytes_read != expected_size:
-        message = f"file changed while capturing scope: {path}"
-        raise RuntimeError(message)
-
-
 def _index_entry(git: str, repo: Path, relative: str) -> bytes:
     """Return canonical index metadata for one literal path."""
     return _run_git(git, repo, _with_paths(("ls-files", "--stage", "-z"), (relative,)))
@@ -182,8 +150,25 @@ def _submodule_fingerprint(git: str, path: Path) -> str:
     )
 
 
-def _update_worktree_path(digest: _Digest, git: str, repo: Path, relative: str) -> None:
-    """Hash one worktree path using Git-relevant type, mode, and content."""
+def _file_blob_id(path: Path, expected_size: int, algorithm: str) -> str:
+    """Stream raw worktree bytes using Git framing, without filters or subprocesses."""
+    if algorithm not in {"sha1", "sha256"}:
+        msg = "Git source identity requires sha1 or sha256"
+        raise ValueError(msg)
+    digest = hashlib.new(algorithm, f"blob {expected_size}\0".encode(), usedforsecurity=False)
+    bytes_read = 0
+    with path.open("rb") as stream:
+        while chunk := stream.read(_CHUNK_SIZE):
+            digest.update(chunk)
+            bytes_read += len(chunk)
+    if bytes_read != expected_size:
+        msg = f"file changed while capturing scope: {path}"
+        raise RuntimeError(msg)
+    return digest.hexdigest()
+
+
+def _update_worktree_path(digest: _Digest, git: str, repo: Path, relative: str, algorithm: str) -> str:
+    """Bind one path to its native Git mode/object identity without writing objects."""
     path = repo / relative
     index_entry = _index_entry(git, repo, relative)
     _update_part(digest, "path", os.fsencode(relative))
@@ -193,31 +178,37 @@ def _update_worktree_path(digest: _Digest, git: str, repo: Path, relative: str) 
         if _is_gitlink(index_entry):
             _update_part(digest, "mode", b"160000-unchecked-out")
             _update_part(digest, "gitlink-index", index_entry)
+            identity = "submodule:" + hashlib.sha256(index_entry).hexdigest()
         else:
             _update_part(digest, "mode", b"deleted")
-        return
+            identity = "absent"
+        return identity
 
     if stat.S_ISLNK(metadata.st_mode):
         _update_part(digest, "mode", b"120000")
-        _update_part(digest, "symlink-target", os.fsencode(path.readlink()))
-        return
+        identity = GitPathIdentity(algorithm, "120000", git_object_id("blob", os.fsencode(path.readlink()), algorithm)).serialize()
+        _update_part(digest, "git-object", identity.encode())
+        return identity
     if stat.S_ISREG(metadata.st_mode):
-        mode = b"100755" if metadata.st_mode & 0o111 else b"100644"
+        mode = b"100755" if metadata.st_mode & stat.S_IXUSR else b"100644"
         _update_part(digest, "mode", mode)
-        _update_file(digest, path, metadata.st_size)
+        oid = _file_blob_id(path, metadata.st_size, algorithm)
+        identity = GitPathIdentity(algorithm, mode.decode(), oid).serialize()
+        _update_part(digest, "git-object", identity.encode())
         final_metadata = path.lstat()
         if (final_metadata.st_mode, final_metadata.st_size, final_metadata.st_mtime_ns) != (metadata.st_mode, metadata.st_size, metadata.st_mtime_ns):
             message = f"file changed while capturing scope: {path}"
             raise RuntimeError(message)
-        return
+        return identity
     if stat.S_ISDIR(metadata.st_mode):
         if not _is_gitlink(index_entry):
             message = f"unexpected directory in file scope: {relative}"
             raise RuntimeError(message)
         _update_part(digest, "mode", b"160000")
         _update_part(digest, "gitlink-index", index_entry)
-        _update_part(digest, "gitlink-worktree", _submodule_fingerprint(git, path).encode())
-        return
+        submodule = _submodule_fingerprint(git, path)
+        _update_part(digest, "gitlink-worktree", submodule.encode())
+        return "submodule:" + hashlib.sha256(index_entry + submodule.encode()).hexdigest()
     message = f"unsupported filesystem entry in review scope: {relative}"
     raise RuntimeError(message)
 
@@ -233,16 +224,14 @@ def _worktree_fingerprint(  # noqa: PLR0913 - optional path identities share the
 ) -> str:
     """Hash the selected worktree state from canonical path content and modes."""
     digest = hashlib.sha256()
+    algorithm = _decode(_run_git(git, repo, ("rev-parse", "--show-object-format")))
     for label, value in identity:
         _update_part(digest, label, value)
     _update_part(digest, "requested-paths", json.dumps(pathspecs, separators=(",", ":")).encode())
     for relative in sorted(set(paths)):
-        if path_fingerprints is None:
-            _update_worktree_path(digest, git, repo, relative)
-        else:
-            path_digest = _PathDigest(digest)
-            _update_worktree_path(path_digest, git, repo, relative)
-            path_fingerprints[relative] = path_digest.hexdigest()
+        path_identity = _update_worktree_path(digest, git, repo, relative, algorithm)
+        if path_fingerprints is not None:
+            path_fingerprints[relative] = path_identity
     return digest.hexdigest()
 
 
@@ -354,8 +343,8 @@ def _repository_state_snapshot(*, git: str, repo: Path, head: str, branch: str, 
     # Deleted branch/index paths remain in the review scope but not ls-files.
     for relative in sorted(set(captured_paths) - path_fingerprints.keys()):
         path_digest = hashlib.sha256()
-        _update_worktree_path(path_digest, git, repo, relative)
-        path_fingerprints[relative] = path_digest.hexdigest()
+        algorithm = _decode(_run_git(git, repo, ("rev-parse", "--show-object-format")))
+        path_fingerprints[relative] = _update_worktree_path(path_digest, git, repo, relative, algorithm)
     return digest.hexdigest(), path_fingerprints, hashlib.sha256(index_entries).hexdigest()
 
 
@@ -471,7 +460,9 @@ def _scope_data(git: str, repo: Path, mode: str, base: str | None, pathspecs: Se
         "status": status,
         "untracked_paths": selected_untracked,
     }
-    manifest["repository_state_fingerprint"] = source_snapshot(manifest).computed_fingerprint()
+    snapshot = source_snapshot(manifest)
+    manifest["repository_git_tree_id"] = snapshot.git_tree_id
+    manifest["repository_state_fingerprint"] = snapshot.computed_fingerprint()
     return manifest
 
 
@@ -507,4 +498,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    from review_graph_session import verify_current_snapshot
+
+    verify_current_snapshot()
     raise SystemExit(main())

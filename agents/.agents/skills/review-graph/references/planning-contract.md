@@ -346,9 +346,10 @@ For supplied accepted audit `sources`, preserve original artifacts and verify
 complete compiler-bound ownership, inspected dependencies, instructions,
 skill/reference identities, and unchanged inputs between content-bound v3
 captures. Only predecessor-free, complete audits without reuse-blocking caveats
-qualify. Typed execution facts and delegated validator context are retained;
-scope omissions, unclassified limitations, unresolved uncertainty, and
-unavailable/failed environmental evidence block reuse. See the
+qualify. Typed execution facts and validator context are retained;
+scope omissions, unclassified limitations and unresolved uncertainty block reuse.
+Unavailable environmental checks block readiness independently; failed checks
+retain an owning recheck disposition after source/dependency assessment. See the
 [audit context fields](audit-context.md).
 Before preserving an audit, reconcile each delegated validation requirement
 against the replacement plan. A changed execution identity or missing requirement

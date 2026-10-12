@@ -30,7 +30,7 @@ from test_review_graph_transitions import _materialize, _payload, _synthesis_pay
 
 def _save(entry: dict[str, Any], lifecycle: dict[str, Any], journal: Path, payload: dict[str, Any]) -> dict[str, str]:
     state = lifecycle.get("current_source_state", lifecycle["source_state"])
-    dispatch = {**entry["dispatch"], "before_state": state, "after_state": state}
+    dispatch = {**entry["dispatch"], "before_state": state, "after_state": state, "source_capture": lifecycle.get("capture", lifecycle.get("new_capture"))}
     compiler = {
         "audit": runtime.compile_review,
         "synthesis": runtime.compile_review,
@@ -57,6 +57,7 @@ def _save(entry: dict[str, Any], lifecycle: dict[str, Any], journal: Path, paylo
 def _validation_payload(entry: dict[str, Any], *, blocked: bool = False) -> dict[str, Any]:
     unit = entry["dispatch"]["validation_unit"]
     return {
+        "schema_version": 3,
         "status": "blocked" if blocked else "passed",
         "artifacts": [],
         "limitations": ["Native CI unavailable before authorized commit and push."] if blocked else [],
@@ -86,11 +87,31 @@ def _commit_audit_payload(dispatch: dict[str, Any], *, mode: str, change_target:
     return payload
 
 
-def _commit_fixture(
+def _commit_fixture(  # noqa: PLR0915 - complete real-Git execution and handoff fixture.
     tmp_path: Path, *, mode: str = "baseline", git_sensitive_review: bool = False
 ) -> tuple[dict[str, Any], dict[str, dict[str, Any]], dict[str, dict[str, str]]]:
     git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
     (repository / "justfile").write_text("ci:\n    test -f tool.py\n")
+    (repository / "review-validation-contracts.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "contracts": [
+                    {
+                        "contract_id": "fixture-ci",
+                        "commands": ["just ci"],
+                        "working_directories": ["."],
+                        "implementation_paths": ["justfile"],
+                        "input_scope": "repository",
+                        "input_prefixes": [],
+                        "git_inputs": [],
+                        "deterministic": True,
+                        "rationale": "The fixture recipe checks file existence only.",
+                    }
+                ],
+            }
+        )
+    )
     _run_test_git(git, "-C", str(repository), "add", "justfile")
     _run_test_git(git, "-C", str(repository), "commit", "-m", "CI recipe")
     (repository / "tool.py").write_text("value = 2\n")
@@ -112,6 +133,7 @@ def _commit_fixture(
     plan = plan_from_document(bootstrap_document(capture, template), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)
     assert plan.dispatch_allowed, plan.blockers
     lifecycle, dispatch_set, dispatches = _materialize(tmp_path, capture, plan)
+    lifecycle["capture"] = capture
     entries = {entry["node_id"]: entry for entry in dispatch_set["dispatches"]}
     journal = tmp_path / "original.jsonl"
     local_entry = next(entry for entry in entries.values() if entry["dispatch"].get("validation_unit", {}).get("baseline"))
@@ -147,6 +169,7 @@ def _commit_fixture(
     _run_test_git(git, "-C", str(repository), "add", ".")
     _run_test_git(git, "-C", str(repository), "commit", "-m", "Reviewed source")
     current = _scope_data(git, repository, mode, base_ref, ())
+    lifecycle.pop("capture")
     request = {
         **lifecycle,
         "previous_capture": capture,
@@ -160,14 +183,6 @@ def _commit_fixture(
             "branch": current["branch"],
             "source_state": lifecycle["source_state"],
             "user_authorization": "Commit these reviewed changes on fix/reviewed-commit and push.",
-        },
-        "local_validation": {
-            local_entry["node_id"]: {
-                "execution_identity": local_entry["dispatch"]["validation_unit"],
-                "git_dependencies": [],
-                "environment_unchanged": True,
-                "reason": "The fixture CI checks only file existence; no Git inputs.",
-            }
         },
         "independent_reviews": {
             entry["node_id"]: {
@@ -416,12 +431,12 @@ def test_handoff_rejects_unproved_transition(tmp_path: Path, damage: str) -> Non
     elif damage == "live-drift":
         (repository / "tool.py").write_text("uncommitted drift\n")
     elif damage == "execution":
-        next(iter(request["local_validation"].values()))["execution_identity"]["environment"] = "different environment"
+        request["local_validation"] = {}
     elif damage == "comparison":
         next(iter(request["independent_reviews"].values()))["comparison_commit"] = request["new_capture"]["head"]
     else:
         next(iter(request["native_ci"].values()))["commands"] = [f"native-ci --commit {request['previous_capture']['head']}"]
-    with pytest.raises(ValueError, match=r"handoff|reuse|replacement"):
+    with pytest.raises(ValueError, match=r"handoff|reuse|replacement|local_validation"):
         runtime.resume_after_authorized_commit(request)
     assert not Path(request["artifact_store"]).exists()
 

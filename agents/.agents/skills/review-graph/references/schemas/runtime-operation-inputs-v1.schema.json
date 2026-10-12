@@ -180,37 +180,109 @@
     "commitHandoff": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["authorization", "parent_commit", "commit", "preserved_files", "preserved_evidence", "native_ci", "previous_native_units", "source_records"],
+      "required": [
+        "authorization",
+        "parent_commit",
+        "commit",
+        "preserved_files",
+        "preserved_evidence",
+        "native_ci",
+        "previous_native_units",
+        "source_records"
+      ],
       "properties": {
-        "authorization": {"$ref": "#/$defs/resume-after-authorized-commit/properties/authorization"},
-        "parent_commit": {"type": "string", "minLength": 1},
-        "commit": {"type": "string", "minLength": 1},
-        "native_ci": {"$ref": "#/$defs/resume-after-authorized-commit/properties/native_ci"},
+        "authorization": {
+          "$ref": "#/$defs/resume-after-authorized-commit/properties/authorization"
+        },
+        "parent_commit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "commit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "native_ci": {
+          "$ref": "#/$defs/resume-after-authorized-commit/properties/native_ci"
+        },
         "previous_native_units": {
           "type": "object",
-          "additionalProperties": {"type": "object", "required": ["node_id"], "properties": {"node_id": {"type": "string", "minLength": 1}}}
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "node_id"
+            ],
+            "properties": {
+              "node_id": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
         },
-        "source_records": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}},
+        "source_records": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
         "preserved_files": {
           "type": "array",
           "minItems": 1,
           "items": {
-            "type": "object", "additionalProperties": false, "required": ["path", "digest"],
-            "properties": {"path": {"type": "string", "minLength": 1}, "digest": {"type": "string", "minLength": 1}}
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "digest"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "digest": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
           }
         },
         "preserved_evidence": {
           "type": "object",
           "additionalProperties": {
-            "type": "object", "additionalProperties": false, "required": ["kind", "node_id", "record_digest", "policy"],
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "node_id",
+              "record_digest",
+              "policy"
+            ],
             "properties": {
-              "kind": {"enum": ["local_validation", "independent_reviews"]},
-              "node_id": {"type": "string", "minLength": 1},
-              "record_digest": {"type": "string", "minLength": 1},
+              "kind": {
+                "enum": [
+                  "validation_records",
+                  "independent_reviews"
+                ]
+              },
+              "node_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "record_digest": {
+                "type": "string",
+                "minLength": 1
+              },
               "policy": {
                 "oneOf": [
-                  {"$ref": "#/$defs/resume-after-authorized-commit/properties/local_validation/additionalProperties"},
-                  {"$ref": "#/$defs/resume-after-authorized-commit/properties/independent_reviews/additionalProperties"}
+                  {
+                    "$ref": "#/$defs/validationApplicabilityBinding"
+                  },
+                  {
+                    "$ref": "#/$defs/resume-after-authorized-commit/properties/independent_reviews/additionalProperties"
+                  }
                 ]
               }
             }
@@ -218,175 +290,145 @@
         }
       }
     },
-      "resume-after-authorized-commit": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "artifact_store",
-          "dispatches_path",
-          "journal_path",
-          "plan",
-          "source_state",
-          "previous_capture",
-          "new_capture",
-          "authorization",
-          "native_ci"
-        ],
-        "properties": {
-          "artifact_store": {
-            "type": "string",
-            "minLength": 1
-          },
-          "dispatches_path": {
-            "type": "string",
-            "minLength": 1
-          },
-          "journal_path": {
-            "type": "string",
-            "minLength": 1
-          },
-          "plan": {
+    "resume-after-authorized-commit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_store",
+        "dispatches_path",
+        "journal_path",
+        "plan",
+        "source_state",
+        "previous_capture",
+        "new_capture",
+        "authorization",
+        "native_ci"
+      ],
+      "properties": {
+        "artifact_store": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dispatches_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "journal_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "plan": {
+          "type": "object"
+        },
+        "source_state": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "previous_capture": {
+          "type": "object"
+        },
+        "new_capture": {
+          "type": "object"
+        },
+        "external_metadata_transitions": {
+          "type": "array",
+          "items": {
             "type": "object"
-          },
-          "source_state": {
-            "$ref": "#/$defs/sourceState"
-          },
-          "previous_capture": {
-            "type": "object"
-          },
-          "new_capture": {
-            "type": "object"
-          },
-          "external_metadata_transitions": {
-            "type": "array",
-            "items": {
-              "type": "object"
+          }
+        },
+        "authorization": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "operation",
+            "repository_root",
+            "branch",
+            "source_state",
+            "user_authorization"
+          ],
+          "properties": {
+            "operation": {
+              "const": "branch-commit"
+            },
+            "repository_root": {
+              "type": "string",
+              "minLength": 1
+            },
+            "branch": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_state": {
+              "$ref": "#/$defs/sourceState"
+            },
+            "user_authorization": {
+              "type": "string",
+              "minLength": 1
             }
-          },
-          "authorization": {
+          }
+        },
+        "independent_reviews": {
+          "type": "object",
+          "additionalProperties": {
             "type": "object",
             "additionalProperties": false,
             "required": [
-              "operation",
-              "repository_root",
-              "branch",
-              "source_state",
-              "user_authorization"
+              "change_target",
+              "comparison_commit",
+              "reason"
             ],
             "properties": {
-              "operation": {
-                "const": "branch-commit"
-              },
-              "repository_root": {
+              "change_target": {
                 "type": "string",
                 "minLength": 1
               },
-              "branch": {
+              "comparison_commit": {
                 "type": "string",
                 "minLength": 1
               },
-              "source_state": {
-                "$ref": "#/$defs/sourceState"
-              },
-              "user_authorization": {
+              "reason": {
                 "type": "string",
                 "minLength": 1
               }
             }
-          },
-          "local_validation": {
+          }
+        },
+        "native_ci": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
             "type": "object",
-            "additionalProperties": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "execution_identity",
-                "git_dependencies",
-                "environment_unchanged",
-                "reason"
-              ],
-              "properties": {
-                "execution_identity": {
-                  "type": "object"
-                },
-                "git_dependencies": {
-                  "type": "array",
-                  "maxItems": 0
-                },
-                "environment_unchanged": {
-                  "const": true
-                },
-                "reason": {
+            "additionalProperties": false,
+            "required": [
+              "commands",
+              "checks"
+            ],
+            "properties": {
+              "commands": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
                   "type": "string",
                   "minLength": 1
                 }
-              }
-            }
-          },
-          "independent_reviews": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "change_target",
-                "comparison_commit",
-                "reason"
-              ],
-              "properties": {
-                "change_target": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "comparison_commit": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "reason": {
-                  "type": "string",
-                  "minLength": 1
-                }
-              }
-            }
-          },
-          "native_ci": {
-            "type": "object",
-            "minProperties": 1,
-            "additionalProperties": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "commands",
-                "checks"
-              ],
-              "properties": {
-                "commands": {
-                  "type": "array",
-                  "minItems": 1,
-                  "items": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "checks": {
-                  "type": "array",
-                  "minItems": 1,
-                  "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "name",
-                      "target"
-                    ],
-                    "properties": {
-                      "name": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "target": {
-                        "type": "string",
-                        "minLength": 1
-                      }
+              },
+              "checks": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "target"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "target": {
+                      "type": "string",
+                      "minLength": 1
                     }
                   }
                 }
@@ -394,95 +436,298 @@
             }
           }
         }
-      },
+      }
+    },
     "preflight-validation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["plan", "repository_root", "command_policy", "cache_paths"],
+      "required": [
+        "plan",
+        "repository_root",
+        "command_policy",
+        "cache_paths"
+      ],
       "properties": {
-        "plan": {"type": "object"},
-        "repository_root": {"type": "string", "minLength": 1},
-        "cache_paths": {"$ref": "#/$defs/stringArray"},
-        "execution_prerequisites": {"type": "array", "items": {
-          "type": "object", "additionalProperties": false,
-          "required": ["node_id", "executables", "native_available", "reason"],
-          "properties": {
-            "node_id": {"type": "string", "minLength": 1},
-            "executables": {"$ref": "#/$defs/stringArray"},
-            "sandbox_permissions": {"enum": ["use_default", "require_escalated"]},
-            "uv_projects": {"type": "array", "items": {
-              "type": "object", "additionalProperties": false,
-              "required": ["project_directory", "environment_path", "executables"],
-              "properties": {
-                "project_directory": {"type": "string", "minLength": 1},
-                "environment_path": {"type": "string", "minLength": 1},
-                "configured_python": {"type": "string", "minLength": 1},
-                "executables": {"type": "array", "items": {
-                  "type": "string", "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.+-]*$"
-                }}
+        "plan": {
+          "type": "object"
+        },
+        "repository_root": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cache_paths": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "execution_prerequisites": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "node_id",
+              "executables",
+              "native_available",
+              "reason"
+            ],
+            "properties": {
+              "node_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "executables": {
+                "$ref": "#/$defs/stringArray"
+              },
+              "sandbox_permissions": {
+                "enum": [
+                  "use_default",
+                  "require_escalated"
+                ]
+              },
+              "uv_projects": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "project_directory",
+                    "environment_path",
+                    "executables"
+                  ],
+                  "properties": {
+                    "project_directory": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "environment_path": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "configured_python": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "executables": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.+-]*$"
+                      }
+                    }
+                  }
+                }
+              },
+              "native_available": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
               }
-            }},
-            "native_available": {"type": "boolean"},
-            "reason": {"type": "string", "minLength": 1}
+            }
           }
-        }},
-        "command_policy": {"type": "array", "items": {
-          "type": "object", "additionalProperties": false,
-          "required": ["command", "disposition", "reason"],
-          "properties": {
-            "command": {"type": "string", "minLength": 1},
-            "disposition": {"enum": ["allowed", "blocked"]},
-            "reason": {"type": "string", "minLength": 1}
+        },
+        "command_policy": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "command",
+              "disposition",
+              "reason"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "minLength": 1
+              },
+              "disposition": {
+                "enum": [
+                  "allowed",
+                  "blocked"
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
           }
-        }}
+        }
       }
     },
     "recover-validation-launch": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["artifact_store", "plan", "source_state", "node_id", "failure_kind", "checks_started", "reason", "remedy", "environment", "permission_change"],
+      "required": [
+        "artifact_store",
+        "plan",
+        "source_state",
+        "node_id",
+        "failure_kind",
+        "checks_started",
+        "reason",
+        "remedy",
+        "environment",
+        "permission_change"
+      ],
       "properties": {
-        "external_metadata_transitions": {"type": "array", "items": {"type": "object"}},
-        "artifact_store": {"type": "string", "minLength": 1},
-        "plan": {"type": "object"},
-        "source_state": {"$ref": "#/$defs/sourceState"},
-        "node_id": {"type": "string", "minLength": 1},
-        "failure_kind": {"enum": ["cache-access", "command-launch", "executor-permission"]},
-        "checks_started": {"const": false},
-        "executor_permissions": {"enum": ["use_default", "require_escalated"]},
-        "reason": {"type": "string", "minLength": 1},
-        "remedy": {"type": "string", "minLength": 1},
-        "environment": {"type": "string", "minLength": 1},
-        "permission_change": {"type": "string", "minLength": 1}
+        "external_metadata_transitions": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "artifact_store": {
+          "type": "string",
+          "minLength": 1
+        },
+        "plan": {
+          "type": "object"
+        },
+        "source_state": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "node_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "failure_kind": {
+          "enum": [
+            "cache-access",
+            "command-launch",
+            "executor-permission"
+          ]
+        },
+        "checks_started": {
+          "const": false
+        },
+        "executor_permissions": {
+          "enum": [
+            "use_default",
+            "require_escalated"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "remedy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "environment": {
+          "type": "string",
+          "minLength": 1
+        },
+        "permission_change": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "recover-validation-execution": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["artifact_store", "plan", "source_state", "node_id", "failure_kind", "checks_started", "reason", "remedy", "environment", "permission_change", "executor_permissions", "failure_evidence"],
+      "required": [
+        "artifact_store",
+        "plan",
+        "source_state",
+        "node_id",
+        "failure_kind",
+        "checks_started",
+        "reason",
+        "remedy",
+        "environment",
+        "permission_change",
+        "executor_permissions",
+        "failure_evidence"
+      ],
       "properties": {
-        "external_metadata_transitions": {"type": "array", "items": {"type": "object"}},
-        "artifact_store": {"type": "string", "minLength": 1},
-        "plan": {"type": "object"},
-        "source_state": {"$ref": "#/$defs/sourceState"},
-        "node_id": {"type": "string", "minLength": 1},
-        "failure_kind": {"const": "executor-permission"},
-        "checks_started": {"const": true},
-        "reason": {"type": "string", "minLength": 1},
-        "remedy": {"type": "string", "minLength": 1},
-        "environment": {"type": "string", "minLength": 1},
-        "permission_change": {"type": "string", "minLength": 1},
-        "executor_permissions": {"enum": ["use_default", "require_escalated"]},
+        "external_metadata_transitions": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "artifact_store": {
+          "type": "string",
+          "minLength": 1
+        },
+        "plan": {
+          "type": "object"
+        },
+        "source_state": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "node_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "failure_kind": {
+          "const": "executor-permission"
+        },
+        "checks_started": {
+          "const": true
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "remedy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "environment": {
+          "type": "string",
+          "minLength": 1
+        },
+        "permission_change": {
+          "type": "string",
+          "minLength": 1
+        },
+        "executor_permissions": {
+          "enum": [
+            "use_default",
+            "require_escalated"
+          ]
+        },
         "failure_evidence": {
-          "type": "object", "additionalProperties": false,
-          "required": ["log_path", "diagnostic", "before_capture", "after_capture", "workspace_before", "workspace_after"],
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "log_path",
+            "diagnostic",
+            "before_capture",
+            "after_capture",
+            "workspace_before",
+            "workspace_after"
+          ],
           "properties": {
-            "log_path": {"type": "string", "minLength": 1},
-            "diagnostic": {"type": "string", "minLength": 1},
-            "before_capture": {"type": "string", "minLength": 1},
-            "after_capture": {"type": "string", "minLength": 1},
-            "workspace_before": {"type": "string", "minLength": 1},
-            "workspace_after": {"type": "string", "minLength": 1}
+            "log_path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "diagnostic": {
+              "type": "string",
+              "minLength": 1
+            },
+            "before_capture": {
+              "type": "string",
+              "minLength": 1
+            },
+            "after_capture": {
+              "type": "string",
+              "minLength": 1
+            },
+            "workspace_before": {
+              "type": "string",
+              "minLength": 1
+            },
+            "workspace_after": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         }
       }
@@ -529,34 +774,82 @@
           "items": {
             "type": "object"
           }
+        },
+        "git_context_authorization": {
+          "type": "string",
+          "minLength": 1
         }
       }
     },
     "advance-after-mutation": {
       "additionalProperties": false,
       "properties": {
-        "journal_path": {"type": "string", "minLength": 1},
-        "dispatches_path": {"type": "string", "minLength": 1},
+        "journal_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dispatches_path": {
+          "type": "string",
+          "minLength": 1
+        },
         "external_metadata_transitions": {
           "type": "array",
           "items": {
             "type": "object"
           }
         },
-        "artifact_store": {"minLength": 1, "type": "string"},
-        "authorization_after": {"const": "review-and-fix"},
-        "authorization_before": {"enum": ["review-only", "review-and-fix"]},
-        "changed_paths": {"$ref": "#/$defs/stringArray"},
-        "new_capture": {"type": "object"},
-        "post_repair_capture": {"type": "object"},
-        "plan": {"type": "object"},
-        "planning_template": {"type": "object"},
-        "previous_capture": {"type": "object"},
-        "repair_epoch": {"minimum": 1, "type": "integer"},
-        "routing_catalog_path": {"minLength": 1, "type": "string"},
-        "source_state": {"$ref": "#/$defs/sourceState"},
-        "sources": {"items": {"$ref": "#/$defs/sourceRecord"}, "type": "array"},
-        "state_verification_command": {"minLength": 1, "type": "string"}
+        "artifact_store": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "authorization_after": {
+          "const": "review-and-fix"
+        },
+        "authorization_before": {
+          "enum": [
+            "review-only",
+            "review-and-fix"
+          ]
+        },
+        "changed_paths": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "new_capture": {
+          "type": "object"
+        },
+        "post_repair_capture": {
+          "type": "object"
+        },
+        "plan": {
+          "type": "object"
+        },
+        "planning_template": {
+          "type": "object"
+        },
+        "previous_capture": {
+          "type": "object"
+        },
+        "repair_epoch": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "routing_catalog_path": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "source_state": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/sourceRecord"
+          },
+          "type": "array"
+        },
+        "state_verification_command": {
+          "minLength": 1,
+          "type": "string"
+        }
       },
       "required": [
         "artifact_store",
@@ -576,11 +869,21 @@
     "compile-independent-review": {
       "additionalProperties": false,
       "properties": {
-        "dispatch": {"type": "object"},
-        "handoff_attempt": {"minimum": 1, "type": "integer"},
-        "payload": {"type": "object"}
+        "dispatch": {
+          "type": "object"
+        },
+        "handoff_attempt": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "payload": {
+          "type": "object"
+        }
       },
-      "required": ["dispatch", "payload"],
+      "required": [
+        "dispatch",
+        "payload"
+      ],
       "type": "object"
     },
     "compile-node": {
@@ -592,51 +895,103 @@
             "type": "object"
           }
         },
-        "current_source_state": {"$ref": "#/$defs/sourceState"},
-        "plan": {"type": "object"},
-        "source_state": {"$ref": "#/$defs/sourceState"}
+        "current_source_state": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "plan": {
+          "type": "object"
+        },
+        "source_state": {
+          "$ref": "#/$defs/sourceState"
+        }
       },
-      "required": ["plan", "source_state"],
+      "required": [
+        "plan",
+        "source_state"
+      ],
       "type": "object"
     },
     "compile-review": {
       "additionalProperties": false,
       "properties": {
-        "dispatch": {"type": "object"},
-        "handoff_attempt": {"minimum": 1, "type": "integer"},
-        "payload": {"type": "object"}
+        "dispatch": {
+          "type": "object"
+        },
+        "handoff_attempt": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "payload": {
+          "type": "object"
+        }
       },
-      "required": ["dispatch", "payload"],
+      "required": [
+        "dispatch",
+        "payload"
+      ],
       "type": "object"
     },
     "compile-validation": {
       "additionalProperties": false,
       "properties": {
-        "dispatch": {"type": "object"},
-        "handoff_attempt": {"minimum": 1, "type": "integer"},
-        "payload": {"type": "object"}
+        "dispatch": {
+          "type": "object"
+        },
+        "handoff_attempt": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "payload": {
+          "type": "object"
+        }
       },
-      "required": ["dispatch", "payload"],
+      "required": [
+        "dispatch",
+        "payload"
+      ],
       "type": "object"
     },
     "schedule-ready": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "plan": {"type": "object"},
-        "source_state": {"$ref": "#/$defs/sourceState"},
-        "artifact_store": {"type": "string", "minLength": 1},
-        "external_metadata_transitions": {"type": "array", "items": {"type": "object"}},
-        "reserved_node_ids": {"$ref": "#/$defs/stringArray"},
+        "plan": {
+          "type": "object"
+        },
+        "source_state": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "artifact_store": {
+          "type": "string",
+          "minLength": 1
+        },
+        "external_metadata_transitions": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "reserved_node_ids": {
+          "$ref": "#/$defs/stringArray"
+        },
         "preflight_blocked_nodes": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["node_id", "reason"],
+            "required": [
+              "node_id",
+              "reason"
+            ],
             "properties": {
-              "node_id": {"type": "string", "minLength": 1},
-              "reason": {"type": "string", "minLength": 1}
+              "node_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
             }
           }
         },
@@ -644,40 +999,110 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "source": {"type": "string", "minLength": 1},
-            "concurrent_worker_limit": {"type": "integer", "minimum": 1},
-            "active_workers": {"type": "integer", "minimum": 0}
+            "source": {
+              "type": "string",
+              "minLength": 1
+            },
+            "concurrent_worker_limit": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "active_workers": {
+              "type": "integer",
+              "minimum": 0
+            }
           },
-          "required": ["source", "concurrent_worker_limit", "active_workers"]
+          "required": [
+            "source",
+            "concurrent_worker_limit",
+            "active_workers"
+          ]
         },
         "creation_failure": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "node_id": {"type": "string", "minLength": 1},
-            "failure_kind": {"enum": ["capacity", "unexpected"]},
-            "attempts": {"type": "integer", "minimum": 1, "maximum": 2},
-            "reason": {"type": "string", "minLength": 1},
-            "worker_created": {"const": false}
+            "node_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "failure_kind": {
+              "enum": [
+                "capacity",
+                "unexpected"
+              ]
+            },
+            "attempts": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1
+            },
+            "worker_created": {
+              "const": false
+            }
           },
-          "required": ["node_id", "failure_kind", "attempts", "reason", "worker_created"]
+          "required": [
+            "node_id",
+            "failure_kind",
+            "attempts",
+            "reason",
+            "worker_created"
+          ]
         }
       },
-      "required": ["plan", "source_state", "artifact_store"]
+      "required": [
+        "plan",
+        "source_state",
+        "artifact_store"
+      ]
     },
     "fallback-to-coordinator": {
       "additionalProperties": false,
       "properties": {
-        "external_metadata_transitions": {"type": "array", "items": {"type": "object"}},
-        "artifact_store": {"minLength": 1, "type": "string"},
-        "node_id": {"minLength": 1, "type": "string"},
-        "plan": {"type": "object"},
-        "reason": {"minLength": 1, "type": "string"},
-        "source_state": {"$ref": "#/$defs/sourceState"},
-        "worker_created": {"const": false}
+        "external_metadata_transitions": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "artifact_store": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "node_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "plan": {
+          "type": "object"
+        },
+        "reason": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "source_state": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "worker_created": {
+          "const": false
+        }
       },
-      "required": ["artifact_store", "node_id", "plan", "reason", "source_state", "worker_created"],
+      "required": [
+        "artifact_store",
+        "node_id",
+        "plan",
+        "reason",
+        "source_state",
+        "worker_created"
+      ],
       "type": "object"
+    },
+    "report-delivery": {
+      "$ref": "#/$defs/finalize-proof"
     },
     "finalize-proof": {
       "additionalProperties": false,
@@ -688,16 +1113,41 @@
             "type": "object"
           }
         },
-        "current_source_state": {"$ref": "#/$defs/sourceState"},
-        "manifest_id": {"minLength": 1, "type": "string"},
-        "plan": {"type": "object"},
-        "proof_id": {"minLength": 1, "type": "string"},
-        "source_state": {"$ref": "#/$defs/sourceState"},
-        "sources": {"items": {"$ref": "#/$defs/sourceRecord"}, "type": "array"},
-        "stale_evidence_ids": {"$ref": "#/$defs/stringArray"},
-        "verifier_id": {"minLength": 1, "type": "string"}
+        "current_source_state": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "manifest_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "plan": {
+          "type": "object"
+        },
+        "proof_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "source_state": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/sourceRecord"
+          },
+          "type": "array"
+        },
+        "stale_evidence_ids": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "verifier_id": {
+          "minLength": 1,
+          "type": "string"
+        }
       },
-      "required": ["plan", "source_state"],
+      "required": [
+        "plan",
+        "source_state"
+      ],
       "type": "object"
     },
     "journal-append": {
@@ -709,31 +1159,99 @@
             "type": "object"
           }
         },
-        "current_source_state": {"$ref": "#/$defs/sourceState"},
-        "plan": {"type": "object"},
-        "source_state": {"$ref": "#/$defs/sourceState"}
+        "current_source_state": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "plan": {
+          "type": "object"
+        },
+        "source_state": {
+          "$ref": "#/$defs/sourceState"
+        }
       },
-      "required": ["plan", "source_state"],
+      "required": [
+        "plan",
+        "source_state"
+      ],
       "type": "object"
     },
     "materialize-dispatches": {
       "additionalProperties": false,
       "properties": {
-        "artifact_store": {"minLength": 1, "type": "string"},
-        "authorization": {"enum": ["review-only", "review-and-fix"]},
-        "duplicate_command_authorizations": {"additionalProperties": {"$ref": "#/$defs/stringArray"}, "type": "object"},
-        "execution_locations": {"additionalProperties": {"enum": ["worker", "coordinator"]}, "type": "object"},
-        "inspection_profile": {"enum": ["independent-source", "shared-read-only"]},
-        "concurrent_worker_limit": {"type": "integer", "minimum": 1},
-        "external_metadata_transitions": {"type": "array", "items": {"type": "object"}},
-        "plan": {"type": "object"},
-        "repository_root": {"minLength": 1, "type": "string"},
-        "routing_catalog_path": {"minLength": 1, "type": "string"},
-        "source_state": {"$ref": "#/$defs/sourceState"},
-        "sources": {"items": {"$ref": "#/$defs/sourceRecord"}, "type": "array"},
-        "state_verification_command": {"minLength": 1, "type": "string"}
+        "artifact_store": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "authorization": {
+          "enum": [
+            "review-only",
+            "review-and-fix"
+          ]
+        },
+        "duplicate_command_authorizations": {
+          "additionalProperties": {
+            "$ref": "#/$defs/stringArray"
+          },
+          "type": "object"
+        },
+        "execution_locations": {
+          "additionalProperties": {
+            "enum": [
+              "worker",
+              "coordinator"
+            ]
+          },
+          "type": "object"
+        },
+        "inspection_profile": {
+          "enum": [
+            "independent-source",
+            "shared-read-only"
+          ]
+        },
+        "concurrent_worker_limit": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "external_metadata_transitions": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "plan": {
+          "type": "object"
+        },
+        "repository_root": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "routing_catalog_path": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "source_state": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/sourceRecord"
+          },
+          "type": "array"
+        },
+        "state_verification_command": {
+          "minLength": 1,
+          "type": "string"
+        }
       },
-      "required": ["artifact_store", "authorization", "plan", "repository_root", "source_state", "state_verification_command"],
+      "required": [
+        "artifact_store",
+        "authorization",
+        "plan",
+        "repository_root",
+        "source_state",
+        "state_verification_command"
+      ],
       "type": "object"
     },
     "next-ready": {
@@ -745,78 +1263,210 @@
             "type": "object"
           }
         },
-        "current_source_state": {"$ref": "#/$defs/sourceState"},
-        "plan": {"type": "object"},
-        "source_state": {"$ref": "#/$defs/sourceState"}
+        "current_source_state": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "plan": {
+          "type": "object"
+        },
+        "source_state": {
+          "$ref": "#/$defs/sourceState"
+        }
       },
-      "required": ["plan", "source_state"],
+      "required": [
+        "plan",
+        "source_state"
+      ],
       "type": "object"
     },
     "persist-worker-payload": {
-      "oneOf": [{"$ref": "#/$defs/stdinWorkerPayloadContract"}, {"$ref": "#/$defs/legacyWorkerPayloadContract"}]
+      "oneOf": [
+        {
+          "$ref": "#/$defs/stdinWorkerPayloadContract"
+        },
+        {
+          "$ref": "#/$defs/legacyWorkerPayloadContract"
+        }
+      ]
     },
     "compilerPreflight": {
       "additionalProperties": false,
       "properties": {
-        "worker_input_path": {"minLength": 1, "type": "string"},
-        "digest": {"pattern": "^sha256:[0-9a-f]{64}$", "type": "string"}
+        "worker_input_path": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        }
       },
-      "required": ["worker_input_path", "digest"],
+      "required": [
+        "worker_input_path",
+        "digest"
+      ],
       "type": "object"
     },
     "stdinWorkerPayloadContract": {
       "additionalProperties": false,
       "properties": {
-        "coverage_reuse": {"type": "object"},
-        "compiler_preflight": {"$ref": "#/$defs/compilerPreflight"},
-        "mode": {"enum": ["audit", "fix", "independent-review", "revalidation", "synthesis", "validation"]},
-        "node_id": {"minLength": 1, "type": "string"},
-        "owned_paths": {"$ref": "#/$defs/stringArray"},
-        "result_contract": {"enum": ["compact-review", "compact-validation", "compact-independent-review"]},
-        "schema_version": {"const": 1},
-        "worker_payload_path": {"minLength": 1, "type": "string"}
+        "coverage_reuse": {
+          "type": "object"
+        },
+        "compiler_preflight": {
+          "$ref": "#/$defs/compilerPreflight"
+        },
+        "mode": {
+          "enum": [
+            "audit",
+            "fix",
+            "independent-review",
+            "revalidation",
+            "synthesis",
+            "validation"
+          ]
+        },
+        "node_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "owned_paths": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "result_contract": {
+          "enum": [
+            "compact-review",
+            "compact-validation",
+            "compact-independent-review"
+          ]
+        },
+        "schema_version": {
+          "const": 1
+        },
+        "worker_payload_path": {
+          "minLength": 1,
+          "type": "string"
+        }
       },
-      "required": ["mode", "node_id", "owned_paths", "result_contract", "schema_version", "worker_payload_path"],
+      "required": [
+        "mode",
+        "node_id",
+        "owned_paths",
+        "result_contract",
+        "schema_version",
+        "worker_payload_path"
+      ],
       "type": "object"
     },
     "legacyWorkerPayloadContract": {
       "additionalProperties": false,
       "properties": {
-        "coverage_reuse": {"type": "object"},
-        "compiler_preflight": {"$ref": "#/$defs/compilerPreflight"},
-        "candidate_path": {"minLength": 1, "type": "string"},
-        "mode": {"enum": ["audit", "fix", "independent-review", "revalidation", "synthesis", "validation"]},
-        "node_id": {"minLength": 1, "type": "string"},
-        "owned_paths": {"$ref": "#/$defs/stringArray"},
-        "result_contract": {"enum": ["compact-review", "compact-validation", "compact-independent-review"]},
-        "schema_version": {"const": 1},
-        "worker_payload_path": {"minLength": 1, "type": "string"}
+        "coverage_reuse": {
+          "type": "object"
+        },
+        "compiler_preflight": {
+          "$ref": "#/$defs/compilerPreflight"
+        },
+        "candidate_path": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "audit",
+            "fix",
+            "independent-review",
+            "revalidation",
+            "synthesis",
+            "validation"
+          ]
+        },
+        "node_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "owned_paths": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "result_contract": {
+          "enum": [
+            "compact-review",
+            "compact-validation",
+            "compact-independent-review"
+          ]
+        },
+        "schema_version": {
+          "const": 1
+        },
+        "worker_payload_path": {
+          "minLength": 1,
+          "type": "string"
+        }
       },
-      "required": ["candidate_path", "mode", "node_id", "owned_paths", "result_contract", "schema_version", "worker_payload_path"],
+      "required": [
+        "candidate_path",
+        "mode",
+        "node_id",
+        "owned_paths",
+        "result_contract",
+        "schema_version",
+        "worker_payload_path"
+      ],
       "type": "object"
     },
-    "review-worker-payload-write": {"$ref": "#/$defs/stdinWorkerPayloadContract"},
-    "publish-worker-payload": {"$ref": "#/$defs/stdinWorkerPayloadContract"},
+    "review-worker-payload-write": {
+      "$ref": "#/$defs/stdinWorkerPayloadContract"
+    },
+    "publish-worker-payload": {
+      "$ref": "#/$defs/stdinWorkerPayloadContract"
+    },
     "reconcile-handoffs": {
       "additionalProperties": false,
       "properties": {
-        "plan": {"type": "object"},
-        "source_state": {"$ref": "#/$defs/sourceState"},
-        "sources": {"items": {"$ref": "#/$defs/sourceRecord"}, "type": "array"}
+        "plan": {
+          "type": "object"
+        },
+        "source_state": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/sourceRecord"
+          },
+          "type": "array"
+        }
       },
-      "required": ["plan", "source_state", "sources"],
+      "required": [
+        "plan",
+        "source_state",
+        "sources"
+      ],
       "type": "object"
     },
     "reconcile-validation-requirements": {
       "additionalProperties": false,
       "properties": {
-        "external_metadata_transitions": {"type": "array", "items": {"type": "object"}},
-        "plan": {"type": "object"},
-        "source_state": {"$ref": "#/$defs/sourceState"},
-        "artifact_store": {"minLength": 1, "type": "string"},
+        "external_metadata_transitions": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "plan": {
+          "type": "object"
+        },
+        "source_state": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "artifact_store": {
+          "minLength": 1,
+          "type": "string"
+        },
         "validation_requirements": {
           "description": "New full validationRequirement objects from planning-input-v1; each is validated against that definition and the accepted review's exact command, working-directory, environment and dependency identity.",
-          "items": {"type": "object"},
+          "items": {
+            "type": "object"
+          },
           "type": "array"
         },
         "software_doi_rechecks": {
@@ -824,12 +1474,30 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["requirement_id", "evidence_id", "execution_index", "original_report"],
+            "required": [
+              "requirement_id",
+              "evidence_id",
+              "execution_index",
+              "original_report"
+            ],
             "properties": {
-              "requirement_id": {"type": "string", "minLength": 1},
-              "evidence_id": {"type": "string", "minLength": 1},
-              "execution_index": {"type": "integer", "minimum": 0},
-              "original_report": {"type": "string", "minLength": 1, "pattern": "^(?:/|[A-Za-z]:[/\\\\]|\\\\\\\\[^\\\\/]+[/\\\\][^\\\\/]+(?:[/\\\\]|$))[^\\r\\n]*$"}
+              "requirement_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "evidence_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "execution_index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "original_report": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^(?:/|[A-Za-z]:[/\\\\]|\\\\\\\\[^\\\\/]+[/\\\\][^\\\\/]+(?:[/\\\\]|$))[^\\r\\n]*$"
+              }
             }
           }
         },
@@ -837,27 +1505,54 @@
           "items": {
             "additionalProperties": false,
             "properties": {
-              "originating_evidence_id": {"minLength": 1, "type": "string"},
-              "requirement_id": {"minLength": 1, "type": "string"},
-              "requirement_digest": {"minLength": 1, "type": "string"},
-              "reason": {"minLength": 1, "type": "string"}
+              "originating_evidence_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "requirement_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "requirement_digest": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "reason": {
+                "minLength": 1,
+                "type": "string"
+              }
             },
-            "required": ["originating_evidence_id", "requirement_id", "requirement_digest", "reason"],
+            "required": [
+              "originating_evidence_id",
+              "requirement_id",
+              "requirement_digest",
+              "reason"
+            ],
             "type": "object"
           },
           "type": "array"
         }
       },
-      "required": ["plan", "source_state"],
+      "required": [
+        "plan",
+        "source_state"
+      ],
       "type": "object"
     },
     "routing-projection": {
       "additionalProperties": true,
       "properties": {
-        "captured_paths": {"$ref": "#/$defs/stringArray"},
-        "consulted_routers": {"$ref": "#/$defs/stringArray"}
+        "captured_paths": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "consulted_routers": {
+          "$ref": "#/$defs/stringArray"
+        }
       },
-      "required": ["captured_paths", "consulted_routers"],
+      "required": [
+        "captured_paths",
+        "consulted_routers"
+      ],
       "type": "object"
     },
     "snapshot-workspace": {
@@ -869,31 +1564,60 @@
             "type": "object"
           }
         },
-        "current_source_state": {"$ref": "#/$defs/sourceState"},
-        "plan": {"type": "object"},
-        "source_state": {"$ref": "#/$defs/sourceState"}
+        "current_source_state": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "plan": {
+          "type": "object"
+        },
+        "source_state": {
+          "$ref": "#/$defs/sourceState"
+        }
       },
-      "required": ["plan", "source_state"],
+      "required": [
+        "plan",
+        "source_state"
+      ],
       "type": "object"
     },
     "sourceRecord": {
       "additionalProperties": false,
       "properties": {
-        "artifact_path": {"minLength": 1, "type": "string"},
-        "kind": {"enum": ["review", "validation"]},
-        "metadata_path": {"minLength": 1, "type": "string"}
+        "artifact_path": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "review",
+            "validation"
+          ]
+        },
+        "metadata_path": {
+          "minLength": 1,
+          "type": "string"
+        }
       },
-      "required": ["artifact_path", "metadata_path"],
+      "required": [
+        "artifact_path",
+        "metadata_path"
+      ],
       "type": "object"
     },
     "sourceState": {
-      "items": {"minLength": 1, "type": "string"},
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
       "maxItems": 3,
       "minItems": 3,
       "type": "array"
     },
     "stringArray": {
-      "items": {"minLength": 1, "type": "string"},
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
       "type": "array"
     },
     "synthesis-bundle": {
@@ -905,12 +1629,56 @@
             "type": "object"
           }
         },
-        "plan": {"type": "object"},
-        "source_state": {"$ref": "#/$defs/sourceState"},
-        "sources": {"items": {"$ref": "#/$defs/sourceRecord"}, "type": "array"}
+        "plan": {
+          "type": "object"
+        },
+        "source_state": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/sourceRecord"
+          },
+          "type": "array"
+        }
       },
-      "required": ["source_state", "sources"],
+      "required": [
+        "source_state",
+        "sources"
+      ],
       "type": "object"
+    },
+    "validationApplicabilityBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_id",
+        "command_identity_digest",
+        "environment_digest",
+        "original_evidence_id",
+        "target_source_state"
+      ],
+      "properties": {
+        "contract_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "command_identity_digest": {
+          "type": "string",
+          "minLength": 1
+        },
+        "environment_digest": {
+          "type": "string",
+          "minLength": 1
+        },
+        "original_evidence_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target_source_state": {
+          "$ref": "#/$defs/sourceState"
+        }
+      }
     }
   }
 }

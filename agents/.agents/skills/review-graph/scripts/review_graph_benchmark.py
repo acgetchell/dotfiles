@@ -426,6 +426,13 @@ def _trial(module: types.ModuleType, document: dict[str, Any], store: Path) -> d
                 "formatting_only_retries": 0,
             },
             "worker_input_bytes": sum(Path(item["worker_input_path"]).stat().st_size for item in entries),
+            "worker_execution_bytes": sum(Path(item.get("worker_execution_path", item["worker_input_path"])).stat().st_size for item in entries),
+            "execution_instruction_bytes": sum(
+                len(json.loads(Path(item["worker_execution_path"]).read_bytes())["instructions"].encode())
+                if "worker_execution_path" in item
+                else len(item["worker_prompt"].encode())
+                for item in entries
+            ),
             "worker_prompt_bytes": sum(len(item["worker_prompt"].encode()) for item in entries),
             "scripted_reads": reads,
             "coordinator_api_operations": operations + independent_replay["coordinator_api_operations"],
@@ -435,6 +442,10 @@ def _trial(module: types.ModuleType, document: dict[str, Any], store: Path) -> d
             "publication_and_compile_seconds": time.perf_counter() - publish_started,
             "total_seconds": time.perf_counter() - started,
             "model_review_seconds": None,
+            "model_assisted_publication_steps": None,
+            "model_assisted_recovery_steps": None,
+            "provider_tokens": None,
+            "provider_cost": None,
         },
     }
     (store / "benchmark-manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")

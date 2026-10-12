@@ -27,8 +27,8 @@ Honor placement and the coalesced unit. Do not re-plan, split or broaden it,
 create another worker, or inspect implementation semantics. The coordinator
 owns before/after snapshots and all evidence identities and digests.
 
-Stream the payload through the dispatch-bound review and persistence commands;
-return identical bytes after publication. Skip candidate writes.
+Stream the payload through the dispatch-bound publication command; return its
+bound receipt. The runtime consumes persisted bytes. Skip candidate writes.
 
 ## Universal Boundaries
 
@@ -46,8 +46,9 @@ return identical bytes after publication. Skip candidate writes.
 
 ## Status
 
-Use `blocked` when execution could not proceed safely or source identity was
-lost; `failed` when an executed command failed; `passed` when all requirements
-are satisfied and at least one command ran; `reused` only when all requirements
-were exactly satisfied without execution; and `not-applicable` only for a
-zero-requirement, zero-command plan.
+Graph-dispatched payloads allow only `passed`, `failed`, or `blocked`. Use
+`blocked` for unsafe execution or lost source identity; `failed` for an executed
+command failure; and `passed` when all requirements pass and a command ran.
+
+Standalone results additionally allow `reused` for exactly satisfied requirements
+without execution, and `not-applicable` for a zero-requirement, zero-command plan.

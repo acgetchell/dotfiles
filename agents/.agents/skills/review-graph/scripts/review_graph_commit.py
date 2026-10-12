@@ -5,15 +5,16 @@ import re
 import shlex
 import shutil
 from dataclasses import replace
-from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from capture_scope import _run_git, _scope_data, _update_part
+from capture_scope import _run_git, _scope_data
 from review_graph_git import _source_discovery_command, fixed_branch_comparison, metadata_audit_blockers
+from review_graph_git_objects import GitPathIdentity
 from review_graph_integrity import canonical_json, digest_bytes
-from review_graph_reuse import CommitHandoffTransition, regular_file_fingerprint, source_snapshot
+from review_graph_reuse import CommitHandoffTransition, source_snapshot
 from review_graph_schema import require_schema_definition
+from review_graph_validation import VerifiedValidationRecord
 
 if TYPE_CHECKING:
     from review_graph_plan import GraphPlan
@@ -30,9 +31,11 @@ def verify_commit_transition(transition: CommitHandoffTransition) -> None:
     for item in proof["preserved_files"]:
         path = Path(item["path"])
         if path.resolve() != path or path.is_symlink() or not path.is_file() or digest_bytes(path.read_bytes()) != item["digest"]:
-            raise ValueError(f"commit handoff history missing or changed: {path}")
+            msg = f"commit handoff history missing or changed: {path}"
+            raise ValueError(msg)
         if path.name in retained:
-            raise ValueError(f"commit handoff history has a duplicate name: {path.name}")
+            msg = f"commit handoff history has a duplicate name: {path.name}"
+            raise ValueError(msg)
         retained[path.name] = path.read_bytes()
     declarations = _history_object(retained, "reconciliation.json")
     if any(proof[key] != declarations.get(key) for key in ("authorization", "native_ci")):
@@ -55,20 +58,23 @@ def verify_commit_transition(transition: CommitHandoffTransition) -> None:
 def _history_mapping(value: Any, name: str) -> dict[str, Any]:
     """Reject malformed retained JSON before using object fields."""
     if not isinstance(value, dict):
-        raise TypeError(f"commit handoff history {name} must be an object")
+        msg = f"commit handoff history {name} must be an object"
+        raise TypeError(msg)
     return value
 
 
 def _history_object(retained: dict[str, bytes], name: str) -> dict[str, Any]:
     if name not in retained:
-        raise ValueError(f"commit handoff history is missing {name}")
+        msg = f"commit handoff history is missing {name}"
+        raise ValueError(msg)
     return _history_mapping(json.loads(retained[name]), name)
 
 
 def _history_record(retained: dict[str, bytes], name: str) -> dict[str, Any]:
     record = _history_mapping(_history_object(retained, name).get("normalized_record"), name + ".normalized_record")
     if not isinstance(record.get("evidence_id"), str) or not record["evidence_id"].strip():
-        raise ValueError(f"commit handoff history {name} requires an evidence_id")
+        msg = f"commit handoff history {name} requires an evidence_id"
+        raise ValueError(msg)
     return record
 
 
@@ -152,8 +158,9 @@ def verify_live_commit(previous: dict[str, Any], current: dict[str, Any]) -> str
 
 
 def _committed_path_fingerprints(git: str, root: Path, head: str) -> dict[str, str]:
-    """Fingerprint Git blob bytes using the same framing as source capture."""
+    """Reuse Git's committed blob IDs and modes without rereading their bytes."""
     committed = {}
+    algorithm = _run_git(git, root, ("rev-parse", "--show-object-format")).decode().strip()
     for entry in _run_git(git, root, ("ls-tree", "-r", "-z", head)).split(b"\0"):
         if not entry:
             continue
@@ -163,14 +170,7 @@ def _committed_path_fingerprints(git: str, root: Path, head: str) -> dict[str, s
         if kind != b"blob" or mode not in {b"100644", b"100755", b"120000"}:
             msg = "commit handoff cannot prove submodule tree identities; replan required"
             raise ValueError(msg)
-        content = _run_git(git, root, ("cat-file", "blob", oid.decode()))
-        if mode == b"120000":
-            digest = sha256()
-            for label, value in (("path", raw_path), ("mode", mode), ("symlink-target", content)):
-                _update_part(digest, label, value)
-            committed[path] = digest.hexdigest()
-        else:
-            committed[path] = regular_file_fingerprint(path, content, executable=mode == b"100755")
+        committed[path] = GitPathIdentity(algorithm, mode.decode(), oid.decode()).serialize()
     return committed
 
 
@@ -186,32 +186,49 @@ def commit_node_reasons(mode: str, record: dict[str, Any], transition: CommitHan
 
 
 def reconciliation_policy(
-    document: dict[str, Any], records: dict[str, dict[str, Any]], entries: dict[str, dict[str, Any]], transition: ExternalMetadataTransition
+    document: dict[str, Any],
+    records: dict[str, dict[str, Any] | VerifiedValidationRecord],
+    entries: dict[str, dict[str, Any]],
+    transition: ExternalMetadataTransition,
 ) -> dict[str, Any]:
     """Bind explicit execution/comparison declarations to accepted evidence identities."""
-    preserved = {}
-    for node_id, policy in document.get("local_validation", {}).items():
-        record = records.get(node_id, {})
-        unit = entries.get(node_id, {}).get("dispatch", {}).get("validation_unit")
-        if (
-            unit is None
-            or record.get("status") != "passed"
-            or policy.get("git_dependencies") != []
-            or policy.get("execution_identity") != unit
-            or not policy.get("reason", "").strip()
-            or policy.get("environment_unchanged") is not True
-            or any(re.search(r"\bgit\b", command) for command in unit["commands"])
-        ):
-            msg = "local validation reuse requires passed evidence, exact execution identity, unchanged environment, and explicit source-only rationale"
+    preserved: dict[str, Any] = {}
+    if "local_validation" in document:
+        msg = "legacy local_validation declarations are retired; validation reuse derives from verified version 3 records and repository contracts"
+        raise ValueError(msg)
+    # Validation applicability is evaluated by the runtime's typed record API.
+    # The resulting binding preserves history without rewriting execution IDs.
+    for node_id, trusted in records.items():
+        if not isinstance(trusted, VerifiedValidationRecord):
+            continue
+        from review_graph_runtime import _metadata_node_reasons  # noqa: PLC0415 - runtime owns artifact observations.
+
+        if _metadata_node_reasons("validation", (), trusted, transition):
+            continue
+        record = trusted.to_document()
+        binding = trusted.record.contract_binding
+        if binding is None:
+            msg = "verified reusable validation requires its contract binding"
             raise ValueError(msg)
-        preserved[record["evidence_id"]] = {
+        policy = {
+            "contract_id": binding.contract.contract_id,
+            "command_identity_digest": trusted.record.command_digest,
+            "environment_digest": trusted.record.environment_digest,
+            "original_evidence_id": trusted.record.evidence_id,
+            "target_source_state": list(transition.after.source_state),
+        }
+        preserved[trusted.record.evidence_id] = {
             "record_digest": digest_bytes(canonical_json(record).encode()),
             "policy": policy,
             "node_id": node_id,
-            "kind": "local_validation",
+            "kind": "validation_records",
         }
     for node_id, policy in document.get("independent_reviews", {}).items():
-        record = records.get(node_id, {})
+        trusted = records.get(node_id, {})
+        if isinstance(trusted, VerifiedValidationRecord):
+            msg = "independent review policy cannot name a validation record"
+            raise TypeError(msg)
+        record = trusted
         dispatch = entries.get(node_id, {}).get("dispatch", {})
         # A free-form target alone cannot identify the comparison revision.
         if (
@@ -320,7 +337,6 @@ def replacement_native_units(document: dict[str, Any], plan: GraphPlan, lifecycl
             or any(re.search(rf"(?<![0-9a-f]){re.escape(head)}(?![0-9a-f])", command) is None for command in commands)
             or not checks
             or len({(item["name"], item["target"]) for item in checks}) != len(checks)
-            or node_id in document.get("local_validation", {})
         ):
             msg = "native replacement requires pending/blocked checks, unique targets, and commands naming the new exact commit"
             raise ValueError(msg)
@@ -334,7 +350,7 @@ def history_files(document: dict[str, Any], sources: dict[str, dict[str, Any]]) 
     for field in ("journal_path", "dispatches_path"):
         result[field] = Path(document[field]).read_bytes()
     result["reconciliation.json"] = canonical_json(
-        {key: document.get(key, {}) for key in ("authorization", "local_validation", "independent_reviews", "native_ci", "external_metadata_transitions")}
+        {key: document.get(key, {}) for key in ("authorization", "validation_records", "independent_reviews", "native_ci", "external_metadata_transitions")}
     ).encode()
     for node_id, source in sources.items():
         metadata = json.loads(Path(source["metadata_path"]).read_bytes())

@@ -387,7 +387,10 @@ def test_scholarly_resolution_final_proof_rechecks_primary_bytes(tmp_path: Path)
                 ],
             }
             content, metadata = compile_validation(
-                {"dispatch": dispatch, "payload": {key: original[key] for key in ("status", "executions", "artifacts")} | {"limitations": []}}
+                {
+                    "dispatch": dispatch,
+                    "payload": {key: original[key] for key in ("status", "executions", "artifacts")} | {"schema_version": 3, "limitations": []},
+                }
             )
             Path(entry["artifact_path"]).write_bytes(content)
             Path(entry["metadata_path"]).write_text(json.dumps(metadata))

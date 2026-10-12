@@ -1,6 +1,6 @@
 # Compact Graph Validation Dispatch
 
-Execute only the dispatched unit; never broaden work.
+Execute only the dispatched unit.
 
 ## Required Dispatch
 
@@ -36,6 +36,8 @@ Missing fields mean `blocked`, never standalone discovery.
    concise output evidence, actual platform and native/emulated mode, and
    approved artifact paths. Put unexecuted target cells and the boundary of any
    emulation in `limitations`.
+   Report additional `git_dependencies`; repository contracts remain authoritative.
+   For failures, classify `failure_kind` as source, infrastructure, timeout or inconclusive.
 5. Repeat the source-state check. Follow `worker_prompt`: serialize the complete
    payload once and stream it to `worker_payload_persistence.publish_command`,
    which reviews and publishes identical bytes. Return its bound receipt without
@@ -51,19 +53,17 @@ denial in `evidence`, and retain an approved log. Only coordinators request reco
 Success proves only the dispatched environment; never describe local runs or
 emulation as native evidence for another platform.
 
-Do not review code, diagnose findings, edit, install substitute toolchains,
-change dependencies, re-plan, or create another worker.
-
 Before asynchronous execution, read [execution timing](execution-timing.md) for
 measurement and recovery.
 
 ## ValidationPayload
 
-Publish one JSON object:
+Publish one version 3 JSON object:
 
 ```json
 {
-  "status": "passed | failed | blocked | reused | not-applicable",
+  "schema_version": 3,
+  "status": "passed | failed | blocked",
   "executions": [
     {
       "executor": "worker node-id | coordinator",
@@ -83,8 +83,7 @@ Publish one JSON object:
 `passed` requires exit `0`; `failed` requires a nonzero integer. Both require
 finite, nonnegative elapsed seconds, optionally with units. `not-run` requires `null` or
 `"none"` for both fields. `blocked` allows unavailable timing and a nonzero or
-unavailable exit code, with a concrete limitation. `reused` and `not-applicable`
-contain no executions. `artifact_paths` names exact
+unavailable exit code, with a concrete limitation. `artifact_paths` names exact
 `validation_unit.allowed_artifacts[].path` roots, including external logs.
 Children belong in evidence text; absent outputs use `[]`. Publication names
 permitted roots on rejection. Correct references without reruns; runtime owns

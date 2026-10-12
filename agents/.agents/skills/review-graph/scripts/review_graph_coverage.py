@@ -92,11 +92,8 @@ def coverage_decision_report(units: list[dict[str, Any]], origin: ReviewSourceSn
     return [
         {
             **unit,
-            "reason_code": "dependency-uncertainty"
-            if unit["dependency_uncertainty"]
-            else "verified"
-            if unit["disposition"] == "reused"
-            else "input-proof-failed",
+            "reason_code": unit.get("reason_code")
+            or ("dependency-uncertainty" if unit["dependency_uncertainty"] else "verified" if unit["disposition"] == "reused" else "input-proof-failed"),
             "input_changes": {role: sorted(changed.intersection(unit[role])) for role in ("owned_paths", "dependency_paths")},
         }
         for unit in units

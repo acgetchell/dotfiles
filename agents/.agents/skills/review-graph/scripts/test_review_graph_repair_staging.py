@@ -62,6 +62,7 @@ def _staged_repair(tmp_path: Path, dependency: str = "source") -> tuple[str, Pat
         {
             "dispatch": {**validator["dispatch"], "before_state": lifecycle["source_state"], "after_state": lifecycle["source_state"]},
             "payload": {
+                "schema_version": 3,
                 "artifacts": [],
                 "limitations": [],
                 "status": "failed",
@@ -437,7 +438,7 @@ def test_metadata_continuations_reject_stale_validator_evidence(tmp_path: Path, 
     request = _operation_request(tmp_path, operation, result)
     history.update({Path(result[key]): Path(result[key]).read_bytes() for key in ("journal_path", "dispatches_path", "lifecycle_input_path")})
     history.update({Path(validator[key]): Path(validator[key]).read_bytes() for key in ("artifact_path", "metadata_path")})
-    with pytest.raises(ValueError, match="Evidence requires revalidation after external staging"):
+    with pytest.raises(ValueError, match="Evidence requires revalidation after Git context changed"):
         getattr(runtime, operation.replace("-", "_"))(request, args)
     assert not Path(request["artifact_store"]).exists()
     assert all(path.read_bytes() == content for path, content in history.items())
@@ -485,7 +486,7 @@ def _block_staged_validator(entry: dict[str, Any], result: dict[str, Any]) -> No
     content, metadata = runtime.compile_validation(
         {
             "dispatch": {**entry["dispatch"], "before_state": result["current_source_state"], "after_state": result["current_source_state"]},
-            "payload": {"executions": [], "status": "blocked", "limitations": ["Permission denied before launch."]},
+            "payload": {"schema_version": 3, "executions": [], "status": "blocked", "limitations": ["Permission denied before launch."]},
         }
     )
     Path(entry["artifact_path"]).write_bytes(content)

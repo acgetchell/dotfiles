@@ -17,13 +17,17 @@ reporting; missing skill reads or CI inspection block completion.
 
 ## Profiles
 
+Routine delivery is the default; formal certification is explicit. Bootstrap
+freezes runtime/skills before planning; follow its retained commands. Read
+[run profiles](references/run-profiles.md) for recovery or certification details.
+
 - **Adaptive grouped** (default): run read-only nodes concurrently across worker
   and coordinator lanes; permit worker-failure fallback.
 - **Isolated**: fresh worker per node with declared adaptive fallback.
 - **Isolated-only**: fresh workers without fallback; resume manifest when blocked.
 
-`fork_turns: "none"` workers receive only dispatch, applicable
-instructions/references, and result schema. Coordinator execution records
+`fork_turns: "none"` workers receive compact execution views, applicable
+instructions/references, and lazy schema/provenance access. Coordinator execution records
 `worker_created: false`, `fresh_context: false` under the same contract.
 
 ## Capture And Authorization
@@ -80,15 +84,12 @@ execution identities.
 Identical skill/source/scope leaves execute once; each catalog requirement
 retains ownership of the coalesced judgment and evidence.
 
-Capture before and after execution. Invoke
-`scripts/review_graph_runtime.py compile-node` with the node ID, materialized
-dispatch set, captures, and journal. It reads the bound payload, seals accepted
-bytes at a read-only content-addressed path, and records that copy in evidence.
-Do not splice a dispatch or author compiler identities. Accept only when the
-compiler and evidence verifier succeed.
+Capture before/after execution. Run `compile-node` with node ID, signed
+dispatches, captures and journal. Accept only compiler-verified sealed evidence.
 
-For a concrete change target, run `repository-independent-review` fresh and
-conclusion-blind. It supplies structured judgments and observed fingerprints;
+For a concrete change target, run `repository-independent-review` once on the
+finished change, fresh and conclusion-blind; repeat only when subsequent changes
+affect its judgment. It supplies structured judgments and observed fingerprints;
 the compiler renders native sections and verifies them through `compile-node`.
 Never send it specialist findings or synthesis context.
 
@@ -103,10 +104,8 @@ to schedule cheap canonical checks before affected review fanout.
 
 ## Validate Once
 
-Before worker fanout, run the runtime's `preflight-validation` for command policy
-(including nested fixtures), executor caches, hosted obligations, and concrete
-output paths. Resolve launch blockers or retain explicit blocked evidence.
-See [runtime contract](references/runtime-contract.md#materialize-and-schedule).
+Before fanout, run `preflight-validation` for command policy, caches, hosted
+obligations and output paths; resolve blockers or retain blocked evidence.
 
 Collect exact validation requirements from accepted compact payloads. Coalesce
 only identical source, command or recipe, working-directory, environment,
@@ -114,22 +113,13 @@ toolchain, feature, platform, artifact, and mutation-lock identities.
 Narrative request and skip wording do not force duplicate execution; the plan
 retains their per-requirement provenance.
 
-Run each coalesced unit once through `review-validator`. Validator workers also
-use `fork_turns: "none"`, read only its compact graph-dispatch reference, and
-publish a schema-valid `ValidationPayload` without artifact records or digests
-through the same reviewed persistence flow before returning it. Invoke
-`snapshot-workspace` immediately before and after execution, then compile the
-node from its bound payload path with both runtime-owned snapshots. Cache/build
-manifests bind metadata for every immediate entry. Accept only when both gates pass.
-Reuse equivalent checks when permitted. A required final gate may follow focused
-red/green checks with a recorded reason for overlap; keep one owner for each
-exact planned execution and do not count repeated coverage as independent. A validator failure is owner evidence, not
-itself a finding. The compiler rejects unexpected outputs;
-source-adjacent build intermediates require an isolated working tree.
-`recover-validation-launch` handles failures before checks start;
-`recover-validation-execution` handles permission denials during a failed
-aggregate. Both preserve evidence and permit one remedied attempt per node/source.
-Follow [continuations](references/state-transitions.md) and declare
+Run each coalesced unit once through `review-validator` with fresh context and
+its compact dispatch. Publish `ValidationPayload` without artifact identities;
+snapshot immediately before/after execution and compile against both snapshots.
+Keep one owner per execution, including reasoned red/green overlap. Failed
+validation remains owner evidence. Unexpected outputs are rejected; adjacent
+build intermediates require isolation. For launch/execution failures, use the
+bounded [recovery operations](references/state-transitions.md) and declared
 [executor permissions](references/validation-preflight.md).
 
 ## Synthesize From A Compact Bundle
@@ -146,17 +136,20 @@ follow returned continuations. `next-ready --output-dir` creates immutable gener
 Reconcile accepted handoffs before expansion; only new triggers reroute. Use
 `advance-after-mutation` after authorized repairs to recapture, invalidate stale
 nodes, and materialize the replacement graph.
-For external staging with unchanged content, use `resume-after-external-metadata`.
+For external branch creation or staging with unchanged content, use `resume-after-external-metadata`.
 Declare semantic `git_dependencies` to preserve source-discovery audits; follow
 its continuation and [state transitions](references/state-transitions.md).
 Retain both Git captures and the user's index.
 Authorized commits: [commit/CI handoff](references/state-transitions.md#authorized-commit-and-native-ci-handoff).
-Run `finalize-proof` with the signed dispatch set and journal after every
+For routine delivery, run `report-delivery` and disclose affected verification
+and outstanding CI; its report remains uncertified. For explicit certification,
+run `finalize-proof` with the signed dispatch set and journal after every
 applicable review and validation requirement has accepted non-stale evidence.
 It derives the mappings, manifest, and `RepositoryReviewProof`; report complete
 only when its verifier returns `complete` and the platform/CI gate is reconciled.
 Proof completeness does not establish CI inspection. Report repository readiness from
-typed synthesis separately from proof completeness and validation success.
+the routine verified delivery report, or typed synthesis for certification,
+separately from proof completeness and validation success.
 
 On user stop, interrupt workers immediately and persist `review-control action: stop`.
 Separate delivered fixes, verification, CI, and proof; unfinished stopped/bounded

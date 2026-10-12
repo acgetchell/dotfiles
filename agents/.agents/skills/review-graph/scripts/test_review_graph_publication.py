@@ -315,7 +315,7 @@ def test_validation_artifact_references_agree_before_and_after_publication(tmp_p
 
 
 @pytest.mark.parametrize("omitted", ["executions", "artifact_paths"])
-def test_direct_validation_compiler_preserves_optional_array_defaults(tmp_path: Path, omitted: str) -> None:
+def test_validation_publication_and_compilation_require_explicit_arrays(tmp_path: Path, omitted: str) -> None:
     entry, dispatch = _validation_fixture(tmp_path)
     payload = _execution_payload(entry, "passed", 0, "1s")
     if omitted == "executions":
@@ -323,9 +323,21 @@ def test_direct_validation_compiler_preserves_optional_array_defaults(tmp_path: 
         payload.update(status="blocked", limitations=["Executor unavailable before checks started"])
     else:
         del payload["executions"][0]["artifact_paths"]
+    with pytest.raises(ValueError, match=rf"{omitted}: missing required field"):
+        _publish(entry, payload)
+    assert not Path(entry["worker_payload_path"]).exists()
+    with pytest.raises(ValueError, match=rf"{omitted}: missing required field"):
+        runtime.compile_validation({"dispatch": dispatch, "payload": payload})
+    assert not Path(entry["artifact_path"]).exists()
+    assert not Path(entry["metadata_path"]).exists()
+    if omitted == "executions":
+        payload["executions"] = []
+    else:
+        payload["executions"][0]["artifact_paths"] = []
+    _publish(entry, payload)
     _content, metadata = runtime.compile_validation({"dispatch": dispatch, "payload": payload})
     assert metadata["evidence"]["status"] == payload["status"]
-    assert metadata["normalized_record"]["executions"] == payload.get("executions", [])
+    assert metadata["normalized_record"]["executions"] == payload["executions"]
 
 
 def _synthesis_fixture(tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
@@ -572,7 +584,7 @@ def test_separate_hosted_evidence_and_required_unexecuted_matrix(tmp_path: Path,
             "before_state": document["validation_requirements"][0]["source_state"],
             "after_state": document["validation_requirements"][0]["source_state"],
         }
-        blocked = {"status": "blocked", "executions": [], "limitations": ["Hosted runner unavailable"]}
+        blocked = {"schema_version": 3, "status": "blocked", "executions": [], "limitations": ["Hosted runner unavailable"]}
         content, metadata = runtime.compile_validation({"dispatch": dispatch, "payload": blocked})
         Path(validator["artifact_path"]).write_bytes(content)
         Path(validator["metadata_path"]).write_text(json.dumps(metadata))
