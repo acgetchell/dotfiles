@@ -200,10 +200,15 @@ git:sha1:100644:<40-character-blob-id>
 git:sha256:100755:<64-character-blob-id>
 ```
 
-Capture uses `git hash-object --no-filters` without `-w`, identifying worktree
-bytes without staging files or writing Git objects. Modes distinguish executable
-files, ordinary files and symlinks. Deleted paths record absence. The runtime
-also derives a native Git tree ID without writing that tree.
+Capture streams regular-file bytes in-process using Git's raw blob framing
+(`blob <byte-count>\0`) and the repository's SHA-1 or SHA-256 object format. It
+verifies the number of bytes read and rejects observed concurrent file changes.
+Clean filters and line-ending normalization are not applied: validators consume
+worktree bytes, and distinct bytes must retain distinct identities even when
+Git's filtered blobs would match. Capture neither stages files nor writes Git
+objects. Modes distinguish executable files, ordinary files and symlinks.
+Deleted paths record absence. The runtime also derives a native Git tree ID
+without writing that tree.
 
 An unchanged blob alone does not prove that a broad check remains applicable.
 Complete repository inputs are the default boundary. Explicit contracts permit

@@ -46,8 +46,9 @@ bound receipt. The runtime consumes persisted bytes. Skip candidate writes.
 
 ## Status
 
-Use `blocked` when execution could not proceed safely or source identity was
-lost; `failed` when an executed command failed; `passed` when all requirements
-are satisfied and at least one command ran; `reused` only when all requirements
-were exactly satisfied without execution; and `not-applicable` only for a
-zero-requirement, zero-command plan.
+Graph-dispatched payloads allow only `passed`, `failed`, or `blocked`. Use
+`blocked` for unsafe execution or lost source identity; `failed` for an executed
+command failure; and `passed` when all requirements pass and a command ran.
+
+Standalone results additionally allow `reused` for exactly satisfied requirements
+without execution, and `not-applicable` for a zero-requirement, zero-command plan.

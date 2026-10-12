@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -564,6 +565,18 @@ def _require_disposition(status: ValidationStatus, executions: tuple[ValidationE
         raise ValueError(msg)
 
 
+def _command_requires_git_declaration(command: str) -> bool:
+    """Classify complete shell words, retaining uncertainty for invalid quoting."""
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        words = tuple(lexer)
+    except ValueError:
+        return True
+    return any(word == "HEAD" or word.replace("\\", "/").rsplit("/", 1)[-1] in {"git", "git.exe"} or re.match(r"GIT_[A-Za-z0-9_]*=", word) for word in words)
+
+
 def _require_git_dependencies(executions: tuple[ValidationExecution, ...], dependencies: tuple[GitDependency, ...] | None) -> None:
     from review_graph_git import _source_discovery_command  # noqa: PLC0415 - same standard Git declaration policy as audits.
 
@@ -580,6 +593,6 @@ def _require_git_dependencies(executions: tuple[ValidationExecution, ...], depen
         if dependency.kind == GitDependencyKind.SOURCE_DISCOVERY and (dependency.command is None or not _source_discovery_command(dependency.command)):
             msg = "validation source discovery requires a plain local Git diff"
             raise ValueError(msg)
-    if any(re.search(r"\bgit\b|\bHEAD\b|\bGIT_[A-Z_]+\b", command) and command not in declared for command in commands):
+    if any(_command_requires_git_declaration(command) and command not in declared for command in commands):
         msg = "source-only validation cannot execute an unclassified Git command"
         raise ValueError(msg)

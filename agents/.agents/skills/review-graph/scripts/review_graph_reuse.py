@@ -165,6 +165,9 @@ class AuthorizedGitContextTransition(ExternalMetadataTransition):
         """Separate source equality from changed HEAD, branch and comparison state."""
         self.before.verify()
         self.after.verify()
+        if "staged" in (self.before.capture_mode, self.after.capture_mode):
+            msg = "authorized Git context handoff cannot preserve staged capture scopes; replan from the new capture"
+            raise ValueError(msg)
         if not isinstance(self.git_context_authorization, str) or not self.git_context_authorization.strip():
             msg = "changed Git context requires explicit user authorization"
             raise ValueError(msg)

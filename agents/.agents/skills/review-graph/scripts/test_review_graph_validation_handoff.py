@@ -11,8 +11,8 @@ import review_graph_runtime as runtime
 from capture_scope import _scope_data
 from review_graph_bootstrap import bootstrap_document
 from review_graph_plan import plan_from_document
-from review_graph_reuse import source_snapshot
-from review_graph_validation import ValidationRecord, ValidationStatus, VerifiedValidationRecord
+from review_graph_reuse import AuthorizedGitContextTransition, source_snapshot
+from review_graph_validation import ValidationPayload, ValidationRecord, ValidationStatus, VerifiedValidationRecord
 from test_review_graph_runtime import (
     ROUTING_CATALOG,
     SKILL_ROOT,
@@ -23,6 +23,69 @@ from test_review_graph_runtime import (
     _run_test_git,
 )
 from test_review_graph_transitions import _materialize
+
+
+@pytest.mark.parametrize(("before_mode", "after_mode"), [("staged", "staged"), ("staged", "baseline"), ("baseline", "staged")])
+def test_authorized_git_context_rejects_either_staged_capture(tmp_path: Path, before_mode: str, after_mode: str) -> None:
+    git, repository, _template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
+    before = source_snapshot(_scope_data(git, repository, before_mode, None, ()))
+    _run_test_git(git, "-C", str(repository), "commit", "--allow-empty", "-m", "Authorized context change")
+    after = source_snapshot(_scope_data(git, repository, after_mode, None, ()))
+    before.verify()
+    after.verify()
+    assert before.git_tree_id == after.git_tree_id
+    with pytest.raises(ValueError, match="staged capture scopes; replan from the new capture"):
+        AuthorizedGitContextTransition(before, after, "Observe the authorized commit.").verify()
+
+
+def _source_only_payload(command: str) -> dict[str, Any]:
+    return {
+        "schema_version": 3,
+        "status": "passed",
+        "executions": [
+            {
+                "executor": "validator",
+                "command": command,
+                "working_directory": ".",
+                "result": "passed",
+                "exit_code": 0,
+                "elapsed": "1s",
+                "evidence": "Observed command completion.",
+                "artifact_paths": [],
+            }
+        ],
+        "limitations": [],
+        "git_dependencies": [],
+    }
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["just git-config-check", "just git-config", "python scripts/git.py", "python /tmp/git/check.py", "python scripts/HEAD.py", "python scripts/GIT_CONFIG.py"],
+)
+def test_source_only_validation_accepts_recipe_and_path_words(command: str) -> None:
+    payload = ValidationPayload.from_raw(_source_only_payload(command))
+    assert payload.git_dependencies == ()
+    assert payload.executions[0].command == command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git status",
+        "/usr/bin/git status",
+        "'/path with spaces/git' status",
+        "git.exe status",
+        "true&&git status",
+        "just check HEAD",
+        "GIT_CONFIG_COUNT=0 just check",
+        "env GIT_INDEX_FILE=/tmp/index just check",
+        "echo 'unclosed",
+    ],
+)
+def test_source_only_validation_rejects_git_tokens_and_unparseable_commands(command: str) -> None:
+    with pytest.raises(ValueError, match="unclassified Git command"):
+        ValidationPayload.from_raw(_source_only_payload(command))
 
 
 def _handoff(  # noqa: PLR0913 - orthogonal fixture execution and contract controls.

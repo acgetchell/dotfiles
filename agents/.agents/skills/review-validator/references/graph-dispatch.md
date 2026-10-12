@@ -83,8 +83,7 @@ Publish one version 3 JSON object:
 `passed` requires exit `0`; `failed` requires a nonzero integer. Both require
 finite, nonnegative elapsed seconds, optionally with units. `not-run` requires `null` or
 `"none"` for both fields. `blocked` allows unavailable timing and a nonzero or
-unavailable exit code, with a concrete limitation. `reused` and `not-applicable`
-contain no executions. `artifact_paths` names exact
+unavailable exit code, with a concrete limitation. `artifact_paths` names exact
 `validation_unit.allowed_artifacts[].path` roots, including external logs.
 Children belong in evidence text; absent outputs use `[]`. Publication names
 permitted roots on rejection. Correct references without reruns; runtime owns

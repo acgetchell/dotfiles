@@ -150,6 +150,23 @@ def _submodule_fingerprint(git: str, path: Path) -> str:
     )
 
 
+def _file_blob_id(path: Path, expected_size: int, algorithm: str) -> str:
+    """Stream raw worktree bytes using Git framing, without filters or subprocesses."""
+    if algorithm not in {"sha1", "sha256"}:
+        msg = "Git source identity requires sha1 or sha256"
+        raise ValueError(msg)
+    digest = hashlib.new(algorithm, f"blob {expected_size}\0".encode(), usedforsecurity=False)
+    bytes_read = 0
+    with path.open("rb") as stream:
+        while chunk := stream.read(_CHUNK_SIZE):
+            digest.update(chunk)
+            bytes_read += len(chunk)
+    if bytes_read != expected_size:
+        msg = f"file changed while capturing scope: {path}"
+        raise RuntimeError(msg)
+    return digest.hexdigest()
+
+
 def _update_worktree_path(digest: _Digest, git: str, repo: Path, relative: str, algorithm: str) -> str:
     """Bind one path to its native Git mode/object identity without writing objects."""
     path = repo / relative
@@ -175,7 +192,7 @@ def _update_worktree_path(digest: _Digest, git: str, repo: Path, relative: str, 
     if stat.S_ISREG(metadata.st_mode):
         mode = b"100755" if metadata.st_mode & stat.S_IXUSR else b"100644"
         _update_part(digest, "mode", mode)
-        oid = _decode(_run_git(git, repo, ("hash-object", "--no-filters", "--", relative)))
+        oid = _file_blob_id(path, metadata.st_size, algorithm)
         identity = GitPathIdentity(algorithm, mode.decode(), oid).serialize()
         _update_part(digest, "git-object", identity.encode())
         final_metadata = path.lstat()

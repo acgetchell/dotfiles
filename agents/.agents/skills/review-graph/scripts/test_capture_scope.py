@@ -8,8 +8,9 @@ from collections.abc import Sequence  # noqa: TC003 - keep available for runtime
 from pathlib import Path
 from typing import cast
 
+import capture_scope
 import pytest
-from capture_scope import _scope_data
+from capture_scope import _file_blob_id, _scope_data
 from review_graph_git_objects import GitPathIdentity
 from review_graph_reuse import source_snapshot
 
@@ -17,7 +18,14 @@ _TIMEOUT_SECONDS = 30
 
 
 @pytest.mark.parametrize("algorithm", ["sha1", "sha256"])
-def test_source_capture_uses_native_git_objects_without_mutating_git(tmp_path: Path, algorithm: str) -> None:
+def test_source_capture_uses_native_git_objects_without_mutating_git(tmp_path: Path, algorithm: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    run_git = capture_scope._run_git
+
+    def without_per_file_hash(git: str, repository: Path, arguments: Sequence[str]) -> bytes:
+        assert arguments[0] != "hash-object"
+        return run_git(git, repository, arguments)
+
+    monkeypatch.setattr(capture_scope, "_run_git", without_per_file_hash)
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "--quiet", "--object-format=" + algorithm)
@@ -46,6 +54,47 @@ def test_source_capture_uses_native_git_objects_without_mutating_git(tmp_path: P
     assert {str(path.relative_to(repo / ".git/objects")) for path in (repo / ".git/objects").rglob("*")} == before_objects
     _git(repo, "add", ".")
     assert captured["repository_git_tree_id"] == f"git:{algorithm}:tree:" + _git(repo, "write-tree").strip()
+
+
+@pytest.mark.parametrize("algorithm", ["sha1", "sha256"])
+@pytest.mark.parametrize("content", [b"", b"\x00raw\r\n\xff", b"x" * (1024 * 1024 + 7)], ids=["empty", "binary", "multiple-chunks"])
+def test_streamed_blob_identity_matches_native_raw_git(tmp_path: Path, algorithm: str, content: bytes) -> None:
+    _git(tmp_path, "init", "--quiet", "--object-format=" + algorithm)
+    path = tmp_path / "source.bin"
+    path.write_bytes(content)
+    assert _file_blob_id(path, len(content), algorithm) == _git(tmp_path, "hash-object", "--no-filters", "source.bin").strip()
+
+
+@pytest.mark.parametrize("expected_size", [2, 4])
+def test_streamed_blob_rejects_a_changed_file_size(tmp_path: Path, expected_size: int) -> None:
+    path = tmp_path / "source.bin"
+    path.write_bytes(b"raw")
+    with pytest.raises(RuntimeError, match="file changed while capturing scope"):
+        _file_blob_id(path, expected_size, "sha1")
+
+
+def test_clean_filters_cannot_hide_changed_worktree_bytes(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    (repo / ".gitattributes").write_bytes(b"*.txt text eol=lf\n")
+    source = repo / "source.txt"
+    source.write_bytes(b"source\n")
+    _commit_all(repo)
+    index = (repo / ".git/index").read_bytes()
+    objects = {str(path.relative_to(repo / ".git/objects")) for path in (repo / ".git/objects").rglob("*")}
+    filtered = _git(repo, "hash-object", "source.txt").strip()
+    git = shutil.which("git") or "git"
+    before = source_snapshot(_scope_data(git, repo, "baseline", None, ()))
+    source.write_bytes(b"source\r\n")
+    after = source_snapshot(_scope_data(git, repo, "baseline", None, ()))
+    before.verify()
+    after.verify()
+    assert _git(repo, "hash-object", "source.txt").strip() == filtered
+    assert dict(before.repository_path_fingerprints)["source.txt"] != dict(after.repository_path_fingerprints)["source.txt"]
+    assert before.git_tree_id != after.git_tree_id
+    assert before.repository_state_fingerprint != after.repository_state_fingerprint
+    assert (repo / ".git/index").read_bytes() == index
+    assert {str(path.relative_to(repo / ".git/objects")) for path in (repo / ".git/objects").rglob("*")} == objects
 
 
 def _run(command: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
