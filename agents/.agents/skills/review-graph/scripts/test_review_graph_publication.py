@@ -25,7 +25,6 @@ from test_review_graph_runtime import (
     _late_handoff_replan,
     _run_test_git,
     _source_by_node,
-    _sparse_plan,
     _sparse_plan_document,
     _worker_input_fixture,
 )
@@ -257,7 +256,7 @@ def _validation_fixture(tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any]]
         ValidationArtifact("target", "build", "ignored", "repository-rule", status_rule=".gitignore:target/"),
         ValidationArtifact(str(effects), "log", "outside-repository", "isolated-output-directory"),
     )
-    plan = _sparse_plan()
+    plan = plan_from_document(_sparse_plan_document(), repository_root=repository)
     unit = replace(plan.coalesced_validation_units[0], allowed_artifacts=artifacts)
     plan = replace(plan, coalesced_validation_units=(unit,))
     materialized = runtime.materialize_dispatches(

@@ -22,7 +22,7 @@ from review_graph_coverage import coverage_reference
 from review_graph_executor import executor_permissions
 from review_graph_integrity import digest_bytes, digest_json
 from review_graph_lifecycle import ReviewLifecycle, lifecycle_from_document
-from review_graph_provenance import review_scope_body
+from review_graph_provenance import metadata_transition_reference, review_scope_body
 from review_graph_reuse import (
     AuditInputIdentity,
     AuditReuseTransition,
@@ -2389,7 +2389,9 @@ def _initialize_plan_control(plan: GraphPlan, *, control_root: Path | None, repo
     directories = {
         Path(directory).resolve() for unit in plan.coalesced_validation_units for directory in unit.working_directories if Path(directory).is_absolute()
     }
-    repository = _validated_repository_root(repository_root) if repository_root is not None else next(iter(directories)) if len(directories) == 1 else None
+    repository = (
+        _validated_repository_root(repository_root) if repository_root is not None else next(iter(directories), None) if len(directories) == 1 else None
+    )
     if repository is None or not repository.is_dir():
         return plan
     binding = issue_run_control(asdict(plan), repository=repository, root=control_root)
@@ -2874,11 +2876,22 @@ def _fix_change_blockers(state_verification: str, changes: str, expectation: Rev
     return tuple(blockers)
 
 
+def _native_metadata_transition_blockers(body: str, fingerprints: FingerprintEvidence, *, section: str) -> tuple[str, ...]:
+    """Check exact compact provenance while accepting existing inline evidence."""
+    compact = _native_field_values(body, "External metadata transitions reference")
+    inline = _native_field_values(body, "External metadata transitions")
+    if not fingerprints.metadata_transitions:
+        return (f"native result {section} claims absent metadata transitions",) if compact or inline else ()
+    if compact and inline:
+        return (f"native result {section} has duplicate metadata transition representations",)
+    label = "External metadata transitions reference" if compact else "External metadata transitions"
+    value = metadata_transition_reference(fingerprints.metadata_transitions) if compact else [asdict(item) for item in fingerprints.metadata_transitions]
+    expected = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return _native_values_blockers(body, section=section, label=label, expected=(expected,))
+
+
 def _native_state_verification_blockers(body: str, fingerprints: FingerprintEvidence, *, status: str, changed_as_reported: bool = False) -> tuple[str, ...]:
-    blockers: list[str] = []
-    if fingerprints.metadata_transitions:
-        transitions = json.dumps([asdict(item) for item in fingerprints.metadata_transitions], sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-        blockers.extend(_native_values_blockers(body, section="State Verification", label="External metadata transitions", expected=(transitions,)))
+    blockers = list(_native_metadata_transition_blockers(body, fingerprints, section="State Verification"))
     for ordinal, label in enumerate(("Observed scope fingerprint", "Observed worktree fingerprint", "Observed repository state fingerprint")):
         blockers.extend(
             _native_values_blockers(
@@ -3048,11 +3061,7 @@ def _independent_review_native_blockers(  # noqa: C901, PLR0912, PLR0915
         )
     )
     envelope = sections["## Review Graph Envelope"]
-    if evidence.fingerprints.metadata_transitions:
-        transitions = json.dumps(
-            [asdict(item) for item in evidence.fingerprints.metadata_transitions], sort_keys=True, separators=(",", ":"), ensure_ascii=True
-        )
-        blockers.extend(_native_values_blockers(envelope, section="Review Graph Envelope", label="External metadata transitions", expected=(transitions,)))
+    blockers.extend(_native_metadata_transition_blockers(envelope, evidence.fingerprints, section="Review Graph Envelope"))
     blockers.extend(_native_nonempty_section_blockers(envelope, section="Review Graph Envelope"))
     for label, expected in (
         ("Node ID", evidence.node_id),

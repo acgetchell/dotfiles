@@ -461,7 +461,7 @@ def test_independent_review_can_revalidate_on_resumed_metadata(tmp_path: Path) -
     payload.update(before_state=current, after_state=current)
     content, metadata = compile_independent_payload({"dispatch": dispatch, "payload": payload})
     assert metadata["normalized_record"]["observed_source_state"] == current
-    assert b"External metadata transitions:" in content
+    assert b"External metadata transitions reference:" in content
 
 
 def test_compound_git_command_is_rechecked_after_staging(tmp_path: Path) -> None:

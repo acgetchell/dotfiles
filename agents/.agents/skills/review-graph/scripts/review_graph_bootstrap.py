@@ -181,7 +181,7 @@ def main(argv: list[str] | None = None) -> int:
             catalog_path=args.catalog,
             skill_roots=tuple(args.skill_root or (DEFAULT_SKILL_ROOT,)),
             repository_root=root,
-            control_root=args.output.absolute().with_suffix(".control"),
+            control_root=args.output.resolve().with_suffix(".control"),
         )
         plan_document = json.loads(json.dumps(asdict(plan)))
         source_state = _source_state(document)

@@ -122,7 +122,7 @@ from review_graph_plan import (
     validation_requirements_from_document,
 )
 from review_graph_preflight import inspect_executor_executables
-from review_graph_provenance import review_scope_body, worker_payload_reference
+from review_graph_provenance import metadata_transition_reference, review_scope_body, worker_payload_reference
 from review_graph_receipts import stage_receipt
 from review_graph_reuse import (
     SNAPSHOT_FORMAT,
@@ -538,7 +538,7 @@ def _state_verification(dispatch: dict[str, Any], evidence: ReviewEvidence, chan
             f"- Changed repository paths: {', '.join(changed_paths) or 'none'}",
             f"- HEAD, branch, or index mutated: {'yes' if evidence.git_mutated else 'no'}",
             *(
-                (f"- External metadata transitions: {canonical_json([asdict(item) for item in evidence.fingerprints.metadata_transitions])}",)
+                (f"- External metadata transitions reference: {canonical_json(metadata_transition_reference(evidence.fingerprints.metadata_transitions))}",)
                 if evidence.fingerprints.metadata_transitions
                 else ()
             ),
@@ -1533,7 +1533,7 @@ def _compile_independent_native(document: dict[str, Any], native_content: bytes)
             "- Source-controlled files changed: none",
             "- Git state mutated: no",
             *(
-                (f"- External metadata transitions: {canonical_json([asdict(item) for item in fingerprints.metadata_transitions])}",)
+                (f"- External metadata transitions reference: {canonical_json(metadata_transition_reference(fingerprints.metadata_transitions))}",)
                 if fingerprints.metadata_transitions
                 else ()
             ),
@@ -1946,7 +1946,7 @@ def _validation_state_verification(dispatch: dict[str, Any], evidence: Validatio
             f"  - Observed repository state fingerprint: {evidence.fingerprints.after[2]}",
             f"  - Result: {result}",
             *(
-                (f"- External metadata transitions: {canonical_json([asdict(item) for item in evidence.fingerprints.metadata_transitions])}",)
+                (f"- External metadata transitions reference: {canonical_json(metadata_transition_reference(evidence.fingerprints.metadata_transitions))}",)
                 if evidence.fingerprints.metadata_transitions
                 else ()
             ),
@@ -2229,7 +2229,8 @@ def _recursive_workspace_directory_digest(path: Path) -> str:
     return digest_bytes(canonical_json(records).encode())
 
 
-def _workspace_content_digest(path: Path) -> tuple[bool, str, str]:
+def _workspace_content_digest(path: Path, *, declared_cache: bool = False) -> tuple[bool, str, str]:
+    """Bound declared cache directories while retaining file and symlink identities."""
     if not path.exists() and not path.is_symlink():
         return False, digest_bytes(b"absent"), "absent-v1"
     if path.is_symlink():
@@ -2238,7 +2239,7 @@ def _workspace_content_digest(path: Path) -> tuple[bool, str, str]:
         return True, digest_bytes(path.read_bytes()), "content-sha256-v1"
     if not path.is_dir():
         return True, digest_bytes(f"special:{path.stat().st_mode}".encode()), "special-metadata-v1"
-    if path.name in _BOUNDED_WORKSPACE_DIRECTORY_NAMES:
+    if declared_cache or path.name in _BOUNDED_WORKSPACE_DIRECTORY_NAMES:
         return True, _bounded_workspace_directory_digest(path), _BOUNDED_WORKSPACE_POLICY
     return True, _recursive_workspace_directory_digest(path), _RECURSIVE_WORKSPACE_POLICY
 
@@ -2280,8 +2281,12 @@ def capture_workspace_snapshot(dispatch: dict[str, Any]) -> dict[str, Any]:
     records: list[dict[str, object]] = []
     for raw_path in paths:
         resolved = _workspace_path(raw_path, repository_root)
-        exists, digest, snapshot_mode = _workspace_content_digest(resolved)
         status = _git_path_status(repository_root, resolved)
+        artifact = approved.get(raw_path)
+        declared_cache = (
+            artifact is not None and artifact.kind == "cache" and artifact.repository_status == status and status in {"ignored", "outside-repository"}
+        )
+        exists, digest, snapshot_mode = _workspace_content_digest(resolved, declared_cache=declared_cache)
         records.append({"digest": digest, "exists": exists, "path": raw_path, "snapshot_mode": snapshot_mode, "status": status})
     return {"node_id": unit.node_id, "records": records, "schema_version": 1, "source_state": list(unit.source_state)}
 

@@ -157,6 +157,27 @@ def test_starter_binds_all_original_plan_copies(tmp_path: Path) -> None:
     assert bundle["materialization_input"]["plan"]["review_lifecycle"]["run_control"] == binding
 
 
+def test_bootstrap_resolves_symlinked_output_parent_and_retries_canonically(tmp_path: Path) -> None:
+    capture, choices = _fixture(tmp_path)
+    physical = tmp_path / "physical"
+    physical.mkdir()
+    alias = tmp_path / "temporary-alias"
+    alias.symlink_to(physical, target_is_directory=True)
+    capture_path, choices_path = tmp_path / "capture.json", tmp_path / "choices.json"
+    capture_path.write_text(json.dumps(capture))
+    choices_path.write_text(json.dumps(choices))
+    output = alias / "bootstrap.json"
+    argv = ["--capture", str(capture_path), "--starter-config", str(choices_path), "--output"]
+
+    assert main([*argv, str(output)]) == 0
+    original = output.read_bytes()
+    bundle = json.loads(original)
+    binding = bundle["plan"]["review_lifecycle"]["run_control"]
+    assert Path(binding["identity"]["path"]).parent == physical.resolve() / "bootstrap.control"
+    assert main([*argv, str(physical / "bootstrap.json")]) == 0
+    assert output.read_bytes() == original
+
+
 @pytest.mark.parametrize("field", ["authorization", "environment", "artifact_root", "ignored_outputs", "command_policy", "execution_prerequisites"])
 def test_starter_requires_operator_choices(tmp_path: Path, field: str) -> None:
     capture, choices = _fixture(tmp_path)

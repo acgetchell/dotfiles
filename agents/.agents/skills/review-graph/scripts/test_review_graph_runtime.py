@@ -4870,7 +4870,7 @@ def test_isolation_boundary_is_checked_before_planning_materialization_and_snaps
         return
     with pytest.raises(ValueError, match="validation root overlaps"):
         plan_from_document(document, repository_root=repository)
-    plan = _sparse_plan()
+    plan = plan_from_document(_sparse_plan_document(), repository_root=repository)
     unit = replace(plan.coalesced_validation_units[0], requires_isolation=True, isolation_root=str(root), working_directories=(str(root / "work"),))
     old_plan = replace(plan, coalesced_validation_units=(unit,))
     store = tmp_path / "unpublished"
