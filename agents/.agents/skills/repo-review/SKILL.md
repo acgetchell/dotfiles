@@ -16,7 +16,8 @@ Delegate comprehensive repository review to
 3. Follow the selected `review-graph` profile once and return its native final
    result without adding a second routing, validation, or synthesis pass.
 
-Preserve its repair budget and stop reason; report unfinished proof as partial.
+Preserve its repair budget, delivery profile and stop reason. Routine delivery
+reports fixes, affected verification and pending CI without claiming formal proof.
 
 `review-graph` owns capture, capacity, routing, validators, orchestrators,
 synthesis, and the five-surface compatibility view. Do not repeat those actions.
@@ -32,6 +33,8 @@ coalesced validators, exact evidence reuse, and coordinator fallback may change
 execution order or location, but never coverage, findings, validation
 attribution, or completion status.
 
-Require the runtime's verified `RepositoryReviewProof`; tables, plans, and
-conversation summaries cannot establish completion. Load the evidence
+Use routine delivery by default and explicit certification when requested, as
+defined in [run profiles](../review-graph/references/run-profiles.md). Formal
+certification requires the runtime's verified `RepositoryReviewProof`; tables,
+plans and conversation summaries cannot establish it. Load the evidence
 specification only to diagnose verifier rejection.

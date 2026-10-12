@@ -65,7 +65,8 @@ def test_source_discovery_preserves_accepted_bytes_and_explains_each_node(tmp_pa
         node_mode = entry["dispatch"].get("mode", "validation")
         if node_mode in {"validation", "synthesis", "independent-review"}:
             assert decisions[entry["node_id"]]["disposition"] == "recheck"
-            assert decisions[entry["node_id"]]["reasons"][0]["reason_code"] == f"{node_mode}-policy"
+            expected_reason = "validation-unverified" if node_mode == "validation" else f"{node_mode}-policy"
+            assert decisions[entry["node_id"]]["reasons"][0]["reason_code"] == expected_reason
     for key, path in source.items():
         assert Path(path).read_bytes() == originals[key]
     _kind, _expectation, _evidence, _content, record = _load_evidence_source(source, require_normalized=True)

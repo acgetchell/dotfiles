@@ -3,78 +3,204 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
-    "review_lifecycle": {"$ref": "#/$defs/reviewLifecycle"},
-    "planning_purpose": {"enum": ["initial-review", "repair-verification", "comprehensive-restart"]},
+    "review_lifecycle": {
+      "$ref": "#/$defs/reviewLifecycle"
+    },
+    "planning_purpose": {
+      "enum": [
+        "initial-review",
+        "repair-verification",
+        "comprehensive-restart"
+      ]
+    },
     "additional_nodes": {
-      "items": {"$ref": "#/$defs/node"},
+      "items": {
+        "$ref": "#/$defs/node"
+      },
       "type": "array"
     },
-    "allow_legacy_fixture": {"type": "boolean"},
-    "authorization": {"enum": ["review-only", "review-and-fix"]},
-    "base_ref": {"type": ["string", "null"]},
-    "branch": {"type": ["string", "null"]},
-    "capture_mode": {"enum": ["branch", "staged", "worktree", "baseline"]},
+    "allow_legacy_fixture": {
+      "type": "boolean"
+    },
+    "authorization": {
+      "enum": [
+        "review-only",
+        "review-and-fix"
+      ]
+    },
+    "base_ref": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "branch": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "capture_mode": {
+      "enum": [
+        "branch",
+        "staged",
+        "worktree",
+        "baseline"
+      ]
+    },
     "captured_path_line_bounds": {
-      "additionalProperties": {"minimum": 0, "type": "integer"},
+      "additionalProperties": {
+        "minimum": 0,
+        "type": "integer"
+      },
       "type": "object"
     },
-    "captured_paths": {"$ref": "#/$defs/stringArray"},
-    "captured_scope_paths": {"$ref": "#/$defs/stringArray"},
-    "captured_worktree_fingerprint": {"type": "string"},
-    "change_target": {"type": "string"},
-    "concrete_change_target": {"type": "boolean"},
-    "consulted_routers": {"$ref": "#/$defs/stringArray"},
-    "execution_profile": {"enum": ["grouped", "isolated", "isolated-only", "mixed"]},
-    "head": {"type": "string"},
-    "instruction_paths": {"$ref": "#/$defs/stringArray"},
-    "merge_base": {"type": ["string", "null"]},
-    "pre_review_validation_requirement_ids": {"$ref": "#/$defs/stringArray"},
-    "recovery_finalization_reserve": {"minimum": 0, "type": "integer"},
-    "release_readiness": {"type": "boolean"},
-    "repository_root": {"type": "string"},
-    "repository_state_fingerprint": {"type": "string"},
-    "requested_paths": {"$ref": "#/$defs/stringArray"},
+    "captured_paths": {
+      "$ref": "#/$defs/stringArray"
+    },
+    "captured_scope_paths": {
+      "$ref": "#/$defs/stringArray"
+    },
+    "captured_worktree_fingerprint": {
+      "type": "string"
+    },
+    "change_target": {
+      "type": "string"
+    },
+    "concrete_change_target": {
+      "type": "boolean"
+    },
+    "consulted_routers": {
+      "$ref": "#/$defs/stringArray"
+    },
+    "execution_profile": {
+      "enum": [
+        "grouped",
+        "isolated",
+        "isolated-only",
+        "mixed"
+      ]
+    },
+    "head": {
+      "type": "string"
+    },
+    "instruction_paths": {
+      "$ref": "#/$defs/stringArray"
+    },
+    "independent_review_after_audits": {
+      "type": "boolean"
+    },
+    "merge_base": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "pre_review_validation_requirement_ids": {
+      "$ref": "#/$defs/stringArray"
+    },
+    "recovery_finalization_reserve": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "release_readiness": {
+      "type": "boolean"
+    },
+    "repository_root": {
+      "type": "string"
+    },
+    "repository_state_fingerprint": {
+      "type": "string"
+    },
+    "requested_paths": {
+      "$ref": "#/$defs/stringArray"
+    },
     "review_requirements": {
-      "items": {"$ref": "#/$defs/reviewRequirement"},
+      "items": {
+        "$ref": "#/$defs/reviewRequirement"
+      },
       "type": "array"
     },
     "routing_decisions": {
-      "items": {"$ref": "#/$defs/routingDecision"},
+      "items": {
+        "$ref": "#/$defs/routingDecision"
+      },
       "type": "array"
     },
     "routing_discoveries": {
       "items": {
         "additionalProperties": false,
         "properties": {
-          "catalog_id": {"type": "string"},
-          "evidence": {"type": "string"},
-          "handoff_id": {"type": "string"},
-          "source_node_id": {"type": "string"}
+          "catalog_id": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "handoff_id": {
+            "type": "string"
+          },
+          "source_node_id": {
+            "type": "string"
+          }
         },
-        "required": ["handoff_id", "source_node_id", "catalog_id", "evidence"],
+        "required": [
+          "handoff_id",
+          "source_node_id",
+          "catalog_id",
+          "evidence"
+        ],
         "type": "object"
       },
       "type": "array"
     },
     "routing_overrides": {
-      "items": {"$ref": "#/$defs/routingOverride"},
+      "items": {
+        "$ref": "#/$defs/routingOverride"
+      },
       "type": "array"
     },
-    "scope_fingerprint": {"type": "string"},
-    "scope_mode": {"enum": ["branch", "staged-only", "changed-file-only", "baseline", "release-readiness"]},
-    "schema_version": {"const": 1, "type": "integer"},
-    "source_state": {"$ref": "#/$defs/sourceState"},
-    "status": {"$ref": "#/$defs/stringArray"},
+    "scope_fingerprint": {
+      "type": "string"
+    },
+    "scope_mode": {
+      "enum": [
+        "branch",
+        "staged-only",
+        "changed-file-only",
+        "baseline",
+        "release-readiness"
+      ]
+    },
+    "schema_version": {
+      "const": 1,
+      "type": "integer"
+    },
+    "source_state": {
+      "$ref": "#/$defs/sourceState"
+    },
+    "status": {
+      "$ref": "#/$defs/stringArray"
+    },
     "synthesis_nodes": {
-      "items": {"$ref": "#/$defs/node"},
+      "items": {
+        "$ref": "#/$defs/node"
+      },
       "type": "array"
     },
-    "untracked_paths": {"$ref": "#/$defs/stringArray"},
+    "untracked_paths": {
+      "$ref": "#/$defs/stringArray"
+    },
     "validation_requirements": {
-      "items": {"$ref": "#/$defs/validationRequirement"},
+      "items": {
+        "$ref": "#/$defs/validationRequirement"
+      },
       "type": "array"
     },
-    "worker_budget": {"minimum": 1, "type": "integer"}
+    "worker_budget": {
+      "minimum": 1,
+      "type": "integer"
+    }
   },
   "required": [
     "authorization",
@@ -102,116 +228,334 @@
     "controlReference": {
       "additionalProperties": false,
       "properties": {
-        "path": {"minLength": 1, "type": "string"},
-        "digest": {"pattern": "^sha256:[0-9a-f]{64}$", "type": "string"}
+        "path": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        }
       },
-      "required": ["path", "digest"],
+      "required": [
+        "path",
+        "digest"
+      ],
       "type": "object"
     },
     "runControlBinding": {
       "additionalProperties": false,
       "properties": {
-        "identity": {"$ref": "#/$defs/controlReference"},
-        "generation": {"$ref": "#/$defs/controlReference"}
+        "identity": {
+          "$ref": "#/$defs/controlReference"
+        },
+        "generation": {
+          "$ref": "#/$defs/controlReference"
+        }
       },
-      "required": ["identity", "generation"],
+      "required": [
+        "identity",
+        "generation"
+      ],
       "type": "object"
     },
     "reviewLifecycle": {
       "additionalProperties": false,
       "properties": {
-        "repair_budget": {"minimum": 0, "type": "integer"},
-        "repairs_completed": {"minimum": 0, "type": "integer"},
-        "budget_extensions": {"items": {"type": "object"}, "type": "array"},
-        "comprehensive_restarts": {"items": {"type": "object"}, "type": "array"},
-        "stop_reason": {"type": ["string", "null"]},
-        "run_control": {"oneOf": [{"$ref": "#/$defs/runControlBinding"}, {"type": "null"}]}
+        "repair_budget": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "repairs_completed": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "budget_extensions": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "comprehensive_restarts": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "stop_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run_control": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/runControlBinding"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
       },
-      "required": ["repair_budget", "repairs_completed", "budget_extensions", "comprehensive_restarts", "stop_reason"],
+      "required": [
+        "repair_budget",
+        "repairs_completed",
+        "budget_extensions",
+        "comprehensive_restarts",
+        "stop_reason"
+      ],
       "type": "object"
     },
     "artifact": {
       "additionalProperties": false,
       "properties": {
-        "artifact_digest": {"pattern": "^sha256:[0-9a-f]{64}$", "type": ["string", "null"]},
+        "artifact_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "artifact_digest_mode": {
           "enum": [
-            "bounded-directory-metadata-v1",
-            "bounded-directory-metadata-v2",
             "bounded-directory-metadata-v3",
             "content-sha256-v1",
-            "recursive-content-sha256-v1",
             "recursive-content-sha256-v2",
             "special-metadata-v1",
             "symlink-target-v1",
             null
           ]
         },
-        "artifact_id": {"type": ["string", "null"]},
-        "kind": {"enum": ["build", "cache", "coverage", "log", "report", "test-result", "other"]},
-        "path": {"type": "string"},
-        "repository_status": {"enum": ["ignored", "outside-repository"]}
+        "artifact_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "enum": [
+            "build",
+            "cache",
+            "coverage",
+            "log",
+            "report",
+            "test-result",
+            "other"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "repository_status": {
+          "enum": [
+            "ignored",
+            "outside-repository"
+          ]
+        }
       },
-      "required": ["path", "kind", "repository_status"],
+      "required": [
+        "path",
+        "kind",
+        "repository_status"
+      ],
       "type": "object"
     },
     "node": {
       "additionalProperties": false,
       "properties": {
-        "change_target": {"type": "string"},
-        "coverage": {"$ref": "#/$defs/stringArray"},
-        "instruction_paths": {"$ref": "#/$defs/stringArray"},
-        "mode": {"enum": ["audit", "independent-review", "validation", "synthesis", "fix", "revalidation"]},
-        "node_id": {"type": "string"},
-        "predecessors": {"$ref": "#/$defs/stringArray"},
-        "priority": {"enum": ["required-routing-synthesis", "correctness-invariants", "required-validation", "supporting-quality", "optional-hygiene"]},
-        "required": {"type": "boolean"},
-        "requirement_ids": {"$ref": "#/$defs/stringArray"},
-        "skill_id": {"type": "string"},
-        "skill_path": {"type": "string"},
-        "static_references": {"$ref": "#/$defs/stringArray"},
-        "synthesis_dependency": {"type": ["string", "null"]}
+        "change_target": {
+          "type": "string"
+        },
+        "coverage": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "instruction_paths": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "mode": {
+          "enum": [
+            "audit",
+            "independent-review",
+            "validation",
+            "synthesis",
+            "fix",
+            "revalidation"
+          ]
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "predecessors": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "priority": {
+          "enum": [
+            "required-routing-synthesis",
+            "correctness-invariants",
+            "required-validation",
+            "supporting-quality",
+            "optional-hygiene"
+          ]
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "requirement_ids": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "skill_id": {
+          "type": "string"
+        },
+        "skill_path": {
+          "type": "string"
+        },
+        "static_references": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "synthesis_dependency": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       },
-      "required": ["node_id", "skill_id", "skill_path", "mode"],
+      "required": [
+        "node_id",
+        "skill_id",
+        "skill_path",
+        "mode"
+      ],
       "type": "object"
     },
     "routingOverride": {
       "additionalProperties": false,
       "properties": {
-        "applicability_evidence": {"$ref": "#/$defs/stringArray"},
-        "catalog_id": {"type": "string"},
-        "disposition": {"enum": ["selected", "not-applicable", "exact-evidence-reused", "user-excluded", "budget-deferred", "capability-blocked", "failed"]},
-        "evidence_id": {"type": "string"},
-        "instruction_paths": {"$ref": "#/$defs/stringArray"},
-        "owners": {"$ref": "#/$defs/stringArray"},
-        "reason": {"type": "string"},
-        "review_surface": {"$ref": "#/$defs/stringArray"},
-        "static_references": {"$ref": "#/$defs/stringArray"},
-        "validation_requirement_ids": {"$ref": "#/$defs/stringArray"}
+        "applicability_evidence": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "catalog_id": {
+          "type": "string"
+        },
+        "disposition": {
+          "enum": [
+            "selected",
+            "not-applicable",
+            "exact-evidence-reused",
+            "user-excluded",
+            "budget-deferred",
+            "capability-blocked",
+            "failed"
+          ]
+        },
+        "evidence_id": {
+          "type": "string"
+        },
+        "instruction_paths": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "owners": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "review_surface": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "static_references": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "validation_requirement_ids": {
+          "$ref": "#/$defs/stringArray"
+        }
       },
-      "required": ["catalog_id", "disposition", "reason", "applicability_evidence", "review_surface", "owners"],
+      "required": [
+        "catalog_id",
+        "disposition",
+        "reason",
+        "applicability_evidence",
+        "review_surface",
+        "owners"
+      ],
       "type": "object"
     },
     "routingDecision": {
       "additionalProperties": false,
       "properties": {
-        "applicability_evidence": {"$ref": "#/$defs/stringArray"},
-        "catalog_id": {"type": "string"},
-        "disposition": {"enum": ["selected", "not-applicable", "exact-evidence-reused", "user-excluded", "budget-deferred", "capability-blocked", "failed"]},
-        "evidence_id": {"type": ["string", "null"]},
-        "instruction_paths": {"$ref": "#/$defs/stringArray"},
-        "owners": {"$ref": "#/$defs/stringArray"},
-        "priority": {"enum": ["required-routing-synthesis", "correctness-invariants", "required-validation", "supporting-quality", "optional-hygiene", null]},
-        "reason": {"type": "string"},
-        "requirement_id": {"type": "string"},
-        "review_surface": {"$ref": "#/$defs/stringArray"},
-        "router_id": {"type": "string"},
-        "rule_id": {"type": "string"},
-        "skill_id": {"type": "string"},
-        "skill_path": {"type": "string"},
-        "static_references": {"$ref": "#/$defs/stringArray"},
-        "synthesis_dependency": {"type": ["string", "null"]},
-        "validation_requirement_ids": {"$ref": "#/$defs/stringArray"}
+        "applicability_evidence": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "catalog_id": {
+          "type": "string"
+        },
+        "disposition": {
+          "enum": [
+            "selected",
+            "not-applicable",
+            "exact-evidence-reused",
+            "user-excluded",
+            "budget-deferred",
+            "capability-blocked",
+            "failed"
+          ]
+        },
+        "evidence_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "instruction_paths": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "owners": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "priority": {
+          "enum": [
+            "required-routing-synthesis",
+            "correctness-invariants",
+            "required-validation",
+            "supporting-quality",
+            "optional-hygiene",
+            null
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "requirement_id": {
+          "type": "string"
+        },
+        "review_surface": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "router_id": {
+          "type": "string"
+        },
+        "rule_id": {
+          "type": "string"
+        },
+        "skill_id": {
+          "type": "string"
+        },
+        "skill_path": {
+          "type": "string"
+        },
+        "static_references": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "synthesis_dependency": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "validation_requirement_ids": {
+          "$ref": "#/$defs/stringArray"
+        }
       },
       "required": [
         "catalog_id",
@@ -237,20 +581,57 @@
     "reviewRequirement": {
       "additionalProperties": false,
       "properties": {
-        "instruction_paths": {"$ref": "#/$defs/stringArray"},
-        "owners": {"$ref": "#/$defs/stringArray"},
-        "priority": {"enum": ["required-routing-synthesis", "correctness-invariants", "required-validation", "supporting-quality", "optional-hygiene"]},
-        "reason": {"type": "string"},
-        "required": {"type": "boolean"},
-        "requirement_id": {"type": "string"},
-        "review_surface": {"$ref": "#/$defs/stringArray"},
-        "router_id": {"type": "string"},
-        "rule_id": {"type": "string"},
-        "skill_id": {"type": "string"},
-        "skill_path": {"type": "string"},
-        "static_references": {"$ref": "#/$defs/stringArray"},
-        "synthesis_dependency": {"type": ["string", "null"]},
-        "validation_requirement_ids": {"$ref": "#/$defs/stringArray"}
+        "instruction_paths": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "owners": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "priority": {
+          "enum": [
+            "required-routing-synthesis",
+            "correctness-invariants",
+            "required-validation",
+            "supporting-quality",
+            "optional-hygiene"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "requirement_id": {
+          "type": "string"
+        },
+        "review_surface": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "router_id": {
+          "type": "string"
+        },
+        "rule_id": {
+          "type": "string"
+        },
+        "skill_id": {
+          "type": "string"
+        },
+        "skill_path": {
+          "type": "string"
+        },
+        "static_references": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "synthesis_dependency": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "validation_requirement_ids": {
+          "$ref": "#/$defs/stringArray"
+        }
       },
       "required": [
         "requirement_id",
@@ -267,63 +648,154 @@
       "type": "object"
     },
     "sourceState": {
-      "items": {"minLength": 1, "type": "string"},
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
       "maxItems": 3,
       "minItems": 3,
       "type": "array"
     },
     "stringArray": {
-      "items": {"minLength": 1, "type": "string"},
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
       "type": "array"
     },
     "validationRequirement": {
       "additionalProperties": false,
       "properties": {
-        "allowed_artifacts": {"items": {"$ref": "#/$defs/artifact"}, "type": "array"},
-        "artifact_owner": {"type": "string"},
-        "authority": {"type": "string"},
+        "allowed_artifacts": {
+          "items": {
+            "$ref": "#/$defs/artifact"
+          },
+          "type": "array"
+        },
+        "artifact_owner": {
+          "type": "string"
+        },
+        "authority": {
+          "type": "string"
+        },
         "baseline": {
           "description": "Marks the repository's baseline check, not baseline review scope. Every graph requires at least one validation unit with baseline: true, including branch/staged/worktree reviews. For a branch gate such as just ci, set baseline: true and retain requested_scope: branch.",
-          "examples": [true],
+          "examples": [
+            true
+          ],
           "type": "boolean"
         },
-        "canonical_recipe": {"type": ["string", "null"]},
-        "capture_command": {"type": "string"},
-        "captured_paths": {"$ref": "#/$defs/stringArray"},
-        "commands": {"$ref": "#/$defs/stringArray"},
-        "dependency_policy": {"enum": ["stop-on-failure", "continue-independent"]},
-        "elapsed_time_budget": {"type": "string"},
-        "environment": {"type": "string"},
-        "evidence_id": {"type": ["string", "null"]},
-        "execution_strategy": {"enum": ["sequential", "parallel-independent"]},
-        "expected_evidence": {"type": "string"},
-        "expected_workspace_effects": {"$ref": "#/$defs/stringArray"},
-        "features": {"$ref": "#/$defs/stringArray"},
-        "independence_basis": {"type": "string"},
+        "canonical_recipe": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "capture_command": {
+          "type": "string"
+        },
+        "captured_paths": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "commands": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "dependency_policy": {
+          "enum": [
+            "stop-on-failure",
+            "continue-independent"
+          ]
+        },
+        "elapsed_time_budget": {
+          "type": "string"
+        },
+        "environment": {
+          "type": "string"
+        },
+        "evidence_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "execution_strategy": {
+          "enum": [
+            "sequential",
+            "parallel-independent"
+          ]
+        },
+        "expected_evidence": {
+          "type": "string"
+        },
+        "expected_workspace_effects": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "features": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "independence_basis": {
+          "type": "string"
+        },
         "isolation_root": {
           "description": "Absolute root outside and not overlapping the repository, required for external artifacts even when requires_isolation is false. It bounds artifact paths without relocating execution by itself.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
-        "meaningful_skips": {"$ref": "#/$defs/stringArray"},
-        "mutation_classification": {"type": "string"},
-        "mutation_lock": {"type": "string"},
-        "planning_blocker": {"type": ["string", "null"]},
-        "platform": {"type": "string"},
-        "request": {"type": "string"},
+        "meaningful_skips": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "mutation_classification": {
+          "type": "string"
+        },
+        "mutation_lock": {
+          "type": "string"
+        },
+        "planning_blocker": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "platform": {
+          "type": "string"
+        },
+        "request": {
+          "type": "string"
+        },
         "requested_scope": {
           "description": "Scope being validated; independent of the baseline flag that designates the repository check. A branch review normally uses branch even when baseline is true.",
-          "enum": ["branch", "staged", "worktree", "baseline", "release"]
+          "enum": [
+            "branch",
+            "staged",
+            "worktree",
+            "baseline",
+            "release"
+          ]
         },
         "requires_isolation": {
           "description": "When true, working directories must also be absolute and under isolation_root. Use false with a non-null isolation_root for external cache/log artifacts while executing in the captured checkout with ignored repository outputs.",
           "type": "boolean"
         },
-        "required": {"type": "boolean"},
-        "requirement_id": {"type": "string"},
-        "selection_reason": {"type": "string"},
-        "source_state": {"$ref": "#/$defs/sourceState"},
-        "toolchain": {"type": "string"},
-        "working_directories": {"$ref": "#/$defs/stringArray"}
+        "required": {
+          "type": "boolean"
+        },
+        "requirement_id": {
+          "type": "string"
+        },
+        "selection_reason": {
+          "type": "string"
+        },
+        "source_state": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "toolchain": {
+          "type": "string"
+        },
+        "working_directories": {
+          "$ref": "#/$defs/stringArray"
+        }
       },
       "required": [
         "requirement_id",

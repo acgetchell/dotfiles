@@ -1,0 +1,222 @@
+{
+  "$id": "https://openai.com/codex/review-graph/validation-payload-v3.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "git_dependencies": {
+      "description": "Additional observed Git dependencies. Repository-owned contracts remain authoritative; an empty array cannot weaken them.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "source-discovery",
+              "index",
+              "head",
+              "history"
+            ]
+          },
+          "command": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "kind",
+          "reason"
+        ]
+      }
+    },
+    "native_ci": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "target",
+          "head_sha",
+          "conclusion",
+          "url"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1
+          },
+          "head_sha": {
+            "type": "string",
+            "minLength": 1
+          },
+          "conclusion": {
+            "type": "string",
+            "minLength": 1
+          },
+          "url": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "artifacts": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "artifact_digest_mode": {
+            "enum": [
+              "absent-v1",
+              "bounded-directory-metadata-v3",
+              "content-sha256-v1",
+              "recursive-content-sha256-v2",
+              "special-metadata-v1",
+              "symlink-target-v1"
+            ]
+          },
+          "artifact_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "enum": [
+              "build",
+              "cache",
+              "coverage",
+              "log",
+              "report",
+              "test-result",
+              "other"
+            ]
+          },
+          "path": {
+            "type": "string"
+          },
+          "repository_status": {
+            "enum": [
+              "ignored",
+              "outside-repository"
+            ]
+          }
+        },
+        "required": [
+          "path",
+          "kind",
+          "repository_status",
+          "artifact_digest",
+          "artifact_digest_mode"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "executions": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_paths": {
+            "description": "Exact validation_unit.allowed_artifacts[].path roots only; never generated children or absent outputs. Child paths may appear in evidence text. Runtime owns identities and snapshot verification.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "command": {
+            "type": "string"
+          },
+          "elapsed": {
+            "type": [
+              "string",
+              "number",
+              "null"
+            ]
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "executor": {
+            "type": "string"
+          },
+          "exit_code": {
+            "pattern": "^(?:-?[0-9]+|none)$",
+            "type": [
+              "integer",
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "enum": [
+              "passed",
+              "failed",
+              "blocked",
+              "not-run"
+            ]
+          },
+          "working_directory": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "executor",
+          "command",
+          "working_directory",
+          "result",
+          "exit_code",
+          "elapsed",
+          "evidence",
+          "artifact_paths"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "limitations": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "status": {
+      "enum": [
+        "passed",
+        "failed",
+        "blocked"
+      ]
+    },
+    "schema_version": {
+      "const": 3
+    },
+    "failure_kind": {
+      "enum": [
+        "source",
+        "infrastructure",
+        "timeout",
+        "inconclusive"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "status",
+    "executions",
+    "limitations"
+  ],
+  "title": "Review Graph ValidationPayload v3",
+  "type": "object"
+}

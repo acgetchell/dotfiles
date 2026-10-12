@@ -106,7 +106,7 @@ def _block_gate(entry: dict[str, Any], result: dict[str, Any]) -> None:
         "workspace_after": snapshot["records"],
     }
     content, metadata = runtime.compile_validation(
-        {"dispatch": dispatch, "payload": {"executions": [], "status": "blocked", "limitations": ["Permission denied before launch."]}}
+        {"dispatch": dispatch, "payload": {"schema_version": 3, "executions": [], "status": "blocked", "limitations": ["Permission denied before launch."]}}
     )
     Path(entry["artifact_path"]).write_bytes(content)
     Path(entry["metadata_path"]).write_text(json.dumps(metadata))

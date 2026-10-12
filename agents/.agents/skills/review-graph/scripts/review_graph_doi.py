@@ -12,6 +12,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
+from review_graph_git_objects import GitPathIdentity
 from review_graph_reuse import ReviewSourceSnapshot, regular_file_fingerprint, source_snapshot
 
 
@@ -162,7 +163,8 @@ def _captured_cff_digest(canonical: dict[str, Any], cff: Path, capture: ReviewSo
     if captured is None:
         msg = "CITATION.cff is absent from the captured source"
         raise _reject(msg)
-    if captured not in {regular_file_fingerprint(relative, content, executable=executable) for executable in (False, True)}:
+    algorithm = GitPathIdentity.parse(captured).algorithm
+    if captured not in {regular_file_fingerprint(relative, content, executable=executable, algorithm=algorithm) for executable in (False, True)}:
         msg = "retained CFF bytes do not match the captured source"
         raise _reject(msg)
     return "sha256:" + sha256(content).hexdigest()
@@ -483,7 +485,9 @@ def _retained_bibliography(binding: dict[str, Any], markdown: Path, original: di
     if list(snapshot.source_state) != original["observed_source_state"] or relative in snapshot.repository_symlink_paths:
         msg = "historical source evidence differs from validator source state"
         raise _reject(msg)
-    if fingerprints.get(relative) not in {regular_file_fingerprint(relative, contents[1], executable=mode) for mode in (False, True)}:
+    captured = fingerprints.get(relative)
+    algorithm = GitPathIdentity.parse(captured).algorithm if captured is not None else "sha1"
+    if captured not in {regular_file_fingerprint(relative, contents[1], executable=mode, algorithm=algorithm) for mode in (False, True)}:
         msg = "historical bibliography bytes do not match captured source"
         raise _reject(msg)
     return contents[1]

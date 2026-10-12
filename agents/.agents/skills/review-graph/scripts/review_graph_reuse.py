@@ -1,27 +1,23 @@
 """Content-bound capture identities and immutable audit reuse transitions."""
 
-import os
 import re
 from dataclasses import asdict, dataclass
-from hashlib import sha256 as sha256_hash
 from pathlib import PurePosixPath
 from typing import Any, override
 
 from research_repo_tools.evidence import sha256
+from review_graph_git_objects import GitPathIdentity, git_object_id, source_tree_id
 from review_graph_integrity import canonical_json
 
-SNAPSHOT_FORMAT = "review-graph-path-snapshot-v3"
+SNAPSHOT_FORMAT = "review-graph-path-snapshot-v4"
 
 
-def regular_file_fingerprint(path: str, content: bytes, *, executable: bool = False) -> str:
-    """Reconstruct capture_scope's path identity from retained regular-file bytes."""
-    digest = sha256_hash()
-    for label, value in ((b"path", os.fsencode(path)), (b"mode", b"100755" if executable else b"100644"), (b"file-content", content)):
-        digest.update(len(label).to_bytes(8, "big"))
-        digest.update(label)
-        digest.update(len(value).to_bytes(8, "big"))
-        digest.update(value)
-    return digest.hexdigest()
+def regular_file_fingerprint(path: str, content: bytes, *, executable: bool = False, algorithm: str = "sha1") -> str:
+    """Reconstruct the captured native Git blob identity from retained bytes."""
+    if not _repository_path(path):
+        msg = "regular file identity requires a portable repository path"
+        raise ValueError(msg)
+    return GitPathIdentity(algorithm, "100755" if executable else "100644", git_object_id("blob", content, algorithm)).serialize()
 
 
 def _repository_path(path: str) -> bool:
@@ -64,10 +60,17 @@ class ReviewSourceSnapshot:
         fields.pop("repository_state_fingerprint")
         return sha256(canonical_json(fields).encode("utf-8"))
 
+    @property
+    def git_tree_id(self) -> str | None:
+        """Identify captured current source independently of branch/index metadata."""
+        if any(path.startswith(link + "/") for path, _identity in self.repository_path_fingerprints for link in self.repository_symlink_paths):
+            return None  # A tracked path reached through a symlink has no native Git tree representation.
+        return source_tree_id(self.repository_path_fingerprints)
+
     def verify(self) -> None:
         """Reject unsupported or internally inconsistent capture identities."""
         if self.repository_state_format != SNAPSHOT_FORMAT:
-            msg = "audit reuse requires a content-bound v3 source snapshot; recapture required"
+            msg = "audit reuse requires a content-bound v4 source snapshot; recapture required"
             raise ValueError(msg)
         paths = tuple(path for path, _ in self.repository_path_fingerprints)
         if paths != tuple(sorted(set(paths))) or any(not _repository_path(path) for path in paths):
@@ -77,13 +80,17 @@ class ReviewSourceSnapshot:
         if symlinks != tuple(sorted(set(symlinks))) or not set(symlinks) <= set(paths):
             msg = "source snapshot requires unique sorted captured symlink paths"
             raise ValueError(msg)
-        hashes = (*self.source_state, self.index_fingerprint, *(digest for _, digest in self.repository_path_fingerprints))
+        hashes = (*self.source_state, self.index_fingerprint)
         if any(re.fullmatch(r"[0-9a-f]{64}", digest) is None for digest in hashes):
             msg = "source snapshot requires SHA-256 identities"
             raise ValueError(msg)
         if self.repository_state_fingerprint != self.computed_fingerprint():
             msg = "source snapshot path identities do not match its repository fingerprint"
             raise ValueError(msg)
+        for _path, identity in self.repository_path_fingerprints:
+            if identity == "absent" or re.fullmatch(r"submodule:[0-9a-f]{64}", identity):
+                continue
+            GitPathIdentity.parse(identity)
 
 
 def source_snapshot(raw: dict[str, Any]) -> ReviewSourceSnapshot:
@@ -100,7 +107,7 @@ def source_snapshot(raw: dict[str, Any]) -> ReviewSourceSnapshot:
     if not isinstance(pairs, (list, tuple)) or any(
         not isinstance(pair, (list, tuple)) or len(pair) != 2 or any(not isinstance(value, str) for value in pair) for pair in pairs
     ):
-        msg = "source snapshot requires path/digest pairs"
+        msg = "source snapshot repository_path_fingerprints requires path/digest pairs"
         raise ValueError(msg)
     fields["repository_path_fingerprints"] = tuple(sorted(tuple(pair) for pair in pairs))
     for field in ReviewSourceSnapshot.__dataclass_fields__:
@@ -132,18 +139,54 @@ class ExternalMetadataTransition:
     after: ReviewSourceSnapshot
 
     def verify(self) -> None:
-        """Permit only index changes with identical worktree, scope, and Git base."""
+        """Permit branch/index metadata changes with identical source and comparison."""
         self.before.verify()
         self.after.verify()
-        if self.before.capture_mode not in {"baseline", "worktree"}:
-            msg = "external metadata resume requires baseline or worktree scope; staged and branch targets require replanning"
+        if self.before.capture_mode not in {"baseline", "worktree", "branch", "staged"}:
+            msg = "external metadata resume requires a supported captured scope"
             raise ValueError(msg)
         before, after = asdict(self.before), asdict(self.after)
-        for field in ("index_fingerprint", "repository_state_fingerprint"):
+        for field in ("branch", "index_fingerprint", "repository_state_fingerprint"):
             before.pop(field)
             after.pop(field)
-        if before != after or self.before.index_fingerprint == self.after.index_fingerprint:
-            msg = "external metadata transition must change only the index, preserving all content, modes, scope, instructions, HEAD, and branch"
+        if before != after or (self.before.branch, self.before.index_fingerprint) == (self.after.branch, self.after.index_fingerprint):
+            msg = "external metadata transition must change only the index or branch, preserving all content, modes, scope, instructions, HEAD, and base"
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True)
+class AuthorizedGitContextTransition(ExternalMetadataTransition):
+    """An authorized externally performed commit/rebase with identical source."""
+
+    git_context_authorization: str
+
+    @override
+    def verify(self) -> None:
+        """Separate source equality from changed HEAD, branch and comparison state."""
+        self.before.verify()
+        self.after.verify()
+        if not isinstance(self.git_context_authorization, str) or not self.git_context_authorization.strip():
+            msg = "changed Git context requires explicit user authorization"
+            raise ValueError(msg)
+        before, after = self.before, self.after
+
+        def identity(snapshot: ReviewSourceSnapshot) -> tuple[object, ...]:
+            return (
+                snapshot.repository_root,
+                snapshot.capture_mode,
+                snapshot.requested_paths,
+                snapshot.captured_scope_paths,
+                snapshot.base_ref,
+                snapshot.merge_base,
+                snapshot.git_tree_id,
+                snapshot.repository_symlink_paths,
+            )
+
+        if before.git_tree_id is None or identity(before) != identity(after) or before.source_state == after.source_state:
+            msg = (
+                "authorized Git context handoff requires identical complete source tree, scope and comparison boundary; "
+                "changed review scope/base requires replanning"
+            )
             raise ValueError(msg)
 
 
@@ -168,11 +211,18 @@ def metadata_transition(raw: dict[str, Any]) -> ExternalMetadataTransition:
     if not isinstance(raw, dict) or any(not isinstance(raw.get(field), dict) for field in ("before", "after")):
         msg = "external metadata transition requires before and after snapshot objects"
         raise ValueError(msg)
-    result = (
-        CommitHandoffTransition(source_snapshot(raw["before"]), source_snapshot(raw["after"]), raw["commit_handoff"])
-        if "commit_handoff" in raw
-        else ExternalMetadataTransition(source_snapshot(raw["before"]), source_snapshot(raw["after"]))
-    )
+    before, after = source_snapshot(raw["before"]), source_snapshot(raw["after"])
+    result: ExternalMetadataTransition
+    if "commit_handoff" in raw:
+        result = CommitHandoffTransition(before, after, raw["commit_handoff"])
+    elif "git_context_authorization" in raw:
+        authorization = raw["git_context_authorization"]
+        if not isinstance(authorization, str):
+            msg = "Git context authorization must be text"
+            raise TypeError(msg)
+        result = AuthorizedGitContextTransition(before, after, authorization)
+    else:
+        result = ExternalMetadataTransition(before, after)
     result.verify()
     return result
 

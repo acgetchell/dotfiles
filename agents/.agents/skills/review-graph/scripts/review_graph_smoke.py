@@ -153,6 +153,7 @@ def validation_payload(entry: dict[str, Any], output: Path) -> dict[str, Any]:
         msg = "Native smoke validation failed; no successful graph proof will be claimed."
         raise ValueError(msg)
     return {
+        "schema_version": 3,
         "artifacts": [],
         "executions": [
             {

@@ -4,12 +4,20 @@
     "authorization": "review-and-fix",
     "artifact_store": "/tmp/review-control",
     "plan": {},
-    "source_state": ["scope", "worktree", "repository"]
+    "source_state": [
+      "scope",
+      "worktree",
+      "repository"
+    ]
   },
   "schedule-ready": {
     "artifact_store": "/tmp/review-schedules",
     "plan": {},
-    "source_state": ["scope", "worktree", "repository"],
+    "source_state": [
+      "scope",
+      "worktree",
+      "repository"
+    ],
     "reserved_node_ids": [],
     "worker_capacity": {
       "source": "authoritative aggregate runtime slots; coordinator excluded",
@@ -20,21 +28,47 @@
   "preflight-validation": {
     "plan": {},
     "repository_root": "/tmp/repository",
-    "cache_paths": [".uv-cache"],
-    "execution_prerequisites": [{
-      "node_id": "validation-001",
-      "executables": ["just", "uv"],
-      "sandbox_permissions": "use_default",
-      "uv_projects": [{"project_directory": ".", "environment_path": ".venv", "executables": ["python", "pytest"]}],
-      "native_available": true,
-      "reason": "current native host; inspected nested uv run --locked recipes use the declared project environment"
-    }],
-    "command_policy": [{"command": "just ci", "disposition": "blocked", "reason": "nested test fixtures mutate Git, which this task forbids"}]
+    "cache_paths": [
+      ".uv-cache"
+    ],
+    "execution_prerequisites": [
+      {
+        "node_id": "validation-001",
+        "executables": [
+          "just",
+          "uv"
+        ],
+        "sandbox_permissions": "use_default",
+        "uv_projects": [
+          {
+            "project_directory": ".",
+            "environment_path": ".venv",
+            "executables": [
+              "python",
+              "pytest"
+            ]
+          }
+        ],
+        "native_available": true,
+        "reason": "current native host; inspected nested uv run --locked recipes use the declared project environment"
+      }
+    ],
+    "command_policy": [
+      {
+        "command": "just ci",
+        "disposition": "blocked",
+        "reason": "nested test fixtures mutate Git, which this task forbids"
+      }
+    ]
   },
   "recover-validation-launch": {
     "artifact_store": "/tmp/review-recovery",
     "plan": {},
-    "source_state": ["scope", "worktree", "repository"],
+    "source_state": [
+      "scope",
+      "worktree",
+      "repository"
+    ],
     "node_id": "validation-001",
     "failure_kind": "cache-access",
     "checks_started": false,
@@ -46,7 +80,11 @@
   "recover-validation-execution": {
     "artifact_store": "/tmp/review-recovery",
     "plan": {},
-    "source_state": ["scope", "worktree", "repository"],
+    "source_state": [
+      "scope",
+      "worktree",
+      "repository"
+    ],
     "node_id": "validation-001",
     "failure_kind": "executor-permission",
     "checks_started": true,
@@ -67,7 +105,9 @@
   "publish-worker-payload": {
     "mode": "audit",
     "node_id": "audit-001",
-    "owned_paths": ["src/lib.py"],
+    "owned_paths": [
+      "src/lib.py"
+    ],
     "result_contract": "compact-review",
     "schema_version": 1,
     "worker_payload_path": "/tmp/review/audit-001.worker-payload.json"
@@ -90,22 +130,36 @@
     "dispatches_path": "/tmp/review/dispatches.json",
     "journal_path": "/tmp/review/execution.jsonl",
     "plan": {},
-    "source_state": ["scope", "worktree", "repository"],
+    "source_state": [
+      "scope",
+      "worktree",
+      "repository"
+    ],
     "previous_capture": {},
     "new_capture": {},
     "authorization": {
       "operation": "branch-commit",
       "repository_root": "/tmp/repository",
       "branch": "fix/reviewed-source",
-      "source_state": ["scope", "worktree", "repository"],
+      "source_state": [
+        "scope",
+        "worktree",
+        "repository"
+      ],
       "user_authorization": "REPLACE with the actual user's authorization for this operation and scope."
     },
-    "local_validation": {},
     "independent_reviews": {},
     "native_ci": {
       "validation-002": {
-        "commands": ["REPLACE with the native check query naming the new exact commit SHA"],
-        "checks": [{"name": "CI", "target": "linux-native"}]
+        "commands": [
+          "REPLACE with the native check query naming the new exact commit SHA"
+        ],
+        "checks": [
+          {
+            "name": "CI",
+            "target": "linux-native"
+          }
+        ]
       }
     }
   },
@@ -113,22 +167,59 @@
     "artifact_store": "/tmp/review-proof",
     "authorization_after": "review-and-fix",
     "authorization_before": "review-and-fix",
-    "changed_paths": ["src/lib.py"],
+    "changed_paths": [
+      "src/lib.py"
+    ],
     "new_capture": {},
     "plan": {},
     "planning_template": {},
     "previous_capture": {},
     "repair_epoch": 1,
-    "source_state": ["scope-before", "worktree-before", "repository-before"],
+    "source_state": [
+      "scope-before",
+      "worktree-before",
+      "repository-before"
+    ],
     "state_verification_command": "capture_scope.py --mode branch"
   },
   "compile-independent-review": {
     "dispatch": {},
-    "payload": {"status": "blocked", "files_inspected": [], "branches": "Not inspected yet.", "boundary_cases": "Not inspected yet.", "tests": "Not inspected yet.", "findings": [], "no_finding_evidence": [], "adversarial_checks": [], "handoffs": [], "before_state": ["REPLACE_FROM_BEFORE_CAPTURE", "REPLACE_FROM_BEFORE_CAPTURE", "REPLACE_FROM_BEFORE_CAPTURE"], "after_state": ["REPLACE_FROM_AFTER_CAPTURE", "REPLACE_FROM_AFTER_CAPTURE", "REPLACE_FROM_AFTER_CAPTURE"], "source_mutated": false, "git_mutated": false, "command_policy_attested": true, "commands_executed": [], "limitations": ["Template only: inspection has not been performed. Replace observations and attestations truthfully."]}
+    "payload": {
+      "status": "blocked",
+      "files_inspected": [],
+      "branches": "Not inspected yet.",
+      "boundary_cases": "Not inspected yet.",
+      "tests": "Not inspected yet.",
+      "findings": [],
+      "no_finding_evidence": [],
+      "adversarial_checks": [],
+      "handoffs": [],
+      "before_state": [
+        "REPLACE_FROM_BEFORE_CAPTURE",
+        "REPLACE_FROM_BEFORE_CAPTURE",
+        "REPLACE_FROM_BEFORE_CAPTURE"
+      ],
+      "after_state": [
+        "REPLACE_FROM_AFTER_CAPTURE",
+        "REPLACE_FROM_AFTER_CAPTURE",
+        "REPLACE_FROM_AFTER_CAPTURE"
+      ],
+      "source_mutated": false,
+      "git_mutated": false,
+      "command_policy_attested": true,
+      "commands_executed": [],
+      "limitations": [
+        "Template only: inspection has not been performed. Replace observations and attestations truthfully."
+      ]
+    }
   },
   "compile-node": {
     "plan": {},
-    "source_state": ["scope", "worktree", "repository"]
+    "source_state": [
+      "scope",
+      "worktree",
+      "repository"
+    ]
   },
   "compile-review": {
     "dispatch": {},
@@ -136,7 +227,9 @@
       "changes": [],
       "command_policy_attested": true,
       "commands_executed": [],
-      "files_inspected": ["src/lib.py"],
+      "files_inspected": [
+        "src/lib.py"
+      ],
       "findings": [],
       "handoffs": [],
       "limitations": [],
@@ -152,7 +245,8 @@
       "artifacts": [],
       "executions": [],
       "limitations": [],
-      "status": "not-applicable"
+      "status": "not-applicable",
+      "schema_version": 3
     }
   },
   "fallback-to-coordinator": {
@@ -160,17 +254,29 @@
     "node_id": "audit-001",
     "plan": {},
     "reason": "bounded worker-capacity retry exhausted; no worker created",
-    "source_state": ["scope", "worktree", "repository"],
+    "source_state": [
+      "scope",
+      "worktree",
+      "repository"
+    ],
     "worker_created": false
   },
   "finalize-proof": {
     "plan": {},
-    "source_state": ["scope", "worktree", "repository"],
+    "source_state": [
+      "scope",
+      "worktree",
+      "repository"
+    ],
     "sources": []
   },
   "journal-append": {
     "plan": {},
-    "source_state": ["scope", "worktree", "repository"]
+    "source_state": [
+      "scope",
+      "worktree",
+      "repository"
+    ]
   },
   "materialize-dispatches": {
     "artifact_store": "/tmp/review-proof",
@@ -178,17 +284,27 @@
     "inspection_profile": "shared-read-only",
     "plan": {},
     "repository_root": "/workspace/repository",
-    "source_state": ["scope", "worktree", "repository"],
+    "source_state": [
+      "scope",
+      "worktree",
+      "repository"
+    ],
     "state_verification_command": "capture_scope.py --mode branch"
   },
   "next-ready": {
     "plan": {},
-    "source_state": ["scope", "worktree", "repository"]
+    "source_state": [
+      "scope",
+      "worktree",
+      "repository"
+    ]
   },
   "persist-worker-payload": {
     "mode": "audit",
     "node_id": "audit",
-    "owned_paths": ["src/lib.py"],
+    "owned_paths": [
+      "src/lib.py"
+    ],
     "result_contract": "compact-review",
     "schema_version": 1,
     "worker_payload_path": "/tmp/review-proof/audit.worker-payload.json"
@@ -196,30 +312,61 @@
   "review-worker-payload-write": {
     "mode": "audit",
     "node_id": "audit",
-    "owned_paths": ["src/lib.py"],
+    "owned_paths": [
+      "src/lib.py"
+    ],
     "result_contract": "compact-review",
     "schema_version": 1,
     "worker_payload_path": "/tmp/review-proof/audit.worker-payload.json"
   },
+  "report-delivery": {
+    "plan": {},
+    "source_state": [
+      "scope",
+      "worktree",
+      "repository"
+    ]
+  },
   "reconcile-handoffs": {
     "plan": {},
-    "source_state": ["scope", "worktree", "repository"],
+    "source_state": [
+      "scope",
+      "worktree",
+      "repository"
+    ],
     "sources": []
   },
   "reconcile-validation-requirements": {
     "plan": {},
-    "source_state": ["scope", "worktree", "repository"]
+    "source_state": [
+      "scope",
+      "worktree",
+      "repository"
+    ]
   },
   "routing-projection": {
-    "captured_paths": ["src/lib.py"],
-    "consulted_routers": ["review-graph", "python-review-orchestrator"]
+    "captured_paths": [
+      "src/lib.py"
+    ],
+    "consulted_routers": [
+      "review-graph",
+      "python-review-orchestrator"
+    ]
   },
   "snapshot-workspace": {
     "plan": {},
-    "source_state": ["scope", "worktree", "repository"]
+    "source_state": [
+      "scope",
+      "worktree",
+      "repository"
+    ]
   },
   "synthesis-bundle": {
-    "source_state": ["scope", "worktree", "repository"],
+    "source_state": [
+      "scope",
+      "worktree",
+      "repository"
+    ],
     "sources": [
       {
         "artifact_path": "/tmp/review-proof/audit.review.md",

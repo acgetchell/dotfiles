@@ -10,9 +10,42 @@ from typing import cast
 
 import pytest
 from capture_scope import _scope_data
+from review_graph_git_objects import GitPathIdentity
 from review_graph_reuse import source_snapshot
 
 _TIMEOUT_SECONDS = 30
+
+
+@pytest.mark.parametrize("algorithm", ["sha1", "sha256"])
+def test_source_capture_uses_native_git_objects_without_mutating_git(tmp_path: Path, algorithm: str) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "--quiet", "--object-format=" + algorithm)
+    _git(repo, "config", "user.name", "Review Graph Test")
+    _git(repo, "config", "user.email", "review-graph@example.invalid")
+    (repo / "nested").mkdir()
+    (repo / "nested" / "source.txt").write_text("original\n")
+    (repo / "nested.c").write_text("original\n")
+    (repo / "executable.sh").write_text("#!/bin/sh\n")
+    (repo / "executable.sh").chmod(0o755)
+    (repo / "link").symlink_to("nested/source.txt")
+    _commit_all(repo)
+    committed = _scope_data(shutil.which("git") or "git", repo, "baseline", None, ())
+    assert committed["repository_git_tree_id"] == f"git:{algorithm}:tree:" + _git(repo, "rev-parse", "HEAD^{tree}").strip()
+    (repo / "nested" / "source.txt").write_text("uncommitted\n")
+    before_index = (repo / ".git/index").read_bytes()
+    before_objects = {str(path.relative_to(repo / ".git/objects")) for path in (repo / ".git/objects").rglob("*")}
+    captured = _scope_data(shutil.which("git") or "git", repo, "baseline", None, ())
+    snapshot = source_snapshot(captured)
+    snapshot.verify()
+    identity = GitPathIdentity.parse(dict(snapshot.repository_path_fingerprints)["nested/source.txt"])
+    assert identity.object_id == _git(repo, "hash-object", "--no-filters", "nested/source.txt").strip()
+    assert identity.algorithm == algorithm
+    assert captured["repository_git_tree_id"] != committed["repository_git_tree_id"]
+    assert (repo / ".git/index").read_bytes() == before_index
+    assert {str(path.relative_to(repo / ".git/objects")) for path in (repo / ".git/objects").rglob("*")} == before_objects
+    _git(repo, "add", ".")
+    assert captured["repository_git_tree_id"] == f"git:{algorithm}:tree:" + _git(repo, "write-tree").strip()
 
 
 def _run(command: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:

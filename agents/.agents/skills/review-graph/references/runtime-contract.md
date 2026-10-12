@@ -10,7 +10,8 @@ Public contracts:
 - `schemas/review-payload-v1.schema.json`
 - `schemas/independent-payload-v1.schema.json`
 - `schemas/synthesis-payload-v1.schema.json`
-- `schemas/validation-payload-v2.schema.json`
+- `schemas/validation-payload-v3.schema.json`
+- `schemas/check-contracts-v1.schema.json`
 - `schemas/runtime-operation-inputs-v1.schema.json`
 - `runtime-operation-examples-v1.json`
 
@@ -171,7 +172,11 @@ For repairs, external staging, late requirements, or launch recovery, follow
 [state-transitions.md](state-transitions.md) and returned continuation paths.
 Preserve original artifacts and both captures.
 
-Persist all proof artifacts outside the repository. Run `finalize-proof` with
+Persist all artifacts outside the repository. Routine delivery uses
+`report-delivery` with the current lifecycle, dispatches, journal and capture.
+It consumes standard verified records and reports `not-certified` without a
+formal synthesis/proof collection pass. See [run profiles](run-profiles.md).
+For explicit certification, run `finalize-proof` with
 lifecycle input, signed dispatches, journal, and `--current-capture`. It discovers
 accepted evidence and rejects stale source, unresolved handoffs, missing evidence,
 or verifier failures. Blocked events without evidence yield incomplete proof
@@ -179,3 +184,6 @@ with reasons. Report `repository_validation_status`, `graph_proof_status`, and
 `repository_readiness` separately: complete proof and passing validation can
 retain findings. Structural acceptance does not establish semantic agreement
 or adjudicated recall.
+
+For typed handoffs, repository contracts and applicability, read
+[validation records](validation-records.md).

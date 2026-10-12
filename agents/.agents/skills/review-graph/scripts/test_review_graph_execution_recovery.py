@@ -82,6 +82,7 @@ def _compile_aggregate(lifecycle: dict[str, Any], args: Namespace, entry: dict[s
     after = capture_workspace_snapshot(entry["dispatch"])
     status = "passed" if run.returncode == 0 else "failed"
     payload = {
+        "schema_version": 3,
         "status": status,
         "limitations": [] if permitted else ["The modeled executor denied socket binding after checks ran; build was not reached."],
         "executions": [

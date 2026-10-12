@@ -331,6 +331,7 @@ def test_external_staging_between_dispatch_and_compile_completes_without_rollbac
             if entry["result_contract"] == "compact-validation":
                 unit = dispatch["validation_unit"]
                 payload = {
+                    "schema_version": 3,
                     "status": "passed",
                     "limitations": [],
                     "executions": [
@@ -484,12 +485,12 @@ def test_compound_git_command_is_rechecked_after_staging(tmp_path: Path) -> None
 
 
 @pytest.mark.parametrize("mode", ["staged", "branch"])
-def test_external_metadata_resume_rejects_git_sensitive_scope(tmp_path: Path, mode: str) -> None:
+def test_external_metadata_resume_rejects_identical_captures(tmp_path: Path, mode: str) -> None:
     git, repository, request, _audit, _entries = _staging_fixture(tmp_path)
     base = "HEAD" if mode == "branch" else None
     request["previous_capture"] = _scope_data(git, repository, mode, base, ())
     request["new_capture"] = request["previous_capture"]
-    with pytest.raises(ValueError, match="staged and branch targets"):
+    with pytest.raises(ValueError, match="only the index or branch"):
         resume_after_external_metadata(request)
 
 
@@ -665,7 +666,7 @@ def test_synthesis_uses_bound_validator_platform_and_exposes_execution_configura
     content, metadata = compile_validation(
         {
             "dispatch": {**entry["dispatch"], "before_state": lifecycle["source_state"], "after_state": lifecycle["source_state"]},
-            "payload": {"status": "passed", "limitations": ["Linux boundary emulation only."], "executions": executions},
+            "payload": {"schema_version": 3, "status": "passed", "limitations": ["Linux boundary emulation only."], "executions": executions},
         }
     )
     Path(entry["artifact_path"]).write_bytes(content)

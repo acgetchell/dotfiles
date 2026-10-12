@@ -185,6 +185,7 @@ def _replay_contract_repair(
     runtime.publish_worker_payload_bytes(contract, json.dumps(updated).encode())
     assert runtime.main(_compile_args(result, entry, tmp_path / "compiled.json")) == 0
     record = runtime._load_evidence_source(entry, require_normalized=True)[4]
+    assert isinstance(record, dict)
     assert record is not None
     assert record["files_inspected"] == sorted(rechecked)
     expected_findings = [finding for finding in payload["findings"] if finding["location"].split(":")[0] not in rechecked] + updated["findings"]

@@ -8,7 +8,7 @@ Classify audit context explicitly; never suppress a truthful caveat to gain reus
 | Field | Meaning | Reuse effect |
 | --- | --- | --- |
 | `execution_facts` | Known attestations: `validators-not-executed`, `source-captures-match`, `git-not-mutated` | Informational; checked for contradictions with dispatched validator commands and supplied mutation/capture facts |
-| `validation_limits` | Environment and reason bound to an explicit `validation_requirements` ID; status `delegated`, `unavailable`, or `failed` | Delegated evidence remains validator-owned; unavailable/failed evidence blocks audit reuse |
+| `validation_limits` | Environment and reason bound to an explicit `validation_requirements` ID; status `delegated`, `unavailable`, or `failed` | Delegated/unavailable evidence remains validator-owned and blocks readiness when unfulfilled; failed evidence reopens its owning contract after source/dependency assessment |
 | `scope_limitations` | Exact omitted owned paths and reasons | Blocks reuse |
 | `unresolved_uncertainties` | `kind` (`semantic` or `dependency`) and reason | Blocks reuse |
 | Unit `dependency_uncertainty` | Unresolved dependency of one coverage unit | Rechecks that unit |

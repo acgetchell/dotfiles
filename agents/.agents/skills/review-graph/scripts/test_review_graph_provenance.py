@@ -82,6 +82,7 @@ def test_broad_audit_compacts_without_changing_provenance(broad_audit: dict[str,
     source = broad_audit["source"]
     metadata = json.loads(Path(source["metadata_path"]).read_bytes())
     _kind, expectation, evidence, content, record = runtime._load_evidence_source(source, require_normalized=True)
+    assert isinstance(record, dict)
     assert isinstance(expectation, runtime.ReviewEvidenceExpectation)
     assert isinstance(evidence, runtime.ReviewEvidence)
     assert record is not None

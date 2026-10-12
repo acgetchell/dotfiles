@@ -487,7 +487,7 @@ def _compile_validator(entry: dict[str, Any], lifecycle: dict[str, Any], journal
         ],
     }
     content, metadata = compile_validation(
-        {"dispatch": dispatch, "payload": {key: record[key] for key in ("status", "executions", "artifacts")} | {"limitations": []}}
+        {"dispatch": dispatch, "payload": {key: record[key] for key in ("status", "executions", "artifacts")} | {"schema_version": 3, "limitations": []}}
     )
     Path(entry["artifact_path"]).write_bytes(content)
     Path(entry["metadata_path"]).write_text(json.dumps(metadata))

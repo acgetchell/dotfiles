@@ -14,6 +14,7 @@ from research_repo_tools.process import ExecutableNotFoundError, format_exceptio
 from review_graph_plan import DEFAULT_ROUTING_CATALOG, DEFAULT_SKILL_ROOT, plan_from_document
 from review_graph_receipts import stage_receipt
 from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
+from review_graph_session import bootstrap_frozen, verify_current_snapshot
 from review_graph_starter import STARTER_EXAMPLE, STARTER_SCHEMA, starter_metrics, starter_preflight, starter_template
 
 PLANNING_SCHEMA = Path(__file__).resolve().parents[1] / "references" / "schemas" / "planning-input-v1.schema.json"
@@ -144,6 +145,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--catalog", type=Path, default=DEFAULT_ROUTING_CATALOG)
     parser.add_argument("--skill-root", action="append", type=Path)
     parser.add_argument("--full-output", action="store_true", help="print the complete saved bundle instead of a compact receipt")
+    parser.add_argument(
+        "--delivery-profile",
+        choices=("routine", "certification"),
+        default="routine",
+        help="routine reports affected verification; certification additionally requires finalize-proof",
+    )
     return parser
 
 
@@ -174,6 +181,7 @@ def main(argv: list[str] | None = None) -> int:
             return _resume_starter(capture, choices, args)
         template = starter_template(capture, choices) if choices is not None else _read_object(args.input)
         document = bootstrap_document(capture, template)
+        document["independent_review_after_audits"] = args.delivery_profile == "routine" and document["authorization"] == "review-and-fix"
         require_schema(document, PLANNING_SCHEMA)
         root = Path(str(document["repository_root"]))
         plan = plan_from_document(
@@ -209,7 +217,10 @@ def main(argv: list[str] | None = None) -> int:
             "plan": plan_document,
             "planning_input": document,
             "schema_version": 1,
+            "delivery_profile": args.delivery_profile,
         }
+        if (reference := verify_current_snapshot()) is not None:
+            output["runtime_snapshot"] = reference
         preflight = _starter_preflight(output, choices, args) if choices is not None else None
         dispatch_ready = plan.dispatch_allowed and (preflight is None or preflight["status"] == "ready")
         _write_once(args.output, output)
@@ -269,6 +280,8 @@ def _resume_starter(capture: dict[str, Any], choices: dict[str, Any], args: argp
         msg = "preflight continuation requires the original starter capture and bundle"
         raise ValueError(msg)
     document = bootstrap_document(capture, starter_template(capture, choices))
+    if "independent_review_after_audits" in output["planning_input"]:
+        document["independent_review_after_audits"] = output["planning_input"]["independent_review_after_audits"]
     require_schema(document, PLANNING_SCHEMA)
     if document != output["planning_input"]:
         msg = "preflight continuation cannot change planning choices; bootstrap a new plan"
@@ -302,4 +315,5 @@ def _resume_starter(capture: dict[str, Any], choices: dict[str, Any], args: argp
 
 
 if __name__ == "__main__":
+    bootstrap_frozen(_parser().parse_args(), sys.argv[1:])
     raise SystemExit(main())

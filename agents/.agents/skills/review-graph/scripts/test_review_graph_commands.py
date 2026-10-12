@@ -76,7 +76,8 @@ def test_exact_commands_publish_compile_and_verify(tmp_path: Path, command: str,
     kind, _expectation, _evidence, verified, normalized = runtime._load_evidence_source(entry, require_normalized=True)
     assert kind == "validation"
     assert verified == content
-    assert normalized == metadata["normalized_record"]
+    assert isinstance(normalized, runtime.VerifiedValidationRecord)
+    assert normalized.to_document() == metadata["normalized_record"]
     assert Path(entry["worker_payload_path"]).read_bytes() == saved
 
 
@@ -167,7 +168,8 @@ def test_compile_node_recovers_saved_success_without_reexecution(tmp_path: Path,
     kind, _expectation, _evidence, _content, normalized = runtime._load_evidence_source(entry, require_normalized=True)
     assert kind == "validation"
     assert normalized is not None
-    assert normalized["executions"] == payload["executions"]
+    assert isinstance(normalized, runtime.VerifiedValidationRecord)
+    assert normalized.to_document()["executions"] == payload["executions"]
     metadata = json.loads(Path(entry["metadata_path"]).read_bytes())
     assert Path(metadata["worker_payload_path"]).read_bytes() == saved[Path(entry["worker_payload_path"])]
     assert all(path.read_bytes() == data for path, data in saved.items())

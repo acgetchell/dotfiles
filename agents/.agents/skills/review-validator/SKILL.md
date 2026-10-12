@@ -27,8 +27,8 @@ Honor placement and the coalesced unit. Do not re-plan, split or broaden it,
 create another worker, or inspect implementation semantics. The coordinator
 owns before/after snapshots and all evidence identities and digests.
 
-Stream the payload through the dispatch-bound review and persistence commands;
-return identical bytes after publication. Skip candidate writes.
+Stream the payload through the dispatch-bound publication command; return its
+bound receipt. The runtime consumes persisted bytes. Skip candidate writes.
 
 ## Universal Boundaries
 

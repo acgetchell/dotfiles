@@ -108,7 +108,7 @@ def test_known_full_capacity_schedules_coordinator_without_creation_and_preserve
             assert old["dispatch"]["owned_paths"] == new["dispatch"]["owned_paths"]
     assert all(path.read_bytes() == content for path, content in old_files.items())
     assert receipt["continuation"]["path"] == result["continuation_path"]
-    assert receipt["ready_dispatches"][0]["worker_input"]["digest"] == "sha256:" + hashlib.sha256(Path(entry["worker_input_path"]).read_bytes()).hexdigest()
+    assert receipt["ready_dispatches"][0]["worker_input"]["digest"] == "sha256:" + hashlib.sha256(Path(entry["worker_execution_path"]).read_bytes()).hexdigest()
     assert "dispatch" not in receipt["ready_dispatches"][0]
     # Publication preflight must use the new coordinator input rather than the
     # ancestral worker input. Compile through the ordinary lifecycle gate.

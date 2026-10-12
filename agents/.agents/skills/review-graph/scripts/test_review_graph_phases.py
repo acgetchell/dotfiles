@@ -129,6 +129,7 @@ def test_multiple_early_units_require_verified_success_in_declared_order(tmp_pat
     assert lanes["coordinator_node_id"] is None
     entry = entries[first]
     payload = {
+        "schema_version": 3,
         "status": status,
         "limitations": ["Executor unavailable"] if status == "blocked" else [],
         "executions": []
@@ -239,6 +240,7 @@ def _run_early_check(result: dict[str, Any], tmp_path: Path) -> dict[str, str]:
     after = capture_workspace_snapshot(dispatch)
     status = "passed" if command.returncode == 0 else "failed"
     payload = {
+        "schema_version": 3,
         "status": status,
         "limitations": [],
         "executions": [
@@ -432,7 +434,9 @@ def test_early_validation_unexpected_effects_do_not_release_barrier(tmp_path: Pa
         "workspace_after": after["records"],
     }
     with pytest.raises(ValueError, match="unexpected"):
-        compile_validation({"dispatch": dispatch, "payload": {"status": "blocked", "limitations": ["unapproved output"], "executions": []}})
+        compile_validation(
+            {"dispatch": dispatch, "payload": {"schema_version": 3, "status": "blocked", "limitations": ["unapproved output"], "executions": []}}
+        )
     ready = next_ready_nodes({**lifecycle, "current_source_state": lifecycle["source_state"]}, journal_events=(), dispatch_set=dispatches)
     assert ready["ready_node_ids"] == list(plan.pre_review_validation_nodes)
 

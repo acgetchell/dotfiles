@@ -121,7 +121,7 @@ def test_rejected_partition_can_be_corrected_published_and_compiled(tmp_path: Pa
 
 def _block_validator(entry: dict[str, Any], lifecycle: dict[str, Any], journal: Path) -> None:
     dispatch = {**entry["dispatch"], "before_state": lifecycle["source_state"], "after_state": lifecycle["source_state"]}
-    payload = {"executions": [], "status": "blocked", "limitations": ["uv cache permission denied before checks started"]}
+    payload = {"schema_version": 3, "executions": [], "status": "blocked", "limitations": ["uv cache permission denied before checks started"]}
     content, metadata = compile_validation({"dispatch": dispatch, "payload": payload})
     Path(entry["artifact_path"]).write_bytes(content)
     Path(entry["metadata_path"]).write_text(json.dumps(metadata))
@@ -464,7 +464,7 @@ def test_blocked_commandless_validation_and_absent_outputs_compile(tmp_path: Pat
         "workspace_before": snapshot,
         "workspace_after": snapshot,
     }
-    payload = {"status": "blocked", "limitations": ["Hosted matrix cannot run here"], "executions": []}
+    payload = {"schema_version": 3, "status": "blocked", "limitations": ["Hosted matrix cannot run here"], "executions": []}
     contract = json.loads(Path(entry["worker_payload_contract_path"]).read_bytes())
     approval = review_worker_payload_write(contract, json.dumps(payload).encode())
     assert approval["approval_identity"]
@@ -562,6 +562,7 @@ def test_actual_check_failure_cannot_use_launch_recovery(tmp_path: Path) -> None
     lifecycle = {key: request[key] for key in ("plan", "source_state")}
     unit = validation["dispatch"]["validation_unit"]
     payload = {
+        "schema_version": 3,
         "status": "failed",
         "limitations": [],
         "executions": [

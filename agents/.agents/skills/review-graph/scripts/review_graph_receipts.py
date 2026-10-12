@@ -18,7 +18,7 @@ def dispatch_summary(entry: dict[str, Any]) -> dict[str, Any]:
         "result_contract": entry["result_contract"],
         "execution_location": entry.get("dispatch", entry)["execution_location"],
         **({"executor_requirements": entry["dispatch"]["executor_requirements"]} if "executor_requirements" in entry.get("dispatch", {}) else {}),
-        "worker_input": artifact_reference(Path(entry["worker_input_path"])),
+        "worker_input": artifact_reference(Path(entry.get("worker_execution_path", entry["worker_input_path"]))),
     }
 
 
@@ -76,6 +76,13 @@ def stage_receipt(operation: str, output_path: Path, output: dict[str, Any]) -> 
         "repair_epoch",
         "stop_reason",
         "cancel_node_ids",
+        "runtime_snapshot",
+        "delivery_profile",
+        "repairs_completed",
+        "validation",
+        "local_validation",
+        "hosted_ci",
+        "remaining_findings",
         "incomplete_node_ids",
     ):
         if key in output:

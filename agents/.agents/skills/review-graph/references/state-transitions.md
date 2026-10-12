@@ -228,15 +228,15 @@ HEAD, branch, boundary, or live-state mismatch rejects the composition.
 
 ## External Staging Without A Content Repair
 
-For external staging with unchanged reviewed content, use
+For external branch creation or staging with unchanged reviewed content, use
 `resume-after-external-metadata --input <request.json> --output <result.json>`.
 Supply the existing `plan`, `source_state`, `dispatches_path`, `journal_path`,
 immediately preceding `previous_capture`, fresh `new_capture`, and a new
 external `artifact_store`. Include existing `external_metadata_transitions`
-from the lifecycle input when resuming again. The runtime proves baseline or
-worktree scope, complete path identities (including types/modes), applicable
-instructions, HEAD, branch, and boundaries unchanged. Staged/branch targets
-require replanning. No Git command changes the index and no repair epoch is
+from the lifecycle input when resuming again. The runtime proves captured scope,
+complete path identities (including types/modes), applicable instructions, HEAD,
+and comparison base unchanged. Only branch name and index metadata may differ;
+changes to staged scope or source require replanning. No Git command changes the index and no repair epoch is
 consumed.
 
 Use the full returned lifecycle input, including `external_metadata_transitions`,
@@ -290,8 +290,12 @@ Accepted source-only audits survive when all recorded reads have unchanged
 captured identities. Reads outside the captured repository require rechecking.
 Captures bind `repository_symlink_paths`, including paths with symlinked parent
 directories. A link identity proves its target text, not the bytes read through
-it, so symlinked reads conservatively require rechecking. The v3 capture format
-requires this traversal information; older captures require recapture.
+it, so symlinked reads conservatively require rechecking. The v4 capture format
+uses native Git blob IDs with modes for regular files and symlink targets and
+derives a Git tree ID for the current source. Dirty/unavailable submodules retain
+their separate content identities. Capturing neither writes Git objects nor
+changes the index. Metadata envelopes retain their own checksums. Older captures
+require recapture with the new runtime; frozen runs retain their original format.
 The same restriction applies when reusing audit coverage across content repairs.
 The runtime reconciles discovery against the combined HEAD-to-worktree content
 identity, which is independent of the staged/unstaged split, retaining the
@@ -304,8 +308,14 @@ dependencies require review entirely on the latest state.
 `node_decisions` explains every preservation/recheck with exact dependency,
 command, or path reasons and discovery reconciliation. The compact receipt
 reports `node_counts` and `recheck_reason_counts`; its output artifact contains
-the full decisions. Independent fresh reviews, validators, and synthesis have
-separate explicit restart policies. Restarting these nodes does not invalidate
+the full decisions. Completed independent reviews and passed source-only
+validators can retain their original evidence. Validation uses the standard
+compiler-bound `ValidationPayload`, native ledger export and metadata, parsed
+into immutable typed records before publication or consumption. Explicit
+`git_dependencies: []` covers the entire invoked command; missing declarations,
+changed artifacts or input selection, symlink traversal and semantic Git
+dependencies require rechecking. Syntheses refresh their consumed bundles.
+Restarting affected nodes does not invalidate
 unrelated source audit leaves. Scheduling, workspace snapshots, and final proof
 accept only the latest verified capture. Never rewrite fingerprints or undo staging.
 
@@ -358,15 +368,18 @@ Reconciliation is explicit and defaults to rechecking uncertain evidence:
   scope and the original merge base SHA for branch scope. They must not compare
   against the new `HEAD` and silently inspect an empty diff. An unprovable
   comparison target requires replanning.
-- To retain passed local validation, provide a `local_validation` entry keyed
-  by node ID: copy its entire unchanged `validation_unit` as `execution_identity`,
-  declare `git_dependencies: []` and `environment_unchanged: true`, and explain
-  the inspected recipe's source-only inputs in `reason`. Check aggregate recipes
-  and their tools, including version derivation, file discovery, and history
-  assertions. Matching source bytes alone never establishes Git independence or
-  unchanged external inputs. Git-sensitive, mixed, uncertain, failed, and omitted
-  units run again in full. No successful old execution is rewritten or called
-  a new run. Required final gates may run with disclosed overlap.
+- Local validation reuse is derived from verified version 3 records and the
+  captured repository-owned `review-validation-contracts.json`. Exact commands,
+  directories, environment, selected input membership and output identities must
+  match. Deterministic source failures remain failed; transient or incomplete
+  outcomes follow bounded recovery. Workers may add dependencies but cannot
+  weaken a contract. Unmatched commands remain conservative. The handwritten
+  `local_validation` request declaration is retired.
+- For an externally performed commit/rebase preserving the complete tree,
+  scope and comparison boundary, `resume-after-external-metadata` accepts
+  `git_context_authorization`. It records existing user authorization and never
+  mutates Git. A changed review scope/base requires replanning; the validation
+  applicability API can still assess original evidence separately.
 
 `native_ci` must map pending/blocked native validator node IDs to replacement
 `commands` and required `checks` (`name`, `target`). Every replacement command
