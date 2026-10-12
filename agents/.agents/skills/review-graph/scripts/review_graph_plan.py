@@ -17,10 +17,12 @@ from typing import TYPE_CHECKING, Any
 
 from capture_scope import _scope_data
 from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics, run_command_bytes
+from review_graph_control import issue_run_control
 from review_graph_coverage import coverage_reference
 from review_graph_executor import executor_permissions
 from review_graph_integrity import digest_bytes, digest_json
-from review_graph_provenance import review_scope_body
+from review_graph_lifecycle import ReviewLifecycle, lifecycle_from_document
+from review_graph_provenance import metadata_transition_reference, review_scope_body
 from review_graph_reuse import (
     AuditInputIdentity,
     AuditReuseTransition,
@@ -543,6 +545,7 @@ class GraphPlan:
     validation_recoveries: tuple[dict[str, Any], ...] = ()
     pre_review_validation_nodes: tuple[str, ...] = ()
     commit_handoffs: tuple[ExternalMetadataTransition, ...] = ()
+    review_lifecycle: ReviewLifecycle = field(default_factory=ReviewLifecycle)
 
 
 @dataclass(frozen=True)
@@ -2246,6 +2249,9 @@ def plan_graph(  # noqa: C901, PLR0913, PLR0915
     captured_path_line_bounds: tuple[tuple[str, int], ...] = (),
     routing_decisions: tuple[RoutingDecision, ...] = (),
     pre_review_validation_requirement_ids: tuple[str, ...] = (),
+    review_lifecycle: ReviewLifecycle | None = None,
+    control_root: Path | None = None,
+    repository_root: Path | None = None,
 ) -> GraphPlan:
     """Build the complete required graph for one exact execution profile."""
     if not isinstance(execution_profile, str) or execution_profile not in {"grouped", "isolated", "isolated-only", "mixed"}:
@@ -2341,7 +2347,7 @@ def plan_graph(  # noqa: C901, PLR0913, PLR0915
     selected_node_ids = {node.node_id for node in scheduled}
     selected_units = tuple(unit.node_id for unit in validation_units if unit.node_id in selected_node_ids)
     selected_synthesis = tuple(node.node_id for node in scheduled if node.mode == "synthesis")
-    return GraphPlan(
+    plan = GraphPlan(
         execution_profile=execution_profile,
         worker_budget=budget.total,
         recovery_finalization_reserve=budget.recovery_finalization_reserve,
@@ -2373,7 +2379,18 @@ def plan_graph(  # noqa: C901, PLR0913, PLR0915
         dispatch_allowed=routing_assessment.feasible if routing_assessment is not None else True,
         blockers=routing_assessment.blockers if routing_assessment is not None else (),
         pre_review_validation_nodes=early,
+        review_lifecycle=review_lifecycle or ReviewLifecycle(),
     )
+    return _initialize_plan_control(plan, control_root=control_root, repository_root=repository_root) if review_lifecycle is None else plan
+
+
+def _initialize_plan_control(plan: GraphPlan, *, control_root: Path | None, repository_root: Path | None) -> GraphPlan:
+    """Issue shared authority for initialized plans while retaining unbound drafts as data."""
+    repository = _validated_repository_root(repository_root)
+    if repository is None:
+        return plan
+    binding = issue_run_control(asdict(plan), repository=repository, root=control_root)
+    return replace(plan, review_lifecycle=replace(plan.review_lifecycle, run_control=binding))
 
 
 def assess_node_acceptance(evidence: NodeAcceptanceEvidence) -> Assessment:
@@ -2432,6 +2449,8 @@ def _identifier_tuple_blockers(values: Sequence[str], *, label: str) -> tuple[st
 def graph_plan_digest(plan: GraphPlan) -> str:
     """Hash a plan without empty optional fields absent from legacy identities."""
     document = asdict(plan)
+    if plan.review_lifecycle == ReviewLifecycle():
+        document.pop("review_lifecycle")
     if not plan.commit_handoffs:
         document.pop("commit_handoffs")
     if not plan.pre_review_validation_nodes:
@@ -2454,6 +2473,8 @@ def graph_plan_digest_matches(plan: GraphPlan, digest: str) -> bool:
     if digest == graph_plan_digest(plan):
         return True
     legacy = asdict(plan)
+    if plan.review_lifecycle == ReviewLifecycle():
+        legacy.pop("review_lifecycle")
     if not plan.commit_handoffs:
         legacy.pop("commit_handoffs")
     if not plan.pre_review_validation_nodes:
@@ -2850,11 +2871,22 @@ def _fix_change_blockers(state_verification: str, changes: str, expectation: Rev
     return tuple(blockers)
 
 
+def _native_metadata_transition_blockers(body: str, fingerprints: FingerprintEvidence, *, section: str) -> tuple[str, ...]:
+    """Check exact compact provenance while accepting existing inline evidence."""
+    compact = _native_field_values(body, "External metadata transitions reference")
+    inline = _native_field_values(body, "External metadata transitions")
+    if not fingerprints.metadata_transitions:
+        return (f"native result {section} claims absent metadata transitions",) if compact or inline else ()
+    if compact and inline:
+        return (f"native result {section} has duplicate metadata transition representations",)
+    label = "External metadata transitions reference" if compact else "External metadata transitions"
+    value = metadata_transition_reference(fingerprints.metadata_transitions) if compact else [asdict(item) for item in fingerprints.metadata_transitions]
+    expected = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return _native_values_blockers(body, section=section, label=label, expected=(expected,))
+
+
 def _native_state_verification_blockers(body: str, fingerprints: FingerprintEvidence, *, status: str, changed_as_reported: bool = False) -> tuple[str, ...]:
-    blockers: list[str] = []
-    if fingerprints.metadata_transitions:
-        transitions = json.dumps([asdict(item) for item in fingerprints.metadata_transitions], sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-        blockers.extend(_native_values_blockers(body, section="State Verification", label="External metadata transitions", expected=(transitions,)))
+    blockers = list(_native_metadata_transition_blockers(body, fingerprints, section="State Verification"))
     for ordinal, label in enumerate(("Observed scope fingerprint", "Observed worktree fingerprint", "Observed repository state fingerprint")):
         blockers.extend(
             _native_values_blockers(
@@ -3024,11 +3056,7 @@ def _independent_review_native_blockers(  # noqa: C901, PLR0912, PLR0915
         )
     )
     envelope = sections["## Review Graph Envelope"]
-    if evidence.fingerprints.metadata_transitions:
-        transitions = json.dumps(
-            [asdict(item) for item in evidence.fingerprints.metadata_transitions], sort_keys=True, separators=(",", ":"), ensure_ascii=True
-        )
-        blockers.extend(_native_values_blockers(envelope, section="Review Graph Envelope", label="External metadata transitions", expected=(transitions,)))
+    blockers.extend(_native_metadata_transition_blockers(envelope, evidence.fingerprints, section="Review Graph Envelope"))
     blockers.extend(_native_nonempty_section_blockers(envelope, section="Review Graph Envelope"))
     for label, expected in (
         ("Node ID", evidence.node_id),
@@ -5777,21 +5805,36 @@ def validation_requirements_from_document(document: Mapping[str, Any], repositor
     return requirements
 
 
-def plan_from_document(  # noqa: C901, PLR0912, PLR0915
+def plan_from_document(  # noqa: C901, PLR0912, PLR0913, PLR0915
     document: Mapping[str, Any],
     *,
     catalog_path: Path = DEFAULT_ROUTING_CATALOG,
     skill_roots: Sequence[Path] = (DEFAULT_SKILL_ROOT,),
     repository_root: Path | None = None,
     observed_metadata_transition: ExternalMetadataTransition | None = None,
+    control_root: Path | None = None,
 ) -> GraphPlan:
     """Build a graph plan from the exhaustive fixture/CLI JSON schema."""
+    lifecycle = lifecycle_from_document(document.get("review_lifecycle"))
+    lifecycle.require_active()
+    purpose = document.get("planning_purpose", "initial-review")
+    if purpose not in {"initial-review", "repair-verification", "comprehensive-restart"}:
+        msg = "unknown planning_purpose"
+        raise ValueError(msg)
+    if replace(lifecycle, run_control=None) != ReviewLifecycle() and purpose == "initial-review":
+        msg = "an existing review lifecycle requires targeted repair verification or an explicitly authorized comprehensive restart"
+        raise ValueError(msg)
+    if purpose == "comprehensive-restart" and not lifecycle.comprehensive_restarts:
+        msg = "comprehensive restart requires a recorded concrete trigger"
+        raise ValueError(msg)
     execution_profile = document.get("execution_profile", "grouped")
     if not isinstance(execution_profile, str) or execution_profile not in {"grouped", "isolated", "isolated-only", "mixed"}:
         msg = "execution_profile must be exactly grouped, isolated, isolated-only, or mixed"
         raise ValueError(msg)
     release_readiness = _boolean_field(document, "release_readiness", default=False)
     repository_root = _validated_repository_root(repository_root)
+    if control_root is not None and repository_root is not None:
+        validate_isolation_root(str(control_root), repository_root)
     compact_routing = document.get("routing_overrides") is not None
     if compact_routing and document.get("routing_decisions") is not None:
         msg = "use routing_overrides or routing_decisions, not both"
@@ -6021,6 +6064,9 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0915
         captured_path_line_bounds=captured_path_line_bounds,
         routing_decisions=routing_decisions,
         pre_review_validation_requirement_ids=_tuple_field(document, "pre_review_validation_requirement_ids"),
+        review_lifecycle=lifecycle if document.get("review_lifecycle") is not None else None,
+        control_root=control_root,
+        repository_root=repository_root,
     )
 
 

@@ -7,7 +7,24 @@ from review_graph_coverage import coverage_reference
 from review_graph_integrity import canonical_json, digest_bytes, digest_json
 
 if TYPE_CHECKING:
-    from review_graph_reuse import AuditInputIdentity
+    from review_graph_reuse import AuditInputIdentity, ExternalMetadataTransition
+
+
+def metadata_transition_reference(transitions: tuple[ExternalMetadataTransition, ...]) -> dict[str, Any]:
+    """Bind bounded native output to the complete verified chain in metadata."""
+    if not transitions:
+        msg = "metadata transition reference requires a nonempty chain"
+        raise ValueError(msg)
+    content = canonical_json([asdict(item) for item in transitions]).encode()
+    return {
+        "schema_version": 1,
+        "metadata_field": "evidence.fingerprints.metadata_transitions",
+        "digest": digest_bytes(content),
+        "byte_count": len(content),
+        "transition_count": len(transitions),
+        "first_source_state": list(transitions[0].before.source_state),
+        "last_source_state": list(transitions[-1].after.source_state),
+    }
 
 
 def worker_payload_reference(payload: dict[str, Any]) -> dict[str, Any]:

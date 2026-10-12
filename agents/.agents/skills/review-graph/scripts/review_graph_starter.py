@@ -35,7 +35,7 @@ def starter_template(capture: dict[str, Any], choices: dict[str, Any]) -> dict[s
         "consulted_routers": choices["consulted_routers"],
         "instruction_paths": choices["instruction_paths"],
         "execution_profile": choices["execution_profile"],
-        "change_target": f"Captured branch {capture.get('base_ref')}...{capture.get('head')} and captured workspace changes",
+        "change_target": shlex.join(["git", "diff", capture["merge_base"], "--", *capture["captured_scope_paths"]]),
         "routing_overrides": choices.get("routing_overrides", []),
         "validation_requirements": [
             {

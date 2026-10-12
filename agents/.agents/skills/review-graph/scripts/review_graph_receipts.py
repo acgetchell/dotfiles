@@ -41,6 +41,8 @@ def _continuation_receipt(output: dict[str, Any]) -> dict[str, Any]:
         receipt["next_operation_inputs"] = next_inputs
     if "continuation_path" in output:
         receipt["continuation"] = artifact_reference(Path(output["continuation_path"]))
+    if "control_result_path" in output:
+        receipt["control_result"] = artifact_reference(Path(output["control_result_path"]))
     return receipt
 
 
@@ -70,6 +72,11 @@ def stage_receipt(operation: str, output_path: Path, output: dict[str, Any]) -> 
         "node_counts",
         "recheck_reason_counts",
         "phase_accounting",
+        "review_lifecycle",
+        "repair_epoch",
+        "stop_reason",
+        "cancel_node_ids",
+        "incomplete_node_ids",
     ):
         if key in output:
             receipt[key] = output[key]

@@ -3,6 +3,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
+    "review_lifecycle": {"$ref": "#/$defs/reviewLifecycle"},
+    "planning_purpose": {"enum": ["initial-review", "repair-verification", "comprehensive-restart"]},
     "additional_nodes": {
       "items": {"$ref": "#/$defs/node"},
       "type": "array"
@@ -97,6 +99,37 @@
   "title": "Review Graph Planning Input v1",
   "type": "object",
   "$defs": {
+    "controlReference": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {"minLength": 1, "type": "string"},
+        "digest": {"pattern": "^sha256:[0-9a-f]{64}$", "type": "string"}
+      },
+      "required": ["path", "digest"],
+      "type": "object"
+    },
+    "runControlBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "identity": {"$ref": "#/$defs/controlReference"},
+        "generation": {"$ref": "#/$defs/controlReference"}
+      },
+      "required": ["identity", "generation"],
+      "type": "object"
+    },
+    "reviewLifecycle": {
+      "additionalProperties": false,
+      "properties": {
+        "repair_budget": {"minimum": 0, "type": "integer"},
+        "repairs_completed": {"minimum": 0, "type": "integer"},
+        "budget_extensions": {"items": {"type": "object"}, "type": "array"},
+        "comprehensive_restarts": {"items": {"type": "object"}, "type": "array"},
+        "stop_reason": {"type": ["string", "null"]},
+        "run_control": {"oneOf": [{"$ref": "#/$defs/runControlBinding"}, {"type": "null"}]}
+      },
+      "required": ["repair_budget", "repairs_completed", "budget_extensions", "comprehensive_restarts", "stop_reason"],
+      "type": "object"
+    },
     "artifact": {
       "additionalProperties": false,
       "properties": {

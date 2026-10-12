@@ -21,6 +21,7 @@ import pytest
 from capture_scope import _scope_data
 from review_graph_bootstrap import bootstrap_document, main as bootstrap_main
 from review_graph_independent import CHECK_LABELS
+from review_graph_lifecycle import ReviewLifecycle
 from review_graph_plan import (
     GraphPlan,
     ValidationArtifact,
@@ -270,7 +271,7 @@ def _sparse_plan_document() -> dict[str, Any]:
 
 
 def _sparse_plan() -> GraphPlan:
-    return plan_from_document(_sparse_plan_document(), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
+    return plan_from_document(_sparse_plan_document(), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=SKILL_ROOT.parents[2])
 
 
 def _late_handoff_replan() -> GraphPlan:
@@ -310,7 +311,7 @@ def _late_handoff_replan() -> GraphPlan:
             "review_surface": [STATE_FIXTURE],
         },
     ]
-    return plan_from_document(document, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
+    return plan_from_document(document, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=SKILL_ROOT.parents[2])
 
 
 def _json_plan(plan: GraphPlan) -> dict[str, object]:
@@ -3244,22 +3245,7 @@ def test_create_once_writers_reject_nonregular_targets(tmp_path: Path, writer: s
     assert not tuple(tmp_path.glob(f".{destination.name}.*.tmp"))
 
 
-def _legacy_plan_digest(plan: GraphPlan) -> str:
-    document = asdict(plan)
-    document.pop("commit_handoffs")
-    # Historical writers predate the optional scheduling barrier entirely.
-    document.pop("pre_review_validation_nodes")
-    if not plan.validation_recoveries:
-        document.pop("validation_recoveries")
-    if not plan.validation_exclusions:
-        document.pop("validation_exclusions")
-    return "sha256:" + hashlib.sha256(json.dumps(document, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-
-
-@pytest.mark.parametrize("legacy_digest", [False, True])
-def test_compile_node_survives_context_compaction_by_reading_bound_worker_payload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, legacy_digest: bool) -> None:
-    if legacy_digest:
-        monkeypatch.setattr("review_graph_runtime.graph_plan_digest", _legacy_plan_digest)
+def test_compile_node_survives_context_compaction_by_reading_bound_worker_payload(tmp_path: Path) -> None:
     plan = _sparse_plan()
     source_state = ["scope", "worktree", "repository"]
     artifact_store = tmp_path / "nested" / "artifacts"
@@ -3307,7 +3293,6 @@ def test_compile_node_survives_context_compaction_by_reading_bound_worker_payloa
     journal_path.parent.mkdir()
     append_journal_event(journal_path, lifecycle, JournalEventRequest(entry["node_id"], "in-flight"))
     original_journal = journal_path.read_bytes()
-    monkeypatch.undo()
 
     result = main(
         [
@@ -4625,19 +4610,9 @@ def test_synthesis_bundle_binds_compact_routing_and_validation_closure(tmp_path:
     assert changed_bundle["bundle_digest"] != bundle["bundle_digest"]
 
 
-def test_plan_digest_keeps_existing_journals_compatible_without_optional_reuse_fields() -> None:
+def test_plan_digest_survives_current_format_round_trip() -> None:
     plan = _sparse_plan()
-    legacy = _json_plan(plan)
-    legacy.pop("commit_handoffs")
-    legacy.pop("pre_review_validation_nodes")
-    legacy.pop("validation_recoveries")
-    legacy.pop("validation_exclusions")
-    legacy.pop("audit_delta_reviews")
-    legacy.pop("audit_reuse_transitions")
-    legacy.pop("reuse_source_snapshots")
-    expected = "sha256:" + hashlib.sha256(json.dumps(legacy, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    assert graph_plan_digest(plan) == expected
-    assert graph_plan_digest(_graph_plan(legacy)) == expected
+    assert graph_plan_digest(_graph_plan(_json_plan(plan))) == graph_plan_digest(plan)
 
 
 def test_plan_digest_retains_nonempty_reuse_fields(tmp_path: Path) -> None:
@@ -4693,16 +4668,23 @@ def test_repair_explains_conservative_nonreuse_and_emits_continuation_files(tmp_
     assert json.loads(ready_path.read_text())["ready_node_ids"]
 
 
-def test_legacy_digest_compatibility_does_not_accept_a_different_plan(tmp_path: Path) -> None:
+def test_plan_digest_rejects_changed_routing_and_reuse(tmp_path: Path) -> None:
     plan = _sparse_plan()
-    legacy = _legacy_plan_digest(plan)
-    assert legacy != graph_plan_digest(plan)
-    assert graph_plan_digest_matches(plan, legacy)
-    assert not graph_plan_digest_matches(replace(plan, routing_completion_blockers=("new blocker",)), legacy)
+    current_digest = graph_plan_digest(plan)
+    assert graph_plan_digest_matches(plan, current_digest)
+    assert not graph_plan_digest_matches(replace(plan, routing_completion_blockers=("new blocker",)), current_digest)
     request, _entry, _source = _mutation_with_audit_source(tmp_path)
     reused = _graph_plan(json.loads(json.dumps(advance_after_mutation(request)["new_plan"])))
-    assert not graph_plan_digest_matches(reused, legacy)
+    assert not graph_plan_digest_matches(reused, current_digest)
     assert not graph_plan_digest_matches(replace(reused, audit_reuse_transitions=()), graph_plan_digest(reused))
+
+
+@pytest.mark.parametrize("lifecycle", [ReviewLifecycle(repairs_completed=1), ReviewLifecycle(stop_reason="user-stop: enough")])
+def test_plan_digest_cannot_discard_repair_or_stop_state(lifecycle: ReviewLifecycle) -> None:
+    plan = _sparse_plan()
+    changed = replace(plan, review_lifecycle=lifecycle)
+    assert graph_plan_digest(changed) != graph_plan_digest(plan)
+    assert not graph_plan_digest_matches(changed, graph_plan_digest(plan))
 
 
 def _continuation_fixture(tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any], dict[str, Path]]:
@@ -4888,7 +4870,7 @@ def test_isolation_boundary_is_checked_before_planning_materialization_and_snaps
         return
     with pytest.raises(ValueError, match="validation root overlaps"):
         plan_from_document(document, repository_root=repository)
-    plan = _sparse_plan()
+    plan = plan_from_document(_sparse_plan_document(), repository_root=repository)
     unit = replace(plan.coalesced_validation_units[0], requires_isolation=True, isolation_root=str(root), working_directories=(str(root / "work"),))
     old_plan = replace(plan, coalesced_validation_units=(unit,))
     store = tmp_path / "unpublished"

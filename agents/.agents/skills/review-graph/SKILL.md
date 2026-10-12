@@ -92,10 +92,11 @@ conclusion-blind. It supplies structured judgments and observed fingerprints;
 the compiler renders native sections and verifies them through `compile-node`.
 Never send it specialist findings or synthesis context.
 
-Serialize compatible fixes; apply authorized repository formatting before the
-batch's final capture. Invalidate affected evidence, reroute changed surfaces,
-and rerun stale or newly applicable work. Default to two source-mutating repair
-epochs after the initial review barrier.
+Use one comprehensive initial review and batch authorized fixes, including
+requested optional findings. Follow the [bounded lifecycle](references/bounded-lifecycle.md):
+check `review-control` before editing; permit two content-changing batches unless
+explicitly extended. Format before capture, reuse eligible evidence, and verify
+affected contracts. Pending CI or bookkeeping never independently restarts review.
 
 At repair boundaries, follow [repair validation](references/repair-validation.md)
 to schedule cheap canonical checks before affected review fanout.
@@ -156,6 +157,10 @@ It derives the mappings, manifest, and `RepositoryReviewProof`; report complete
 only when its verifier returns `complete` and the platform/CI gate is reconciled.
 Proof completeness does not establish CI inspection. Report repository readiness from
 typed synthesis separately from proof completeness and validation success.
+
+On user stop, interrupt workers immediately and persist `review-control action: stop`.
+Separate delivered fixes, verification, CI, and proof; unfinished stopped/bounded
+runs remain partial.
 
 Report findings, changes, validation, blockers, skills, proof status, repository
 state, and manifest location. Keep exhaustive evidence in the proof store.

@@ -132,6 +132,7 @@ def benchmark_fixture(root: Path, *, scale: int = 1) -> dict[str, Any]:
         routing_assessment=validate_routing_ledger(catalog, decisions, consulted_routers=document["consulted_routers"]),
         routing_decisions=decisions,
         captured_path_line_bounds=tuple(document["captured_path_line_bounds"].items()),
+        repository_root=root.resolve(),
     )
     return {
         "plan": json.loads(json.dumps(asdict(plan))),

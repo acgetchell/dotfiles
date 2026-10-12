@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 from capture_scope import _scope_data
-from review_graph_git import git_dependency_blockers
+from review_graph_git import fixed_branch_comparison, git_dependency_blockers
 from review_graph_receipts import stage_receipt
 from review_graph_runtime import (
     JournalEventRequest,
@@ -19,6 +19,13 @@ from review_graph_runtime import (
 )
 from test_review_graph_runtime import _publish_worker_bytes, _run_test_git
 from test_review_graph_transitions import _payload, _staging_fixture
+
+
+@pytest.mark.parametrize("option", ["--cached", "--staged", "HEAD", "origin/main", "&& git log -1", "a" * 40])
+def test_fixed_branch_base_does_not_hide_index_moving_ref_or_compound_dependencies(option: str) -> None:
+    base = "a" * 40
+    assert not fixed_branch_comparison(f"git diff {base} {option} -- tool.py", base)
+    assert fixed_branch_comparison(f"git --no-pager diff {base} -- tool.py", base)
 
 
 def _discovery_payload(audit: dict[str, Any], command: str = "git --no-pager diff -- tool.py state.rs") -> dict[str, Any]:

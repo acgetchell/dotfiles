@@ -102,7 +102,7 @@ def test_multiple_early_units_require_verified_success_in_declared_order(tmp_pat
     # A combined canonical command stays intact, including its ordinary gate.
     for requirement in planning["validation_requirements"][:2]:
         requirement.update(commands=["just check ci"], canonical_recipe="just check ci")
-    plan = plan_from_document(planning, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
+    plan = plan_from_document(planning, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=SKILL_ROOT.parents[2])
     lifecycle = {"plan": _json_plan(plan), "source_state": ["scope", "worktree", "repository"]}
     dispatches = materialize_dispatches(
         {
@@ -401,7 +401,7 @@ def test_early_success_is_final_evidence_and_unchanged_audit_reuse_survives(tmp_
 
 def test_early_validation_unexpected_effects_do_not_release_barrier(tmp_path: Path) -> None:
     planning = _phase_plan()
-    plan = plan_from_document(planning, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
+    plan = plan_from_document(planning, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=SKILL_ROOT.parents[2])
     effect = tmp_path / "unexpected.txt"
     units = tuple(
         replace(unit, expected_workspace_effects=(str(tmp_path / "approved.txt"),)) if unit.node_id in plan.pre_review_validation_nodes else unit

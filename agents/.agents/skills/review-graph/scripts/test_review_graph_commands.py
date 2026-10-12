@@ -18,7 +18,7 @@ def _command_fixture(tmp_path: Path, commands: tuple[str, ...]) -> tuple[dict[st
     requirement = planning["validation_requirements"][0]
     requirement["commands"] = list(commands)
     requirement["working_directories"] *= len(commands)
-    plan = plan_from_document(planning, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
+    plan = plan_from_document(planning, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=SKILL_ROOT.parents[2])
     document = {
         "artifact_store": str(tmp_path / "proof"),
         "authorization": "review-only",

@@ -2,6 +2,7 @@
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 from copy import deepcopy
@@ -13,6 +14,7 @@ import pytest
 from capture_scope import _scope_data
 from research_repo_tools.process import run_command_bytes
 from review_graph_bootstrap import PLANNING_SCHEMA, RUNTIME_SCHEMA, bootstrap_document, main
+from review_graph_git import fixed_branch_comparison
 from review_graph_plan import DEFAULT_ROUTING_CATALOG, DEFAULT_SKILL_ROOT, plan_from_document
 from review_graph_runtime import main as runtime_main
 from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
@@ -65,6 +67,13 @@ def _invoke(tmp_path: Path, capture: dict[str, Any], choices: dict[str, Any]) ->
     capture_path.write_text(json.dumps(capture, indent=2) + "\n")
     choices_path.write_text(json.dumps(choices, indent=2) + "\n")
     return main(["--capture", str(capture_path), "--starter-config", str(choices_path), "--output", str(output)]), output
+
+
+def test_starter_comparison_is_commit_handoff_eligible(tmp_path: Path) -> None:
+    capture, choices = _fixture(tmp_path)
+    target = starter_template(capture, choices)["change_target"]
+    assert fixed_branch_comparison(target, capture["merge_base"])
+    assert shlex.split(target) == ["git", "diff", capture["merge_base"], "--", *capture["captured_scope_paths"]]
 
 
 def test_starter_bootstrap_fixture(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -135,6 +144,38 @@ def test_generated_command_quotes_paths_and_preserves_ci_failure(tmp_path: Path)
     assert result.returncode == 7
     assert (Path(choices["artifact_root"]) / "ci.log").read_text().strip() == str(Path(choices["artifact_root"]) / "uv-cache")
     assert not (tmp_path / "no-shell-expansion").exists()
+
+
+def test_starter_binds_all_original_plan_copies(tmp_path: Path) -> None:
+    capture, choices = _fixture(tmp_path)
+    status, output = _invoke(tmp_path, capture, choices)
+    assert status == 0
+    bundle = json.loads(output.read_bytes())
+    binding = bundle["plan"]["review_lifecycle"]["run_control"]
+    assert binding is not None
+    assert bundle["lifecycle_input"]["plan"]["review_lifecycle"]["run_control"] == binding
+    assert bundle["materialization_input"]["plan"]["review_lifecycle"]["run_control"] == binding
+
+
+def test_bootstrap_resolves_symlinked_output_parent_and_retries_canonically(tmp_path: Path) -> None:
+    capture, choices = _fixture(tmp_path)
+    physical = tmp_path / "physical"
+    physical.mkdir()
+    alias = tmp_path / "temporary-alias"
+    alias.symlink_to(physical, target_is_directory=True)
+    capture_path, choices_path = tmp_path / "capture.json", tmp_path / "choices.json"
+    capture_path.write_text(json.dumps(capture))
+    choices_path.write_text(json.dumps(choices))
+    output = alias / "bootstrap.json"
+    argv = ["--capture", str(capture_path), "--starter-config", str(choices_path), "--output"]
+
+    assert main([*argv, str(output)]) == 0
+    original = output.read_bytes()
+    bundle = json.loads(original)
+    binding = bundle["plan"]["review_lifecycle"]["run_control"]
+    assert Path(binding["identity"]["path"]).parent == physical.resolve() / "bootstrap.control"
+    assert main([*argv, str(physical / "bootstrap.json")]) == 0
+    assert output.read_bytes() == original
 
 
 @pytest.mark.parametrize("field", ["authorization", "environment", "artifact_root", "ignored_outputs", "command_policy", "execution_prerequisites"])
