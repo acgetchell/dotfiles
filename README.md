@@ -583,10 +583,21 @@ Run `just check-skills` to validate tracked and nonignored skills in one Python
 process, with per-skill diagnostics and an aggregate exit status. Removed
 entrypoints are omitted; explicitly checking a missing skill still fails.
 
-`just test-review-contracts` runs cheap prompt-budget and routing guards.
+`just test-review-contracts` collects only the prompt-budget and routing guard module.
 `just test-python` runs that gate followed by the remaining tests, and `just ci`
 runs it before static checks and graph execution. Each guard runs once in either
 aggregate. Direct `uv run --locked pytest` still collects the complete suite.
+
+Pass pytest selectors to `just test-python` for focused work, for example:
+
+```sh
+just test-python agents/.agents/skills/review-graph/scripts/test_review_graph_validation_planning.py
+just test-python scripts/test_python_policy.py -k 'prompt or selection'
+```
+
+The early guards still run; the remaining phase uses the supplied selection.
+Run `just python-ci` without selectors for the complete Python gate on the final
+source state. Add `--durations=25` to a planned test run when investigating runtime.
 
 Review the changed skill files separately before including them in a commit.
 

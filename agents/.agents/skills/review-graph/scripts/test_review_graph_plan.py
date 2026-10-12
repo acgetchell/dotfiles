@@ -5,13 +5,11 @@ import json
 import shutil
 import subprocess
 from dataclasses import asdict, replace
-from functools import cache
 from itertools import pairwise
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
-from capture_scope import _scope_data
 from review_graph_plan import (
     EVIDENCE_SCHEMA_VERSION,
     NATIVE_EVIDENCE_BLOCK_CLOSE,
@@ -82,6 +80,7 @@ from review_graph_plan import (
     validation_environment_digest,
     validation_evidence_expectation,
 )
+from test_support_review_graph import _captured_rust_repository
 
 SKILL_ROOT = Path(__file__).resolve().parents[2]
 ROUTING_CATALOG = Path(__file__).resolve().parents[1] / "references" / "routing-catalog.json"
@@ -89,11 +88,10 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[5]
 RUST_FIXTURE_PATH = "agents/.agents/skills/review-graph/scripts/fixtures/state.rs"
 
 
-@cache
-def _rust_fixture_capture_manifest() -> dict[str, object]:
-    git = shutil.which("git")
-    assert git is not None
-    return _scope_data(git, REPOSITORY_ROOT, "baseline", None, (RUST_FIXTURE_PATH,))
+@pytest.fixture
+def rust_capture(tmp_path: Path) -> dict[str, Any]:
+    """Give each planner scenario its own captured repository and source identity."""
+    return _captured_rust_repository(tmp_path)
 
 
 def _native_markdown(heading: str, sections: tuple[str, ...], payload: dict[str, object], section_bodies: dict[str, str], *, preamble: str = "") -> bytes:
@@ -766,8 +764,7 @@ def _closed_rust_routing_decisions() -> tuple[RoutingDecision, ...]:
     return tuple(decisions)
 
 
-def _exhaustive_rust_document() -> dict[str, object]:
-    capture = _rust_fixture_capture_manifest()
+def _exhaustive_rust_document(capture: dict[str, Any]) -> dict[str, object]:
     return {
         "execution_profile": "isolated",
         "worker_budget": 5,
@@ -801,7 +798,7 @@ def _exhaustive_rust_document() -> dict[str, object]:
                 "mutation_lock": "read-only",
                 "request": "run the exact repository validation gate",
                 "requested_scope": "baseline",
-                "capture_command": f"capture_scope.py --repo {REPOSITORY_ROOT} --mode baseline --path {RUST_FIXTURE_PATH}",
+                "capture_command": f"capture_scope.py --repo {capture['repository_root']} --mode baseline --path {RUST_FIXTURE_PATH}",
                 "captured_paths": [RUST_FIXTURE_PATH],
                 "authority": "graph dispatch",
                 "selection_reason": "baseline validation for the captured Rust fixture",
@@ -969,10 +966,11 @@ def test_exhaustive_routing_ledger_rejects_silent_omission() -> None:
     assert any("rust.errors" in blocker for blocker in result.blockers)
 
 
-def test_exhaustive_routing_document_plans_every_selected_leaf_across_epochs() -> None:
-    document = _exhaustive_rust_document()
+def test_exhaustive_routing_document_plans_every_selected_leaf_across_epochs(rust_capture: dict[str, Any]) -> None:
+    repository = Path(rust_capture["repository_root"])
+    document = _exhaustive_rust_document(rust_capture)
 
-    plan = plan_from_document(document, repository_root=REPOSITORY_ROOT)
+    plan = plan_from_document(document, repository_root=repository)
 
     assert plan.dispatch_allowed
     assert plan.routing_catalog_closed
@@ -1002,9 +1000,12 @@ def test_exhaustive_routing_document_plans_every_selected_leaf_across_epochs() -
         ("repo.independent", "requirement-repo.independent", "repository-independent-review", "independent-review"),
     ],
 )
-def test_exact_review_reuse_is_typed_nonexecutable_evidence(catalog_id: str, requirement_id: str, skill_id: str, mode: str) -> None:
+def test_exact_review_reuse_is_typed_nonexecutable_evidence(
+    catalog_id: str, requirement_id: str, skill_id: str, mode: str, rust_capture: dict[str, Any]
+) -> None:
+    repository = Path(rust_capture["repository_root"])
     catalog = load_routing_catalog(ROUTING_CATALOG)
-    document = _exhaustive_rust_document()
+    document = _exhaustive_rust_document(rust_capture)
     evidence_id = f"review:reused:{catalog_id}"
     decisions = cast("list[dict[str, object]]", document["routing_decisions"])
     for decision in decisions:
@@ -1018,7 +1019,7 @@ def test_exact_review_reuse_is_typed_nonexecutable_evidence(catalog_id: str, req
     )
     routing_assessment = validate_routing_ledger(catalog, routed_decisions, consulted_routers=("review-graph", "rust-review-orchestrator"))
 
-    plan = plan_from_document(document, repository_root=REPOSITORY_ROOT)
+    plan = plan_from_document(document, repository_root=repository)
     expectation = repository_review_proof_expectation(plan, source_state=("scope", "worktree", "repository"))
 
     assert plan.dispatch_allowed
@@ -1081,12 +1082,13 @@ def test_repository_synthesis_depends_on_unowned_baseline_validation() -> None:
 
 
 @pytest.mark.parametrize("target", ["synthesis", "additional"])
-def test_graph_document_accepts_repository_instruction_paths(target: str) -> None:
-    instruction = REPOSITORY_ROOT / "AGENTS.md"
-    document = _exhaustive_rust_document()
+def test_graph_document_accepts_repository_instruction_paths(target: str, rust_capture: dict[str, Any]) -> None:
+    repository = Path(rust_capture["repository_root"])
+    instruction = repository / "AGENTS.md"
+    document = _exhaustive_rust_document(rust_capture)
     node_id = _set_instruction_path(document, target=target, instruction_path="AGENTS.md")
 
-    plan = plan_from_document(document, repository_root=REPOSITORY_ROOT)
+    plan = plan_from_document(document, repository_root=repository)
 
     node = next(item for item in plan.actual_worker_nodes if item.node_id == node_id)
     assert node.instruction_paths == (str(instruction.resolve()),)
@@ -1094,36 +1096,39 @@ def test_graph_document_accepts_repository_instruction_paths(target: str) -> Non
 
 @pytest.mark.parametrize("target", ["synthesis", "additional"])
 @pytest.mark.parametrize("path_kind", ["absolute-outside", "traversal"])
-def test_graph_document_rejects_repository_instruction_paths_outside_root(tmp_path: Path, target: str, path_kind: str) -> None:
+def test_graph_document_rejects_repository_instruction_paths_outside_root(tmp_path: Path, target: str, path_kind: str, rust_capture: dict[str, Any]) -> None:
+    repository = Path(rust_capture["repository_root"])
     outside = tmp_path / "outside"
     outside.mkdir()
     instruction = outside / "AGENTS.md"
     instruction.write_text("# Outside instructions\n")
-    document = _exhaustive_rust_document()
+    document = _exhaustive_rust_document(rust_capture)
     document["repository_root"] = str(tmp_path)
     raw_path = str(instruction) if path_kind == "absolute-outside" else "../outside/AGENTS.md"
     _set_instruction_path(document, target=target, instruction_path=raw_path)
 
     with pytest.raises(ValueError, match="repository instruction path"):
-        plan_from_document(document, repository_root=REPOSITORY_ROOT)
+        plan_from_document(document, repository_root=repository)
 
 
-def test_exhaustive_routing_normalizes_review_surfaces_within_captured_paths() -> None:
-    document = _exhaustive_rust_document()
+def test_exhaustive_routing_normalizes_review_surfaces_within_captured_paths(rust_capture: dict[str, Any]) -> None:
+    repository = Path(rust_capture["repository_root"])
+    document = _exhaustive_rust_document(rust_capture)
     decisions = cast("list[dict[str, object]]", document["routing_decisions"])
     for decision in decisions:
         if decision["catalog_id"] == "rust.tests":
             decision["review_surface"] = [RUST_FIXTURE_PATH.replace("/state.rs", "/./state.rs")]
 
-    plan = plan_from_document(document, repository_root=REPOSITORY_ROOT)
+    plan = plan_from_document(document, repository_root=repository)
 
     node = next(node for node in plan.actual_worker_nodes if node.skill_id == "rust-test-quality")
     assert node.coverage == (RUST_FIXTURE_PATH,)
 
 
 @pytest.mark.parametrize("disposition", ["selected", "exact-evidence-reused"])
-def test_exhaustive_routing_rejects_review_surfaces_outside_captured_paths(disposition: str) -> None:
-    document = _exhaustive_rust_document()
+def test_exhaustive_routing_rejects_review_surfaces_outside_captured_paths(disposition: str, rust_capture: dict[str, Any]) -> None:
+    repository = Path(rust_capture["repository_root"])
+    document = _exhaustive_rust_document(rust_capture)
     decisions = cast("list[dict[str, object]]", document["routing_decisions"])
     for decision in decisions:
         if decision["catalog_id"] == "rust.tests":
@@ -1132,14 +1137,15 @@ def test_exhaustive_routing_rejects_review_surfaces_outside_captured_paths(dispo
             if disposition == "exact-evidence-reused":
                 decision["evidence_id"] = "review:rust-tests"
 
-    plan = plan_from_document(document, repository_root=REPOSITORY_ROOT)
+    plan = plan_from_document(document, repository_root=repository)
 
     assert not plan.dispatch_allowed
     assert "rust.tests review_surface is outside captured_paths: src/outside.rs" in plan.blockers
 
 
-def test_exhaustive_routing_rejects_additional_node_coverage_outside_captured_paths() -> None:
-    document = _exhaustive_rust_document()
+def test_exhaustive_routing_rejects_additional_node_coverage_outside_captured_paths(rust_capture: dict[str, Any]) -> None:
+    repository = Path(rust_capture["repository_root"])
+    document = _exhaustive_rust_document(rust_capture)
     document["additional_nodes"] = [
         {
             "node_id": "revalidation-rust",
@@ -1155,18 +1161,16 @@ def test_exhaustive_routing_rejects_additional_node_coverage_outside_captured_pa
     ]
 
     with pytest.raises(ValueError, match="additional node revalidation-rust coverage is outside captured_paths"):
-        plan_from_document(document, repository_root=REPOSITORY_ROOT)
+        plan_from_document(document, repository_root=repository)
 
 
 @pytest.mark.parametrize("value", ["false", 0, 1, None])
-@pytest.mark.parametrize("field", ["release_readiness", "validation.required", "validation.baseline", "additional.required"])
-def test_graph_document_rejects_non_boolean_fields(field: str, value: object) -> None:
-    document = _exhaustive_rust_document()
+@pytest.mark.parametrize("field", ["release_readiness", "additional.required"])
+def test_graph_document_rejects_non_boolean_fields(field: str, value: object, rust_capture: dict[str, Any]) -> None:
+    repository = Path(rust_capture["repository_root"])
+    document = _exhaustive_rust_document(rust_capture)
     if field == "release_readiness":
         document["release_readiness"] = value
-    elif field.startswith("validation."):
-        validation = cast("list[dict[str, object]]", document["validation_requirements"])[0]
-        validation[field.removeprefix("validation.")] = value
     else:
         document["additional_nodes"] = [
             {
@@ -1183,64 +1187,12 @@ def test_graph_document_rejects_non_boolean_fields(field: str, value: object) ->
         ]
 
     with pytest.raises(ValueError, match="must be a boolean"):
-        plan_from_document(document, repository_root=REPOSITORY_ROOT)
+        plan_from_document(document, repository_root=repository)
 
 
-@pytest.mark.parametrize(
-    "source_state", ["scope", ["scope", "worktree"], ["scope", "worktree", "repository", "extra"], ["scope", " ", "repository"], ["scope", 1, "repository"]]
-)
-def test_graph_document_rejects_malformed_validation_source_state(source_state: object) -> None:
-    document = _exhaustive_rust_document()
-    validation = cast("list[dict[str, object]]", document["validation_requirements"])[0]
-    validation["source_state"] = source_state
-
-    with pytest.raises(ValueError, match="source_state must be exactly three bounded non-empty strings"):
-        plan_from_document(document, repository_root=REPOSITORY_ROOT)
-
-
-@pytest.mark.parametrize(
-    "field",
-    [
-        "requirement_id",
-        "environment",
-        "toolchain",
-        "platform",
-        "artifact_owner",
-        "mutation_lock",
-        "request",
-        "requested_scope",
-        "capture_command",
-        "authority",
-        "selection_reason",
-        "mutation_classification",
-        "expected_evidence",
-        "elapsed_time_budget",
-        "dependency_policy",
-        "execution_strategy",
-        "independence_basis",
-    ],
-)
-def test_graph_document_rejects_non_string_validation_configuration(field: str) -> None:
-    document = _exhaustive_rust_document()
-    validation = cast("list[dict[str, object]]", document["validation_requirements"])[0]
-    validation[field] = True
-
-    with pytest.raises(ValueError, match=rf"{field} must be a bounded non-empty string"):
-        plan_from_document(document, repository_root=REPOSITORY_ROOT)
-
-
-@pytest.mark.parametrize("value", [1, [], {}, None, " "])
-def test_graph_document_rejects_malformed_validation_configuration_text(value: object) -> None:
-    document = _exhaustive_rust_document()
-    validation = cast("list[dict[str, object]]", document["validation_requirements"])[0]
-    validation["environment"] = value
-
-    with pytest.raises(ValueError, match="environment must be a bounded non-empty string"):
-        plan_from_document(document, repository_root=REPOSITORY_ROOT)
-
-
-def test_graph_document_preserves_optional_validation_artifact_identity() -> None:
-    document = _exhaustive_rust_document()
+def test_graph_document_preserves_optional_validation_artifact_identity(rust_capture: dict[str, Any]) -> None:
+    repository = Path(rust_capture["repository_root"])
+    document = _exhaustive_rust_document(rust_capture)
     validation = cast("list[dict[str, object]]", document["validation_requirements"])[0]
     artifact_digest = "sha256:" + "a" * 64
     validation["isolation_root"] = "/external/review-validator"
@@ -1254,7 +1206,7 @@ def test_graph_document_preserves_optional_validation_artifact_identity() -> Non
         }
     ]
 
-    plan = plan_from_document(document, repository_root=REPOSITORY_ROOT)
+    plan = plan_from_document(document, repository_root=repository)
 
     assert plan.coalesced_validation_units[0].allowed_artifacts == (
         ValidationArtifact(
@@ -1320,14 +1272,15 @@ def test_validation_artifact_status_requires_repository_owned_ignore_rule(tmp_pa
         {"path": "/external/log", "artifact_digest": "sha256:invalid", "kind": "log", "repository_status": "outside-repository"},
     ],
 )
-def test_graph_document_rejects_malformed_validation_artifact_identity(artifact: dict[str, object]) -> None:
-    document = _exhaustive_rust_document()
+def test_graph_document_rejects_malformed_validation_artifact_identity(artifact: dict[str, object], rust_capture: dict[str, Any]) -> None:
+    repository = Path(rust_capture["repository_root"])
+    document = _exhaustive_rust_document(rust_capture)
     validation = cast("list[dict[str, object]]", document["validation_requirements"])[0]
     validation["isolation_root"] = "/external"
     validation["allowed_artifacts"] = [artifact]
 
     with pytest.raises(ValueError, match=r"allowed artifacts|allowed_artifacts"):
-        plan_from_document(document, repository_root=REPOSITORY_ROOT)
+        plan_from_document(document, repository_root=repository)
 
 
 def test_budget_deferred_routing_is_completion_blocking() -> None:
@@ -1602,26 +1555,27 @@ def test_over_budget_plan_is_partitioned_without_omission() -> None:
     assert plan.requires_continuation
 
 
-def test_concrete_independent_review_requires_trusted_captured_path_line_bounds() -> None:
-    missing = _exhaustive_rust_document()
+def test_concrete_independent_review_requires_trusted_captured_path_line_bounds(rust_capture: dict[str, Any]) -> None:
+    repository = Path(rust_capture["repository_root"])
+    missing = _exhaustive_rust_document(rust_capture)
     del missing["captured_path_line_bounds"]
     with pytest.raises(ValueError, match="do not match independently recaptured source bytes"):
-        plan_from_document(missing, repository_root=REPOSITORY_ROOT)
+        plan_from_document(missing, repository_root=repository)
 
-    inflated = _exhaustive_rust_document()
+    inflated = _exhaustive_rust_document(rust_capture)
     inflated["captured_path_line_bounds"] = {RUST_FIXTURE_PATH: 999_999_999}
     with pytest.raises(ValueError, match="do not match independently recaptured source bytes"):
-        plan_from_document(inflated, repository_root=REPOSITORY_ROOT)
+        plan_from_document(inflated, repository_root=repository)
 
-    malformed = _exhaustive_rust_document()
+    malformed = _exhaustive_rust_document(rust_capture)
     malformed["captured_path_line_bounds"] = {RUST_FIXTURE_PATH: True}
     with pytest.raises(ValueError, match="must be a nonnegative integer"):
-        plan_from_document(malformed, repository_root=REPOSITORY_ROOT)
+        plan_from_document(malformed, repository_root=repository)
 
-    outside = _exhaustive_rust_document()
+    outside = _exhaustive_rust_document(rust_capture)
     outside["captured_path_line_bounds"] = {RUST_FIXTURE_PATH: 3, "outside.rs": 10}
     with pytest.raises(ValueError, match="outside captured_paths"):
-        plan_from_document(outside, repository_root=REPOSITORY_ROOT)
+        plan_from_document(outside, repository_root=repository)
 
 
 def test_synthesis_and_baseline_validation_retain_reserved_capacity() -> None:
@@ -1962,22 +1916,20 @@ def _complete_evidence(*, execution_profile: str, isolation_failures: tuple[str,
     )
 
 
-def test_grouped_pre_evidence_fallback_can_complete_with_retained_isolation_failure() -> None:
-    evidence = _complete_evidence(execution_profile="grouped", isolation_failures=("worker creation failed before accepted evidence",))
+@pytest.mark.parametrize(
+    ("profile", "failure"),
+    [
+        pytest.param("grouped", "worker creation failed before accepted evidence", id="pre-evidence"),
+        pytest.param("mixed", "worker creation failed after accepted isolated evidence", id="post-evidence"),
+    ],
+)
+def test_fallback_can_complete_with_retained_isolation_failure(profile: str, failure: str) -> None:
+    evidence = _complete_evidence(execution_profile=profile, isolation_failures=(failure,))
 
     result = assess_completion(evidence)
 
     assert result.feasible
-    assert evidence.isolation_failures == ("worker creation failed before accepted evidence",)
-
-
-def test_mixed_post_evidence_fallback_can_complete_with_retained_isolation_failure() -> None:
-    evidence = _complete_evidence(execution_profile="mixed", isolation_failures=("worker creation failed after accepted isolated evidence",))
-
-    result = assess_completion(evidence)
-
-    assert result.feasible
-    assert evidence.isolation_failures == ("worker creation failed after accepted isolated evidence",)
+    assert evidence.isolation_failures == (failure,)
 
 
 def test_isolated_completion_rejects_retained_isolation_failure() -> None:
@@ -3651,7 +3603,7 @@ def _evidence_bundle_fixture() -> tuple[
 
 
 def _routed_reuse_binding(
-    catalog_id: str,
+    catalog_id: str, capture: dict[str, Any]
 ) -> tuple[
     RepositoryReviewProofExpectation,
     RepositoryReviewProof,
@@ -3660,20 +3612,20 @@ def _routed_reuse_binding(
     ArtifactManifest,
     TrustedArtifactVerifier,
 ]:
-    document = _exhaustive_rust_document()
+    document = _exhaustive_rust_document(capture)
     decisions = cast("list[dict[str, object]]", document["routing_decisions"])
     for decision in decisions:
         if decision["catalog_id"] == catalog_id:
             decision["disposition"] = "exact-evidence-reused"
             decision["evidence_id"] = f"review:reused:{catalog_id}"
-    plan = plan_from_document(document, repository_root=REPOSITORY_ROOT)
+    plan = plan_from_document(document, repository_root=Path(capture["repository_root"]))
     expectation = repository_review_proof_expectation(plan, source_state=("scope", "worktree", "repository"))
     return _verified_binding(expectation)
 
 
 @pytest.mark.parametrize("catalog_id", ["rust.tests", "repo.independent"])
-def test_exact_routed_reuse_satisfies_only_its_requirement_without_execution(catalog_id: str) -> None:
-    expectation, proof, review_records, validation_records, manifest, verifier = _routed_reuse_binding(catalog_id)
+def test_exact_routed_reuse_satisfies_only_its_requirement_without_execution(catalog_id: str, rust_capture: dict[str, Any]) -> None:
+    expectation, proof, review_records, validation_records, manifest, verifier = _routed_reuse_binding(catalog_id, rust_capture)
     planned_nodes = expectation.planned_evidence_nodes
     validation_nodes = tuple(node.node_id for node in planned_nodes if node.mode == "validation")
     synthesis_nodes = tuple(node.node_id for node in planned_nodes if node.mode == "synthesis")
@@ -3720,8 +3672,8 @@ def test_exact_routed_reuse_satisfies_only_its_requirement_without_execution(cat
         assert reuse.planned_paths == (RUST_FIXTURE_PATH,)
 
 
-def test_exact_routed_reuse_rejects_substitution_missing_record_and_tampered_identity() -> None:
-    expectation, proof, review_records, validation_records, manifest, verifier = _routed_reuse_binding("rust.tests")
+def test_exact_routed_reuse_rejects_substitution_missing_record_and_tampered_identity(rust_capture: dict[str, Any]) -> None:
+    expectation, proof, review_records, validation_records, manifest, verifier = _routed_reuse_binding("rust.tests", rust_capture)
     requirement_id, evidence_id = expectation.exact_reused_review_evidence[0]
     substituted = replace(
         proof,
@@ -4638,3 +4590,13 @@ def test_representative_rust_python_docs_fixture_stays_within_budget() -> None:
     assert order.index("validation-001") < order.index("rust-synthesis")
     assert order.index("validation-002") < order.index("python-synthesis")
     assert any("la-stack.md" in reference for item in json.loads(fixture.read_text())["review_requirements"] for reference in item["static_references"])
+
+
+def test_graph_document_propagates_validation_parser_rejection(rust_capture: dict[str, Any]) -> None:
+    repository = Path(rust_capture["repository_root"])
+    document = _exhaustive_rust_document(rust_capture)
+    validation = cast("list[dict[str, object]]", document["validation_requirements"])[0]
+    validation["environment"] = True
+
+    with pytest.raises(ValueError, match="environment must be a bounded non-empty string"):
+        plan_from_document(document, repository_root=repository)
