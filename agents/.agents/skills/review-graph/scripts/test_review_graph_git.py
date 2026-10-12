@@ -21,7 +21,7 @@ from test_review_graph_runtime import _publish_worker_bytes, _run_test_git
 from test_review_graph_transitions import _payload, _staging_fixture
 
 
-@pytest.mark.parametrize("option", ["--cached", "--staged", "HEAD", "origin/main", "&& git log -1"])
+@pytest.mark.parametrize("option", ["--cached", "--staged", "HEAD", "origin/main", "&& git log -1", "a" * 40])
 def test_fixed_branch_base_does_not_hide_index_moving_ref_or_compound_dependencies(option: str) -> None:
     base = "a" * 40
     assert not fixed_branch_comparison(f"git diff {base} {option} -- tool.py", base)

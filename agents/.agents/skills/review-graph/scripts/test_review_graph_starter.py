@@ -146,6 +146,17 @@ def test_generated_command_quotes_paths_and_preserves_ci_failure(tmp_path: Path)
     assert not (tmp_path / "no-shell-expansion").exists()
 
 
+def test_starter_binds_all_original_plan_copies(tmp_path: Path) -> None:
+    capture, choices = _fixture(tmp_path)
+    status, output = _invoke(tmp_path, capture, choices)
+    assert status == 0
+    bundle = json.loads(output.read_bytes())
+    binding = bundle["plan"]["review_lifecycle"]["run_control"]
+    assert binding is not None
+    assert bundle["lifecycle_input"]["plan"]["review_lifecycle"]["run_control"] == binding
+    assert bundle["materialization_input"]["plan"]["review_lifecycle"]["run_control"] == binding
+
+
 @pytest.mark.parametrize("field", ["authorization", "environment", "artifact_root", "ignored_outputs", "command_policy", "execution_prerequisites"])
 def test_starter_requires_operator_choices(tmp_path: Path, field: str) -> None:
     capture, choices = _fixture(tmp_path)

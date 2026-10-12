@@ -153,7 +153,7 @@ def fixed_branch_comparison(command: str, base: str | None) -> bool:
         return False
     options = words[: words.index("--")] if "--" in words else words
     return (
-        base in options
+        options.count(base) == 1
         and not {"HEAD", "--cached", "--staged"}.intersection(options)
         and _source_discovery_command(shlex.join(["HEAD" if word == base else word for word in words]))
     )

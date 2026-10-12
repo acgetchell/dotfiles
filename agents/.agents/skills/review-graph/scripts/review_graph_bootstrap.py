@@ -176,7 +176,13 @@ def main(argv: list[str] | None = None) -> int:
         document = bootstrap_document(capture, template)
         require_schema(document, PLANNING_SCHEMA)
         root = Path(str(document["repository_root"]))
-        plan = plan_from_document(document, catalog_path=args.catalog, skill_roots=tuple(args.skill_root or (DEFAULT_SKILL_ROOT,)), repository_root=root)
+        plan = plan_from_document(
+            document,
+            catalog_path=args.catalog,
+            skill_roots=tuple(args.skill_root or (DEFAULT_SKILL_ROOT,)),
+            repository_root=root,
+            control_root=args.output.absolute().with_suffix(".control"),
+        )
         plan_document = json.loads(json.dumps(asdict(plan)))
         source_state = _source_state(document)
         proof_store = args.output.resolve().parent

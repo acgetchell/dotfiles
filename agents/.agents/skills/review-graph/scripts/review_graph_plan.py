@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from capture_scope import _scope_data
 from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics, run_command_bytes
+from review_graph_control import issue_run_control
 from review_graph_coverage import coverage_reference
 from review_graph_executor import executor_permissions
 from review_graph_integrity import digest_bytes, digest_json
@@ -2248,6 +2249,9 @@ def plan_graph(  # noqa: C901, PLR0913, PLR0915
     captured_path_line_bounds: tuple[tuple[str, int], ...] = (),
     routing_decisions: tuple[RoutingDecision, ...] = (),
     pre_review_validation_requirement_ids: tuple[str, ...] = (),
+    review_lifecycle: ReviewLifecycle | None = None,
+    control_root: Path | None = None,
+    repository_root: Path | None = None,
 ) -> GraphPlan:
     """Build the complete required graph for one exact execution profile."""
     if not isinstance(execution_profile, str) or execution_profile not in {"grouped", "isolated", "isolated-only", "mixed"}:
@@ -2343,7 +2347,7 @@ def plan_graph(  # noqa: C901, PLR0913, PLR0915
     selected_node_ids = {node.node_id for node in scheduled}
     selected_units = tuple(unit.node_id for unit in validation_units if unit.node_id in selected_node_ids)
     selected_synthesis = tuple(node.node_id for node in scheduled if node.mode == "synthesis")
-    return GraphPlan(
+    plan = GraphPlan(
         execution_profile=execution_profile,
         worker_budget=budget.total,
         recovery_finalization_reserve=budget.recovery_finalization_reserve,
@@ -2375,7 +2379,21 @@ def plan_graph(  # noqa: C901, PLR0913, PLR0915
         dispatch_allowed=routing_assessment.feasible if routing_assessment is not None else True,
         blockers=routing_assessment.blockers if routing_assessment is not None else (),
         pre_review_validation_nodes=early,
+        review_lifecycle=review_lifecycle or ReviewLifecycle(),
     )
+    return _initialize_plan_control(plan, control_root=control_root, repository_root=repository_root) if review_lifecycle is None else plan
+
+
+def _initialize_plan_control(plan: GraphPlan, *, control_root: Path | None, repository_root: Path | None) -> GraphPlan:
+    """Issue shared authority for initialized plans while retaining unbound drafts as data."""
+    directories = {
+        Path(directory).resolve() for unit in plan.coalesced_validation_units for directory in unit.working_directories if Path(directory).is_absolute()
+    }
+    repository = _validated_repository_root(repository_root) if repository_root is not None else next(iter(directories)) if len(directories) == 1 else None
+    if repository is None or not repository.is_dir():
+        return plan
+    binding = issue_run_control(asdict(plan), repository=repository, root=control_root)
+    return replace(plan, review_lifecycle=replace(plan.review_lifecycle, run_control=binding))
 
 
 def assess_node_acceptance(evidence: NodeAcceptanceEvidence) -> Assessment:
@@ -5783,13 +5801,14 @@ def validation_requirements_from_document(document: Mapping[str, Any], repositor
     return requirements
 
 
-def plan_from_document(  # noqa: C901, PLR0912, PLR0915
+def plan_from_document(  # noqa: C901, PLR0912, PLR0913, PLR0915
     document: Mapping[str, Any],
     *,
     catalog_path: Path = DEFAULT_ROUTING_CATALOG,
     skill_roots: Sequence[Path] = (DEFAULT_SKILL_ROOT,),
     repository_root: Path | None = None,
     observed_metadata_transition: ExternalMetadataTransition | None = None,
+    control_root: Path | None = None,
 ) -> GraphPlan:
     """Build a graph plan from the exhaustive fixture/CLI JSON schema."""
     lifecycle = lifecycle_from_document(document.get("review_lifecycle"))
@@ -5798,7 +5817,7 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0915
     if purpose not in {"initial-review", "repair-verification", "comprehensive-restart"}:
         msg = "unknown planning_purpose"
         raise ValueError(msg)
-    if lifecycle != ReviewLifecycle() and purpose == "initial-review":
+    if replace(lifecycle, run_control=None) != ReviewLifecycle() and purpose == "initial-review":
         msg = "an existing review lifecycle requires targeted repair verification or an explicitly authorized comprehensive restart"
         raise ValueError(msg)
     if purpose == "comprehensive-restart" and not lifecycle.comprehensive_restarts:
@@ -5810,6 +5829,8 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0915
         raise ValueError(msg)
     release_readiness = _boolean_field(document, "release_readiness", default=False)
     repository_root = _validated_repository_root(repository_root)
+    if control_root is not None and repository_root is not None:
+        validate_isolation_root(str(control_root), repository_root)
     compact_routing = document.get("routing_overrides") is not None
     if compact_routing and document.get("routing_decisions") is not None:
         msg = "use routing_overrides or routing_decisions, not both"
@@ -6024,7 +6045,7 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0915
                 change_target=(str(item["change_target"]) if item.get("change_target") is not None else None),
             )
         )
-    plan = plan_graph(
+    return plan_graph(
         review_requirements,
         validation_requirements,
         synthesis_nodes,
@@ -6039,8 +6060,10 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0915
         captured_path_line_bounds=captured_path_line_bounds,
         routing_decisions=routing_decisions,
         pre_review_validation_requirement_ids=_tuple_field(document, "pre_review_validation_requirement_ids"),
+        review_lifecycle=lifecycle if document.get("review_lifecycle") is not None else None,
+        control_root=control_root,
+        repository_root=repository_root,
     )
-    return replace(plan, review_lifecycle=lifecycle)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

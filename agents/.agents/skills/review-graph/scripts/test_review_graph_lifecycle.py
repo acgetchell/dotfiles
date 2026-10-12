@@ -1,9 +1,10 @@
 """Repairs converge, pending CI does not fan out, and stopped work stays stopped."""
 
 import json
+import shutil
 from argparse import Namespace
 from copy import deepcopy
-from dataclasses import asdict
+from dataclasses import FrozenInstanceError, asdict, replace
 from pathlib import Path
 from typing import Any
 
@@ -11,10 +12,69 @@ import pytest
 import review_graph_runtime as runtime
 from capture_scope import _scope_data
 from review_graph_lifecycle import ReviewLifecycle, lifecycle_from_document
-from review_graph_plan import plan_from_document
+from review_graph_plan import graph_plan_digest, plan_from_document
+from review_graph_reuse import source_snapshot
 from test_review_graph_commit import _commit_fixture, _save
-from test_review_graph_runtime import _baseline_mutation_fixture
+from test_review_graph_runtime import _baseline_mutation_fixture, _sparse_plan
 from test_review_graph_transitions import _materialize, _payload
+
+
+def _history_document() -> dict[str, Any]:
+    return {
+        "repair_budget": 3,
+        "repairs_completed": 2,
+        "budget_extensions": [{"additional_epochs": 1, "user_authorization": "One more repair batch."}],
+        "comprehensive_restarts": [
+            {
+                "trigger": "explicit-user-request",
+                "evidence": "Review the complete source again.",
+                "targeted_verification_insufficient": "The user requests exhaustive reinspection.",
+            }
+        ],
+        "stop_reason": None,
+        "run_control": None,
+    }
+
+
+def test_parsed_history_is_detached_and_keeps_the_plan_identity() -> None:
+    raw = _history_document()
+    expected = deepcopy(raw)
+    lifecycle = lifecycle_from_document(raw)
+    plan = replace(_sparse_plan(), review_lifecycle=lifecycle)
+    original_digest = graph_plan_digest(plan)
+    assert json.loads(json.dumps(asdict(lifecycle))) == expected
+
+    raw["budget_extensions"][0].update(additional_epochs=100, user_authorization="")
+    raw["budget_extensions"].append({"additional_epochs": 10, "user_authorization": "Unreviewed extension"})
+    raw["comprehensive_restarts"][0].update(trigger="pending-ci", evidence="", targeted_verification_insufficient="")
+    raw["comprehensive_restarts"].clear()
+    serialized = asdict(lifecycle)
+    serialized["budget_extensions"][0]["additional_epochs"] = 200
+    serialized["comprehensive_restarts"][0]["trigger"] = "incomplete-proof"
+
+    assert json.loads(json.dumps(asdict(lifecycle))) == expected
+    assert lifecycle_from_document(asdict(lifecycle)) == lifecycle
+    assert graph_plan_digest(plan) == original_digest
+
+
+@pytest.mark.parametrize(
+    ("history_field", "entry_field", "replacement"),
+    [
+        ("budget_extensions", "additional_epochs", 100),
+        ("budget_extensions", "user_authorization", ""),
+        ("comprehensive_restarts", "trigger", "pending-ci"),
+        ("comprehensive_restarts", "evidence", ""),
+        ("comprehensive_restarts", "targeted_verification_insufficient", ""),
+    ],
+)
+def test_lifecycle_history_entries_reject_mutation(history_field: str, entry_field: str, replacement: int | str) -> None:
+    lifecycle = lifecycle_from_document(_history_document())
+    plan = replace(_sparse_plan(), review_lifecycle=lifecycle)
+    original_digest = graph_plan_digest(plan)
+    with pytest.raises(FrozenInstanceError):
+        setattr(getattr(lifecycle, history_field)[0], entry_field, replacement)
+    assert lifecycle_from_document(asdict(lifecycle)) == lifecycle
+    assert graph_plan_digest(plan) == original_digest
 
 
 def _control_args(tmp_path: Path, result: dict[str, Any]) -> Namespace:
@@ -270,3 +330,155 @@ def test_review_control_cli_publishes_cancellation_receipt(tmp_path: Path, capsy
     assert receipt["stop_reason"] == "user-stop: Stop now"
     assert receipt["incomplete_node_ids"]
     assert Path(receipt["continuation"]["path"]).is_file()
+
+
+def _control_fixture(tmp_path: Path) -> tuple[dict[str, Any], Namespace, Path]:
+    _git, repository, _template, capture, plan = _baseline_mutation_fixture(tmp_path)
+    lifecycle, entries, dispatches = _materialize(tmp_path, capture, plan)
+    capture_path = tmp_path / "capture.json"
+    capture_path.write_text(json.dumps(capture))
+    args = Namespace(journal=tmp_path / "execution.jsonl", dispatches=dispatches, current_capture=capture_path, output=tmp_path / "result.json")
+    node_id = next(entry["node_id"] for entry in entries["dispatches"] if not entry["dispatch"]["predecessor_evidence_ids"])
+    runtime.append_journal_event(args.journal, lifecycle, runtime.JournalEventRequest(node_id, "in-flight"))
+    return {**lifecycle, "action": "stop", "reason": "Stop now", "artifact_store": str(tmp_path / "control")}, args, repository
+
+
+def _control_cli(request: dict[str, Any], args: Namespace, tmp_path: Path) -> int:
+    input_path = tmp_path / "control-request.json"
+    input_path.write_text(json.dumps(request))
+    return runtime.main(
+        [
+            "review-control",
+            "--input",
+            str(input_path),
+            "--journal",
+            str(args.journal),
+            "--dispatches",
+            str(args.dispatches),
+            "--current-capture",
+            str(args.current_capture),
+            "--output",
+            str(args.output),
+        ]
+    )
+
+
+@pytest.mark.parametrize("rehash", [False, True])
+def test_control_rejects_substituted_capture_root_before_writes(tmp_path: Path, rehash: bool) -> None:
+    request, args, repository = _control_fixture(tmp_path)
+    capture = json.loads(args.current_capture.read_bytes())
+    capture["repository_root"] = str(tmp_path / "unrelated-repository")
+    if rehash:
+        capture["repository_state_fingerprint"] = source_snapshot(capture).computed_fingerprint()
+    args.current_capture.write_text(json.dumps(capture))
+    request["artifact_store"] = str(repository / "control-artifacts")
+    original_journal = args.journal.read_bytes()
+    with pytest.raises(ValueError, match=r"snapshot|repository_root"):
+        runtime.review_control(request, args)
+    assert args.journal.read_bytes() == original_journal
+    assert not (repository / "control-artifacts").exists()
+    assert not args.journal.with_name(args.journal.name + ".stop.json").exists()
+
+
+@pytest.mark.parametrize("destination", ["store", "journal", "result", "marker", "lock"])
+def test_control_rejects_repository_write_destinations_before_mutation(tmp_path: Path, destination: str) -> None:
+    request, args, repository = _control_fixture(tmp_path)
+    target = repository / "unexpected-control-artifact"
+    if destination == "store":
+        request["artifact_store"] = str(target)
+    elif destination in {"journal", "result"}:
+        setattr(args, "journal" if destination == "journal" else "output", target)
+    else:
+        suffix = ".stop.json" if destination == "marker" else ".lock"
+        alias = args.journal.with_name(args.journal.name + suffix)
+        alias.unlink(missing_ok=True)
+        alias.symlink_to(target)
+    with pytest.raises(ValueError, match=r"outside .*repository|regular non-symlink"):
+        runtime.review_control(request, args)
+    assert not target.exists()
+    assert not Path(request["artifact_store"]).exists()
+
+
+def test_control_stop_accepts_verified_changed_source_and_preserves_direct_api_output(tmp_path: Path) -> None:
+    request, args, repository = _control_fixture(tmp_path)
+    (repository / "tool.py").write_text("value = 99\n")
+    git = shutil.which("git")
+    assert git is not None
+    capture = _scope_data(git, repository, "baseline", None, ())
+    assert source_snapshot(capture).source_state != tuple(request["source_state"])
+    args.current_capture.write_text(json.dumps(capture))
+    args.output.write_text("Caller-owned direct API output.\n")
+    result = runtime.review_control(request, args)
+    assert result["status"] == "stopped"
+    assert result["cancel_node_ids"]
+    assert args.output.read_text() == "Caller-owned direct API output.\n"
+    assert source_snapshot(json.loads(Path(result["current_capture_path"]).read_bytes())) == source_snapshot(capture)
+
+
+@pytest.mark.parametrize("failure", ["existing-result", "missing-parent", "store-publication", "marker-publication"])
+def test_control_cli_publication_failure_preserves_state_and_allows_corrected_retry(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    request, args, _repository = _control_fixture(tmp_path)
+    binding = runtime._graph_plan(request["plan"]).review_lifecycle.run_control
+    assert binding is not None
+    marker = runtime.control_marker_paths(binding)[0]
+    original_journal = args.journal.read_bytes()
+    if failure == "existing-result":
+        args.output.write_text("Keep the earlier result.\n")
+    elif failure == "missing-parent":
+        args.output = tmp_path / "missing" / "result.json"
+    elif failure == "store-publication":
+
+        def refuse_store(*_args: Any, **_kwargs: Any) -> bool:
+            msg = "store publication failed"
+            raise OSError(msg)
+
+        monkeypatch.setattr(runtime, "_publish_materialized_writes", refuse_store)
+    else:
+        write = runtime._write_bytes_atomically_once
+
+        def refuse_marker(path: Path, content: bytes, *, mode: int) -> bool:
+            if path == marker:
+                msg = "marker publication failed"
+                raise OSError(msg)
+            return write(path, content, mode=mode)
+
+        monkeypatch.setattr(runtime, "_write_bytes_atomically_once", refuse_marker)
+    assert _control_cli(request, args, tmp_path) == 2
+    failed = capsys.readouterr()
+    assert failed.err
+    assert not failed.out
+    assert args.journal.read_bytes() == original_journal
+    assert not marker.exists()
+    assert not tuple(Path(request["artifact_store"]).glob("control-*"))
+    if failure == "existing-result":
+        assert args.output.read_text() == "Keep the earlier result.\n"
+    else:
+        assert not args.output.exists()
+    monkeypatch.undo()
+    args.output = tmp_path / "corrected-result.json"
+    assert _control_cli(request, args, tmp_path) == 0
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["status"] == "stopped"
+    assert receipt["cancel_node_ids"]
+    assert receipt["control_result"]["path"].endswith("/result.json")
+
+
+def test_identical_cli_stop_retrieves_original_cancellations_with_new_output(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    request, args, _repository = _control_fixture(tmp_path)
+    assert _control_cli(request, args, tmp_path) == 0
+    first = json.loads(capsys.readouterr().out)
+    result_bytes = args.output.read_bytes()
+    marker = args.journal.with_name(args.journal.name + ".stop.json")
+    marker_bytes = marker.read_bytes()
+    args.output = tmp_path / "recovered-result.json"
+    assert _control_cli(request, args, tmp_path) == 0
+    second = json.loads(capsys.readouterr().out)
+    assert second["cancel_node_ids"] == first["cancel_node_ids"]
+    assert second["control_result"] == first["control_result"]
+    assert args.output.read_bytes() == result_bytes
+    assert marker.read_bytes() == marker_bytes
+    assert _control_cli({**request, "reason": "Different stop request"}, args, tmp_path) == 2
+    assert "review stopped" in capsys.readouterr().err
+    assert args.output.read_bytes() == result_bytes

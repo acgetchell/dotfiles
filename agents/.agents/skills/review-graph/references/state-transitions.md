@@ -354,9 +354,10 @@ Reconciliation is explicit and defaults to rechecking uncertain evidence:
   requires the fixed merge base SHA with an unchanged captured path scope.
   Staged comparisons and unresolved moving refs require a fresh review. The
   original target remains attributed to its original evidence.
-  Fresh independent reviews pin that same comparison to the pre-commit SHA;
-  they must not compare against the new `HEAD` and silently inspect an empty
-  diff. An unprovable comparison target requires replanning.
+  Fresh independent reviews use the captured pre-commit SHA for baseline/worktree
+  scope and the original merge base SHA for branch scope. They must not compare
+  against the new `HEAD` and silently inspect an empty diff. An unprovable
+  comparison target requires replanning.
 - To retain passed local validation, provide a `local_validation` entry keyed
   by node ID: copy its entire unchanged `validation_unit` as `execution_identity`,
   declare `git_dependencies: []` and `environment_unchanged: true`, and explain

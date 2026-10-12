@@ -41,6 +41,8 @@ def _continuation_receipt(output: dict[str, Any]) -> dict[str, Any]:
         receipt["next_operation_inputs"] = next_inputs
     if "continuation_path" in output:
         receipt["continuation"] = artifact_reference(Path(output["continuation_path"]))
+    if "control_result_path" in output:
+        receipt["control_result"] = artifact_reference(Path(output["control_result_path"]))
     return receipt
 
 
