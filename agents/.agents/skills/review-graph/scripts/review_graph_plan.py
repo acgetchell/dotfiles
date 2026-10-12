@@ -1441,7 +1441,7 @@ def classify_repository_paths(paths: Sequence[str], *, release_readiness: bool =
 
     has_cpp = any(fnmatch.fnmatch(path, pattern) for path in normalized for pattern in ("*.cc", "*.cpp", "*.cxx", "*.hh", "*.hpp", "*.hxx", "*.ixx", "*.cppm"))
     has_rust = any(path.endswith(".rs") or PurePosixPath(path).name in {"Cargo.toml", "Cargo.lock"} for path in normalized)
-    has_python = any(path.endswith((".py", ".ipynb")) or PurePosixPath(path).name in {"pyproject.toml", "uv.lock"} for path in normalized)
+    has_python = any(path.endswith((".py", ".pyi", ".ipynb")) or PurePosixPath(path).name in {"pyproject.toml", "uv.lock"} for path in normalized)
     for path in normalized:
         basename = PurePosixPath(path).name
         if path.endswith((".cc", ".cpp", ".cxx", ".hh", ".hpp", ".hxx", ".ixx", ".cppm")):
@@ -1456,7 +1456,7 @@ def classify_repository_paths(paths: Sequence[str], *, release_readiness: bool =
             "rustfmt.toml",
         }:
             add("rust", path, "Rust source, package, or toolchain surface")
-        if path.endswith((".py", ".ipynb")) or basename in {"pyproject.toml", "uv.lock"}:
+        if path.endswith((".py", ".pyi", ".ipynb")) or basename in {"pyproject.toml", "uv.lock"}:
             add("python", path, "Python source, notebook, package, or lock surface")
         if basename in {"CMakeLists.txt", "CMakePresets.json", "vcpkg.json", "vcpkg-configuration.json"} or path.startswith("cmake/"):
             add("cpp", path, "C++ build semantics")

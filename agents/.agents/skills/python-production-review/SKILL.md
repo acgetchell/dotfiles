@@ -20,7 +20,7 @@ review evidence.
   coordinator; do not start a new source review.
 - Treat specialist findings and validation as established evidence.
 - Inspect cross-cutting integration and concerns that remain genuinely unowned.
-- Do not repeat parsing, CLI, scientific, notebook, support-tooling, packaging, or test checklists.
+- Do not repeat API design, parsing, CLI, scientific, notebook, support-tooling, packaging, or test checklists.
 - In a `review-graph` synthesis node, remain read-only and evidence-only. Do not
   edit, run validators, route work, load another review skill, or create
   subagents. Return missing or stale validation as an exact blocker for the
@@ -41,6 +41,7 @@ Use when invoked directly for a broad production review or when no focused orche
 Route primary ownership as follows:
 
 - packaging, built artifacts, install behavior, runtime matrices, extras, and entry points: `python-build-portability`
+- public and materially shared API concepts, signatures, typing, and compatible evolution: `python-api-design`
 - user-facing CLI and application behavior: `python-cli-review`
 - invariant-bearing input parsing and domain models: `python-parse-dont-validate`
 - mathematical and numerical validity: `python-scientific-review`
@@ -58,9 +59,11 @@ Graph synthesis evaluates only accepted evidence for those concerns.
 
 ### Public And Cross-Module Contracts
 
-Check that public functions, classes, protocols, and module exports have cohesive responsibilities, precise inputs and outputs, stable exception behavior, and no accidental exposure of implementation details. Verify that typing strengthens rather than disguises runtime behavior.
-
-Flag unused generic constraints, ambiguous sentinel values, widening to `Any`, incompatible override behavior, or callers required to know undocumented sequencing rules.
+Use `python-api-design` for material public or cross-module interface changes.
+Reconcile its caller contracts with parsing, installed imports, runtime effects,
+and exception/resource behavior; do not repeat the API checklist when focused
+evidence is available. Retain ordinary runtime correctness for reusable modules
+with no narrower owner.
 
 When annotation evaluation or the Python floor changes, read
 [annotation compatibility](../python-build-portability/references/annotation-compatibility.md).

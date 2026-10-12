@@ -862,7 +862,7 @@ def _set_instruction_path(document: dict[str, object], *, target: str, instructi
 def test_real_routing_catalog_resolves_every_skill_path_and_frontmatter() -> None:
     catalog = load_routing_catalog(ROUTING_CATALOG)
 
-    assert len(catalog) == 54
+    assert len(catalog) == 55
     assert all(Path(entry.skill_path).is_absolute() for entry in catalog)
     assert {entry.router_id for entry in catalog} == {
         "review-graph",
@@ -918,6 +918,7 @@ def test_real_routing_catalog_resolves_every_skill_path_and_frontmatter() -> Non
         "rust-production-review",
     }
     assert by_router["python-review-orchestrator"] == {
+        "python-api-design",
         "python-build-portability",
         "jupyter-notebook-review",
         "python-cli-review",

@@ -54,8 +54,8 @@
       "target_kind": "router",
       "default_priority": "correctness-invariants",
       "synthesis_dependency": null,
-      "path_patterns": ["**/*.py", "**/*.ipynb", "pyproject.toml", "uv.lock"],
-      "semantic_triggers": ["Python behavior, notebooks, tests, packaging, scripts, or validation coverage are in scope."]
+      "path_patterns": ["**/*.py", "**/*.pyi", "**/*.ipynb", "pyproject.toml", "uv.lock"],
+      "semantic_triggers": ["Python behavior, API/stubs, notebooks, tests, packaging, scripts, or validation coverage are in scope."]
     },
     {
       "catalog_id": "repo.documentation",
@@ -562,8 +562,22 @@
       "target_kind": "leaf",
       "default_priority": "supporting-quality",
       "synthesis_dependency": "python-synthesis",
-      "path_patterns": ["pyproject.toml", "uv.lock", "src/**/*.py", "scripts/**/*.py", "tools/**/*.py", "tests/**/*.py", "test/**/*.py"],
+      "path_patterns": ["pyproject.toml", "uv.lock", "src/**/*.py", "src/**/*.pyi", "scripts/**/*.py", "tools/**/*.py", "tests/**/*.py", "test/**/*.py"],
       "semantic_triggers": ["Build metadata, wheels/sdists, package discovery/data, installed imports, entry points, extras, runtimes, platforms, or consumers are material. Include source and fixture path, filesystem, executable, and shell assumptions on supported platforms even for unpackaged support tooling or unchanged CI workflows."]
+    },
+    {
+      "catalog_id": "python.api-design",
+      "router_id": "python-review-orchestrator",
+      "rule_id": "python-api-design",
+      "layer": "surface",
+      "surface": "python",
+      "skill_id": "python-api-design",
+      "skill_path": "$SKILLS_ROOT/python-api-design/SKILL.md",
+      "target_kind": "leaf",
+      "default_priority": "correctness-invariants",
+      "synthesis_dependency": "python-synthesis",
+      "path_patterns": ["**/*.py", "**/*.pyi"],
+      "semantic_triggers": ["Material public or cross-module concepts, import/export paths, signatures, return shapes, typing/protocol/callback contracts, stubs, extension hooks, or compatible evolution changed. Private helper changes alone do not require API review."]
     },
     {
       "catalog_id": "python.notebook",

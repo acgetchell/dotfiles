@@ -48,7 +48,9 @@ def test_independently_labeled_source_fixtures_prepare_offline(evaluation_case: 
 
     monkeypatch.setattr(experiment, "build_opener", forbidden)
     packet = experiment.prepare(evaluation_case)
-    assert set(packet["expected"]) == set(packet["request"]["questions"])
+    # Historical judgments stay frozen when the current catalog gains candidates.
+    assert packet["expected"] == evaluation_case["expected"]
+    assert set(packet["expected"]) <= set(packet["request"]["questions"])
     report = experiment.compare(packet, {"status": "not-run", "probabilities": {}})
     assert not report["selected_catalog_ids"]
     assert len(report["uncertain"]) == len(packet["catalog"])

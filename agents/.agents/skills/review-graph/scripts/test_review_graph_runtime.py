@@ -104,6 +104,7 @@ TRACE_PRIORITIZED_DOCUMENTATION_SKILL_BUDGETS = {
 }
 TRACE_PRIORITIZED_PYTHON_SKILL_BUDGETS = {
     "jupyter-notebook-review": 900,
+    "python-api-design": 1100,
     "python-build-portability": 1050,
     "python-cli-review": 800,
     "python-parse-dont-validate": 850,
@@ -1911,7 +1912,11 @@ def test_path_matches_require_semantic_assessment_before_planning(path: str, rou
 @pytest.mark.review_contract
 @pytest.mark.parametrize(
     ("path", "router", "missing_catalog_id"),
-    [("src/app.py", "python-review-orchestrator", "python.parse"), ("README.md", "docs-review-orchestrator", "docs.repository")],
+    [
+        ("src/app.py", "python-review-orchestrator", "python.parse"),
+        ("src/api.pyi", "python-review-orchestrator", "python.api-design"),
+        ("README.md", "docs-review-orchestrator", "docs.repository"),
+    ],
 )
 def test_partial_assessment_reports_the_remaining_candidate(path: str, router: str, missing_catalog_id: str) -> None:
     catalog = load_routing_catalog(ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))

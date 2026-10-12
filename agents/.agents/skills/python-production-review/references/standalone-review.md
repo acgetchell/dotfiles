@@ -10,9 +10,10 @@ Load this reference only when `python-production-review` is invoked directly for
 
 ## API And Type Design
 
-- Check cohesive responsibilities, naming, parameters, return values, protocols, generics, overloads, and exported symbols.
-- Verify annotations agree with runtime behavior and avoid `Any`, unjustified casts, and misleading optional values.
-- Check subclassing and protocol contracts only where callers rely on them.
+- Route material public or cross-module concept, signature, typing, and
+  compatibility changes to `python-api-design`.
+- Reconcile API evidence with ordinary runtime behavior and integration; keep
+  private implementation correctness here when no narrower specialist applies.
 - Route invariant-bearing raw inputs and validated models to `python-parse-dont-validate`.
 
 ## State And Failure Behavior
