@@ -3,38 +3,24 @@
 import json
 import os
 import shlex
-import shutil
 import subprocess
 from copy import deepcopy
-from functools import cache
 from pathlib import Path
 from typing import Any
 
 import pytest
-from capture_scope import _scope_data
-from research_repo_tools.process import run_command_bytes
 from review_graph_bootstrap import PLANNING_SCHEMA, RUNTIME_SCHEMA, bootstrap_document, main
 from review_graph_git import fixed_branch_comparison
 from review_graph_plan import DEFAULT_ROUTING_CATALOG, DEFAULT_SKILL_ROOT, plan_from_document
 from review_graph_runtime import main as runtime_main
 from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
 from review_graph_starter import STARTER_EXAMPLE, STARTER_SCHEMA, starter_template
-from test_review_graph_runtime import STATE_FIXTURE, _assessed_fixture_candidates
-
-
-@cache
-def _branch_capture() -> dict[str, Any]:
-    """Capture one committed fixture from existing history without changing Git."""
-    repository = DEFAULT_SKILL_ROOT.parents[2]
-    git = shutil.which("git")
-    assert git is not None
-    base = run_command_bytes(git, ("-C", str(repository), "rev-list", "--max-parents=0", "HEAD")).stdout.decode().splitlines()[0]
-    return _scope_data(git, repository, "branch", base, (STATE_FIXTURE,))
+from test_support_review_graph import _assessed_fixture_candidates, _captured_rust_repository
 
 
 def _fixture(tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Use tracked ignore rules and source read-only; create no Git repository/state."""
-    capture = deepcopy(_branch_capture())
+    """Use fresh branch history with repository-owned ignore rules and source."""
+    capture = _captured_rust_repository(tmp_path, branch=True)
     choices = json.loads(STARTER_EXAMPLE.read_text())
     root = tmp_path / "proof ' space $(no-shell-expansion)"
     root.mkdir()

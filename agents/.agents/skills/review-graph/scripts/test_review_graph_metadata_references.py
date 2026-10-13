@@ -54,7 +54,7 @@ def _load_compiled(tmp_path: Path, name: str, content: bytes, metadata: dict[str
     runtime._load_evidence_source({"artifact_path": str(artifact), "metadata_path": str(record)}, require_normalized=True)
 
 
-def _assert_reference(content: bytes, metadata: dict[str, Any], *, independent: bool = False) -> None:
+def _assert_reference(content: bytes, metadata: dict[str, Any], *, independent: bool = False, large: bool = True) -> None:
     text = content.decode()
     section = "## Review Graph Envelope" if independent else "## State Verification"
     body = text.split(section + "\n", 1)[1].split("\n## ", 1)[0]
@@ -62,8 +62,9 @@ def _assert_reference(content: bytes, metadata: dict[str, Any], *, independent: 
     assert "- External metadata transitions reference: " in body
     assert "- External metadata transitions: " not in body
     transitions = metadata["evidence"]["fingerprints"]["metadata_transitions"]
-    assert len(transitions[0]["before"]["repository_path_fingerprints"]) > 450
-    assert len(canonical_json(transitions).encode()) > MAX_NATIVE_SECTION_BYTES
+    if large:
+        assert len(transitions[0]["before"]["repository_path_fingerprints"]) > 450
+        assert len(canonical_json(transitions).encode()) > MAX_NATIVE_SECTION_BYTES
     parsed = runtime._fingerprint_evidence(json.loads(json.dumps(metadata["evidence"]["fingerprints"])))
     assert canonical_json(metadata_transition_reference(parsed.metadata_transitions)) in body
     machine, blockers = _native_json_block(text)
@@ -176,7 +177,7 @@ def test_existing_inline_native_transition_evidence_remains_readable(tmp_path: P
 
 
 def test_saved_failed_validation_payload_compiles_without_republication_or_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    request, result, _sources = _handoff(tmp_path, monkeypatch)
+    request, result, _sources = _handoff(tmp_path, monkeypatch, large=False)
     entry = next(entry for entry in result["dispatch_set"]["dispatches"] if entry["node_id"] in request["native_ci"])
     payload = _validation_payload(entry)
     payload["status"] = "failed"
@@ -240,4 +241,4 @@ def test_saved_failed_validation_payload_compiles_without_republication_or_execu
     metadata = json.loads(Path(entry["metadata_path"]).read_bytes())
     assert metadata["evidence"]["status"] == "failed"
     assert metadata["normalized_record"]["executions"][0]["elapsed"] == 17.204975416
-    _assert_reference(Path(entry["artifact_path"]).read_bytes(), metadata)
+    _assert_reference(Path(entry["artifact_path"]).read_bytes(), metadata, large=False)

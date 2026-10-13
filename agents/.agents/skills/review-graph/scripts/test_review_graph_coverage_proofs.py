@@ -25,16 +25,16 @@ from test_review_graph_transitions import _materialize, _payload
 
 
 def _proof_fixture(
-    tmp_path: Path, *, validation_change: str | None = None, stage_after_repair: bool = False
+    tmp_path: Path, *, validation_change: str | None = None, stage_after_repair: bool = False, unrelated_paths: int = 1
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
-    """Recheck one test while reusing its configuration in a 100-path repository."""
+    """Use fresh real proof files; expand the inventory only for the size contract."""
     git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
     owned = ["pyproject.toml", "tests/tooling/test_adoption.py"]
     (repository / "tests/tooling").mkdir(parents=True)
     (repository / owned[0]).write_text('[project]\nname = "fixture"\nversion = "0.1.0"\n')
     (repository / owned[1]).write_text("def test_adoption():\n    assert True\n")
     (repository / "AGENTS.md").write_text("# Instructions\n\nInspect test contracts.\n")
-    for index in range(92):
+    for index in range(unrelated_paths):
         (repository / f"unrelated_{index:03d}.txt").write_text("Unrelated captured input.\n")
     _run_test_git(git, "-C", str(repository), "add", ".")
     _run_test_git(git, "-C", str(repository), "commit", "-m", "fixed coverage fixture")
@@ -182,7 +182,7 @@ def test_changed_validation_contract_requires_fresh_partitioned_audit(tmp_path: 
 
 
 def test_fixed_partial_recheck_dispatch_bytes_and_seeded_findings(tmp_path: Path) -> None:
-    fresh, partial, result, payload = _proof_fixture(tmp_path)
+    fresh, partial, result, payload = _proof_fixture(tmp_path, unrelated_paths=92)
     view = partial["dispatch"]["coverage_reuse"]
     proof_path = Path(view["proof_reference"]["path"])
     proof = runtime._coverage_proof(view)

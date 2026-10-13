@@ -27,14 +27,12 @@ from review_graph_plan import (
     ValidationArtifact,
     ValidationRequirement,
     ValidationUnit,
-    expand_compact_routing,
     graph_plan_digest,
     graph_plan_digest_matches,
     load_routing_catalog,
     main as plan_main,
     plan_from_document,
     repository_review_proof_expectation,
-    validate_routing_ledger,
 )
 from review_graph_runtime import (
     JournalEventRequest,
@@ -71,62 +69,19 @@ from review_graph_runtime import (
     review_worker_payload_write,
 )
 from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
-
-SKILL_ROOT = Path(__file__).resolve().parents[2]
-ROUTING_CATALOG = Path(__file__).resolve().parents[1] / "references" / "routing-catalog.json"
-RUST_ERROR_SKILL = SKILL_ROOT / "rust-error-variants" / "SKILL.md"
-VALIDATOR_SKILL = SKILL_ROOT / "review-validator" / "SKILL.md"
-VALIDATOR_CONTRACT = SKILL_ROOT / "review-validator" / "references" / "graph-dispatch.md"
-SCHEMA_ROOT = Path(__file__).resolve().parents[1] / "references" / "schemas"
-STATE_FIXTURE = "agents/.agents/skills/review-graph/scripts/fixtures/state.rs"
-ORDINARY_PROMPT_WORD_BUDGET = 2400
-VALIDATOR_PROMPT_WORD_BUDGET = 850
-ALL_SURFACE_PROMPT_WORD_BUDGET = 4200
-TRACE_PRIORITIZED_RUST_LEAF_BUDGETS = {
-    "rust-api-design": 1400,
-    "rust-api-docs": 950,
-    "rust-cargo-hygiene": 900,
-    "rust-error-variants": 1400,
-    "rust-invariant-performance": 1350,
-    "rust-prelude-exports": 950,
-    "rust-production-review": 950,
-    "rust-scientific-correctness": 1500,
-    "rust-test-quality": 950,
-}
-TRACE_PRIORITIZED_DOCUMENTATION_SKILL_BUDGETS = {
-    "academic-authorship-boundary": 700,
-    "cpp-api-docs": 950,
-    "docs-review-orchestrator": 400,
-    "repository-docs-review": 800,
-    "scientific-citation-audit": 500,
-    "scientific-crate-docs-review": 750,
-    "scientific-software-docs-review": 900,
-}
-TRACE_PRIORITIZED_PYTHON_SKILL_BUDGETS = {
-    "jupyter-notebook-review": 900,
-    "python-api-design": 1100,
-    "python-build-portability": 1050,
-    "python-cli-review": 800,
-    "python-parse-dont-validate": 850,
-    "python-production-review": 1100,
-    "python-review-orchestrator": 400,
-    "python-scientific-review": 750,
-    "python-support-scripts": 800,
-    "python-test-quality": 800,
-}
-TRACE_PRIORITIZED_SHARED_SKILL_BUDGETS = {"project-tooling-review": 850}
-ALL_SURFACE_PATHS = (
-    "src/lib.cpp",
-    "include/lib.hpp",
-    "src/lib.rs",
-    "src/main.py",
-    "docs/README.md",
-    "justfile",
-    "pyproject.toml",
-    "Cargo.toml",
-    "CMakeLists.txt",
+from test_support_review_graph import (
+    ROUTING_CATALOG,
+    SKILL_ROOT,
+    STATE_FIXTURE,
+    VALIDATOR_CONTRACT,
+    VALIDATOR_SKILL,
+    _assessed_fixture_candidates,
+    _captured_rust_repository,
+    _sparse_plan_document,
 )
-ALL_ROUTER_IDS = ("review-graph", "cpp-review-orchestrator", "rust-review-orchestrator", "python-review-orchestrator", "docs-review-orchestrator")
+
+RUST_ERROR_SKILL = SKILL_ROOT / "rust-error-variants" / "SKILL.md"
+SCHEMA_ROOT = Path(__file__).resolve().parents[1] / "references" / "schemas"
 FORBIDDEN_DISPATCH_KEYS = frozenset(
     {
         "accepted_node_ids",
@@ -177,10 +132,6 @@ def _run_test_git(git: str, *arguments: str) -> None:
     subprocess.run([git, *arguments], check=True, capture_output=True)  # noqa: S603 - resolved Git test fixture.
 
 
-def _word_count(paths: tuple[Path, ...]) -> int:
-    return sum(len(path.read_text(encoding="utf-8").split()) for path in paths)
-
-
 def _assert_compact_dispatches(entries: list[dict[str, Any]]) -> None:
     for entry in entries:
         serialized = json.dumps(entry["dispatch"], sort_keys=True)
@@ -206,68 +157,6 @@ def _baseline_capture() -> dict[str, Any]:
         "scope_fingerprint": "captured-scope",
         "status": [],
         "untracked_paths": [],
-    }
-
-
-def _sparse_plan_document() -> dict[str, Any]:
-    return {
-        "captured_paths": [STATE_FIXTURE],
-        "concrete_change_target": False,
-        "consulted_routers": ["review-graph", "rust-review-orchestrator"],
-        "execution_profile": "grouped",
-        "release_readiness": False,
-        "routing_overrides": [
-            {
-                "applicability_evidence": ["state.rs changes Rust state behavior"],
-                "catalog_id": "rust.invariants",
-                "disposition": "selected",
-                "owners": ["rust"],
-                "reason": "state transition behavior changed",
-                "review_surface": [STATE_FIXTURE],
-            },
-            {
-                "catalog_id": "rust.build",
-                "disposition": "selected",
-                "reason": "Fixture explicitly exercises the Rust build owner and its independent evidence",
-                "applicability_evidence": ["The synthetic source participates in a build contract"],
-                "owners": ["rust"],
-                "review_surface": [STATE_FIXTURE],
-            },
-        ],
-        "scope_mode": "baseline",
-        "validation_requirements": [
-            {
-                "allowed_artifacts": [],
-                "artifact_owner": "repository",
-                "authority": "repository baseline",
-                "baseline": True,
-                "canonical_recipe": "true",
-                "capture_command": "capture_scope.py --mode baseline",
-                "captured_paths": [STATE_FIXTURE],
-                "commands": ["true"],
-                "dependency_policy": "stop-on-failure",
-                "elapsed_time_budget": "30s",
-                "environment": "current host",
-                "evidence_id": None,
-                "execution_strategy": "sequential",
-                "expected_evidence": "baseline command completes",
-                "features": [],
-                "independence_basis": "none",
-                "meaningful_skips": [],
-                "mutation_classification": "non-mutating under validation-only",
-                "mutation_lock": "repository read-only",
-                "planning_blocker": None,
-                "platform": "current host",
-                "request": "validate compact routing fixture",
-                "requested_scope": "baseline",
-                "required": True,
-                "requirement_id": "baseline-validation",
-                "selection_reason": "bounded graphs require baseline validation",
-                "source_state": ["scope", "worktree", "repository"],
-                "toolchain": "system",
-                "working_directories": [str(SKILL_ROOT.parents[2])],
-            }
-        ],
     }
 
 
@@ -713,21 +602,21 @@ def test_compile_cli_allows_at_most_one_schema_retry(tmp_path: Path, capsys: pyt
 
 
 def test_bootstrap_binds_capture_and_validation_fingerprints_without_field_renaming(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    capture = _baseline_capture()
+    _git, _repository, template, capture, _plan = _baseline_mutation_fixture(tmp_path)
 
-    document = bootstrap_document(capture, _sparse_plan_document())
+    document = bootstrap_document(capture, template)
     require_schema(document, SCHEMA_ROOT / "planning-input-v1.schema.json")
 
     validation = document["validation_requirements"][0]
-    assert validation["source_state"] == ["captured-scope", "captured-worktree", "captured-repository"]
-    assert validation["captured_paths"] == [STATE_FIXTURE]
-    assert document["captured_paths"] == [STATE_FIXTURE]
+    assert validation["source_state"] == [capture[field] for field in ("scope_fingerprint", "captured_worktree_fingerprint", "repository_state_fingerprint")]
+    assert validation["captured_paths"] == capture["captured_scope_paths"]
+    assert document["captured_paths"] == capture["captured_scope_paths"]
 
     capture_path = tmp_path / "capture.json"
     template_path = tmp_path / "template.json"
     bundle_path = tmp_path / "bootstrap.json"
     capture_path.write_text(json.dumps(capture), encoding="utf-8")
-    template_path.write_text(json.dumps(_sparse_plan_document()), encoding="utf-8")
+    template_path.write_text(json.dumps(template), encoding="utf-8")
     assert bootstrap_main(["--capture", str(capture_path), "--input", str(template_path), "--output", str(bundle_path)]) == 0
 
     receipt = json.loads(capsys.readouterr().out)
@@ -738,7 +627,10 @@ def test_bootstrap_binds_capture_and_validation_fingerprints_without_field_renam
     assert Path(command[0]).is_absolute()
     assert Path(command[1]).is_absolute()
     assert Path(command[1]).stat().st_mode & 0o111
-    assert subprocess.run(command, check=False, capture_output=True).returncode == 0  # noqa: S603 - bootstrap-owned absolute command.
+    verification = subprocess.run(command, check=False, capture_output=True)  # noqa: S603 - bootstrap-owned absolute command.
+    assert verification.returncode == 0, verification.stderr
+    observed = json.loads(verification.stdout)
+    assert observed == capture
 
     assert plan_main(["--input", str(bundle_path)]) == 0
     assert json.loads(capsys.readouterr().out) == bundle["plan"]
@@ -1709,7 +1601,8 @@ def test_bounded_workspace_snapshot_selects_entries_deterministically_before_tru
     assert forward["records"][0]["digest"] == reverse["records"][0]["digest"]
 
 
-def test_bounded_workspace_snapshot_hashes_names_outside_metadata_sample(tmp_path: Path) -> None:
+@pytest.mark.parametrize("change", ["name", "metadata"])
+def test_bounded_workspace_snapshot_hashes_changes_outside_diagnostic_sample(tmp_path: Path, change: str) -> None:
     repository_root = tmp_path / "repository"
     build_root = tmp_path / "target"
     repository_root.mkdir()
@@ -1723,28 +1616,11 @@ def test_bounded_workspace_snapshot_hashes_names_outside_metadata_sample(tmp_pat
     dispatch = {"repository_root": str(repository_root), "validation_unit": json.loads(json.dumps(asdict(unit)))}
     before = capture_workspace_snapshot(dispatch)
 
-    (build_root / "artifact-299").rename(build_root / "artifact-399")
-    os.utime(build_root, ns=(fixed_timestamp_ns, fixed_timestamp_ns))
-    after = capture_workspace_snapshot(dispatch)
-
-    assert before["records"][0]["digest"] != after["records"][0]["digest"]
-
-
-def test_bounded_workspace_snapshot_hashes_metadata_outside_diagnostic_sample(tmp_path: Path) -> None:
-    repository_root = tmp_path / "repository"
-    build_root = tmp_path / "target"
-    repository_root.mkdir()
-    build_root.mkdir()
-    for ordinal in range(300):
-        (build_root / f"artifact-{ordinal:03d}").write_text(str(ordinal), encoding="utf-8")
-    fixed_timestamp_ns = 1_700_000_000_000_000_000
-    os.utime(build_root, ns=(fixed_timestamp_ns, fixed_timestamp_ns))
-    plan = _sparse_plan()
-    unit = replace(plan.coalesced_validation_units[0], allowed_artifacts=(), expected_workspace_effects=(str(build_root),))
-    dispatch = {"repository_root": str(repository_root), "validation_unit": json.loads(json.dumps(asdict(unit)))}
-    before = capture_workspace_snapshot(dispatch)
-
-    (build_root / "artifact-299").write_text("changed outside the diagnostic sample", encoding="utf-8")
+    path = build_root / "artifact-299"
+    if change == "name":
+        path.rename(build_root / "artifact-399")
+    else:
+        path.write_text("changed outside the diagnostic sample", encoding="utf-8")
     os.utime(build_root, ns=(fixed_timestamp_ns, fixed_timestamp_ns))
     after = capture_workspace_snapshot(dispatch)
 
@@ -1874,119 +1750,6 @@ def test_isolated_validation_workspace_audit_binds_artifacts_and_changes_to_root
         )
 
 
-def _assessed_fixture_candidates(paths: list[str], routers: list[str], selected: dict[str, str]) -> list[dict[str, Any]]:
-    """Supply explicit judgments for structural fixtures; never production routing."""
-    projection = build_routing_projection_document(
-        {"captured_paths": paths, "consulted_routers": routers}, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,)
-    )
-    return [
-        {
-            "catalog_id": entry["catalog_id"],
-            "disposition": "selected" if entry["catalog_id"] in selected else "not-applicable",
-            "reason": selected.get(entry["catalog_id"], "Fixture contract has no change to this specialist's concern"),
-            "applicability_evidence": [selected.get(entry["catalog_id"], "Explicit fixture scope excludes this concern; path match is only a candidate")],
-            "review_surface": entry["matched_paths"],
-            "owners": ["documentation" if entry["catalog_id"].startswith("docs.") else entry["catalog_id"].split(".")[0]],
-        }
-        for entry in projection["entries"]
-        if entry["target_kind"] == "leaf" and entry["matched_paths"] and not entry["catalog_id"].startswith("repo.")
-    ]
-
-
-@pytest.mark.review_contract
-@pytest.mark.parametrize(
-    ("path", "router"),
-    [
-        ("src/lib.rs", "rust-review-orchestrator"),
-        ("include/api.hpp", "cpp-review-orchestrator"),
-        ("src/app.py", "python-review-orchestrator"),
-        ("README.md", "docs-review-orchestrator"),
-    ],
-)
-def test_path_matches_require_semantic_assessment_before_planning(path: str, router: str) -> None:
-    catalog = load_routing_catalog(ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
-    with pytest.raises(ValueError, match="semantic applicability decisions required"):
-        expand_compact_routing(catalog, consulted_routers=["review-graph", router], captured_paths=[path], overrides=[])
-
-
-@pytest.mark.review_contract
-@pytest.mark.parametrize(
-    ("path", "router", "missing_catalog_id"),
-    [
-        ("src/app.py", "python-review-orchestrator", "python.parse"),
-        ("src/api.pyi", "python-review-orchestrator", "python.api-design"),
-        ("README.md", "docs-review-orchestrator", "docs.repository"),
-    ],
-)
-def test_partial_assessment_reports_the_remaining_candidate(path: str, router: str, missing_catalog_id: str) -> None:
-    catalog = load_routing_catalog(ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
-    routers = ["review-graph", router]
-    assessments = _assessed_fixture_candidates([path], routers, {})
-    assert any(entry["catalog_id"] == missing_catalog_id for entry in assessments)
-    partial_assessments = [entry for entry in assessments if entry["catalog_id"] != missing_catalog_id]
-    assert partial_assessments
-
-    with pytest.raises(ValueError, match="semantic applicability decisions required") as error:
-        expand_compact_routing(catalog, consulted_routers=routers, captured_paths=[path], overrides=partial_assessments)
-
-    assert str(error.value) == f"semantic applicability decisions required for path-matched candidates: {missing_catalog_id}"
-
-
-@pytest.mark.review_contract
-def test_sparse_routing_expands_to_exhaustive_catalog_records() -> None:
-    catalog = load_routing_catalog(ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
-    decisions = expand_compact_routing(
-        catalog,
-        consulted_routers=("review-graph", "rust-review-orchestrator"),
-        captured_paths=("src/lib.rs",),
-        overrides=_assessed_fixture_candidates(
-            ["src/lib.rs"],
-            ["review-graph", "rust-review-orchestrator"],
-            {"rust.errors": "Only typed error propagation changed; no shared state or scheduling contract"},
-        ),
-        change_target="git diff origin/main...HEAD",
-    )
-
-    assessment = validate_routing_ledger(catalog, decisions, consulted_routers=("review-graph", "rust-review-orchestrator"))
-    by_id = {decision.catalog_id: decision for decision in decisions}
-    assert assessment.feasible
-    assert len(decisions) == sum(entry.router_id in {"review-graph", "rust-review-orchestrator"} for entry in catalog)
-    assert by_id["repo.rust"].disposition == "selected"
-    assert by_id["rust.errors"].skill_id == "rust-error-variants"
-    assert by_id["rust.errors"].disposition == "selected"
-    assert by_id["rust.concurrency"].disposition == "not-applicable"
-    assert {item.catalog_id for item in decisions if item.disposition == "selected"} == {
-        "repo.rust",
-        "repo.independent",
-        "repo.synthesis",
-        "rust.errors",
-        "rust.synthesis",
-    }
-    assert by_id["rust.concurrency"].review_surface == ("src/lib.rs",)
-    assert by_id["rust.synthesis"].disposition == "selected"
-
-
-@pytest.mark.review_contract
-def test_sparse_routing_rejects_catalog_owned_identity_fields() -> None:
-    catalog = load_routing_catalog(ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
-    with pytest.raises(ValueError, match="catalog-owned fields"):
-        expand_compact_routing(
-            catalog,
-            consulted_routers=("review-graph", "rust-review-orchestrator"),
-            captured_paths=("src/lib.rs",),
-            overrides=(
-                {
-                    "applicability_evidence": ["typed errors changed"],
-                    "catalog_id": "rust.errors",
-                    "disposition": "selected",
-                    "reason": "typed errors changed",
-                    "review_surface": ["src/lib.rs"],
-                    "skill_id": "substituted-skill",
-                },
-            ),
-        )
-
-
 def test_plan_from_document_accepts_sparse_routing_and_derives_synthesis() -> None:
     plan = _sparse_plan()
 
@@ -2014,112 +1777,6 @@ def test_synthesis_bundle_is_order_independent_and_hashed(tmp_path: Path) -> Non
 def test_synthesis_bundle_rejects_caller_authored_records() -> None:
     with pytest.raises(ValueError, match="requires compiler evidence sources"):
         build_synthesis_bundle({"records": [{"evidence_id": "review:untrusted"}], "source_state": ["scope", "worktree", "repository"]})
-
-
-@pytest.mark.review_contract
-def test_routing_projection_is_complete_compact_and_hashed() -> None:
-    captured_path = "src/lib.rs"
-    projection = build_routing_projection_document(
-        {"captured_paths": [captured_path], "consulted_routers": ["review-graph", "rust-review-orchestrator"]},
-        catalog_path=ROUTING_CATALOG,
-        skill_roots=(SKILL_ROOT,),
-    )
-
-    catalog = load_routing_catalog(ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
-    expected_ids = {entry.catalog_id for entry in catalog if entry.router_id in {"review-graph", "rust-review-orchestrator"}}
-    projected = {entry["catalog_id"]: entry for entry in projection["entries"]}
-    assert set(projected) == expected_ids
-    assert projected["rust.errors"]["matched_paths"] == [captured_path]
-    assert projected["rust.concurrency"]["matched_paths"] == [captured_path]
-    assert projection["projection_digest"].startswith("sha256:")
-
-
-@pytest.mark.review_contract
-def test_routing_regression_fixtures_enforce_selected_and_excluded_ownership() -> None:
-    fixture = Path(__file__).with_name("fixtures") / "routing_regressions.json"
-    cases = json.loads(fixture.read_text(encoding="utf-8"))["cases"]
-
-    for case in cases:
-        projection = build_routing_projection_document(
-            {"captured_paths": case["paths"], "consulted_routers": case["consulted_routers"]}, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,)
-        )
-        projected = {entry["catalog_id"]: entry for entry in projection["entries"]}
-        for catalog_id, expected_matches in case["expected_matches"].items():
-            assert projected[catalog_id]["matched_paths"] == expected_matches, case["id"]
-        catalog = load_routing_catalog(ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
-        decisions = expand_compact_routing(
-            catalog,
-            consulted_routers=case["consulted_routers"],
-            captured_paths=case["paths"],
-            overrides=_assessed_fixture_candidates(case["paths"], case["consulted_routers"], {}),
-        )
-        decisions_by_id = {decision.catalog_id: decision for decision in decisions}
-        # Projection fixtures deliberately consult extra routers to test exclusions.
-        assert set(decisions_by_id) == {entry.catalog_id for entry in catalog if entry.router_id in case["consulted_routers"]}
-        for catalog_id, expected_matches in case["expected_matches"].items():
-            decision = decisions_by_id[catalog_id]
-            assert decision.review_surface == tuple(expected_matches), case["id"]
-            assert decision.disposition == ("selected" if catalog_id == "repo.tooling" and expected_matches else "not-applicable"), case["id"]
-
-
-@pytest.mark.parametrize(
-    ("paths", "router"),
-    [
-        (["justfile", "README.md"], "docs-review-orchestrator"),
-        (["justfile", "CMakePresets.json"], "cpp-review-orchestrator"),
-        (["tooling/examples.toml", "README.md"], "docs-review-orchestrator"),
-    ],
-)
-@pytest.mark.parametrize("explicit_scope", [False, True])
-@pytest.mark.review_contract
-def test_tooling_scope_combines_classifier_and_projection_unless_overridden(paths: list[str], router: str, explicit_scope: bool) -> None:
-    catalog = load_routing_catalog(ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
-    reason = "Targeted tooling scope; shared contracts have their own selected specialist"
-    overrides = (
-        [{"catalog_id": "repo.tooling", "disposition": "selected", "reason": reason, "applicability_evidence": [reason], "review_surface": paths[:1]}]
-        if explicit_scope
-        else []
-    )
-    routers = ["review-graph", router]
-    overrides.extend(_assessed_fixture_candidates(paths, routers, {}))
-    decisions = expand_compact_routing(catalog, consulted_routers=routers, captured_paths=paths, overrides=overrides)
-    tooling = next(decision for decision in decisions if decision.catalog_id == "repo.tooling")
-    expected = paths[:1] if explicit_scope else paths
-    assert tooling.disposition == "selected"
-    assert set(tooling.review_surface) == set(expected)
-    assert len(tooling.review_surface) == len(expected)
-    assert validate_routing_ledger(catalog, decisions, consulted_routers=routers).feasible
-
-
-@pytest.mark.parametrize(
-    ("catalog_id", "path", "reason"),
-    [
-        ("python.cli", "tests/fixtures/generate_ess.py", "Fixture utility exposes substantial argument validation and a versioned JSON output contract"),
-        (
-            "docs.scientific-software",
-            "benches/diagnostic_backends/Cargo.lock",
-            "Changed numerical backend dependency is evidence for a documented precision claim",
-        ),
-    ],
-)
-@pytest.mark.review_contract
-def test_projection_exclusions_preserve_semantic_overrides(catalog_id: str, path: str, reason: str) -> None:
-    catalog = load_routing_catalog(ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
-    language_router = "python-review-orchestrator" if path.endswith(".py") else "rust-review-orchestrator"
-    routers = ["review-graph", language_router, "docs-review-orchestrator"]
-    decisions = expand_compact_routing(
-        catalog,
-        consulted_routers=routers,
-        captured_paths=[path, "README.md"],
-        overrides=[
-            *[item for item in _assessed_fixture_candidates([path, "README.md"], routers, {}) if item["catalog_id"] != catalog_id],
-            {"catalog_id": catalog_id, "disposition": "selected", "reason": reason, "applicability_evidence": [reason], "review_surface": [path]},
-        ],
-    )
-    decision = next(item for item in decisions if item.catalog_id == catalog_id)
-    assert decision.disposition == "selected"
-    assert decision.review_surface == (path,)
-    assert validate_routing_ledger(catalog, decisions, consulted_routers=routers).feasible
 
 
 @pytest.mark.parametrize("document", [[], None, True, 123, "catalog"])
@@ -3100,12 +2757,10 @@ def _completed_independent_example(entry: dict[str, Any]) -> dict[str, Any]:
 
 
 def test_completed_independent_caveats_publish_compile_and_journal_on_first_attempt(tmp_path: Path) -> None:
-    git = shutil.which("git")
-    assert git is not None
-    repository = SKILL_ROOT.parents[2]
+    capture = _captured_rust_repository(tmp_path)
+    repository = Path(capture["repository_root"])
     document = _sparse_plan_document()
     document.update({"change_target": f"git diff -- {STATE_FIXTURE}", "concrete_change_target": True, "scope_mode": "baseline"})
-    capture = _scope_data(git, repository, "baseline", None, (STATE_FIXTURE,))
     planning = bootstrap_document(capture, document)
     plan = plan_from_document(planning, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)
     source_state = cast(
@@ -5187,45 +4842,3 @@ def test_awaiting_replan_is_terminal_for_stale_dispatch_set(tmp_path: Path) -> N
     assert root.node_id not in ready["ready_node_ids"]
     assert root.node_id in ready["lifecycle"]["awaiting_replan_node_ids"]
     assert any("fresh plan" in blocker for blocker in ready["blockers"])
-
-
-@pytest.mark.review_contract
-def test_ordinary_validator_and_all_surface_prompt_budgets() -> None:
-    review_prompt = (
-        SKILL_ROOT / "repo-review" / "SKILL.md",
-        SKILL_ROOT / "review-graph" / "SKILL.md",
-        SKILL_ROOT / "review-graph" / "references" / "runtime-contract.md",
-    )
-    validator_prompt = (VALIDATOR_SKILL, VALIDATOR_CONTRACT)
-    projection = build_routing_projection_document(
-        {"captured_paths": list(ALL_SURFACE_PATHS), "consulted_routers": list(ALL_ROUTER_IDS)}, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,)
-    )
-    catalog = load_routing_catalog(ROUTING_CATALOG, skill_roots=(SKILL_ROOT,))
-    ordinary_words = _word_count(review_prompt)
-    validator_words = _word_count(validator_prompt)
-    projection_words = len(json.dumps(projection, indent=2, sort_keys=True).split())
-    all_surface_words = ordinary_words + projection_words
-
-    assert len(projection["entries"]) == len(catalog)
-    assert set(projection["classifier_signals"]) == {"cpp", "documentation", "python", "rust", "tooling"}
-    assert ordinary_words <= ORDINARY_PROMPT_WORD_BUDGET, f"ordinary coordinator prompt proxy is {ordinary_words} words"
-    assert validator_words <= VALIDATOR_PROMPT_WORD_BUDGET, f"validator prompt proxy is {validator_words} words"
-    assert all_surface_words <= ALL_SURFACE_PROMPT_WORD_BUDGET, f"all-surface prompt proxy is {all_surface_words} words"
-
-
-@pytest.mark.review_contract
-@pytest.mark.parametrize(
-    "budgets",
-    [
-        pytest.param(TRACE_PRIORITIZED_RUST_LEAF_BUDGETS, id="rust"),
-        pytest.param(TRACE_PRIORITIZED_DOCUMENTATION_SKILL_BUDGETS, id="documentation"),
-        pytest.param(TRACE_PRIORITIZED_PYTHON_SKILL_BUDGETS, id="python"),
-        pytest.param(TRACE_PRIORITIZED_SHARED_SKILL_BUDGETS, id="shared"),
-    ],
-)
-def test_trace_prioritized_prompt_budgets(budgets: dict[str, int]) -> None:
-    for skill_id, budget in budgets.items():
-        entrypoint = SKILL_ROOT / skill_id / "SKILL.md"
-        words = _word_count((entrypoint,))
-
-        assert words <= budget, f"{skill_id} graph/orchestrator entrypoint is {words} words"

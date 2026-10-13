@@ -4,16 +4,19 @@ import json
 import os
 import shutil
 import subprocess
+from collections import Counter
 from pathlib import Path
 
 import pytest
 import yaml
+from research_repo_tools.process import run_command_bytes
+from research_repo_tools.semgrep_findings import parse_results
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 
 
-def test_production_paths_with_shared_count_fixtures(tmp_path: Path) -> None:
-    """The same violations fire only in the production paths each rule owns."""
+def _path_fixtures(tmp_path: Path, *, selected: tuple[str, ...] | None = None) -> tuple[list[str], dict[str, list[int]]]:
+    """Share literal rule/path expectations across native scanning and the harness."""
     config = yaml.safe_load((REPOSITORY / "semgrep.yaml").read_text())
     retirement_rule_id = "dotfiles.github-actions.no-retired-coderabbit-token"
     rules = [rule for rule in config["rules"] if rule["id"].startswith("dotfiles.review-graph.") or rule["id"] == retirement_rule_id]
@@ -44,24 +47,79 @@ def parse(value, items):
         "dotfiles.review-graph.boolean-membership-is-not-type-check",
         retirement_rule_id,
     ]
+    if selected is not None:
+        expected = {path: expected[path] for path in selected}
     # A fixture root containing only source inputs allows the shared harness to
     # retain their real repository-relative paths without reading config as input.
     for fixture in expected:
         path = tmp_path / "inputs" / fixture
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(source if path.suffix == ".py" else "env:\n  GH_TOKEN: ${{ secrets.CODERABBIT_REVIEW_TOKEN }}\n")
-    manifest = '[tool.research-repo-tools.semgrep]\nconfig = "semgrep.yaml"\nfixtures = "inputs"\ncwd = "inputs"\nnamespace = "dotfiles."\n'
+    return ids, expected
+
+
+def _scanner_environment(tmp_path: Path) -> dict[str, str]:
+    environment = {
+        **os.environ,
+        "SEMGREP_SEND_METRICS": "off",
+        "OTEL_SDK_DISABLED": "true",
+        "SEMGREP_SETTINGS_FILE": str(tmp_path / "settings.yml"),
+        "SEMGREP_VERSION_CACHE_PATH": str(tmp_path / "version-cache"),
+        "SEMGREP_LOG_FILE": str(tmp_path / "semgrep.log"),
+    }
+    if Path("/etc/ssl/cert.pem").is_file():
+        environment["SSL_CERT_FILE"] = "/etc/ssl/cert.pem"
+    return environment
+
+
+def test_production_path_filters_cover_every_owned_rule(tmp_path: Path) -> None:
+    """Batch the complete path matrix while retaining the native scanner filters."""
+    ids, expected = _path_fixtures(tmp_path)
+    executable = shutil.which("semgrep")
+    assert executable is not None
+    result = run_command_bytes(
+        executable,
+        (
+            "scan",
+            "--disable-version-check",
+            "--metrics",
+            "off",
+            "--json",
+            "--quiet",
+            "--strict",
+            "--no-rewrite-rule-ids",
+            "--config",
+            str(tmp_path / "semgrep.yaml"),
+            *expected,
+        ),
+        cwd=tmp_path / "inputs",
+        env=_scanner_environment(tmp_path),
+        timeout=120,
+    )
+    findings = parse_results(result.stdout.decode()).results
+    actual = Counter((finding.path, finding.check_id) for finding in findings)
+    required = Counter({(Path(path), rule): count for path, counts in expected.items() for rule, count in zip(ids, counts, strict=True) if count})
+    assert actual == required
+
+
+def test_production_paths_with_shared_count_fixtures(tmp_path: Path) -> None:
+    """The shared harness enforces positive counts and a production-path exclusion."""
+    owned = "agents/.agents/skills/review-graph/scripts"
+    ids, expected = _path_fixtures(tmp_path, selected=(f"{owned}/review_graph_runtime.py", f"{owned}/test_runtime.py"))
+    manifest = '[tool.research-repo-tools.semgrep]\nconfig = "semgrep.yaml"\nfixtures = "inputs"\ncwd = "inputs"\nnamespace = "dotfiles.review-graph."\n'
     for fixture, counts in expected.items():
         manifest += f'\n[tool.research-repo-tools.semgrep.counts."inputs/{fixture}"]\n'
         manifest += "".join(f'"{rule}" = {count}\n' for rule, count in zip(ids, counts, strict=True))
     (tmp_path / "pyproject.toml").write_text(manifest)
     executable = shutil.which("research-repo-tools")
     assert executable is not None
-    environment = dict(os.environ)
-    if Path("/etc/ssl/cert.pem").is_file():
-        environment["SSL_CERT_FILE"] = "/etc/ssl/cert.pem"
     result = subprocess.run(  # noqa: S603
-        [executable, "--root", str(tmp_path), "semgrep", "check-fixtures"], capture_output=True, text=True, env=environment, check=False, timeout=120
+        [executable, "--root", str(tmp_path), "semgrep", "check-fixtures"],
+        capture_output=True,
+        text=True,
+        env=_scanner_environment(tmp_path),
+        check=False,
+        timeout=120,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 

@@ -7,6 +7,7 @@ export UV_CACHE_DIR := env_var_or_default("UV_CACHE_DIR", ".uv-cache")
 
 python_fixture_paths := "tests/semgrep"
 python_primary_paths := "agents/.agents/skills scripts"
+review_contract_tests := "agents/.agents/skills/review-graph/scripts/test_review_graph_contracts.py"
 cargo_update_version := "22.1.1"
 cargo_version_pattern := '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?'
 dprint_version := "0.63.0"
@@ -446,10 +447,12 @@ stow-verify: _ensure-uv
 
 # Cheap instruction/routing guards run once before graph execution, including in ci.
 test-review-contracts: _ensure-uv
-    uv run --locked pytest -m review_contract
+    uv run --locked pytest {{ review_contract_tests }}
 
-test-python: test-review-contracts
-    uv run --locked pytest -m 'not review_contract'
+# With no arguments, execute the complete remaining inventory; selectors stay optional.
+[positional-arguments]
+test-python *args: test-review-contracts
+    uv run --locked pytest --ignore {{ review_contract_tests }} "$@"
 
 # Standard-library tests also run on Windows without installing POSIX-only tools.
 test-validation-timing: _ensure-uv

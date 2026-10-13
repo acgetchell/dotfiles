@@ -119,26 +119,52 @@ def test_validate_skill_rejects_malformed_closing_delimiter(tmp_path: Path) -> N
     assert message == "Invalid frontmatter format"
 
 
-def test_validate_skill_rejects_duplicate_frontmatter_key(tmp_path: Path) -> None:
-    """Repeated YAML keys must not be resolved with last-key-wins semantics."""
-    skill_dir = tmp_path / "example-skill"
-    write_skill(skill_dir, 'name: ignored\nname: example-skill\ndescription: "Use for tests."')
+@pytest.mark.parametrize(
+    ("directory_name", "frontmatter", "expected_message", "exact_message"),
+    [
+        pytest.param(
+            "example-skill",
+            'name: ignored\nname: example-skill\ndescription: "Use for tests."',
+            "Duplicate key in frontmatter: name",
+            True,
+            id="duplicate_frontmatter_key",
+        ),
+        pytest.param(
+            "example-skill",
+            'name: example-skill\ndescription: "Use for tests."\nmetadata:\n  nested:\n    yes: first\n    true: second',
+            "Duplicate key in frontmatter: true",
+            True,
+            id="equivalent_nested_frontmatter_keys",
+        ),
+        pytest.param(
+            "example-skill",
+            'name: different-skill\ndescription: "Use for tests."',
+            "Frontmatter name 'different-skill' must match skill directory 'example-skill'",
+            True,
+            id="name_that_differs_from_directory",
+        ),
+        pytest.param("bad-skill", 'name: bad-skill\ndescription: "Use for tests."\nextra: nope', "Unexpected key", False, id="unexpected_frontmatter_key"),
+        pytest.param(
+            "bad-skill", 'name: bad-skill\ndescription: "Use for tests."\n1: nope', "Frontmatter keys must be strings: 1", True, id="non_string_frontmatter_key"
+        ),
+        pytest.param("bad-skill", 'name: Bad_Skill\ndescription: "Use for tests."', "hyphen-case", False, id="invalid_name"),
+        pytest.param("bad-skill", 'name: ""\ndescription: "Use for tests."', "Name cannot be empty", True, id="empty_name"),
+        pytest.param("bad-skill", 'name: bad-skill\ndescription: "Use for <tests>."', "angle brackets", False, id="angle_brackets_in_description"),
+        pytest.param("bad-skill", 'name: bad-skill\ndescription: ""', "Description cannot be empty", True, id="empty_description"),
+    ],
+)
+def test_validate_skill_rejects_invalid_frontmatter(tmp_path: Path, directory_name: str, frontmatter: str, expected_message: str, exact_message: bool) -> None:
+    """Each malformed frontmatter case retains its original diagnostic contract."""
+    skill_dir = tmp_path / directory_name
+    write_skill(skill_dir, frontmatter)
 
     valid, message = skill_validate.validate_skill(skill_dir)
 
     assert not valid
-    assert message == "Duplicate key in frontmatter: name"
-
-
-def test_validate_skill_rejects_equivalent_nested_frontmatter_keys(tmp_path: Path) -> None:
-    """Constructed YAML keys that compare equally must be rejected at any depth."""
-    skill_dir = tmp_path / "example-skill"
-    write_skill(skill_dir, 'name: example-skill\ndescription: "Use for tests."\nmetadata:\n  nested:\n    yes: first\n    true: second')
-
-    valid, message = skill_validate.validate_skill(skill_dir)
-
-    assert not valid
-    assert message == "Duplicate key in frontmatter: true"
+    if exact_message:
+        assert message == expected_message
+    else:
+        assert expected_message in message
 
 
 @pytest.mark.parametrize(
@@ -239,17 +265,6 @@ def test_validate_skill_rejects_missing_openai_metadata(tmp_path: Path) -> None:
     assert message == "agents/openai.yaml not found"
 
 
-def test_validate_skill_rejects_name_that_differs_from_directory(tmp_path: Path) -> None:
-    """A skill name must match its portable directory identifier."""
-    skill_dir = tmp_path / "example-skill"
-    write_skill(skill_dir, 'name: different-skill\ndescription: "Use for tests."')
-
-    valid, message = skill_validate.validate_skill(skill_dir)
-
-    assert not valid
-    assert message == "Frontmatter name 'different-skill' must match skill directory 'example-skill'"
-
-
 def test_validate_skill_rejects_short_ui_description(tmp_path: Path) -> None:
     """UI descriptions must remain useful when shown in skill lists."""
     skill_dir = tmp_path / "example-skill"
@@ -294,72 +309,6 @@ def test_validate_skill_rejects_prompt_with_partial_invocation(tmp_path: Path) -
 
     assert not valid
     assert message == "interface.default_prompt must mention $example-skill"
-
-
-def test_validate_skill_rejects_unexpected_frontmatter_key(tmp_path: Path) -> None:
-    """Only supported skill frontmatter keys are accepted."""
-    skill_dir = tmp_path / "bad-skill"
-    write_skill(skill_dir, 'name: bad-skill\ndescription: "Use for tests."\nextra: nope')
-
-    valid, message = skill_validate.validate_skill(skill_dir)
-
-    assert not valid
-    assert "Unexpected key" in message
-
-
-def test_validate_skill_rejects_non_string_frontmatter_key(tmp_path: Path) -> None:
-    """Frontmatter keys must be strings for deterministic diagnostics."""
-    skill_dir = tmp_path / "bad-skill"
-    write_skill(skill_dir, 'name: bad-skill\ndescription: "Use for tests."\n1: nope')
-
-    valid, message = skill_validate.validate_skill(skill_dir)
-
-    assert not valid
-    assert message == "Frontmatter keys must be strings: 1"
-
-
-def test_validate_skill_rejects_invalid_name(tmp_path: Path) -> None:
-    """Skill names must use hyphen-case."""
-    skill_dir = tmp_path / "bad-skill"
-    write_skill(skill_dir, 'name: Bad_Skill\ndescription: "Use for tests."')
-
-    valid, message = skill_validate.validate_skill(skill_dir)
-
-    assert not valid
-    assert "hyphen-case" in message
-
-
-def test_validate_skill_rejects_empty_name(tmp_path: Path) -> None:
-    """Required name values must be present and non-empty."""
-    skill_dir = tmp_path / "bad-skill"
-    write_skill(skill_dir, 'name: ""\ndescription: "Use for tests."')
-
-    valid, message = skill_validate.validate_skill(skill_dir)
-
-    assert not valid
-    assert message == "Name cannot be empty"
-
-
-def test_validate_skill_rejects_angle_brackets_in_description(tmp_path: Path) -> None:
-    """Skill descriptions cannot contain angle brackets."""
-    skill_dir = tmp_path / "bad-skill"
-    write_skill(skill_dir, 'name: bad-skill\ndescription: "Use for <tests>."')
-
-    valid, message = skill_validate.validate_skill(skill_dir)
-
-    assert not valid
-    assert "angle brackets" in message
-
-
-def test_validate_skill_rejects_empty_description(tmp_path: Path) -> None:
-    """Required description values must be present and non-empty."""
-    skill_dir = tmp_path / "bad-skill"
-    write_skill(skill_dir, 'name: bad-skill\ndescription: ""')
-
-    valid, message = skill_validate.validate_skill(skill_dir)
-
-    assert not valid
-    assert message == "Description cannot be empty"
 
 
 def test_main_reports_invalid_skill_on_stderr(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

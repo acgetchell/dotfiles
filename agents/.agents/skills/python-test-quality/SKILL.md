@@ -1,6 +1,6 @@
 ---
 name: python-test-quality
-description: "Review Python tests and fixtures for meaningful assertions, isolation, failure coverage, and durable regression evidence."
+description: "Review Python tests and fixtures for meaningful assertions, isolation, failure coverage, efficient execution, and durable regression evidence."
 ---
 
 # Python Test Quality
@@ -62,7 +62,11 @@ Route scientific property selection and mathematical oracle validity to `python-
 
 Control randomness, time, timezone, locale, environment, current directory, filesystem order, network, subprocesses, and services. Use explicit seeds or generator objects when exact replay matters. Avoid global random state and tests whose expected value comes from `now()`.
 
-Use `tmp_path` for writes and `monkeypatch` at stable seams. Keep fixtures small and local. Prevent shared mutable fixture state, import-order dependence, hidden environment requirements, and tests that read user data or machine-specific paths.
+Use `tmp_path` for writes and `monkeypatch` at stable seams. Keep fixtures small and cohesive. Prevent shared mutable fixture state, import-order dependence, hidden environment requirements, and tests that read user data or machine-specific paths.
+
+## Evidence Cost
+
+Choose the smallest stable boundary that proves the contract. Preserve real integration evidence where Git, files, subprocesses, or provenance own the risk. For runtime concerns or substantial fixture/selection changes, read [runtime and selection](references/runtime-and-selection.md).
 
 ## Async, Concurrency, And Subprocess Evidence
 
