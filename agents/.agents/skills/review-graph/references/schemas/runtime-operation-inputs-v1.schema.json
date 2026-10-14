@@ -1469,6 +1469,38 @@
           },
           "type": "array"
         },
+        "validation_requirement_bindings": {
+          "description": "Bind each immutable accepted origin/requirement/digest tuple to a unique planned requirement ID without changing its requested execution contract.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "originating_evidence_id",
+              "requirement_id",
+              "requirement_digest",
+              "planned_requirement_id"
+            ],
+            "properties": {
+              "originating_evidence_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "requirement_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "requirement_digest": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              "planned_requirement_id": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
         "software_doi_rechecks": {
           "type": "array",
           "items": {

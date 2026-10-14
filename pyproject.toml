@@ -3,13 +3,16 @@ name = "dotfiles-support-scripts"
 version = "0.1.0"
 description = "Python support tooling for dotfiles-managed Codex skills"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.15"
 license = { text = "BSD-3-Clause" }
 authors = [{ name = "Adam Getchell", email = "adam@adamgetchell.org" }]
 
 [tool.uv]
 package = false
-required-version = "==0.13.0"
+required-version = "==0.13.1"
+# Semgrep 1.180.0 pins pywin32 311, which has no cp315 wheels. Keep native
+# Windows resolution with 312 until Semgrep advances its Windows dependency.
+override-dependencies = ["pywin32==312; sys_platform == 'win32'"]
 
 [tool.research-repo-tools.toolchain]
 inherit-python = true
@@ -38,8 +41,7 @@ namespace = "dotfiles."
 "dotfiles.github-actions.external-action-version-comment" = 3
 "dotfiles.github-actions.checkout-persist-credentials-false" = 7
 "dotfiles.github-actions.github-script-no-expression-interpolation" = 1
-"dotfiles.github-actions.uv-sync-locked-in-workflows" = 3
-"dotfiles.tooling.uv-run-locked" = 3
+"dotfiles.tooling.uv-run-locked" = 6
 "dotfiles.github-actions.automerge-head-safe-squash" = 2
 "dotfiles.github-actions.no-retired-coderabbit-token" = 1
 
@@ -48,6 +50,13 @@ namespace = "dotfiles."
 
 [tool.research-repo-tools.semgrep.counts."tests/semgrep/.github/workflows/dependabot-auto-merge.yml"]
 "dotfiles.github-actions.no-retired-coderabbit-token" = 1
+
+[tool.research-repo-tools.semgrep.counts."tests/semgrep/python315/runtime_policy.py"]
+"dotfiles.python315.no-global-lazy-imports" = 4
+"dotfiles.skills.safe-yaml-loader" = 12
+
+[tool.research-repo-tools.semgrep.counts."tests/semgrep/tooling/justfile"]
+"dotfiles.python315.no-global-jit-default" = 4
 
 [tool.ruff]
 line-length = 160
@@ -221,13 +230,13 @@ dev = [
   "pytest==9.1.1",
   "ruff==0.17.0",
   "semgrep==1.180.0",
-  "ty==0.0.86",
+  "ty==0.0.87",
   "yamllint==1.38.0",
   "zizmor==1.30.1",
 ]
 tooling = [
-    "research-repo-tools==0.1.8",
+    "research-repo-tools==0.1.9",
 ]
 
 [tool.uv.dependency-groups]
-tooling = { requires-python = ">=3.14" }
+tooling = { requires-python = ">=3.15" }

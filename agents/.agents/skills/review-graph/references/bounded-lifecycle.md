@@ -20,11 +20,7 @@ lifecycle.
 For example, create the plan and lifecycle from the same initialized value:
 
 ```python
-plan = plan_from_document(
-    planning_input,
-    repository_root=repository,
-    control_root=external_artifact_root / "run-control",
-)
+plan = plan_from_document(planning_input, repository_root=repository, control_root=external_artifact_root / "run-control")
 lifecycle_input = {"plan": asdict(plan), "source_state": planning_input["source_state"]}
 ```
 

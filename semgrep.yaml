@@ -96,28 +96,11 @@ rules:
     patterns:
       - pattern-regex: '(?ms)^\s*script:\s*\|\n(?:(?!^\s*-\s+(?:name|uses):).)*\$\{\{'
 
-  - id: dotfiles.github-actions.uv-sync-locked-in-workflows
-    languages:
-      - regex
-    severity: WARNING
-    message: "Use uv sync --locked in GitHub Actions workflows."
-    metadata:
-      category: reproducibility
-      rationale: "Workflow dependency installs should fail on lockfile drift instead of silently resolving new versions."
-    paths:
-      include:
-        - "/.github/workflows/**/*.yml"
-        - "/.github/workflows/**/*.yaml"
-        - "/tests/semgrep/.github/workflows/**/*.yml"
-        - "/tests/semgrep/.github/workflows/**/*.yaml"
-    patterns:
-      - pattern-regex: '(?m)^[ \t]*(?:-[ \t]+)?(?:run:[ \t]*)?uv\s+sync\b(?![^\n]*\s--locked\b)[^\n]*$'
-
   - id: dotfiles.tooling.uv-run-locked
     languages:
       - regex
     severity: WARNING
-    message: "Use uv run --locked in repository tooling so lockfile drift fails instead of resolving implicitly."
+    message: "Use uv run/sync --locked in repository tooling so lockfile drift fails instead of resolving implicitly."
     metadata:
       category: reproducibility
       rationale: "Check, CI, and support commands should execute only the dependency graph committed in uv.lock."
@@ -140,9 +123,71 @@ rules:
         (?:"[^"\n]*"|'[^'\n]*'|[^\s\n]+)
         \s+
       )*
-      uv\s+run\b
+      uv\s+(?:run|sync)\b
       (?![^\n]*\s--locked(?:\s|$))
       [^\n]*$
+
+  - id: dotfiles.python315.no-global-lazy-imports
+    languages:
+      - python
+    severity: WARNING
+    message: "Use module-local __lazy_modules__ declarations; global lazy imports break dependency initialization and pytest import ordering."
+    metadata:
+      category: correctness
+      rationale: "The Python 3.15 evaluation demonstrated an import cycle under global lazy mode."
+    paths:
+      include:
+        - "/scripts/**/*.py"
+        - "/agents/.agents/skills/**/scripts/**/*.py"
+        - "/tests/semgrep/python315/**/*.py"
+      exclude:
+        - "/scripts/test_*.py"
+        - "/agents/.agents/skills/**/scripts/test_*.py"
+    pattern-either:
+      - pattern: sys.set_lazy_imports("all")
+      - pattern: os.environ["PYTHON_LAZY_IMPORTS"] = "all"
+      - pattern: os.putenv("PYTHON_LAZY_IMPORTS", "all")
+      - pattern: '{..., "PYTHON_LAZY_IMPORTS": "all", ...}'
+
+  - id: dotfiles.skills.safe-yaml-loader
+    languages:
+      - python
+    severity: WARNING
+    message: "Skill metadata must use SafeLoader or CSafeLoader; faster loading must preserve safe YAML construction."
+    metadata:
+      category: security
+      rationale: "Ruff's yaml.load check does not protect direct loader construction or dynamic loader selection."
+    paths:
+      include:
+        - "/scripts/skill_validate.py"
+        - "/tests/semgrep/python315/**/*.py"
+    pattern-either:
+      - pattern: yaml.UnsafeLoader
+      - pattern: yaml.FullLoader
+      - pattern: yaml.Loader
+      - pattern: yaml.CLoader
+      - pattern: yaml.CUnsafeLoader
+      - pattern: yaml.CFullLoader
+      - pattern: getattr(yaml, "CLoader", ...)
+      - pattern: getattr(yaml, "CUnsafeLoader", ...)
+      - pattern: getattr(yaml, "CFullLoader", ...)
+      - pattern: getattr(yaml, "UnsafeLoader", ...)
+      - pattern: getattr(yaml, "FullLoader", ...)
+      - pattern: getattr(yaml, "Loader", ...)
+
+  - id: dotfiles.python315.no-global-jit-default
+    languages:
+      - regex
+    severity: WARNING
+    message: "Keep JIT opt-in per command or benchmark subprocess; do not enable it for every Just recipe."
+    metadata:
+      category: correctness
+      rationale: "JIT results depend on workload and warmup; global enablement invalidates the default validation baseline."
+    paths:
+      include:
+        - "/justfile"
+        - "/tests/semgrep/tooling/justfile"
+    pattern-regex: '(?m)^[ \t]*export[ \t]+PYTHON_JIT[ \t]*:=[ \t]*["\x27]1["\x27][ \t]*(?:#[^\r\n]*)?\r?$'
 
   - id: dotfiles.github-actions.automerge-head-safe-squash
     languages:

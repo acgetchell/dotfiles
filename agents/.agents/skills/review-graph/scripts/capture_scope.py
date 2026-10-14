@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Capture a path-bounded, content-based Git review scope manifest."""
 
+__lazy_modules__ = ("argparse", "subprocess", "research_repo_tools.process", "review_graph_git_objects", "review_graph_reuse")
+
 import argparse
 import hashlib
 import json

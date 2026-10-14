@@ -180,7 +180,7 @@ just brew-cleanup-preview
 # Uninstall the previewed formulae/casks and perform Homebrew cache cleanup
 just brew-cleanup
 
-# Upgrade the Brewfile, Python pins/environment, and all installed Cargo tools
+# Run manager updates; the Python override guard currently stops this sequence
 just update
 
 # Snapshot the current machine for review, without committing it
@@ -190,9 +190,12 @@ brew bundle dump --file=~/projects/dotfiles/Brewfile.local --force --describe
 `Brewfile.local` is gitignored. Use it to audit one-off apps before deciding whether they belong in the committed foundational `Brewfile`.
 `just brew-cleanup-preview` never passes Homebrew's destructive `--force` flag. Homebrew returns status 1 when the preview finds cleanup candidates; the recipe treats that documented result as a successful preview while preserving actual errors. `just brew-cleanup` asks for confirmation before passing `--force` and applying that cleanup.
 
-`just update` upgrades the Brewfile dependencies, advances exact direct Python development-tool
-pins in `pyproject.toml`, and refreshes the complete `uv.lock` and development environment.
-`just update-python-dependencies` runs the Python portion independently.
+`just update` upgrades the Brewfile dependencies and reconciles uv, then currently stops
+at the Python dependency step. The Windows resolver override cannot be preserved by the
+published direct-pin updater, so `just update-python-dependencies` also stops before resolution.
+Use the [project-aware manual refresh instructions](docs/shared-tooling.md#python-authority-and-upgrades)
+for Python updates. After upstream supports overrides, the Python step can again advance
+exact direct development-tool pins, refresh `uv.lock`, and synchronize the environment.
 The locked `research-repo-tools` package supplies pin updates, uv preflight, and tool-pin
 reconciliation. Its exact pin lives in the included `tooling` group and changes only through
 an explicit package upgrade; ranges, markers, and other included-group constraints remain intact.
@@ -217,7 +220,7 @@ The same locked package owns the Semgrep fixture runner and CodeRabbit wrapper.
 `just semgrep-test` reads `[tool.research-repo-tools.semgrep]`; the repository keeps its
 rules and real fixtures while generic runner tests live upstream.
 The Jupyter review skill delegates notebook inspection, advice, validation, native
-Ruff/ty lint, cleanup, and execution to published v0.1.8 shared commands. It keeps
+Ruff/ty lint, cleanup, and execution to published v0.1.9 shared commands. It keeps
 only review policy and a tested consumer configuration template; generic notebook
 implementation and regression coverage live upstream. See the
 [shared notebook workflow](agents/.agents/skills/jupyter-notebook-review/references/shared-notebooks.md)
@@ -227,7 +230,7 @@ execution dependencies belong to each consumer's locked notebook environment.
 
 ### Shared tooling and Python upgrades
 
-Dotfiles adopts `research-repo-tools==0.1.8` for Python baseline inheritance,
+Dotfiles adopts `research-repo-tools==0.1.9` for Python baseline inheritance,
 tracked and nonignored file selection, notebook policy, workflow audits, dependency
 and secret scans, and managed scanner setup/cleanup. The
 [adoption map](docs/shared-tooling.md) records the command owners and scope.
@@ -238,7 +241,7 @@ as the sole allowlist. It remains part of `github-actions-check` and CI; actionl
 owns workflow syntax and zizmor owns SHA pinning. The reusable Dependabot approval
 workflow retains its separately reviewed commit pin.
 
-When a published shared-tools release adopts Python 3.15, migrate with its version:
+Python 3.15 is inherited from v0.1.9. Preview and apply future upgrades with the published version:
 
 ```sh
 just shared-python-plan VERSION

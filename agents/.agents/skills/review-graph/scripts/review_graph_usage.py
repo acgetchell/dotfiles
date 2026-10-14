@@ -1,5 +1,7 @@
 """Append-only request accounting; missing measurements never become zero cost."""
 
+__lazy_modules__ = ("argparse", "time", "uuid")
+
 import argparse
 import fcntl
 import json

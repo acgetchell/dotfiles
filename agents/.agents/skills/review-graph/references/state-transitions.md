@@ -19,6 +19,17 @@ Follow returned lifecycle/journal/dispatch paths. Source state and accepted
 audits/CI remain; synthesis inputs refresh. Wait for active workers before expansion.
 Details: [planning-contract.md](planning-contract.md#late-validation-expansion).
 
+When accepted reviewers use the same requirement ID for distinct execution
+contracts, give the full additions unique planned IDs, such as
+`ubuntu-ci.audit-001` and `ubuntu-ci.audit-002`. Supply
+`validation_requirement_bindings`, each with the returned
+`originating_evidence_id`, original `requirement_id`, `requirement_digest`, and
+its `planned_requirement_id`. Bindings retain the original immutable obligations;
+commands, working directories, environment, and dependency policy must still
+match exactly. Multiple origins may bind one planned requirement only when its
+execution contract satisfies every origin. An ambiguous origin binding is
+rejected. Use the returned digests rather than reconstructing or editing evidence.
+
 For infrastructure failures before checks start, run `recover-validation-launch`
 with the same four path flags as reconciliation. Supply `plan`, `source_state`,
 `artifact_store`, validator `node_id`, `failure_kind` (`cache-access`,

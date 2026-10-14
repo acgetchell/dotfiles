@@ -459,6 +459,16 @@ class ValidationEvidenceMapping:
 
 
 @dataclass(frozen=True)
+class ValidationRequirementBinding:
+    """Bind an immutable audit obligation to one unique planned requirement."""
+
+    originating_evidence_id: str
+    requirement_id: str
+    requirement_digest: str
+    planned_requirement_id: str
+
+
+@dataclass(frozen=True)
 class WorkerNode:
     """One actual fresh-worker node after routing and validator coalescing."""
 
@@ -532,6 +542,7 @@ class GraphPlan:
     audit_reuse_transitions: tuple[AuditReuseTransition, ...] = ()
     reuse_source_snapshots: tuple[ReviewSourceSnapshot, ...] = ()
     validation_exclusions: tuple[ValidationExclusion, ...] = ()
+    validation_requirement_bindings: tuple[ValidationRequirementBinding, ...] = field(default=(), kw_only=True)
     audit_delta_reviews: tuple[dict[str, Any], ...] = ()
     validation_recoveries: tuple[dict[str, Any], ...] = ()
     pre_review_validation_nodes: tuple[str, ...] = ()
@@ -1815,7 +1826,7 @@ def coalesce_review_requirements(
         allocated.add(node_id)
         priority = min((item.priority for item in members), key=_priority_rank)
         requirement_ids = tuple(item.requirement_id for item in members)
-        coverage = tuple(sorted({path for item in members for path in item.review_surface}))
+        coverage = tuple(sorted({*item.review_surface for item in members}))
         synthesis_dependencies = {item.synthesis_dependency for item in members}
         nodes.append(
             WorkerNode(
@@ -1831,9 +1842,9 @@ def coalesce_review_requirements(
                 router_ids=tuple(sorted({item.router_id for item in members})),
                 rule_ids=tuple(sorted({item.rule_id for item in members})),
                 selection_reasons=tuple(sorted({item.reason for item in members})),
-                owners=tuple(sorted({owner for item in members for owner in item.owners})),
-                instruction_paths=tuple(sorted({path for item in members for path in item.instruction_paths})),
-                static_references=tuple(sorted({path for item in members for path in item.static_references})),
+                owners=tuple(sorted({*item.owners for item in members})),
+                instruction_paths=tuple(sorted({*item.instruction_paths for item in members})),
+                static_references=tuple(sorted({*item.static_references for item in members})),
                 skill_digest=members[0].skill_digest,
                 reference_digests=members[0].reference_digests,
             )
@@ -2443,6 +2454,13 @@ def _identifier_tuple_blockers(values: Sequence[str], *, label: str) -> tuple[st
     return tuple(blockers)
 
 
+def _drop_empty_plan_fields(document: dict[str, Any], fields: tuple[str, ...]) -> None:
+    """Preserve identities emitted before optional fields were introduced."""
+    for name in fields:
+        if not document[name]:
+            document.pop(name)
+
+
 def graph_plan_digest(plan: GraphPlan) -> str:
     """Hash a plan without empty optional fields absent from legacy identities."""
     document = asdict(plan)
@@ -2450,20 +2468,19 @@ def graph_plan_digest(plan: GraphPlan) -> str:
         document.pop("independent_review_after_audits")
     if plan.review_lifecycle == ReviewLifecycle():
         document.pop("review_lifecycle")
-    if not plan.commit_handoffs:
-        document.pop("commit_handoffs")
-    if not plan.pre_review_validation_nodes:
-        document.pop("pre_review_validation_nodes")
-    if not plan.validation_recoveries:
-        document.pop("validation_recoveries")
-    if not plan.audit_delta_reviews:
-        document.pop("audit_delta_reviews")
-    if not plan.validation_exclusions:
-        document.pop("validation_exclusions")
-    if not plan.audit_reuse_transitions:
-        document.pop("audit_reuse_transitions")
-    if not plan.reuse_source_snapshots:
-        document.pop("reuse_source_snapshots")
+    _drop_empty_plan_fields(
+        document,
+        (
+            "commit_handoffs",
+            "pre_review_validation_nodes",
+            "validation_recoveries",
+            "audit_delta_reviews",
+            "validation_exclusions",
+            "validation_requirement_bindings",
+            "audit_reuse_transitions",
+            "reuse_source_snapshots",
+        ),
+    )
     return digest_json(document)
 
 
@@ -2476,14 +2493,9 @@ def graph_plan_digest_matches(plan: GraphPlan, digest: str) -> bool:
         legacy.pop("independent_review_after_audits")
     if plan.review_lifecycle == ReviewLifecycle():
         legacy.pop("review_lifecycle")
-    if not plan.commit_handoffs:
-        legacy.pop("commit_handoffs")
-    if not plan.pre_review_validation_nodes:
-        legacy.pop("pre_review_validation_nodes")
-    if not plan.validation_recoveries:
-        legacy.pop("validation_recoveries")
-    if not plan.validation_exclusions:
-        legacy.pop("validation_exclusions")
+    _drop_empty_plan_fields(
+        legacy, ("commit_handoffs", "pre_review_validation_nodes", "validation_recoveries", "validation_exclusions", "validation_requirement_bindings")
+    )
     if digest == digest_json(legacy):
         return True
     if not plan.audit_delta_reviews:

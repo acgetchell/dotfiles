@@ -1,5 +1,7 @@
 """Record a portable review environment and run explicit, credential-free checks."""
 
+__lazy_modules__ = ("argparse", "hashlib", "platform", "re", "shutil", "subprocess", "tempfile", "time", "tomllib")
+
 import argparse
 import hashlib
 import json
@@ -13,11 +15,64 @@ import tempfile
 import time
 import tomllib
 from pathlib import Path
+from typing import TypedDict
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 SKILLS = REPOSITORY / "agents/.agents/skills"
 TIMING = SKILLS / "review-validator/scripts/run_timed.py"
 SMOKE = SKILLS / "review-graph/scripts/review_graph_smoke.py"
+
+
+class SourceIdentity(TypedDict, closed=True):
+    """Exact source identities without additional untracked metadata fields."""
+
+    commit: str
+    content_digest: str
+
+
+class ToolIdentity(TypedDict, closed=True):
+    """Allowlisted identity and availability fields for one installed tool."""
+
+    executable: str | None
+    identity: str
+    expected_version: str | None
+    available: bool
+    pin_matches: bool
+
+
+class ToolIdentities(TypedDict, extra_items=ToolIdentity):
+    """Dynamic tool names whose values retain the same checked shape."""
+
+
+class PythonIdentity(TypedDict, closed=True):
+    """The executing interpreter's public identity."""
+
+    version: str
+    executable: str
+
+
+class EnvironmentInventory(TypedDict, closed=True):
+    """Stable environment-report fields, independent of the invoking host."""
+
+    schema_version: int
+    source: SourceIdentity
+    system: str
+    distribution: dict[str, str]
+    architecture: str
+    libc: list[str]
+    shell: str
+    python: PythonIdentity
+    tools: ToolIdentities
+    verification_scope: str
+
+
+class ProbeResult(TypedDict, closed=True):
+    """Bounded probe outcome with no response bodies or caller-supplied errors."""
+
+    status: str
+    reason: str
+    exit_code: int | None
+    elapsed_seconds: float
 
 
 def command_output(argv: list[str]) -> str:
@@ -29,7 +84,7 @@ def command_output(argv: list[str]) -> str:
     return result.stdout.strip() if result.returncode == 0 else "unavailable"
 
 
-def source_identity() -> dict[str, str]:
+def source_identity() -> SourceIdentity:
     """Bind local evidence to HEAD and all nonignored checkout bytes without Git writes."""
     git = shutil.which("git")
     if git is None:
@@ -63,14 +118,14 @@ def source_identity() -> dict[str, str]:
     return {"commit": commit, "content_digest": f"sha256:{digest.hexdigest()}"}
 
 
-def inventory() -> dict[str, object]:
+def inventory() -> EnvironmentInventory:
     """Record allowlisted host/tool fields, never the environment or credentials."""
     versions = tomllib.loads((REPOSITORY / "pyproject.toml").read_text())
     expected = {"uv": versions["tool"]["uv"]["required-version"].removeprefix("==")}
     just = shutil.which("just")
     for name in ("just", "dprint", "rumdl"):
         expected[name] = command_output([just, "--evaluate", f"{name}_version"]) if just is not None else "unavailable"
-    tools = {}
+    tools: ToolIdentities = {}
     for name in ("uv", "just", "dprint", "rumdl", "git", "bash", "zsh", "stow"):
         executable = shutil.which(name)
         lines = command_output([executable, "--version"]).splitlines() if executable is not None else []
@@ -130,7 +185,7 @@ def run_timed(argv: list[str], output: Path) -> int:
     ).returncode
 
 
-def probe() -> dict[str, object]:
+def probe() -> ProbeResult:
     """Bound the existing safe TypeSafe probe without publishing response/error bodies."""
     started = time.monotonic()
     try:
@@ -169,9 +224,9 @@ def main(argv: list[str] | None = None) -> int:
     }
     code = 2
     try:
-        report.update(inventory())
-        tools = report["tools"]
-        assert isinstance(tools, dict)  # noqa: S101 - internal inventory, never external JSON.
+        environment = inventory()
+        report.update(environment)
+        tools = environment["tools"]
         missing = [name for name, tool in tools.items() if not tool["available"] or not tool["pin_matches"]]
         if missing:
             msg = f"Required tools unavailable or incorrectly pinned: {', '.join(missing)}. Load site modules or rerun connected setup."

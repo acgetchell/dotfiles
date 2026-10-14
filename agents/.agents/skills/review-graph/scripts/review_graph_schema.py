@@ -1,14 +1,29 @@
 """Small deterministic validator for review-graph's published JSON schemas."""
 
-from __future__ import annotations
-
 import json
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+class DiagnosticPayload(TypedDict, closed=True):
+    """Fields serialized for one schema diagnostic."""
+
+    path: str
+    code: str
+    message: str
+    accepted_shape: str
+    accepted_values: list[object]
+
+
+class SchemaErrorPayload(TypedDict, closed=True):
+    """The complete schema-error wire envelope."""
+
+    diagnostics: list[DiagnosticPayload]
+    schema_id: str
 
 
 @dataclass(frozen=True)
@@ -37,7 +52,7 @@ class SchemaValidationError(ValueError):
         )
         super().__init__(f"schema {schema_id} rejected {len(diagnostics)} field(s): {rendered}")
 
-    def as_dict(self) -> dict[str, object]:
+    def as_dict(self) -> SchemaErrorPayload:
         """Return deterministic diagnostics suitable for a constrained retry."""
         return {
             "diagnostics": [

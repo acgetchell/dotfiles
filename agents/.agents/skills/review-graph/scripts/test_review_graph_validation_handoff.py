@@ -10,7 +10,7 @@ import pytest
 import review_graph_runtime as runtime
 from capture_scope import _scope_data
 from review_graph_bootstrap import bootstrap_document
-from review_graph_plan import plan_from_document
+from review_graph_plan import ValidationRequirementBinding, plan_from_document
 from review_graph_reuse import AuthorizedGitContextTransition, source_snapshot
 from review_graph_validation import ValidationPayload, ValidationRecord, ValidationStatus, VerifiedValidationRecord
 from test_review_graph_runtime import (
@@ -280,6 +280,52 @@ def test_another_reviewers_requirement_binds_to_the_existing_exact_execution(tmp
     assert report["requirements"][0]["resolution"] == "planned"
     requirement["planned_validation_digest"] = runtime._planned_validation_digest(replace(unit, environment="another toolchain"))
     assert runtime._validation_reconciliation(plan, [audit])["requirements"][0]["resolution"] == "requires-expansion"
+
+
+@pytest.mark.parametrize("reference", ["legacy", "digest"])
+def test_origin_binding_preserves_exact_validation_identity_and_immutable_requirement(tmp_path: Path, reference: str) -> None:
+    lifecycle, entry, _capture, _git, _repository, _metadata = _handoff(tmp_path, dependencies=[])
+    plan = runtime._graph_plan(lifecycle["plan"])
+    unit = next(item for item in plan.coalesced_validation_units if item.node_id == entry["node_id"])
+    requirement: dict[str, Any] = {
+        "requirement_id": "reviewer-local-name",
+        "owner": "review-validator",
+        "reason": "This origin requests the exact existing execution.",
+        "expected_evidence": "Source-bound successful validation.",
+    }
+    if reference == "legacy":
+        requirement.update(
+            commands=list(unit.commands), working_directory=unit.working_directories[0], environment=unit.environment, dependency_policy=unit.dependency_policy
+        )
+    else:
+        requirement["planned_validation_digest"] = runtime._planned_validation_digest(unit)
+    original = json.dumps(requirement, sort_keys=True)
+    binding = ValidationRequirementBinding(
+        "review:second", requirement["requirement_id"], runtime.digest_bytes(runtime.canonical_json(requirement).encode()), unit.requirement_ids[0]
+    )
+    bound_plan = replace(plan, validation_requirement_bindings=(binding,))
+    audit = {"status": "no-findings", "evidence_id": "review:second", "validation_requirements": [requirement]}
+    report = runtime._validation_reconciliation(bound_plan, [audit])
+    assert report["blockers"] == []
+    row = report["requirements"][0]
+    assert row["originating_evidence_id"] == binding.originating_evidence_id
+    assert row["requirement_id"] == requirement["requirement_id"]
+    assert row["requirement_digest"] == binding.requirement_digest
+    assert row["planned_requirement_id"] == unit.requirement_ids[0]
+    assert row["validation_unit_id"] == unit.node_id
+    assert row["requirement"] == requirement
+    assert json.dumps(requirement, sort_keys=True) == original
+    changed_unit = replace(unit, environment="A different environment")
+    changed_plan = replace(bound_plan, coalesced_validation_units=(changed_unit,))
+    assert runtime._validation_reconciliation(changed_plan, [audit])["requirements"][0]["resolution"] == "identity-conflict"
+    if reference == "legacy":
+        altered = {**requirement, "reason": "Changed authoritative obligation"}
+        altered_audit = {**audit, "validation_requirements": [altered]}
+        assert runtime._validation_reconciliation(bound_plan, [altered_audit])["requirements"][0]["resolution"] == "requires-expansion"
+        assert (
+            runtime._validation_reconciliation(bound_plan, [{**audit, "evidence_id": "review:another-origin"}])["requirements"][0]["resolution"]
+            == "requires-expansion"
+        )
 
 
 def _verified(entry: dict[str, Any]) -> VerifiedValidationRecord:

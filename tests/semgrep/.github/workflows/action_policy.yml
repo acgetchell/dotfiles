@@ -138,24 +138,24 @@ jobs:
             core.info(process.env.SAFE_REF_NAME);
 
       - name: Unlocked uv sync
-        # ruleid: dotfiles.github-actions.uv-sync-locked-in-workflows
+        # ruleid: dotfiles.tooling.uv-run-locked
         run: uv sync
 
       - name: Locked uv sync
-        # ok: dotfiles.github-actions.uv-sync-locked-in-workflows
+        # ok: dotfiles.tooling.uv-run-locked
         run: uv sync --locked
 
-      # ruleid: dotfiles.github-actions.uv-sync-locked-in-workflows
+      # ruleid: dotfiles.tooling.uv-run-locked
       - run: uv sync --group dev
 
-      # ok: dotfiles.github-actions.uv-sync-locked-in-workflows
+      # ok: dotfiles.tooling.uv-run-locked
       - run: uv sync --locked --group dev
 
       - name: Multiline sync
         run: |
-          # ruleid: dotfiles.github-actions.uv-sync-locked-in-workflows
+          # ruleid: dotfiles.tooling.uv-run-locked
           uv sync --group dev
-          # ok: dotfiles.github-actions.uv-sync-locked-in-workflows
+          # ok: dotfiles.tooling.uv-run-locked
           uv sync --locked --group dev
 
       - name: Named unlocked run

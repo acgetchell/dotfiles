@@ -20,8 +20,21 @@ three workflow paths for `github_actions`. Review the allowlist when workflows
 or composite actions are added or renamed. Added, removed, renamed, or
 unexpected files require manual review. Dependency names and version eligibility
 belong to `.github/dependabot.yml`: patch, minor, major, grouped, and security
-updates are eligible. Monday schedules, seven-day cooldowns, and groups remain
-unchanged. CodeRabbit remains a separate required status check.
+updates are eligible. Python version-update PRs are temporarily paused with
+`open-pull-requests-limit: 0` while the hosted uv updater rejects Python 3.15.
+The Python security-update group remains configured, but shares that runtime
+limitation; the required OSV audit remains available. The published manual updater
+also loses project `override-dependencies` during isolated resolution and can
+downgrade Semgrep. `just update-python-dependencies` therefore stops before that
+resolver while the Windows override is set. Use `uv lock --upgrade` for a
+project-aware transitive refresh, or update exact direct pins deliberately with
+`uv add --dev 'PACKAGE==VERSION'`. Review the manifest and lock diff, confirm
+Semgrep has not regressed, then run `just ci` and `just security`. Remove the
+preflight guard after the shared updater preserves project overrides.
+Restore the uv limit to 10 after a hosted update resolves the committed 3.15
+lockfile successfully. GitHub Actions updates continue on Mondays with their
+seven-day cooldown and existing groups. CodeRabbit remains a separate required
+status check.
 
 A verified GitHub base merge is eligible only when its parents form the expected
 chain and its changed paths, statuses, and blob IDs match the original Dependabot

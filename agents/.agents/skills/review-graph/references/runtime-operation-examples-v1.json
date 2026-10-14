@@ -342,6 +342,20 @@
       "scope",
       "worktree",
       "repository"
+    ],
+    "validation_requirement_bindings": [
+      {
+        "originating_evidence_id": "review:audit-001",
+        "requirement_id": "ubuntu-ci",
+        "requirement_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "planned_requirement_id": "ubuntu-ci.audit-001"
+      },
+      {
+        "originating_evidence_id": "review:audit-002",
+        "requirement_id": "ubuntu-ci",
+        "requirement_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "planned_requirement_id": "ubuntu-ci.audit-002"
+      }
     ]
   },
   "routing-projection": {

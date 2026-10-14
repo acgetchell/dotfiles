@@ -114,8 +114,8 @@ def _inherited_metadata_context(record: dict[str, Any]) -> dict[str, Any] | None
     return {
         **context.get("original_git_context", {}),
         "evidence_id": context["evidence_id"],
-        "files_inspected": sorted({path for unit in units for path in unit["owned_paths"]}),
-        "nearby_contract_owners": sorted({path for unit in units for path in unit["dependency_paths"]}),
+        "files_inspected": sorted({*unit["owned_paths"] for unit in units}),
+        "nearby_contract_owners": sorted({*unit["dependency_paths"] for unit in units}),
     }
 
 
