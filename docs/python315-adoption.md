@@ -233,6 +233,13 @@ pending; local macOS success does not establish those matrix cells.
 
 ## Platform and updater boundaries
 
+The Linux review environment bounds the inherited hard stack limit to 64 MiB
+and preserves smaller caller limits. With Python 3.15's unsigned Linux
+`RLIM_INFINITY`, Semgrep 1.180 otherwise computes an unusably large finite stack
+limit before launching its engine, preventing worker-thread creation. This
+process-local workaround covers repository scans, shared fixtures, and tests;
+remove it after the upstream stack-limit handling is corrected.
+
 Semgrep 1.180.0 requires `pywin32==311` on Windows. Its published wheels stop
 at Python 3.14; the Windows-only uv override uses 312's cp315 wheels. Remove the
 override when Semgrep advances its pin. The lock resolves across supported

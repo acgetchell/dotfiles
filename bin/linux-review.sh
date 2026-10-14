@@ -44,9 +44,19 @@ export XDG_CACHE_HOME="$DOTFILES_REVIEW_CACHE"
 # Never create Python shims in ~/.local/bin; site/module Python remains selectable.
 export UV_PYTHON_INSTALL_BIN=0
 export UV_HTTP_TIMEOUT=30 UV_HTTP_RETRIES=1
-# Semgrep's io_uring backend can fail on restricted Linux runners. Keep all
-# scanner subprocesses, including shared fixtures, on Eio's POSIX backend.
-export EIO_BACKEND=posix
+# Python 3.15 exposes Linux RLIM_INFINITY as an unsigned value. Semgrep 1.180
+# mistakes it for a finite hard stack limit and creates unusably large stacks.
+# Bound this review process and its children until that upstream bug is fixed;
+# retain any smaller limits selected by the caller.
+stack_limit_kib=65536
+stack_hard_kib="$(ulimit -Hs)"
+if [[ "$stack_hard_kib" == unlimited ]] || (( stack_hard_kib > stack_limit_kib )); then
+  stack_soft_kib="$(ulimit -Ss)"
+  if [[ "$stack_soft_kib" == unlimited ]] || (( stack_soft_kib > stack_limit_kib )); then
+    ulimit -S -s "$stack_limit_kib"
+  fi
+  ulimit -H -s "$stack_limit_kib"
+fi
 
 for tool in git bash zsh stow; do
   command -v "$tool" >/dev/null || fail "Required tool '$tool' unavailable. Load a site module or ask the environment owner to provide it; no checks were skipped."

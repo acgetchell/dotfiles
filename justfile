@@ -210,8 +210,7 @@ semgrep: _ensure-uv
     export SEMGREP_SETTINGS_FILE="$scan_cache/settings.yml"
     export SEMGREP_SEND_METRICS=off OTEL_SDK_DISABLED=true
     if [[ -f /etc/ssl/cert.pem ]]; then export SSL_CERT_FILE=/etc/ssl/cert.pem; fi
-    # Automatic multicore selection can exhaust worker threads on Linux runners.
-    uv run --locked --group dev research-repo-tools files run --exclude 'tests/semgrep/**' --timeout 600 -- semgrep --jobs 1 --disable-version-check --metrics off --error --strict --timeout 120 --config semgrep.yaml
+    uv run --locked --group dev research-repo-tools files run --exclude 'tests/semgrep/**' --timeout 600 -- semgrep --disable-version-check --metrics off --error --strict --timeout 120 --config semgrep.yaml
 
 semgrep-test: _ensure-uv
     #!/usr/bin/env bash

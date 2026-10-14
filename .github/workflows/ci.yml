@@ -144,7 +144,7 @@ jobs:
 
       - name: Report Linux executor resource limits
         run: |
-          cat /proc/self/limits
+          bash bin/linux-review.sh exec cat /proc/self/limits
           for name in pids.max pids.current memory.max memory.current cpu.max; do
             path="/sys/fs/cgroup/$name"
             if [[ -r "$path" ]]; then
