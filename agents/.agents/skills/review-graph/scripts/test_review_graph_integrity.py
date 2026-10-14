@@ -1,30 +1,30 @@
 """Shared helper integration preserves graph identities and Python environments."""
 
 import hashlib
+import importlib.metadata
 import json
-import os
 import shlex
 import shutil
 import subprocess
 import sys
 import venv
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import Any
 
 import capture_scope
 import pytest
 import review_graph_bootstrap as bootstrap
 import review_graph_plan as plan
 import review_graph_runtime as runtime
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 from review_graph_bootstrap import _capture_command
 from review_graph_integrity import canonical_json, digest_bytes, digest_json
 from review_graph_plan import _file_identity_digest
 from review_graph_receipts import artifact_reference
 from review_graph_usage import digest, parse_json
 from test_capture_scope import _git, _init_repo
-from test_review_graph_runtime import SKILL_ROOT, _baseline_capture, _sparse_plan_document, _worker_input_fixture
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from test_review_graph_runtime import _baseline_capture, _sparse_plan_document, _worker_input_fixture
 
 
 @pytest.mark.parametrize("content", [b"", b"first\r\nsecond\n\xff\x00last\r"])
@@ -267,29 +267,31 @@ def test_generated_capture_and_publication_commands_keep_the_dependency_environm
     environment = tmp_path / "environment"
     venv.EnvBuilder(with_pip=False, symlinks=True).create(environment)
     interpreter = environment / "bin" / "python"
-    uv = shutil.which("uv")
-    assert uv is not None
-    # A locked sync caches wheel URLs without requiring registry metadata for offline resolution.
-    installation = subprocess.run(  # noqa: S603 - locked tooling dependencies installed offline into the temporary environment.
-        [
-            uv,
-            "sync",
-            "--locked",
-            "--offline",
-            "--only-group",
-            "tooling",
-            "--project",
-            str(SKILL_ROOT.parents[2]),
-            "--python",
-            str(interpreter),
-            "--no-python-downloads",
-        ],
-        env={**os.environ, "UV_PROJECT_ENVIRONMENT": str(environment)},
-        capture_output=True,
-        check=False,
-        timeout=30,
+    location = subprocess.run(  # noqa: S603 - isolated standard-library interpreter locates its own package directory.
+        [str(interpreter), "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"], capture_output=True, text=True, check=True, timeout=30
     )
-    assert installation.returncode == 0, installation.stderr.decode(errors="replace")
+    # This test owns generated interpreter commands, not uv provisioning. Copy
+    # installed distribution bytes and active runtime dependencies without an
+    # ambient warm cache, registry access, or unrelated development packages.
+    site_packages = Path(location.stdout.strip())
+    pending = ["research-repo-tools"]
+    copied = set()
+    while pending:
+        name = canonicalize_name(pending.pop())
+        if name in copied:
+            continue
+        copied.add(name)
+        distribution = importlib.metadata.distribution(name)
+        for entry in distribution.files or ():
+            if entry.is_absolute() or ".." in entry.parts:
+                continue  # Console entry points are outside this Python-import contract.
+            target = site_packages / entry
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(Path(str(distribution.locate_file(entry))), target)
+        for raw in distribution.requires or ():
+            requirement = Requirement(raw)
+            if requirement.marker is None or requirement.marker.evaluate({"extra": ""}):
+                pending.append(requirement.name)
     isolated = subprocess.run(  # noqa: S603 - temporary environment's Python, fixed read-only import inspection.
         [str(interpreter), "-c", "import importlib.util; print(importlib.util.find_spec('pytest'))"], capture_output=True, check=True, timeout=30
     )

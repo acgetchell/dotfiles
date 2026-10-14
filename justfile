@@ -145,10 +145,8 @@ macos-defaults:
 macos-defaults-rectangle-pro:
     bin/macos-defaults.sh --rectangle-pro-takeover
 
-python-check: _ensure-uv python-baseline-check
-    uv run --locked --group dev research-repo-tools files run --include '*.py' --include '*.pyi' -- ruff format --check --no-force-exclude
-    uv run --locked --group dev research-repo-tools files run --include '*.py' --include '*.pyi' -- ruff check --no-fix --no-force-exclude
-    just python-typecheck
+python-check: _ensure-uv
+    uv run --locked --group dev research-repo-tools python check
 
 python-baseline-check: _ensure-uv
     uv run --locked --no-sync --no-python-downloads research-repo-tools toolchain python-check
@@ -169,7 +167,21 @@ python-sync: _ensure-uv
     uv sync --locked --group dev
 
 python-typecheck: _ensure-uv
-    uv run --locked --group dev research-repo-tools files run --include '*.py' --include '*.pyi' -- ty check --no-force-exclude --error all
+    uv run --locked --group dev research-repo-tools python typecheck
+
+# Python 3.15's statistical profiler; forward its run/attach/dump/replay options.
+[positional-arguments]
+python-profile +args: _ensure-uv
+    uv run --locked python -m profiling.sampling "$@"
+
+# Deterministic tracing works without sampling's process-memory permissions.
+[positional-arguments]
+python-profile-tracing +args: _ensure-uv
+    uv run --locked python -m profiling.tracing "$@"
+
+# Isolated JIT off/on trials using the existing planner/publication fixture.
+python315-benchmark repeats="7" scale="20": _ensure-uv
+    uv run --locked python scripts/python315_benchmark.py --repeats {{ quote(repeats) }} --scale {{ quote(scale) }}
 
 # Review committed and local changes with CodeRabbit; the base defaults to main.
 review base="origin/main": _ensure-uv
@@ -345,6 +357,7 @@ update-python-dependencies: _preflight-stable-uv
     #!/usr/bin/env bash
     set -euo pipefail
 
+    uv run --locked python scripts/python_update_preflight.py
     just _shared-deps update-python
     uv_executable="$(brew --prefix uv)/bin/uv"
     if [[ ! -x "$uv_executable" ]]; then

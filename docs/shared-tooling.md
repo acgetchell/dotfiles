@@ -1,19 +1,19 @@
 # Shared tooling adoption
 
-The exact published `research-repo-tools==0.1.8` package owns reusable mechanics.
+The exact published `research-repo-tools==0.1.9` package owns reusable mechanics.
 Dotfiles retains policy, machine provisioning, fixtures, and its skill protocols.
 No sibling checkout or unreleased code is needed.
 
 | Capability | Dotfiles adoption |
 | --- | --- |
-| Python baseline | `inherit-python = true`; `python-baseline-check` is part of `python-check` and CI |
+| Python baseline | `inherit-python = true`; shared `python check` validates the mirrors as part of CI; `python-baseline-check` remains available separately |
 | Python migration | `shared-python-plan VERSION` and `shared-python-update VERSION` run the target release through isolated uvx |
 | File selection | Shared inventory and bounded batches for Python, Markdown, YAML, actionlint, and Semgrep |
 | Python lint/type policy | Complete configured Ruff and ty checks over tracked/nonignored `.py` and `.pyi`, including fixtures; fixers retain the narrower safe scope |
 | Workflow auditing | One locked Python zizmor pin and explicit persona; SHA pinning, offline local gate, required-online hosted audit, guarded SARIF upload; shared Actions allowlist command reads the committed settings |
 | Dependency/secret scanning | Managed OSV/Gitleaks, explicit root `uv.lock`, full reachable history and current files, redacted reports; required CI `verify` includes the gate |
 | Scanner lifecycle | `tools-sync`, `tools-check`, `update-security-tools`, and preview-first `clean`; package-owned cache store |
-| Dependency/tool updates | Shared dependency and tool-pin helpers; Homebrew uv pin reconciliation; machine Cargo tools remain with their existing owner |
+| Dependency/tool updates | Shared helpers with a preflight guard for unsupported project overrides; Homebrew uv pin reconciliation; machine Cargo tools retain their existing owner |
 | Semgrep fixtures | Shared assertion runner over repository rules, syntax mutation pairs, and count expectations that retain path filters; integration tests exercise real review-graph source/test paths |
 | Notebooks | Published inspection/advice/lint/cleanup/execution in the Jupyter skill; its consumer template prohibits dependency installs inside cells |
 | Reviews | Shared opt-in CodeRabbit wrapper defaults to verified `origin/main`; no review is sent merely by running CI |
@@ -43,6 +43,34 @@ environment, so upgrading to Python 3.15 does not require editing dotfiles'
 Python literals by hand. Publication alone does not change the pinned consumer.
 Review the resulting diff and commit through the normal maintainer workflow.
 
+The v0.1.9 adoption sets Python 3.15 as the floor. `just python-check` uses
+the published `python check` pipeline: one complete inventory, then format,
+lint, and strict ty checks with the first failing batch stopping the command.
+`python-typecheck` uses the same shared owner. `python-fix` retains its narrower
+scope to preserve deliberately invalid Semgrep fixtures.
+
+Semgrep 1.180.0 pins `pywin32==311` on Windows, whose wheels stop at Python 3.14.
+The Windows-only uv override selects 312, which publishes cp315 wheels. Remove
+the override when Semgrep advances its dependency. Universal lock resolution
+checks package availability; native Windows execution remains a hosted check.
+
+The v0.1.9 direct-pin updater resolves through temporary PEP 723 metadata that
+does not copy this project override. It can consequently downgrade Semgrep even
+though the project lock resolves correctly. `update-python-dependencies` stops
+before shared resolution while overrides are present. Use `uv lock --upgrade`
+for a transitive refresh that retains direct pins and project overrides. For a
+deliberate direct-pin change, use `uv add --dev 'PACKAGE==VERSION'`, review the
+manifest/lock diff, and run `just ci` plus `just security`. Remove the preflight
+guard after upstream supports overrides; the shared package remains the updater
+owner. `just update` also stops at this guard during its Python dependency step.
+
+Skill validation uses PyYAML's C safe loader when installed, with the Python
+safe loader as a supported fallback. Explicit Python 3.15 lazy imports defer
+CLI-only dependencies; the YAML merge marker uses a named `sentinel`, and fixed
+review labels use `frozendict`. Graph JSON encoding and byte identities retain
+their existing contracts. See [the adoption evaluation](python315-adoption.md)
+for measurements and the limits of optional C-extension and JIT results.
+
 The uv requirement is separate from Python inheritance. Its sole pin lives in
 `[tool.uv].required-version`. The small Just bootstrap expression reads the
 conventional assignment without needing Python, and `just update-uv` reconciles
@@ -65,17 +93,23 @@ allowlist command covers reusable-workflow calls independently of zizmor's
 The published checker replaces `scripts/check_workflow_allowlist.py` as part of
 [dotfiles #105](https://github.com/acgetchell/dotfiles/issues/105). Generic YAML
 parsing and malformed-policy regressions live in the
-[upstream Actions tests](https://github.com/acgetchell/research-repo-tools/blob/v0.1.8/tests/dependencies/test_actions.py).
+[upstream Actions tests](https://github.com/acgetchell/research-repo-tools/blob/v0.1.9/tests/dependencies/test_actions.py).
 Dotfiles retains installed-package consumer tests for its actual workflows,
 unapproved action and reusable-call mutations with file/line diagnostics,
 committed policy authority, and recipe/CI wiring. The shared Dependabot workflow's
 v0.1.7 commit pin is independent of this Python package migration.
 
-Semgrep retains version-comment, locked-command, trigger, explicit checkout,
-bootstrap, portability, and review-graph policies. The retired
+Semgrep retains version-comment, locked-command, explicit checkout, bootstrap,
+portability, safe skill YAML loading, selective Python runtime settings, and
+review-graph policies. One locked-command rule now covers both `uv run` and
+`uv sync`, replacing the duplicate workflow-only sync rule. Ruff and ty own
+general Python syntax, lint, and type checks; zizmor owns SHA pinning and
+dangerous workflow triggers. The retired
 `CODERABBIT_REVIEW_TOKEN` is forbidden in every workflow, including the approval
 caller. The shared approval job uses `GITHUB_TOKEN`. Add mutation pairs for new
-YAML forms and count assertions when a rule's path scope changes.
+YAML forms and count assertions when a rule's path scope changes. Python 3.15
+fixtures cover unsafe C/Python loader selection and global lazy-import settings;
+the production-path matrix also checks imported aliases and test exclusions.
 
 OSV scans the root Python lockfile. The embedded zero-dependency Rust warmup
 fixture is deliberate review input, not a shipped Cargo product. Root Cargo

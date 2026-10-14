@@ -138,6 +138,28 @@ def test_fresh_setup_and_rerun_use_pins_custom_storage_and_no_shell_changes(linu
     assert all(json.loads(path.read_text())["status"] == "passed" for path in reports)
 
 
+@pytest.mark.parametrize("caller_limit_kib", [None, 32768])
+def test_executor_keeps_scanner_stack_finite_and_respects_caller_limit(linux_boundary: dict[str, str], caller_limit_kib: int | None) -> None:
+    """Exercise the real pinned scanner's preexec policy inside the installer boundary."""
+    setup = run_installer(linux_boundary)
+    assert setup.returncode == 0, setup.stderr
+    probe = (
+        "import json, resource; from semgrep.core_runner import setrlimits_preexec_fn; "
+        "before = resource.getrlimit(resource.RLIMIT_STACK); setrlimits_preexec_fn(); "
+        "print(json.dumps({'before': before, 'after': resource.getrlimit(resource.RLIMIT_STACK), 'infinity': resource.RLIM_INFINITY}))"
+    )
+    argv = ["/bin/bash", str(REPOSITORY / "bin/linux-review.sh"), "exec", sys.executable, "-c", probe]
+    if caller_limit_kib is not None:
+        argv = ["/bin/bash", "-c", 'ulimit -HS -s "$1"; shift; exec "$@"', "scanner-stack-boundary", str(caller_limit_kib), *argv]
+    result = subprocess.run(argv, env=linux_boundary, capture_output=True, text=True, check=False, timeout=30)  # noqa: S603 - fixed isolated boundary probe.
+    assert result.returncode == 0, result.stderr
+    limits = json.loads(result.stdout)
+    assert limits["before"][1] != limits["infinity"]
+    assert 0 < limits["after"][0] <= limits["after"][1] <= 64 * 1024 * 1024
+    if caller_limit_kib is not None:
+        assert limits["before"][1] == limits["after"][1] == caller_limit_kib * 1024
+
+
 def test_plugin_failure_is_retained_as_failed_setup(linux_boundary: dict[str, str]) -> None:
     linux_boundary["PLUGIN_CHECK_EXIT_CODE"] = "17"
     result = run_installer(linux_boundary)

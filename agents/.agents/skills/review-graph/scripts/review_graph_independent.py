@@ -1,5 +1,7 @@
 """Validate substantive independent-review evidence and render the native contract."""
 
+__lazy_modules__ = ("review_graph_git", "review_graph_schema")
+
 import json
 from pathlib import Path
 from typing import Any
@@ -8,13 +10,15 @@ from review_graph_git import validate_git_dependencies
 from review_graph_schema import require_schema, require_schema_definition
 
 SCHEMA = Path(__file__).resolve().parents[1] / "references/schemas/independent-payload-v1.schema.json"
-CHECK_LABELS = {
-    "fallback": "fallback absence and failure",
-    "platform": "platform seams",
-    "parser-errors": "parser suffixes and error branches",
-    "unexpected-exceptions": "unexpected exception types",
-    "test-boundaries": "changed tests and boundary cases",
-}
+CHECK_LABELS = frozendict(
+    {
+        "fallback": "fallback absence and failure",
+        "platform": "platform seams",
+        "parser-errors": "parser suffixes and error branches",
+        "unexpected-exceptions": "unexpected exception types",
+        "test-boundaries": "changed tests and boundary cases",
+    }
+)
 
 
 def _context_blockers(context: list[str], owned: list[str]) -> list[str]:

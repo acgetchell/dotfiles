@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Validate Codex skill metadata stored in this repository."""
 
+__lazy_modules__ = ("argparse", "subprocess", "research_repo_tools.process", "research_repo_tools.selection")
+
 import argparse
 import re
 import subprocess
 import sys
 from collections.abc import Hashable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import yaml
 from research_repo_tools.process import ExecutableNotFoundError
@@ -25,10 +27,36 @@ MAX_SHORT_DESCRIPTION_LENGTH = 64
 ALLOWED_FRONTMATTER_KEYS = frozenset({"name", "description", "license", "allowed-tools", "metadata"})
 FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---(?:\n|\Z)", re.DOTALL)
 SKILL_NAME_RE = re.compile(r"^[a-z0-9-]+$")
-_YAML_MERGE_KEY = object()
+_YAML_MERGE_KEY = sentinel("_YAML_MERGE_KEY")
+SAFE_YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 
 
-def construct_scalar_mapping_key(node: ScalarNode, loader: yaml.SafeLoader) -> Hashable:
+class SafeYamlLoader(Protocol):
+    """Shared node-construction interface of the Python and C safe loaders."""
+
+    def construct_object(self, node: Node, deep: bool = False) -> Any:
+        """Construct a safe YAML value."""
+        ...
+
+    def get_single_node(self) -> Node | None:
+        """Compose one YAML document without flattening its mappings."""
+        ...
+
+    def dispose(self) -> None:
+        """Release parser resources."""
+        ...
+
+
+def load_safe_yaml(text: str) -> Any:
+    """Construct a document with the selected safe loader and release resources."""
+    loader = SAFE_YAML_LOADER(text)
+    try:
+        return loader.get_single_data()
+    finally:
+        loader.dispose()
+
+
+def construct_scalar_mapping_key(node: ScalarNode, loader: SafeYamlLoader) -> Hashable:
     """Construct a key identity without flattening away explicit duplicates."""
     if node.tag == "tag:yaml.org,2002:merge":
         # A merge directive is distinct from a literal quoted '<<' key.
@@ -43,7 +71,7 @@ def construct_scalar_mapping_key(node: ScalarNode, loader: yaml.SafeLoader) -> H
     return key
 
 
-def find_duplicate_mapping_key(node: Node | None, loader: yaml.SafeLoader) -> str | None:
+def find_duplicate_mapping_key(node: Node | None, loader: SafeYamlLoader) -> str | None:
     """Return the first repeated scalar mapping key in a YAML node tree."""
     if node is None:
         return None
@@ -97,14 +125,14 @@ def read_frontmatter_text(skill_path: Path | str) -> tuple[str | None, str]:
 def parse_frontmatter(frontmatter_text: str) -> tuple[dict[str, object] | None, str]:
     """Parse and validate the raw YAML frontmatter shape."""
     try:
-        loader = yaml.SafeLoader(frontmatter_text)
+        loader = SAFE_YAML_LOADER(frontmatter_text)
         try:
             duplicate_key = find_duplicate_mapping_key(loader.get_single_node(), loader)
         finally:
             loader.dispose()
         if duplicate_key is not None:
             return None, f"Duplicate key in frontmatter: {duplicate_key}"
-        loaded_frontmatter: Any = yaml.safe_load(frontmatter_text)
+        loaded_frontmatter: Any = load_safe_yaml(frontmatter_text)
     except yaml.YAMLError as exc:
         return None, f"Invalid YAML in frontmatter: {exc}"
 
@@ -173,7 +201,7 @@ def load_openai_metadata(skill_path: Path | str) -> tuple[dict[str, object] | No
         return None, "agents/openai.yaml not found"
 
     try:
-        loaded_metadata: Any = yaml.safe_load(metadata_path.read_text(encoding=UTF8))
+        loaded_metadata: Any = load_safe_yaml(metadata_path.read_text(encoding=UTF8))
     except yaml.YAMLError as exc:
         return None, f"Invalid YAML in agents/openai.yaml: {exc}"
 

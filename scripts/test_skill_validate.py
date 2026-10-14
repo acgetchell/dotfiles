@@ -3,14 +3,52 @@
 
 import shutil
 import subprocess
+import sys
 from typing import TYPE_CHECKING
 
 import pytest
+import yaml
 
 import skill_validate
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+@pytest.fixture(autouse=True, params=list(dict.fromkeys([yaml.SafeLoader, getattr(yaml, "CSafeLoader", yaml.SafeLoader)])))
+def safe_loader(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replay validation contracts against every available safe implementation."""
+    monkeypatch.setattr(skill_validate, "SAFE_YAML_LOADER", request.param)
+
+
+def test_import_falls_back_without_libyaml() -> None:
+    """An installation without the optional extension still imports and validates."""
+    program = (
+        "import sys, yaml\n"
+        "if hasattr(yaml, 'CSafeLoader'): del yaml.CSafeLoader\n"
+        "import skill_validate\n"
+        "assert skill_validate.SAFE_YAML_LOADER is yaml.SafeLoader\n"
+        "assert skill_validate.parse_frontmatter('name: example\\ndescription: Example.')[0] == {'name': 'example', 'description': 'Example.'}\n"
+        "assert 'research_repo_tools.selection' not in sys.modules\n"
+    )
+    result = subprocess.run(  # noqa: S603 - isolated import probe, no source changes.
+        [sys.executable, "-c", program], cwd=skill_validate.Path(__file__).parent, capture_output=True, text=True, check=False, timeout=30
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("filename", ["SKILL.md", "agents/openai.yaml"])
+def test_unsafe_yaml_tags_are_rejected(tmp_path: Path, filename: str) -> None:
+    """Both input paths reject Python object construction with either loader."""
+    skill_dir = tmp_path / "example-skill"
+    write_skill(skill_dir, "name: example-skill\ndescription: Example.")
+    content = "!!python/object:builtins.object {}"
+    if filename == "SKILL.md":
+        content = f"---\n{content}\n---\n"
+    (skill_dir / filename).write_text(content, encoding="utf-8")
+    valid, message = skill_validate.validate_skill(skill_dir)
+    assert not valid
+    assert message.startswith("Invalid YAML")
 
 
 def write_skill(skill_dir: Path, frontmatter: str, *, include_openai_metadata: bool = True) -> None:

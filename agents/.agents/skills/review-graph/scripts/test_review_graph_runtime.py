@@ -11,7 +11,7 @@ import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
-from dataclasses import asdict, replace
+from dataclasses import asdict, fields, replace
 from functools import partial
 from pathlib import Path
 from threading import Barrier
@@ -26,6 +26,7 @@ from review_graph_plan import (
     GraphPlan,
     ValidationArtifact,
     ValidationRequirement,
+    ValidationRequirementBinding,
     ValidationUnit,
     graph_plan_digest,
     graph_plan_digest_matches,
@@ -39,6 +40,7 @@ from review_graph_runtime import (
     WorkerPayloadWriteError,
     _argument_parser,
     _canonical_worker_payload,
+    _expanded_validation_plan,
     _expected_evidence_id,
     _git_path_status,
     _graph_plan,
@@ -46,6 +48,7 @@ from review_graph_runtime import (
     _planned_validation_digest,
     _reconciled_handoffs,
     _schema_reference,
+    _validation_reconciliation,
     _validation_workspace_audit,
     _worker_prompt,
     _workspace_content_digest,
@@ -378,7 +381,7 @@ def test_review_payload_schema_reports_all_field_diagnostics() -> None:
     with pytest.raises(SchemaValidationError) as captured:
         require_schema({"status": "unknown", "unexpected": True}, SCHEMA_ROOT / "review-payload-v1.schema.json")
 
-    diagnostics = cast("list[dict[str, Any]]", captured.value.as_dict()["diagnostics"])
+    diagnostics = captured.value.as_dict()["diagnostics"]
     paths = {item["path"] for item in diagnostics}
     assert {"$.changes", "$.command_policy_attested", "$.commands_executed", "$.status", "$.unexpected"} <= paths
     status = next(item for item in diagnostics if item["path"] == "$.status")
@@ -418,7 +421,7 @@ def test_planning_schema_aggregates_enum_and_required_field_diagnostics() -> Non
     with pytest.raises(SchemaValidationError) as captured:
         require_schema({"validation_requirements": [{"execution_strategy": "distributed"}]}, SCHEMA_ROOT / "planning-input-v1.schema.json")
 
-    diagnostics = cast("list[dict[str, Any]]", captured.value.as_dict()["diagnostics"])
+    diagnostics = captured.value.as_dict()["diagnostics"]
     paths = {item["path"] for item in diagnostics}
     strategy_path = "$.validation_requirements[0].execution_strategy"
     assert {"$.captured_paths", "$.scope_fingerprint", strategy_path} <= paths
@@ -470,7 +473,7 @@ def test_review_payload_schema_rejects_numeric_true_constants(value: float) -> N
     with pytest.raises(SchemaValidationError) as captured:
         require_schema({"command_policy_attested": value}, SCHEMA_ROOT / "review-payload-v1.schema.json")
 
-    diagnostics = cast("list[dict[str, Any]]", captured.value.as_dict()["diagnostics"])
+    diagnostics = captured.value.as_dict()["diagnostics"]
     assert any(item["path"] == "$.command_policy_attested" and item["code"] == "const" for item in diagnostics)
 
 
@@ -479,7 +482,7 @@ def test_planning_schema_rejects_boolean_schema_versions(value: bool) -> None:
     with pytest.raises(SchemaValidationError) as captured:
         require_schema({"schema_version": value}, SCHEMA_ROOT / "planning-input-v1.schema.json")
 
-    diagnostics = cast("list[dict[str, Any]]", captured.value.as_dict()["diagnostics"])
+    diagnostics = captured.value.as_dict()["diagnostics"]
     assert any(item["path"] == "$.schema_version" for item in diagnostics)
 
 
@@ -507,7 +510,7 @@ def test_validation_payload_schema_rejects_nonnumeric_exit_code_strings(exit_cod
     with pytest.raises(SchemaValidationError) as captured:
         require_schema(payload, SCHEMA_ROOT / "validation-payload-v3.schema.json")
 
-    diagnostics = cast("list[dict[str, Any]]", captured.value.as_dict()["diagnostics"])
+    diagnostics = captured.value.as_dict()["diagnostics"]
     assert any(item["path"] == "$.executions[0].exit_code" and item["code"] == "pattern" for item in diagnostics)
 
 
@@ -570,7 +573,7 @@ def test_planning_schema_reports_item_diagnostics(section: str, identity_field: 
     with pytest.raises(SchemaValidationError) as captured:
         require_schema({section: [{identity_field: "rust.errors", "unexpected": True}]}, SCHEMA_ROOT / "planning-input-v1.schema.json")
 
-    diagnostics = cast("list[dict[str, Any]]", captured.value.as_dict()["diagnostics"])
+    diagnostics = captured.value.as_dict()["diagnostics"]
     paths = {item["path"] for item in diagnostics}
     assert f"$.{section}[0].{missing_field}" in paths
     assert f"$.{section}[0].unexpected" in paths
@@ -2410,8 +2413,8 @@ def test_materialize_cli_output_failure_leaves_no_store_and_corrected_retry_succ
 def test_materialize_cli_store_failure_rolls_back_new_operation_result(tmp_path: Path) -> None:
     artifact_store = tmp_path / "proof"
     artifact_store.mkdir()
-    sentinel = artifact_store / "preexisting.txt"
-    sentinel.write_text("preserve me\n", encoding="utf-8")
+    preserved_file = artifact_store / "preexisting.txt"
+    preserved_file.write_text("preserve me\n", encoding="utf-8")
     request = {
         "artifact_store": str(artifact_store),
         "authorization": "review-only",
@@ -2426,8 +2429,8 @@ def test_materialize_cli_store_failure_rolls_back_new_operation_result(tmp_path:
 
     assert main(["materialize-dispatches", "--input", str(input_path), "--output", str(output_path)]) == 2
     assert not output_path.exists()
-    assert tuple(artifact_store.iterdir()) == (sentinel,)
-    assert sentinel.read_text(encoding="utf-8") == "preserve me\n"
+    assert tuple(artifact_store.iterdir()) == (preserved_file,)
+    assert preserved_file.read_text(encoding="utf-8") == "preserve me\n"
 
 
 def test_late_materialization_failure_publishes_nothing_before_retry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -3722,6 +3725,7 @@ def _compile_materialized_evidence(  # noqa: PLR0913
     plan: GraphPlan | None = None,
     skip_node_ids: tuple[str, ...] = (),
     late_requirements: list[dict[str, Any]] | None = None,
+    late_requirements_by_node: dict[str, list[dict[str, Any]]] | None = None,
     reference_planned_validation: bool = False,
     audit_findings: list[dict[str, Any]] | None = None,
     reused_sources: list[dict[str, str]] | None = None,
@@ -3804,6 +3808,8 @@ def _compile_materialized_evidence(  # noqa: PLR0913
                 ]
             else:
                 validation_requirements = late_requirements or [] if dispatch["node_id"] == "audit-001" else []
+                if late_requirements_by_node is not None:
+                    validation_requirements = late_requirements_by_node.get(dispatch["node_id"], [])
             payload = {
                 "command_policy_attested": True,
                 "commands_executed": [],
@@ -4032,8 +4038,12 @@ def _late_validation_plan() -> dict[str, Any]:
     return requirement
 
 
-def _late_validation_fixture(tmp_path: Path) -> tuple[GraphPlan, list[dict[str, str]], dict[str, Any], Path, Path, Path]:
-    plan, sources = _compile_materialized_evidence(tmp_path / "original", late_requirements=[_late_validation_requirement()])
+def _late_validation_fixture(
+    tmp_path: Path, *, late_requirements_by_node: dict[str, list[dict[str, Any]]] | None = None
+) -> tuple[GraphPlan, list[dict[str, str]], dict[str, Any], Path, Path, Path]:
+    plan, sources = _compile_materialized_evidence(
+        tmp_path / "original", late_requirements=[_late_validation_requirement()], late_requirements_by_node=late_requirements_by_node
+    )
     lifecycle = {"plan": _json_plan(plan), "source_state": ["scope", "worktree", "repository"]}
     materialized = materialize_dispatches(
         {
@@ -4056,6 +4066,225 @@ def _late_validation_fixture(tmp_path: Path) -> tuple[GraphPlan, list[dict[str, 
         if node.mode != "synthesis":
             append_journal_event(journal, lifecycle, JournalEventRequest(node.node_id, "accepted", source=by_node[node.node_id]))
     return plan, sources, lifecycle, dispatch_path, capture_path, journal
+
+
+def _bound_late_validation_fixture(
+    tmp_path: Path, *, compatible: bool = False
+) -> tuple[GraphPlan, list[dict[str, str]], dict[str, Any], Path, Path, Path, dict[str, Any]]:
+    late_by_node = {
+        node: [
+            {
+                **_late_validation_requirement(),
+                "requirement_id": "ubuntu-ci",
+                "commands": ["just ci"],
+                "environment": "GitHub Actions Ubuntu" if compatible or node == "audit-001" else "GitHub-hosted Ubuntu, pinned tooling",
+                "reason": f"Native CI requested by {node}",
+                "expected_evidence": f"Exact-source success and logs requested by {node}",
+            }
+        ]
+        for node in ("audit-001", "audit-002")
+    }
+    plan, sources, lifecycle, dispatch_path, capture_path, journal = _late_validation_fixture(tmp_path, late_requirements_by_node=late_by_node)
+    records = [json.loads(Path(source["metadata_path"]).read_bytes())["normalized_record"] for source in sources]
+    discoveries = _validation_reconciliation(plan, records)["requirements"]
+    additions = []
+    bindings = []
+    for discovery in discoveries:
+        requirement = discovery["requirement"]
+        alias = f"{requirement['requirement_id']}.{discovery['originating_evidence_id'].removeprefix('review:')}"
+        additions.append(
+            {
+                **_late_validation_plan(),
+                "requirement_id": alias,
+                "commands": requirement["commands"],
+                "working_directories": [requirement["working_directory"]],
+                "environment": requirement["environment"],
+                "selection_reason": requirement["reason"],
+                "expected_evidence": requirement["expected_evidence"],
+            }
+        )
+        bindings.append(
+            {key: discovery[key] for key in ("originating_evidence_id", "requirement_id", "requirement_digest")} | {"planned_requirement_id": alias}
+        )
+    request = {**lifecycle, "artifact_store": str(tmp_path / "revision"), "validation_requirements": additions, "validation_requirement_bindings": bindings}
+    return plan, sources, lifecycle, dispatch_path, capture_path, journal, request
+
+
+@pytest.mark.parametrize("compatible", [False, True])
+def test_late_validation_requirement_bindings_preserve_colliding_origins_and_immutable_evidence(tmp_path: Path, compatible: bool) -> None:
+    plan, sources, lifecycle, dispatch_path, capture_path, journal, request = _bound_late_validation_fixture(tmp_path, compatible=compatible)
+    original_bytes = {path: path.read_bytes() for path in (tmp_path / "original").rglob("*") if path.is_file()}
+    original_bytes.update({path: path.read_bytes() for path in (journal, dispatch_path, capture_path)})
+    request_path, result_path = tmp_path / "request.json", tmp_path / "result.json"
+    request_path.write_text(json.dumps(request))
+    assert (
+        main(
+            [
+                "reconcile-validation-requirements",
+                "--input",
+                str(request_path),
+                "--dispatches",
+                str(dispatch_path),
+                "--journal",
+                str(journal),
+                "--current-capture",
+                str(capture_path),
+                "--output",
+                str(result_path),
+            ]
+        )
+        == 0
+    )
+    result = json.loads(result_path.read_bytes())
+    assert result["status"] == "expanded"
+    revised_lifecycle = result["lifecycle_input"]
+    revised_plan = _graph_plan(revised_lifecycle["plan"])
+    aliases = {binding["planned_requirement_id"] for binding in request["validation_requirement_bindings"]}
+    added_units = [unit for unit in revised_plan.coalesced_validation_units if aliases.intersection(unit.requirement_ids)]
+    assert len(added_units) == (1 if compatible else 2)
+    assert {requirement_id for unit in added_units for requirement_id in unit.requirement_ids} == aliases
+    reconciled = result["validation_reconciliation"]["requirements"]
+    assert {row["requirement_id"] for row in reconciled} == {"ubuntu-ci"}
+    assert {row["originating_evidence_id"] for row in reconciled} == {"review:audit-001", "review:audit-002"}
+    assert {row["resolution"] for row in reconciled} == {"planned"}
+    assert {row["planned_requirement_id"] for row in reconciled} == aliases
+    for row in reconciled:
+        binding = next(item for item in request["validation_requirement_bindings"] if item["originating_evidence_id"] == row["originating_evidence_id"])
+        assert row["requirement_digest"] == binding["requirement_digest"]
+        original = json.loads(Path(_source_by_node(sources)[row["originating_evidence_id"].removeprefix("review:")]["metadata_path"]).read_bytes())
+        assert row["requirement"] == original["normalized_record"]["validation_requirements"][0]
+        unit = next(unit for unit in added_units if unit.node_id == row["validation_unit_id"])
+        assert unit.environment == row["requirement"]["environment"]
+    assert {node.node_id for node in plan.actual_worker_nodes if node.mode != "synthesis"} <= set(result["retained_node_ids"])
+    assert revised_lifecycle["source_state"] == lifecycle["source_state"]
+    revised_dispatches = json.loads(Path(result["dispatches_path"]).read_bytes())
+    revised_journal = Path(result["journal_path"])
+    validators = [entry for entry in revised_dispatches["dispatches"] if entry["node_id"] in {unit.node_id for unit in added_units}]
+    for entry in validators[:-1]:
+        _compile_repair_fixture_entry(entry, revised_lifecycle, revised_journal)
+    incomplete_path = tmp_path / "incomplete.json"
+    assert (
+        main(
+            [
+                "finalize-proof",
+                "--input",
+                result["lifecycle_input_path"],
+                "--dispatches",
+                result["dispatches_path"],
+                "--journal",
+                result["journal_path"],
+                "--current-capture",
+                str(capture_path),
+                "--output",
+                str(incomplete_path),
+            ]
+        )
+        == 2
+    )
+    assert json.loads(incomplete_path.read_bytes())["repository_validation_status"] == "incomplete"
+    _compile_repair_fixture_entry(validators[-1], revised_lifecycle, revised_journal)
+    for entry in revised_dispatches["dispatches"]:
+        if entry["dispatch"]["mode"] == "synthesis":
+            _compile_repair_fixture_entry(entry, revised_lifecycle, revised_journal)
+    final_path = tmp_path / "final.json"
+    assert (
+        main(
+            [
+                "finalize-proof",
+                "--input",
+                result["lifecycle_input_path"],
+                "--dispatches",
+                result["dispatches_path"],
+                "--journal",
+                result["journal_path"],
+                "--current-capture",
+                str(capture_path),
+                "--output",
+                str(final_path),
+            ]
+        )
+        == 0
+    )
+    final = json.loads(final_path.read_bytes())
+    assert final["status"] == "complete", final["blockers"]
+    assert final["repository_validation_status"] == "passed"
+    assert all(path.read_bytes() == content for path, content in original_bytes.items())
+
+
+@pytest.mark.parametrize("tamper", ["origin", "digest", "alias", "duplicate", "environment", "shared-alias", "missing-bindings", "duplicate-planned-id"])
+def test_late_validation_requirement_bindings_reject_unbound_ambiguous_and_changed_contracts(tmp_path: Path, tamper: str) -> None:
+    _plan, _sources, _lifecycle, dispatch_path, capture_path, journal, request = _bound_late_validation_fixture(tmp_path)
+    if tamper == "origin":
+        request["validation_requirement_bindings"][0]["originating_evidence_id"] = "review:unknown"
+    elif tamper == "digest":
+        request["validation_requirement_bindings"][0]["requirement_digest"] = "sha256:" + "0" * 64
+    elif tamper == "alias":
+        request["validation_requirement_bindings"][0]["planned_requirement_id"] = "missing-alias"
+    elif tamper == "duplicate":
+        duplicate = {**request["validation_requirement_bindings"][0], "planned_requirement_id": request["validation_requirements"][1]["requirement_id"]}
+        request["validation_requirement_bindings"].append(duplicate)
+    elif tamper == "environment":
+        request["validation_requirements"][0]["environment"] = "Ubuntu with a differently described environment"
+    elif tamper == "shared-alias":
+        request["validation_requirement_bindings"][1]["planned_requirement_id"] = request["validation_requirements"][0]["requirement_id"]
+        request["validation_requirements"].pop()
+    elif tamper == "missing-bindings":
+        request.pop("validation_requirement_bindings")
+    else:
+        for requirement in request["validation_requirements"]:
+            requirement["requirement_id"] = "ubuntu-ci"
+        for binding in request["validation_requirement_bindings"]:
+            binding["planned_requirement_id"] = "ubuntu-ci"
+    request_path = tmp_path / "request.json"
+    request_path.write_text(json.dumps(request))
+    assert (
+        main(
+            [
+                "reconcile-validation-requirements",
+                "--input",
+                str(request_path),
+                "--dispatches",
+                str(dispatch_path),
+                "--journal",
+                str(journal),
+                "--current-capture",
+                str(capture_path),
+                "--output",
+                str(tmp_path / "rejected.json"),
+            ]
+        )
+        == 2
+    )
+    assert not (tmp_path / "revision").exists()
+
+
+def test_validation_requirement_bindings_can_share_one_exact_existing_execution(tmp_path: Path) -> None:
+    plan, sources, lifecycle, _dispatch_path, _capture_path, _journal, request = _bound_late_validation_fixture(tmp_path, compatible=True)
+    records = [json.loads(Path(source["metadata_path"]).read_bytes())["normalized_record"] for source in sources]
+    expanded = _expanded_validation_plan(request, plan, records, SKILL_ROOT.parents[2], authorization="review-only")
+    alias = request["validation_requirements"][0]["requirement_id"]
+    bindings = [dict(item, planned_requirement_id=alias) for item in request["validation_requirement_bindings"]]
+    one_request = {**lifecycle, "validation_requirements": [request["validation_requirements"][0]], "validation_requirement_bindings": bindings}
+    one_plan = _expanded_validation_plan(one_request, plan, records, SKILL_ROOT.parents[2], authorization="review-only")
+    assert len(one_plan.coalesced_validation_units) == len(plan.coalesced_validation_units) + 1
+    assert {row["validation_unit_id"] for row in _validation_reconciliation(one_plan, records)["requirements"]} == {
+        one_plan.coalesced_validation_units[-1].node_id
+    }
+    # An unchanged binding retry is idempotent; replacing its origin target is forbidden.
+    assert (
+        _expanded_validation_plan(
+            {"source_state": lifecycle["source_state"], "validation_requirement_bindings": bindings},
+            one_plan,
+            records,
+            SKILL_ROOT.parents[2],
+            authorization="review-only",
+        )
+        == one_plan
+    )
+    changed = {**one_request, "validation_requirements": [], "validation_requirement_bindings": request["validation_requirement_bindings"]}
+    with pytest.raises(ValueError, match="cannot replace an existing origin binding"):
+        _expanded_validation_plan(changed, one_plan, records, SKILL_ROOT.parents[2], authorization="review-only")
+    assert expanded.validation_requirement_bindings
 
 
 @pytest.mark.parametrize("exclude", [False, True])
@@ -4259,6 +4488,46 @@ def test_plan_digest_survives_current_format_round_trip() -> None:
     assert graph_plan_digest(_graph_plan(_json_plan(plan))) == graph_plan_digest(plan)
 
 
+def test_validation_requirement_bindings_preserve_legacy_plan_digests() -> None:
+    plan = _sparse_plan()
+    legacy = _json_plan(plan)
+    legacy.pop("validation_requirement_bindings")
+    restored = _graph_plan(legacy)
+    assert restored.validation_requirement_bindings == ()
+    assert graph_plan_digest(restored) == graph_plan_digest(plan)
+    for field in ("independent_review_after_audits", "commit_handoffs", "pre_review_validation_nodes", "validation_recoveries", "validation_exclusions"):
+        legacy.pop(field)
+    if plan.review_lifecycle == ReviewLifecycle():
+        legacy.pop("review_lifecycle")
+    legacy_digest = "sha256:" + hashlib.sha256(json.dumps(legacy, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    assert graph_plan_digest_matches(restored, legacy_digest)
+    binding = ValidationRequirementBinding("review:audit-001", "logical-check", "sha256:" + "1" * 64, plan.coalesced_validation_units[0].requirement_ids[0])
+    bound_plan = replace(plan, validation_requirement_bindings=(binding,))
+    assert graph_plan_digest(bound_plan) != graph_plan_digest(plan)
+    assert not graph_plan_digest_matches(bound_plan, legacy_digest)
+    assert _graph_plan(_json_plan(bound_plan)).validation_requirement_bindings == (binding,)
+
+
+def test_graph_plan_preserves_legacy_positional_constructor_tail() -> None:
+    """Adding origin bindings must not shift existing optional positional arguments."""
+    plan = _sparse_plan()
+    legacy_fields = [item.name for item in fields(GraphPlan) if item.name != "validation_requirement_bindings"]
+    assert GraphPlan(*(getattr(plan, name) for name in legacy_fields)) == plan
+    assert next(item for item in fields(GraphPlan) if item.name == "validation_requirement_bindings").kw_only
+
+
+def test_validation_requirement_bindings_reject_ambiguous_persisted_origins() -> None:
+    plan = _sparse_plan()
+    binding = ValidationRequirementBinding("review:audit-001", "logical-check", "sha256:" + "1" * 64, plan.coalesced_validation_units[0].requirement_ids[0])
+    ambiguous = replace(plan, validation_requirement_bindings=(binding, binding))
+    with pytest.raises(ValueError, match="binding origins must be unique"):
+        _graph_plan(_json_plan(ambiguous))
+    with pytest.raises(ValueError, match="binding origins must be unique"):
+        _validation_reconciliation(ambiguous, [])
+    with pytest.raises(ValueError, match="unknown planned requirement"):
+        _graph_plan(_json_plan(replace(plan, validation_requirement_bindings=(replace(binding, planned_requirement_id="missing"),))))
+
+
 def test_plan_digest_retains_nonempty_reuse_fields(tmp_path: Path) -> None:
     request, _entry, _source = _mutation_with_audit_source(tmp_path)
     result = advance_after_mutation(request)
@@ -4269,6 +4538,7 @@ def test_plan_digest_retains_nonempty_reuse_fields(tmp_path: Path) -> None:
     document.pop("validation_recoveries")
     document.pop("audit_delta_reviews")
     document.pop("validation_exclusions")
+    document.pop("validation_requirement_bindings")
     assert plan.review_lifecycle.repairs_completed == 1
     assert not plan.independent_review_after_audits
     document.pop("independent_review_after_audits")

@@ -7,12 +7,9 @@ import subprocess
 import sys
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING
 
+import pytest
 from research_repo_tools.just_inspect import dry_run, inspect_justfile
-
-if TYPE_CHECKING:
-    import pytest
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_TESTS = "agents/.agents/skills/review-graph/scripts/test_review_graph_contracts.py"
@@ -21,14 +18,61 @@ CONTRACT_TESTS = "agents/.agents/skills/review-graph/scripts/test_review_graph_c
 def test_ci_requires_full_python_inventory_and_shared_baseline() -> None:
     """CI includes fixtures once through the complete Python gate."""
     recipes = inspect_justfile(REPOSITORY_ROOT).recipes
-    for parent, child in (("ci", "check"), ("check", "python-ci"), ("python-ci", "python-check"), ("python-check", "python-baseline-check")):
+    for parent, child in (("ci", "check"), ("check", "python-ci"), ("python-ci", "python-check")):
         assert child in {dependency["recipe"] for dependency in recipes[parent]["dependencies"]}
-    commands = [line[0] for line in recipes["python-check"]["body"]]
-    for command in commands[:2]:
-        assert "research-repo-tools files run --include '*.py' --include '*.pyi'" in command
-        assert "--no-force-exclude" in command
-        assert "--exclude" not in command
-    assert "--no-fix" in commands[1]
+    assert recipes["python-check"]["body"] == [["uv run --locked --group dev research-repo-tools python check"]]
+    assert recipes["python-typecheck"]["body"] == [["uv run --locked --group dev research-repo-tools python typecheck"]]
+
+
+@pytest.mark.parametrize("overrides", [False, True])
+def test_python_updater_rejects_lost_project_overrides_before_mutation(tmp_path: Path, *, overrides: bool) -> None:
+    """A real preflight process protects the manifest/lock before shared resolution."""
+    content = "[tool.uv]\n" + ("override-dependencies = [\"pywin32==312; sys_platform == 'win32'\"]\n" if overrides else "")
+    manifest = tmp_path / "pyproject.toml"
+    manifest.write_text(content)
+    lock = tmp_path / "uv.lock"
+    lock.write_text("preserved lock\n")
+    result = subprocess.run(  # noqa: S603 - fixed local guard in an isolated consumer directory.
+        [sys.executable, str(REPOSITORY_ROOT / "scripts/python_update_preflight.py")], cwd=tmp_path, capture_output=True, text=True, check=False, timeout=30
+    )
+    assert result.returncode == int(overrides)
+    assert result.stdout == ""
+    assert ("isolated resolver" in result.stderr) == overrides
+    assert manifest.read_text() == content
+    assert lock.read_text() == "preserved lock\n"
+    recipe = inspect_justfile(REPOSITORY_ROOT).recipes["update-python-dependencies"]
+    commands = "\n".join(line[0] for line in recipe["body"] if line and isinstance(line[0], str))
+    assert commands.index("python_update_preflight.py") < commands.index("just _shared-deps update-python")
+
+
+@pytest.mark.parametrize(
+    ("content", "diagnostic"),
+    [
+        ('"""Fixture."""\n\nvalue=1\n', "would be reformatted"),
+        ('"""Fixture."""\n\nprint(undefined_value)\n', "F821"),
+        ('"""Fixture."""\n\nvalue: int = "wrong"\n', "invalid-assignment"),
+    ],
+)
+def test_shared_python_gate_checks_excluded_consumer_fixtures(tmp_path: Path, content: str, diagnostic: str) -> None:
+    """The published command catches each failure even under native tool exclusions."""
+    for name in ("pyproject.toml", ".python-version"):
+        shutil.copy2(REPOSITORY_ROOT / name, tmp_path)
+    manifest = tmp_path / "pyproject.toml"
+    manifest.write_text(manifest.read_text().replace("[tool.ruff]\n", '[tool.ruff]\nexclude = ["tests/semgrep"]\n'), encoding="utf-8")
+    fixture = tmp_path / "tests/semgrep/negative.py"
+    fixture.parent.mkdir(parents=True)
+    fixture.write_text(content, encoding="utf-8")
+    git = shutil.which("git")
+    executable = shutil.which("research-repo-tools")
+    assert git is not None
+    assert executable is not None
+    subprocess.run([git, "init", "-q", str(tmp_path)], check=True, capture_output=True)  # noqa: S603 - isolated consumer repository.
+    result = subprocess.run(  # noqa: S603 - installed public checker against a disposable consumer fixture.
+        [executable, "--root", str(tmp_path), "python", "check"], capture_output=True, text=True, check=False, timeout=30
+    )
+    assert result.returncode != 0
+    assert diagnostic in result.stdout + result.stderr, result.stdout + result.stderr
+    assert fixture.read_text() == content
 
 
 def test_python_fixture_lint_uses_the_complete_ruff_configuration() -> None:

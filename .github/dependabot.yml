@@ -25,7 +25,8 @@ updates:
         patterns:
           - "*"
 
-  # Enable version updates for Python development dependencies locked by uv.
+  # Pause version updates until hosted Dependabot supports Python >=3.15.
+  # Security-update policy remains configured; OSV still audits the lockfile.
   - package-ecosystem: "uv"
     directory: "/"
     schedule:
@@ -35,7 +36,7 @@ updates:
       timezone: "America/Los_Angeles"
     cooldown:
       default-days: 7
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 0
     labels:
       - "dependencies"
       - "python"

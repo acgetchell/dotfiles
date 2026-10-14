@@ -1,0 +1,16 @@
+# ruleid: dotfiles.python315.no-global-jit-default
+export PYTHON_JIT := "1"
+# ruleid: dotfiles.python315.no-global-jit-default
+export PYTHON_JIT := '1'
+# ruleid: dotfiles.python315.no-global-jit-default
+export PYTHON_JIT := "1" # enable JIT
+# ruleid: dotfiles.python315.no-global-jit-default
+export PYTHON_JIT := '1'  # enable JIT
+# ok: dotfiles.python315.no-global-jit-default
+export PYTHON_JIT := "0"
+# ok: dotfiles.python315.no-global-jit-default
+export PYTHON_JIT := "0" # keep the default
+
+benchmark:
+    # ok: dotfiles.python315.no-global-jit-default
+    PYTHON_JIT=1 uv run --locked python workload.py

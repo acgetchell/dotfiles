@@ -124,6 +124,79 @@ def test_production_paths_with_shared_count_fixtures(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_python315_policy_and_consolidated_lock_rule_cover_production_paths(tmp_path: Path) -> None:
+    """Exercise aliases, owned paths, exclusions, and both uv subcommands."""
+    ids = [
+        "dotfiles.python315.no-global-lazy-imports",
+        "dotfiles.skills.safe-yaml-loader",
+        "dotfiles.python315.no-global-jit-default",
+        "dotfiles.tooling.uv-run-locked",
+    ]
+    config = yaml.safe_load((REPOSITORY / "semgrep.yaml").read_text())
+    rules = [rule for rule in config["rules"] if rule["id"] in ids]
+    assert len(rules) == len(ids)
+    assert "dotfiles.github-actions.uv-sync-locked-in-workflows" not in {rule["id"] for rule in config["rules"]}
+    config_path = tmp_path / "semgrep.yaml"
+    config_path.write_text(yaml.safe_dump({"rules": rules}))
+    python = """import sys as runtime
+import yaml as parser
+from yaml import FullLoader
+runtime.set_lazy_imports("all")
+parser.CFullLoader("")
+getattr(parser, "CLoader", parser.SafeLoader)("")
+FullLoader("")
+"""
+    commands = """export PYTHON_JIT := "1"
+export PYTHON_JIT := '1' # enable JIT
+export PYTHON_JIT := "0" # keep the default
+uv sync
+uv run pytest
+PYTHON_JIT=1 uv sync --locked
+UV_CACHE_DIR="cache" uv run --locked pytest
+"""
+    owned = "agents/.agents/skills/review-graph/scripts"
+    expected = {
+        "scripts/skill_validate.py": [1, 3, 0, 0],
+        "scripts/linux_review.py": [1, 0, 0, 0],
+        "scripts/test_runtime.py": [0, 0, 0, 0],
+        f"{owned}/capture_scope.py": [1, 0, 0, 0],
+        f"{owned}/test_runtime.py": [0, 0, 0, 0],
+        "docs/runtime.py": [0, 0, 0, 0],
+        "justfile": [0, 0, 2, 2],
+        "bin/check.sh": [0, 0, 0, 2],
+        ".github/workflows/check.yml": [0, 0, 0, 2],
+        "docs/example.sh": [0, 0, 0, 0],
+    }
+    for name in expected:
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(python if path.suffix == ".py" else commands)
+    executable = shutil.which("semgrep")
+    assert executable is not None
+    result = run_command_bytes(
+        executable,
+        (
+            "scan",
+            "--disable-version-check",
+            "--metrics",
+            "off",
+            "--json",
+            "--quiet",
+            "--strict",
+            "--no-rewrite-rule-ids",
+            "--config",
+            str(config_path),
+            *expected,
+        ),
+        cwd=tmp_path,
+        env=_scanner_environment(tmp_path),
+        timeout=120,
+    )
+    actual = Counter((finding.path, finding.check_id) for finding in parse_results(result.stdout.decode()).results)
+    required = Counter({(Path(path), rule): count for path, counts in expected.items() for rule, count in zip(ids, counts, strict=True) if count})
+    assert actual == required
+
+
 def _zizmor_finding_ids(path: Path) -> set[str]:
     """Run the pinned offline audit with the repository's regular persona."""
     executable = shutil.which("zizmor")

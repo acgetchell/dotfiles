@@ -75,7 +75,7 @@ Ensure human-facing output is intentional and machine-consumed data remains pars
 
 ## Validation
 
-Prefer consumer repository commands using published `research-repo-tools` v0.1.7
+Prefer consumer repository commands using published `research-repo-tools` v0.1.9
 or a deliberately adopted newer release. The [shared workflow](references/shared-notebooks.md)
 defines locked and isolated invocations, consumer policy, and severity rules.
 

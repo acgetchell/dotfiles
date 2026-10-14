@@ -78,6 +78,7 @@ from review_graph_plan import (
     ValidationEvidenceMapping,
     ValidationExclusion,
     ValidationRequirement,
+    ValidationRequirementBinding,
     ValidationUnit,
     WorkerBudget,
     WorkerNode,
@@ -2744,8 +2745,10 @@ def _graph_plan(raw: dict[str, Any]) -> GraphPlan:
             )
             for item in _records(raw, "validation_exclusions")
         ),
+        validation_requirement_bindings=tuple(_validation_requirement_binding(item) for item in _records(raw, "validation_requirement_bindings")),
     )
     validate_validation_barrier(plan)
+    _validation_binding_map(plan)
     return plan
 
 
@@ -3040,6 +3043,39 @@ def _reused_validation_reference(
     }
 
 
+def _validation_requirement_binding(raw: dict[str, Any]) -> ValidationRequirementBinding:
+    """Parse an exact origin identity without accepting additional claims."""
+    if set(raw) != {"originating_evidence_id", "requirement_id", "requirement_digest", "planned_requirement_id"}:
+        msg = "validation requirement binding must name its exact origin, ID, digest, and planned ID"
+        raise ValueError(msg)
+    return ValidationRequirementBinding(
+        originating_evidence_id=_required_text(raw, "originating_evidence_id"),
+        requirement_id=_required_text(raw, "requirement_id"),
+        requirement_digest=_sha256_digest(raw.get("requirement_digest"), "requirement_digest"),
+        planned_requirement_id=_required_text(raw, "planned_requirement_id"),
+    )
+
+
+def _validation_binding_map(plan: GraphPlan) -> dict[tuple[str, str, str], ValidationRequirementBinding]:
+    """Reject ambiguous origins and aliases before selecting execution units."""
+    planned_ids = [requirement for unit in plan.coalesced_validation_units for requirement in unit.requirement_ids]
+    if len(planned_ids) != len(set(planned_ids)):
+        msg = "planned validation requirement IDs must be unique"
+        raise ValueError(msg)
+    bindings: dict[tuple[str, str, str], ValidationRequirementBinding] = {}
+    for item in plan.validation_requirement_bindings:
+        binding = _validation_requirement_binding(asdict(item))
+        identity = (binding.originating_evidence_id, binding.requirement_id, binding.requirement_digest)
+        if identity in bindings:
+            msg = "validation requirement binding origins must be unique"
+            raise ValueError(msg)
+        if binding.planned_requirement_id not in planned_ids:
+            msg = "validation requirement binding names an unknown planned requirement"
+            raise ValueError(msg)
+        bindings[identity] = binding
+    return bindings
+
+
 def _validation_requirement_unit(
     units: dict[str, tuple[ValidationUnit, str]], requirement_id: str, planned_digest: str | None
 ) -> tuple[ValidationUnit, str] | None:
@@ -3054,6 +3090,7 @@ def _validation_requirement_unit(
 def _validation_reconciliation(plan: GraphPlan, records: Sequence[EvidenceRecord]) -> dict[str, Any]:
     """Bind discovered needs to exact command plans, never to a generic CI pass."""
     units = {requirement: (unit, _planned_validation_digest(unit)) for unit in plan.coalesced_validation_units for requirement in unit.requirement_ids}
+    bindings = _validation_binding_map(plan)
     exclusions = {(item.originating_evidence_id, item.requirement_id, item.requirement_digest): item for item in plan.validation_exclusions}
     results: list[dict[str, Any]] = []
     blockers: list[str] = []
@@ -3063,7 +3100,9 @@ def _validation_reconciliation(plan: GraphPlan, records: Sequence[EvidenceRecord
         for requirement_id, requirement in _validation_records(record):
             digest = digest_bytes(canonical_json(requirement).encode())
             origin = _required_text(record, "evidence_id")
-            planned = _validation_requirement_unit(units, requirement_id, requirement.get("planned_validation_digest"))
+            binding = bindings.get((origin, requirement_id, digest))
+            planned_id = binding.planned_requirement_id if binding is not None else requirement_id
+            planned = _validation_requirement_unit(units, planned_id, requirement.get("planned_validation_digest"))
             unit = planned[0] if planned is not None else None
             original = next(
                 (
@@ -3112,6 +3151,7 @@ def _validation_reconciliation(plan: GraphPlan, records: Sequence[EvidenceRecord
                     "resolution": resolution,
                     "reason": exclusion.reason if exclusion and not matches else None,
                     "validation_unit_id": unit.node_id if matches and unit else None,
+                    **({"planned_requirement_id": planned_id} if binding is not None else {}),
                     **({"reuse_binding": reuse_binding} if reuse_binding is not None else {}),
                     **({"commit_handoff_binding": commit_binding} if commit_binding is not None else {}),
                 }
@@ -3168,6 +3208,9 @@ def _synthesis_plan_context(plan: GraphPlan, records: list[dict[str, Any]]) -> d
         "validation_evidence_mapping": [asdict(item) for item in plan.validation_evidence_mapping],
         "validation_environments": {unit.node_id: json.loads(_validation_environment_identity(unit)) for unit in plan.coalesced_validation_units},
         "validation_exclusions": [asdict(item) for item in plan.validation_exclusions],
+        **(
+            {"validation_requirement_bindings": [asdict(item) for item in plan.validation_requirement_bindings]} if plan.validation_requirement_bindings else {}
+        ),
         "validation_recoveries": list(plan.validation_recoveries),
         **({"commit_handoffs": [asdict(item) for item in plan.commit_handoffs]} if plan.commit_handoffs else {}),
         "validation_reconciliation": _validation_reconciliation(plan, records),
@@ -6894,6 +6937,37 @@ def _software_doi_recheck_ids(document: dict[str, Any], records: list[dict[str, 
     return recheck_ids
 
 
+def _expanded_validation_bindings(
+    document: dict[str, Any], plan: GraphPlan, discoveries: dict[tuple[str, str, str], dict[str, Any]], addition_ids: set[str]
+) -> dict[tuple[str, str, str], ValidationRequirementBinding]:
+    """Admit aliases only through verified immutable discovery identities."""
+    existing = {requirement for unit in plan.coalesced_validation_units for requirement in unit.requirement_ids}
+    bindings = _validation_binding_map(plan)
+    declared_bindings: set[tuple[str, str, str]] = set()
+    for raw in _records(document, "validation_requirement_bindings"):
+        binding = _validation_requirement_binding(raw)
+        identity = (binding.originating_evidence_id, binding.requirement_id, binding.requirement_digest)
+        discovery = discoveries.get(identity)
+        if discovery is None:
+            msg = "validation requirement binding does not name an exact accepted requirement"
+            raise ValueError(msg)
+        if identity in declared_bindings:
+            msg = "validation requirement binding origins must be unique"
+            raise ValueError(msg)
+        declared_bindings.add(identity)
+        if identity in bindings and bindings[identity] != binding:
+            msg = "validation requirement binding cannot replace an existing origin binding"
+            raise ValueError(msg)
+        if discovery["resolution"] == "planned" and bindings.get(identity) != binding:
+            msg = "validation requirement binding cannot replace an already planned obligation"
+            raise ValueError(msg)
+        if binding.planned_requirement_id not in existing | addition_ids:
+            msg = "validation requirement binding names an unknown planned requirement"
+            raise ValueError(msg)
+        bindings[identity] = binding
+    return bindings
+
+
 def _expanded_validation_plan(
     document: dict[str, Any], plan: GraphPlan, records: Sequence[EvidenceRecord], repository_root: Path, *, authorization: str
 ) -> GraphPlan:
@@ -6905,18 +6979,20 @@ def _expanded_validation_plan(
     additions = validation_requirements_from_document({"validation_requirements": list(raw_requirements)}, repository_root)
     pending.update(_software_doi_recheck_ids(document, [_record_document(record) for record in records], additions))
     existing = {requirement for unit in plan.coalesced_validation_units for requirement in unit.requirement_ids}
+    discoveries = {(item["originating_evidence_id"], item["requirement_id"], item["requirement_digest"]): item for item in reconciliation["requirements"]}
+    bindings = _expanded_validation_bindings(document, plan, discoveries, {item.requirement_id for item in additions})
+    bound_additions = {binding.planned_requirement_id for binding in bindings.values()}
     source_state = _state(document, "source_state")
     for item in additions:
         quality_blockers = _late_validation_quality_blockers(item, repository_root=repository_root, authorization=authorization)
         if quality_blockers:
             msg = f"late validation requirement {item.requirement_id} failed quality gate: " + "; ".join(quality_blockers)
             raise ValueError(msg)
-        if item.requirement_id not in pending or item.requirement_id in existing or item.source_state != source_state or not item.required:
+        if item.requirement_id not in pending | bound_additions or item.requirement_id in existing or item.source_state != source_state or not item.required:
             msg = f"late validation must be a new, required, source-matching discovered identity: {item.requirement_id}"
             raise ValueError(msg)
     units, mappings = coalesce_validation_requirements(additions, reserved_node_ids=tuple(node.node_id for node in plan.actual_worker_nodes))
     exclusions = list(plan.validation_exclusions)
-    discoveries = {(item["originating_evidence_id"], item["requirement_id"], item["requirement_digest"]): item for item in reconciliation["requirements"]}
     for raw in _records(document, "user_exclusions"):
         exclusion = ValidationExclusion(
             _required_text(raw, "originating_evidence_id"),
@@ -6953,6 +7029,7 @@ def _expanded_validation_plan(
         selected_validation_units=(*plan.selected_validation_units, *(unit.node_id for unit in units)),
         validation_evidence_mapping=(*plan.validation_evidence_mapping, *mappings),
         validation_exclusions=tuple(exclusions),
+        validation_requirement_bindings=tuple(bindings[identity] for identity in sorted(bindings)),
         execution_epochs=epochs,
         current_epoch_node_ids=epochs[0].node_ids if epochs else tuple(node.node_id for node in nodes),
         requires_continuation=len(epochs) > 1,
@@ -6981,7 +7058,7 @@ def reconcile_validation_requirements(document: dict[str, Any], args: argparse.N
     if document.get("software_doi_rechecks") and not document.get("validation_requirements"):
         msg = "software DOI rechecks require new canonical validation requirements"
         raise ValueError(msg)
-    if not document.get("validation_requirements") and not document.get("user_exclusions"):
+    if not document.get("validation_requirements") and not document.get("validation_requirement_bindings") and not document.get("user_exclusions"):
         return {"schema_version": 1, "status": "requires-expansion" if reconciliation["blockers"] else "resolved", **reconciliation}
     if any(status in {"in-flight", "blocked", "awaiting-replan"} for status in state.values()):
         msg = "validation expansion requires quiescent execution without blocked or source-mutated nodes; preserve the current dispatches and journal"
