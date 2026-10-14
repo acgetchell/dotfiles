@@ -44,6 +44,9 @@ export XDG_CACHE_HOME="$DOTFILES_REVIEW_CACHE"
 # Never create Python shims in ~/.local/bin; site/module Python remains selectable.
 export UV_PYTHON_INSTALL_BIN=0
 export UV_HTTP_TIMEOUT=30 UV_HTTP_RETRIES=1
+# Semgrep's io_uring backend can fail on restricted Linux runners. Keep all
+# scanner subprocesses, including shared fixtures, on Eio's POSIX backend.
+export EIO_BACKEND=posix
 
 for tool in git bash zsh stow; do
   command -v "$tool" >/dev/null || fail "Required tool '$tool' unavailable. Load a site module or ask the environment owner to provide it; no checks were skipped."
