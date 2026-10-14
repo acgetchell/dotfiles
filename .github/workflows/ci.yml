@@ -142,6 +142,17 @@ jobs:
       - name: Rerun setup to verify idempotence
         run: bash bin/linux-review.sh setup
 
+      - name: Report Linux executor resource limits
+        run: |
+          cat /proc/self/limits
+          for name in pids.max pids.current memory.max memory.current cpu.max; do
+            path="/sys/fs/cgroup/$name"
+            if [[ -r "$path" ]]; then
+              printf '%s: ' "$name"
+              cat "$path"
+            fi
+          done
+
       - name: Run offline portable suite including native timing tests
         run: bash bin/linux-review.sh check
 
