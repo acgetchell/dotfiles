@@ -204,9 +204,13 @@ def test_fixed_partial_recheck_dispatch_bytes_and_seeded_findings(tmp_path: Path
         "full_proof_bytes": proof_path.stat().st_size,
         "execution_view_bytes": len(canonical_json(view).encode()),
         "partial_publication_contract_bytes": Path(partial["worker_payload_contract_path"]).stat().st_size,
+        "additional_isolation_bytes": len(json.dumps(partial["dispatch"]["fresh_context_forbidden_artifacts"], indent=2).encode())
+        - len(json.dumps(fresh["dispatch"]["fresh_context_forbidden_artifacts"], indent=2).encode()),
     }
     assert sizes["partial_worker_input_bytes"] < sizes["partial_inline_comparison_bytes"] * 0.6
-    assert sizes["partial_worker_input_bytes"] < sizes["fresh_worker_input_bytes"] + 6500
+    # Repair-prefixed node names expand the required peer-artifact boundary.
+    # Preserve the existing budget for the coverage transport itself.
+    assert sizes["partial_worker_input_bytes"] < sizes["fresh_worker_input_bytes"] + sizes["additional_isolation_bytes"] + 6500
     assert sizes["execution_view_bytes"] < sizes["full_proof_bytes"] * 0.2
     contract = json.loads(Path(partial["worker_payload_contract_path"]).read_bytes())
     receipt = runtime.publish_worker_payload_bytes(contract, json.dumps(payload).encode())

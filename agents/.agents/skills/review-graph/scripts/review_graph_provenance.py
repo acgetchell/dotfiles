@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from review_graph_coverage import coverage_reference
 from review_graph_integrity import canonical_json, digest_bytes, digest_json
+from review_graph_reuse import audit_inputs_document
 
 if TYPE_CHECKING:
     from review_graph_reuse import AuditInputIdentity, ExternalMetadataTransition
@@ -58,7 +59,7 @@ def review_scope_body(
             f"- Canonical worker payload: {canonical_payload}",
         ]
     if audit_inputs is not None:
-        inputs = asdict(audit_inputs)
+        inputs = audit_inputs_document(audit_inputs)
         if compact:
             reference = {"schema_version": 1, "metadata_field": "expectation.audit_input_identity", "digest": digest_json(inputs)}
             lines.append(f"- Audit input identity reference: {canonical_json(reference)}")

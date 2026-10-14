@@ -28,6 +28,7 @@ from test_review_graph_runtime import (
     _run_test_git,
 )
 from test_review_graph_transitions import _materialize, _payload
+from test_support_review_graph import _prepare_all_fixture_timing
 
 
 def _staged_repair(tmp_path: Path, dependency: str = "source") -> tuple[str, Path, dict[str, Any], dict[str, Any], dict[Path, bytes]]:
@@ -115,6 +116,7 @@ def _staged_repair(tmp_path: Path, dependency: str = "source") -> tuple[str, Pat
 
 
 def _finish_repair(tmp_path: Path, result: dict[str, Any]) -> list[str]:
+    _prepare_all_fixture_timing(result["dispatch_set"])
     lifecycle = {**result["lifecycle_input"], "current_source_state": result["current_source_state"]}
     plan = runtime._graph_plan(lifecycle["plan"])
     journal = Path(result["journal_path"])

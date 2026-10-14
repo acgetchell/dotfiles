@@ -58,7 +58,7 @@ def _preflight_blocked_nodes(document: dict[str, Any], modes: dict[str, str], re
     return holds
 
 
-def select_execution_lanes(  # noqa: C901, PLR0912 - one selection preserves reservations, capacity, and serialization together.
+def select_execution_lanes(  # noqa: C901, PLR0912, PLR0915 - selection preserves reservations, capacity, freshness and serialization together.
     document: dict[str, Any], *, modes: dict[str, str], entries: dict[str, dict[str, Any]], ready: dict[str, Any]
 ) -> dict[str, Any]:
     """Reserve one adaptive coordinator lane and only available worker lanes."""
@@ -89,13 +89,20 @@ def select_execution_lanes(  # noqa: C901, PLR0912 - one selection preserves res
     coordinator_busy = any(entries[node_id]["dispatch"]["execution_location"] == "coordinator" for node_id in (*in_flight, *reserved))
     serial_busy = any(modes[node_id] not in _PARALLEL_MODES for node_id in (*in_flight, *reserved))
     candidates = [node_id for node_id in ready_ids if node_id not in reserved and node_id not in held_ids]
+    fresh_required = {
+        node_id
+        for node_id in candidates
+        if any(unit["disposition"] == "instruction-review" for unit in entries[node_id]["dispatch"].get("coverage_reuse", {}).get("units", []))
+    }
     coordinator_id = None
     workers: list[str] = []
     if not coordinator_busy and not serial_busy:
-        if action == "coordinator-fallback" and failed_id is not None and modes[failed_id] == "audit":
+        if action == "coordinator-fallback" and failed_id is not None and modes[failed_id] == "audit" and failed_id not in fresh_required:
             coordinator_id = failed_id
         else:
-            coordinator_id = next((node_id for node_id in candidates if modes[node_id] == "audit" and node_id != failed_id), None)
+            coordinator_id = next(
+                (node_id for node_id in candidates if modes[node_id] == "audit" and node_id != failed_id and node_id not in fresh_required), None
+            )
     if coordinator_id is not None:
         candidates.remove(coordinator_id)
     if not serial_busy:
@@ -111,7 +118,9 @@ def select_execution_lanes(  # noqa: C901, PLR0912 - one selection preserves res
         ]
         workers.extend(parallel[:free_workers])
         if not workers and coordinator_id is None and not in_flight and not reserved:
-            serial = next((node_id for node_id in candidates if modes[node_id] != "independent-review" and node_id != failed_id), None)
+            serial = next(
+                (node_id for node_id in candidates if modes[node_id] != "independent-review" and node_id != failed_id and node_id not in fresh_required), None
+            )
             if serial is not None:
                 if entries[serial]["dispatch"]["execution_location"] == "coordinator" or capacity_state == "known-exhausted":
                     coordinator_id = serial

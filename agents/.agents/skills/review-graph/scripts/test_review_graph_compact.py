@@ -137,6 +137,7 @@ def test_default_cli_receipt_binds_full_artifact_and_explicit_full_output(tmp_pa
         expected = {"node_id", "result_contract", "execution_location", "worker_input"}
         if entry["result_contract"] == "compact-validation":
             expected.add("executor_requirements")
+            expected.add("timing_prerequisite")
             assert entry["executor_requirements"] == {"sandbox_permissions": "use_default"}
         assert set(entry) == expected
         assert entry["worker_input"]["digest"] == _digest(Path(entry["worker_input"]["path"]).read_bytes())

@@ -193,7 +193,8 @@ def test_optional_coverage_shape_publishes_and_compiles_first_attempt(dispatch_s
     schema = dispatch["payload_schema"]
     assert "coverage_units" not in schema["required_fields"]
     shape = schema["optional_shapes"]["coverage_units"][0]
-    assert len(json.dumps(schema["optional_shapes"]).encode()) < 400
+    assert len(json.dumps(schema["optional_shapes"]["coverage_units"]).encode()) < 400
+    assert len(json.dumps(schema["optional_shapes"]).encode()) < 700
     payload = _compact_audit_payload(entry)
     payload.update(
         status="completed",

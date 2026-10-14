@@ -24,7 +24,30 @@ algorithm-prefixed identities, streaming scope fingerprints, journals, and
 immutable publication remain graph-owned contracts. Shared JSON serialization
 has a different byte format and cannot replace existing signed identities.
 
-Generated capture and publication commands retain the executing Python path
-without resolving its symlinks, preserving the environment that contains the
-dependency. Keep that environment and the skill checkout available throughout
-the graph and any continuation.
+By default, generated capture and publication commands retain the executing
+Python path without resolving its symlinks. For a repository that requires a
+wrapper, supply `--python-runner <operator-runner.json>` to bootstrap. Its exact
+shape is:
+
+```json
+{
+  "argv": ["/absolute/path/to/uv", "run", "--locked", "python"],
+  "working_directory": "/absolute/repository",
+  "environment": {"UV_CACHE_DIR": "/absolute/external/writable/cache"},
+  "identity_files": ["/absolute/repository/pyproject.toml", "/absolute/repository/uv.lock"]
+}
+```
+
+Choose the runner and approve its resources before startup. An `uv` runner needs
+`run --locked`, both project/lock identities, and an existing writable external
+cache. Bootstrap probes that exact runner for its interpreter identity and
+freezes the invocation policy, executable identities, and lock identities.
+Subsequent helpers reject changed prerequisites. Wrapper environments require
+the host's `env` executable; raw interpreter mode remains available separately.
+
+Every compact worker view retains `execution_context`, including the working
+directory. Run its generated commands in that directory. Capture, publication,
+scheduler, and timing-helper commands carry the chosen wrapper and cache without
+workers reconstructing them. Keep the selected environment available throughout
+the run. Unavailable resources require the normal execution-tool approval or a
+blocker; never silently install dependencies or substitute another runner.

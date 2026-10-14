@@ -28,6 +28,7 @@ from review_graph_reuse import (
     AuditReuseTransition,
     ExternalMetadataTransition,
     ReviewSourceSnapshot,
+    audit_inputs_document,
     metadata_states,
     source_snapshot,
     verify_reuse_inputs,
@@ -2940,7 +2941,7 @@ def _scope_provenance_blockers(scope: str, expectation: ReviewEvidenceExpectatio
             return ("native review provenance reference lacks its bound canonical worker payload",)
         blockers = list(_coverage_reuse_native_blockers(scope, expectation.coverage_reuse))
         if expectation.audit_input_identity is not None:
-            serialized = json.dumps(asdict(expectation.audit_input_identity), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+            serialized = json.dumps(audit_inputs_document(expectation.audit_input_identity), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
             blockers.extend(_native_values_blockers(scope, section="Scope Inspected", label="Audit input identity", expected=(serialized,)))
         return tuple(blockers)
     inputs = expectation.audit_input_identity

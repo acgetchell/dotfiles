@@ -143,6 +143,34 @@ def test_runtime_rejects_repository_store_and_unpinned_interpreter(tmp_path: Pat
         verify_snapshot({**reference, "digest": "sha256:" + "0" * 64})
 
 
+@pytest.mark.parametrize("portable", ["relative", "token"])
+def test_absolute_reference_failure_leaves_bootstrap_retryable(tmp_path: Path, portable: str) -> None:
+    _git, _repository, template, capture, _plan = _baseline_mutation_fixture(tmp_path)
+    relative = "rust-invariant-state-transitions/references/standalone-workflow.md"
+    source = SKILL_ROOT / relative
+    template["routing_overrides"][0]["static_references"] = [str(source)]
+    capture_path, input_path, output = (tmp_path / name for name in ("capture.json", "template.json", "bootstrap.json"))
+    capture_path.write_text(json.dumps(capture))
+    input_path.write_text(json.dumps(template))
+    bootstrap = SKILL_ROOT / "review-graph/scripts/review_graph_bootstrap.py"
+    arguments = ("--capture", str(capture_path), "--input", str(input_path), "--output", str(output))
+    with pytest.raises(subprocess.CalledProcessError) as failure:
+        _cli(bootstrap, *arguments)
+    assert f"use $SKILLS_ROOT/{relative} or {relative}" in failure.value.stderr.decode()
+    assert not output.exists()
+    assert not output.with_suffix(".runtime").exists()
+    template["routing_overrides"][0]["static_references"] = [("$SKILLS_ROOT/" if portable == "token" else "") + relative]
+    input_path.write_text(json.dumps(template))
+    _cli(bootstrap, *arguments)
+    original = output.read_bytes()
+    bundle = json.loads(original)
+    frozen_reference = Path(bundle["runtime_snapshot"]["path"]).parent / "skills" / relative
+    assert frozen_reference.read_bytes() == source.read_bytes()
+    assert any(str(frozen_reference) in node["static_references"] for node in bundle["plan"]["actual_worker_nodes"])
+    _cli(bootstrap, *arguments)
+    assert output.read_bytes() == original
+
+
 def test_blocked_starter_resume_retains_original_runtime_and_plan(tmp_path: Path) -> None:
     capture, choices = _starter_fixture(tmp_path)
     live = tmp_path / "live-skills"

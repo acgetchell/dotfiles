@@ -67,6 +67,7 @@ from review_graph_runtime import (
     materialize_dispatches,
     next_ready_nodes,
     persist_worker_payload_bytes,
+    publish_worker_payload_bytes,
     read_execution_journal,
     reconcile_handoffs,
     review_worker_payload_write,
@@ -80,6 +81,7 @@ from test_support_review_graph import (
     VALIDATOR_SKILL,
     _assessed_fixture_candidates,
     _captured_rust_repository,
+    _prepare_all_fixture_timing,
     _sparse_plan_document,
 )
 
@@ -991,6 +993,7 @@ def test_repair_skips_unchanged_audit_through_scheduling_synthesis_and_final_pro
     lifecycle = json.loads(json.dumps(result["lifecycle_input"]))
     plan = _graph_plan(lifecycle["plan"])
     dispatches = result["dispatch_set"]
+    _prepare_all_fixture_timing(dispatches)
     evidence_id = old_entry["dispatch"]["evidence_id"]
     assert result["reused_evidence_ids"] == [evidence_id]
     assert plan.complete_node_count == len(request["plan"]["actual_worker_nodes"]) - 1
@@ -2046,6 +2049,7 @@ def test_dispatch_materialization_and_ready_nodes_are_plan_derived(tmp_path: Pat
         "plan": _json_plan(plan),
         "source_state": ["scope", "worktree", "repository"],
     }
+    _prepare_all_fixture_timing(result)
     initial = next_ready_nodes(lifecycle_document, journal_events=(), dispatch_set=result)
     assert set(initial["ready_node_ids"]) == {node.node_id for node in plan.actual_worker_nodes if not node.predecessors}
     assert {entry["node_id"] for entry in initial["ready_dispatches"]} == set(initial["ready_node_ids"])
@@ -2274,38 +2278,18 @@ def test_compile_node_partial_journal_failure_rolls_back_outputs_and_retries(
     assert len(journal.read_text(encoding="utf-8").splitlines()) == 1
 
 
-def test_fresh_context_compile_rejects_reads_of_sibling_worker_evidence(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    document, dispatches = _worker_input_fixture(tmp_path)
+def test_fresh_context_publication_rejects_reads_of_sibling_worker_evidence(tmp_path: Path) -> None:
+    _document, dispatches = _worker_input_fixture(tmp_path)
     audits = [item for item in dispatches["dispatches"] if item["result_contract"] == "compact-review"]
     assert len(audits) >= 2
     entry, sibling = audits[:2]
     command = f"cat {sibling['worker_payload_path']}"
-    _publish_worker_bytes(entry, json.dumps(_compact_audit_payload(entry, commands=(command,))).encode())
-    lifecycle_path, dispatch_path, capture_path = _compile_cli_paths(tmp_path, document, dispatches)
+    contract = json.loads(Path(entry["worker_payload_contract_path"]).read_bytes())
+    with pytest.raises(ValueError, match="fresh-context review read another node"):
+        publish_worker_payload_bytes(contract, json.dumps(_compact_audit_payload(entry, commands=(command,))).encode())
     journal = tmp_path / "execution.jsonl"
 
-    result = main(
-        [
-            "compile-node",
-            "--input",
-            str(lifecycle_path),
-            "--dispatches",
-            str(dispatch_path),
-            "--node-id",
-            entry["node_id"],
-            "--before-capture",
-            str(capture_path),
-            "--after-capture",
-            str(capture_path),
-            "--journal",
-            str(journal),
-            "--output",
-            str(tmp_path / "compile-result.json"),
-        ]
-    )
-
-    assert result == 2
-    assert "fresh-context review read another node" in capsys.readouterr().err
+    assert not Path(entry["worker_payload_path"]).exists()
     assert not Path(entry["artifact_path"]).exists()
     assert not Path(entry["metadata_path"]).exists()
     assert not journal.exists()
@@ -4342,6 +4326,7 @@ def test_late_validation_blocks_readiness_and_finalization_then_expands_without_
     revised_lifecycle = result["lifecycle_input"]
     revised_plan = _graph_plan(revised_lifecycle["plan"])
     revised_dispatches = json.loads(Path(result["dispatches_path"]).read_text())
+    _prepare_all_fixture_timing(revised_dispatches)
     revised_journal = Path(result["journal_path"])
     revised_events, _state, _head = read_execution_journal(revised_journal, plan=revised_plan, source_state=tuple(lifecycle["source_state"]))
     ready = next_ready_nodes(
@@ -4994,6 +4979,7 @@ def test_append_only_journal_drives_scheduling_and_cascade_invalidation(tmp_path
             "state_verification_command": "capture_scope.py --mode baseline",
         }
     )
+    _prepare_all_fixture_timing(dispatch_set)
     source_by_node = {json.loads(Path(source["metadata_path"]).read_text(encoding="utf-8"))["evidence"]["node_id"]: source for source in sources}
     journal = tmp_path / "execution.jsonl"
 

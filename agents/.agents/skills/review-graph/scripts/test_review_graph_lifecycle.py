@@ -17,6 +17,7 @@ from review_graph_reuse import source_snapshot
 from test_review_graph_commit import _commit_fixture, _save
 from test_review_graph_runtime import _baseline_mutation_fixture, _sparse_plan
 from test_review_graph_transitions import _materialize, _payload
+from test_support_review_graph import _prepare_all_fixture_timing
 
 
 def _history_document() -> dict[str, Any]:
@@ -245,6 +246,7 @@ def test_branch_handoff_waits_for_exact_commit_ci_without_audit_fanout(tmp_path:
     assert request["previous_capture"]["merge_base"] != request["previous_capture"]["head"]
     lifecycle = {**result["lifecycle_input"], "current_source_state": result["current_source_state"]}
     plan = runtime._graph_plan(lifecycle["plan"])
+    _prepare_all_fixture_timing(result["dispatch_set"])
     events, _state, _head = runtime.read_execution_journal(Path(result["journal_path"]), plan=plan, source_state=tuple(lifecycle["source_state"]))
     ready = runtime.next_ready_nodes(lifecycle, journal_events=events, dispatch_set=result["dispatch_set"])
     assert ready["ready_node_ids"] == list(request["native_ci"])

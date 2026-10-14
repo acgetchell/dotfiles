@@ -14,9 +14,11 @@ from test_review_graph_execution_recovery import _compile_aggregate
 from test_review_graph_repair_staging import _continuation_args, _finish_repair, _recovery_request, _run_continuation, _staged_repair
 from test_review_graph_runtime import _late_validation_plan, _late_validation_requirement, _run_test_git
 from test_review_graph_transitions import _payload
+from test_support_review_graph import _prepare_all_fixture_timing
 
 
 def _ready(result: dict[str, Any]) -> dict[str, Any]:
+    _prepare_all_fixture_timing(result["dispatch_set"])
     lifecycle = result["lifecycle_input"]
     events, _state, _head = runtime.read_execution_journal(
         Path(result["journal_path"]), plan=runtime._graph_plan(lifecycle["plan"]), source_state=tuple(lifecycle["source_state"])

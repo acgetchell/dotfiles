@@ -9,6 +9,12 @@ runtime scripts, schemas, routing, skill/reference contents, and the installed
 version. Snapshot creation rejects symlinks and concurrent resource edits,
 publishes atomically, and verifies the retained resources before use.
 
+Use `$SKILLS_ROOT/<skill>/references/<file>` or a path relative to the approved
+skill root in template `static_references`. Absolute static references are
+rejected before creating a snapshot, with the exact supported spelling in the
+diagnostic. Outside-root and symlink references remain invalid. Correct the
+template and retry the same bootstrap output; no frozen run needs replacing.
+
 Bootstrap re-executes under that snapshot before issuing the plan or dispatches.
 All emitted commands, skill paths, and schema references use the retained root.
 Use those commands throughout the run; live dotfiles changes apply to the next

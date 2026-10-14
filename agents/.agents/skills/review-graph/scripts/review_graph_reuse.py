@@ -129,6 +129,15 @@ class AuditInputIdentity:
     inspected_paths: tuple[str, ...]
     nearby_contract_owners: tuple[str, ...]
     instruction_digests: tuple[tuple[str, str], ...]
+    retained_inputs: tuple[tuple[str, str], ...] = ()
+
+
+def audit_inputs_document(inputs: AuditInputIdentity) -> dict[str, Any]:
+    """Keep legacy evidence serialization unchanged when no text was retained."""
+    document = asdict(inputs)
+    if not inputs.retained_inputs:
+        document.pop("retained_inputs")
+    return document
 
 
 @dataclass(frozen=True)
@@ -256,7 +265,14 @@ class AuditReuseTransition:
     metadata_transitions: tuple[ExternalMetadataTransition, ...] = ()
 
 
-def verify_reuse_inputs(origin: ReviewSourceSnapshot, target: ReviewSourceSnapshot, inputs: AuditInputIdentity, transition: AuditReuseTransition) -> None:
+def verify_reuse_inputs(  # noqa: C901 - fail-closed source, metadata, instruction and dependency proof.
+    origin: ReviewSourceSnapshot,
+    target: ReviewSourceSnapshot,
+    inputs: AuditInputIdentity,
+    transition: AuditReuseTransition,
+    *,
+    instruction_delta_paths: frozenset[str] = frozenset(),
+) -> None:
     """Prove unchanged review inputs across two independently bound captures."""
     origin.verify()
     target.verify()
@@ -268,11 +284,17 @@ def verify_reuse_inputs(origin: ReviewSourceSnapshot, target: ReviewSourceSnapsh
     if not inputs.owned_paths or set(inputs.inspected_paths) != set(inputs.owned_paths):
         msg = "audit reuse requires complete inspection of the owned surface"
         raise ValueError(msg)
-    if inputs.instruction_digests != transition.instruction_digests:
+    root = PurePosixPath(origin.repository_root)
+    old_instructions, new_instructions = dict(inputs.instruction_digests), dict(transition.instruction_digests)
+    if instruction_delta_paths.intersection(inputs.owned_paths):
+        msg = "instruction reconciliation cannot waive changed owned source"
+        raise ValueError(msg)
+    changed_instructions = {path for path in old_instructions.keys() | new_instructions.keys() if old_instructions.get(path) != new_instructions.get(path)}
+    allowed_instructions = {str(root / path) for path in instruction_delta_paths}
+    if list(old_instructions) != list(new_instructions) or changed_instructions - allowed_instructions:
         msg = "audit reuse instruction identities changed"
         raise ValueError(msg)
     paths = {*inputs.owned_paths, *inputs.inspected_paths, *inputs.nearby_contract_owners}
-    root = PurePosixPath(origin.repository_root)
     for path, _digest_value in inputs.instruction_digests:
         instruction = PurePosixPath(path)
         if instruction.is_relative_to(root):
@@ -282,13 +304,16 @@ def verify_reuse_inputs(origin: ReviewSourceSnapshot, target: ReviewSourceSnapsh
         raise ValueError(msg)
     before = dict(origin.repository_path_fingerprints)
     after = dict(target.repository_path_fingerprints)
-    if any(path not in before or path not in after or before[path] != after[path] for path in paths):
+    if any(path not in before or path not in after or (before[path] != after[path] and path not in instruction_delta_paths) for path in paths):
         msg = "audit reuse inspected paths or dependencies changed or are not captured"
         raise ValueError(msg)
     if any(paths.intersection(snapshot.repository_symlink_paths) for snapshot in (origin, target)):
         msg = "audit reuse requires captured proof that inspected paths do not traverse symlinks"
         raise ValueError(msg)
     changed_instructions = (path for path in before.keys() | after.keys() if PurePosixPath(path).name == "AGENTS.md" and before.get(path) != after.get(path))
-    if any(any(PurePosixPath(owned).is_relative_to(PurePosixPath(path).parent) for owned in inputs.owned_paths) for path in changed_instructions):
+    if any(
+        path not in instruction_delta_paths and any(PurePosixPath(owned).is_relative_to(PurePosixPath(path).parent) for owned in inputs.owned_paths)
+        for path in changed_instructions
+    ):
         msg = "audit reuse applicable repository instructions changed"
         raise ValueError(msg)

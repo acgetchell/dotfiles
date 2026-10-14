@@ -47,7 +47,9 @@ from review_graph_executor import executor_permissions, remedied_features
 from review_graph_git import audit_git_context, discovery_reconciliation, intervening_metadata_blockers, metadata_audit_blockers, validate_git_dependencies
 from review_graph_git_objects import GitPathIdentity
 from review_graph_independent import CHECK_LABELS, SCHEMA as _INDEPENDENT_PAYLOAD_SCHEMA, render_independent_payload
+from review_graph_instruction_delta import reconcile_instructions, retained_input_texts
 from review_graph_integrity import canonical_json, digest_bytes
+from review_graph_isolation import ISOLATION_INSTRUCTIONS, IsolationPublicationError, IsolationViolationError, forbidden_artifacts, isolation_violations
 from review_graph_lifecycle import ComprehensiveRestart, RepairBudgetExtension, ReviewLifecycle, lifecycle_from_document
 from review_graph_metrics import projected_waves, source_demand
 from review_graph_phases import pending_validation_barrier, phase_accounting, require_validation_barrier, validate_validation_barrier
@@ -139,7 +141,9 @@ from review_graph_reuse import (
 )
 from review_graph_scheduling import select_execution_lanes
 from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
+from review_graph_session import current_execution_context, runtime_command
 from review_graph_synthesis import synthesis_fields, validate_synthesis
+from review_graph_timing import timing_blocker, timing_documents, timing_prerequisite
 from review_graph_usage import digest as usage_digest, measure_call
 from review_graph_validation import ArtifactIdentity, ValidationPayload, ValidationRecord, VerifiedValidationRecord, bind_validation_payload
 from review_graph_validation_contracts import ContractBinding, load_contract_binding
@@ -729,11 +733,8 @@ def _review_command_policy_blockers(dispatch: dict[str, Any], payload: dict[str,
     duplicates = tuple(command for command in commands if command in prohibited)
     if duplicates:
         return ("review payload executed commands owned by planned validators: " + ", ".join(duplicates),)
-    if dispatch.get("fresh_context") is True:
-        forbidden = _text_list(dispatch, "fresh_context_forbidden_artifacts")
-        violations = tuple(f"{command} -> {path}" for command in commands for path in forbidden if path in command)
-        if violations:
-            return ("fresh-context review read another node's worker/report/evidence artifact: " + "; ".join(violations),)
+    if violations := isolation_violations(dispatch, payload):
+        return ("fresh-context review read another node's worker/report/evidence artifact: " + "; ".join(violations),)
     return ()
 
 
@@ -917,7 +918,7 @@ def _review_scope_coverage_blockers(dispatch: dict[str, Any], payload: dict[str,
         blockers.append("audit files_inspected must be unique")
     owned = set(owned_paths)
     inspected = set(inspected_paths)
-    reused = set(reused_paths(dispatch.get("coverage_reuse")))
+    reused = set(reused_paths(_reconciled_coverage(dispatch, payload)))
     if reused - owned or reused & inspected:
         blockers.append("delta audit must inspect only recheck paths and preserve its bound reused coverage")
     outside = tuple(path for path in inspected_paths if path not in owned)
@@ -949,8 +950,19 @@ def _compiled_audit_inputs(dispatch: dict[str, Any], payload: dict[str, Any]) ->
         msg = "audit instructions changed since materialization"
         raise ValueError(msg)
     return AuditInputIdentity(
-        _text_list(dispatch, "owned_paths"), _text_list(payload, "files_inspected"), _text_list(payload, "nearby_contract_owners"), instruction_digests
+        _text_list(dispatch, "owned_paths"),
+        _text_list(payload, "files_inspected"),
+        _text_list(payload, "nearby_contract_owners"),
+        instruction_digests,
+        retained_input_texts(Path(dispatch["repository_root"]), instruction_paths, payload) if "repository_root" in dispatch else (),
     )
+
+
+def _reconciled_coverage(dispatch: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any] | None:
+    if payload.get("instruction_reconciliations"):
+        require_schema(payload, _REVIEW_PAYLOAD_SCHEMA)
+    bound = _publication_dispatch(dispatch) if payload.get("instruction_reconciliations") and "compiler_preflight" in dispatch else dispatch
+    return reconcile_instructions(dispatch.get("coverage_reuse"), payload, fresh=bool(bound and bound.get("fresh_context")))
 
 
 def _validate_review_coverage_partitions(dispatch: dict[str, Any], payload: dict[str, Any]) -> None:
@@ -1019,7 +1031,7 @@ def compile_review(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  #
     if mode == "synthesis":
         require_schema(payload, _SYNTHESIS_PAYLOAD_SCHEMA)
         validate_synthesis(payload, _text_list(dispatch, "predecessor_evidence_ids"), dispatch.get("synthesis_bundle"))
-    coverage_reuse = dispatch.get("coverage_reuse")
+    coverage_reuse = _reconciled_coverage(dispatch, payload)
     if coverage_reuse is not None:
         _verify_delta_context(coverage_reuse, dispatch)
         old_requirements = {item["requirement_id"] for item in coverage_reuse["original_validation_requirements"]}
@@ -1815,6 +1827,7 @@ def _audit_input_identity(raw: object) -> AuditInputIdentity | None:
         _string_tuple(raw, "inspected_paths"),
         _string_tuple(raw, "nearby_contract_owners"),
         _string_pairs(raw, "instruction_digests"),
+        _string_pairs(raw, "retained_inputs") if "retained_inputs" in raw else (),
     )
 
 
@@ -2762,6 +2775,8 @@ def _read_json_object(path: Path) -> dict[str, Any]:
 
 def _operation_document(document: dict[str, Any], operation: str) -> dict[str, Any]:
     """Accept a bootstrap bundle directly where it owns the operation input."""
+    if operation == "schedule-ready" and "lifecycle_input" in document:
+        return {**document["lifecycle_input"], "artifact_store": document["materialization_input"]["artifact_store"]}
     field = {"materialize-dispatches": "materialization_input", "routing-projection": "planning_input", "preflight-validation": "preflight_input"}.get(
         operation
     )
@@ -2945,6 +2960,7 @@ def _load_evidence_source(  # noqa: C901, PLR0912, PLR0915
                 recomputed = _independent_normalized_record(content, expectation, evidence)
             else:
                 payload = _canonical_worker_payload(content, expectation=expectation)
+                reconcile_instructions(expectation.coverage_reuse, payload, fresh=evidence.fresh_context)
                 _validate_audit_caveats(
                     {
                         "mode": expectation.mode,
@@ -3398,7 +3414,7 @@ def _schema_reference(path: Path) -> dict[str, object]:
         "version": int(match.group("version")),
     }
     if path == _REVIEW_PAYLOAD_SCHEMA:
-        reference["optional_shapes"] = {"coverage_units": _required_schema_shape(raw["properties"]["coverage_units"])}
+        reference["optional_shapes"] = {name: _required_schema_shape(raw["properties"][name]) for name in ("coverage_units", "instruction_reconciliations")}
     return reference
 
 
@@ -3705,7 +3721,7 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
         if dispatch.get("mode") == "synthesis"
         else ""
     )
-    return (
+    return (ISOLATION_INSTRUCTIONS + " " if dispatch.get("fresh_context") and dispatch.get("mode") == "audit" else "") + (
         "Read dispatch.skill_path and the dispatched instruction/reference files before performing this node; "
         "follow the skill's conditional reference requirements. For review nodes, record actual skill/reference reads in nearby_contract_owners. "
         "Routing selection and captured skill digests do not attest that instructions were read. "
@@ -3825,6 +3841,9 @@ def _validate_worker_payload_bytes(contract_document: dict[str, Any], payload_by
             else (_review_payload_schema(contract_document) if contract == "compact-review" else _VALIDATION_PAYLOAD_SCHEMA)
         )
         require_schema(payload, schema)
+        bound = _publication_dispatch(contract_document)
+        if bound is not None and (violations := isolation_violations(bound, payload)):
+            raise IsolationViolationError("fresh-context review read another node's worker/report/evidence artifact: " + "; ".join(violations))
         if contract == "compact-independent-review":
             if "compiler_preflight" not in contract_document:
                 msg = "structured independent publication requires its bound compiler preflight"
@@ -3893,7 +3912,7 @@ def review_worker_payload_write(contract_document: dict[str, Any], payload_bytes
         owned_paths = _text_list(contract_document, "owned_paths", required=True)
         inspected_paths = _text_list(payload, "files_inspected")
         inspected = set(inspected_paths)
-        inherited = reused_paths(contract_document.get("coverage_reuse"))
+        inherited = reused_paths(_reconciled_coverage(contract_document, payload))
         review["audit_path_roles"] = {
             "dispatch_owned_paths": list(owned_paths),
             "inspected_dispatch_owned_paths": list(inspected_paths),
@@ -3916,7 +3935,11 @@ def review_worker_payload_write(contract_document: dict[str, Any], payload_bytes
 def _approved_worker_payload_write(
     contract_document: dict[str, Any], payload_bytes: bytes, approval_identity: str | None, *, candidate_is_write_target: bool = True
 ) -> dict[str, Any]:
-    artifact_write_review = review_worker_payload_write(contract_document, payload_bytes, candidate_is_write_target=candidate_is_write_target)
+    try:
+        artifact_write_review = review_worker_payload_write(contract_document, payload_bytes, candidate_is_write_target=candidate_is_write_target)
+    except IsolationViolationError as error:
+        raise IsolationPublicationError(_retain_isolation_rejection(contract_document, payload_bytes, error)) from error
+    _require_isolation_budget(contract_document)
     if approval_identity is not None:
         _sha256_digest(approval_identity, "worker payload approval identity")
         if approval_identity != artifact_write_review["approval_identity"]:
@@ -4167,6 +4190,23 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         _queue_materialized_write(pending_writes, plan_path, plan_bytes, mode=0o444)
         synthesis_plan_reference = {"path": str(plan_path), "digest": digest_bytes(plan_bytes)}
     dispatches: list[dict[str, Any]] = []
+    isolation_entries = {
+        node.node_id: (preserved_entries or {}).get(node.node_id)
+        or {
+            "artifact_path": str(artifact_store / f"{node.node_id}.{'validation' if node.mode == 'validation' else 'review'}.md"),
+            **{
+                field: str(artifact_store / f"{node.node_id}.{suffix}")
+                for field, suffix in (
+                    ("metadata_path", "evidence.json"),
+                    ("worker_input_path", "worker-input.json"),
+                    ("worker_execution_path", "execution.json"),
+                    ("worker_payload_path", "worker-payload.json"),
+                    ("worker_payload_contract_path", "worker-payload-contract.json"),
+                )
+            },
+        }
+        for node in plan.actual_worker_nodes
+    }
     for node in plan.actual_worker_nodes:
         if preserved_entries is not None and node.node_id in preserved_entries:
             dispatches.append(preserved_entries[node.node_id])
@@ -4181,21 +4221,10 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         metadata_path = artifact_store / f"{node.node_id}.evidence.json"
         worker_payload_path = artifact_store / f"{node.node_id}.worker-payload.json"
         worker_payload_contract_path = artifact_store / f"{node.node_id}.worker-payload-contract.json"
-        worker_payload_command_prefix = [
-            str(Path(sys.executable).absolute()),
-            str(Path(__file__).resolve()),
-            "persist-worker-payload",
-            "--input",
-            str(worker_payload_contract_path),
-            "--payload-stdin",
-        ]
-        worker_payload_review_command = [
-            str(Path(sys.executable).absolute()),
-            str(Path(__file__).resolve()),
-            "review-worker-payload-write",
-            "--input",
-            str(worker_payload_contract_path),
-        ]
+        worker_payload_command_prefix = runtime_command(
+            Path(__file__), "persist-worker-payload", "--input", str(worker_payload_contract_path), "--payload-stdin"
+        )
+        worker_payload_review_command = runtime_command(Path(__file__), "review-worker-payload-write", "--input", str(worker_payload_contract_path))
         instruction_paths = _applicable_instruction_paths(repository_root_path.resolve(), node.coverage, node.instruction_paths)
         authorized_duplicates = tuple(sorted(set(raw_duplicate_authorizations.get(node.node_id, ()))))
         if node.mode == "validation" and authorized_duplicates:
@@ -4234,16 +4263,14 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
                 "input_path": str(worker_payload_contract_path),
                 "operation": "persist-worker-payload",
                 "review_command": worker_payload_review_command,
-                "publish_command": [
-                    str(Path(sys.executable).absolute()),
-                    str(Path(__file__).resolve()),
-                    "publish-worker-payload",
-                    "--input",
-                    str(worker_payload_contract_path),
-                ],
+                "publish_command": runtime_command(Path(__file__), "publish-worker-payload", "--input", str(worker_payload_contract_path)),
             },
             "worker_created": location == "worker",
         }
+        if (execution_context := current_execution_context()) is not None:
+            common["execution_context"] = execution_context
+        if node.mode in {"audit", "independent-review"}:
+            common["fresh_context_forbidden_artifacts"] = forbidden_artifacts(node.node_id, isolation_entries)
         if document.get("external_metadata_transitions"):
             common["external_metadata_transitions"] = document["external_metadata_transitions"]
         if node.mode != "validation":
@@ -4275,6 +4302,7 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
                 raise ValueError(msg)
             common["validation_unit"] = json.loads(canonical_json(asdict(unit)))
             common["executor_requirements"] = {"sandbox_permissions": executor_permissions(unit.features)}
+            common["timing_prerequisite"] = timing_prerequisite(worker_payload_contract_path, node.node_id)
             recovery = next(
                 (item for item in plan.validation_recoveries if item["node_id"] == node.node_id and tuple(item["source_state"]) == source_state), None
             )
@@ -4797,7 +4825,7 @@ def _coverage_proof(context: dict[str, Any]) -> dict[str, Any]:
     except (KeyError, TypeError, AttributeError) as error:
         msg = "coverage proof artifact lacks complete execution context"
         raise ValueError(msg) from error
-    if context != expected:
+    if {key: value for key, value in context.items() if key != "instruction_reconciliations"} != expected:
         msg = "coverage execution view differs from original immutable findings or verified unit decisions"
         raise ValueError(msg)
     return proof
@@ -4841,7 +4869,8 @@ def _verify_delta_context(context: dict[str, Any], dispatch: dict[str, Any]) -> 
         _string_pairs(context, "instruction_digests"),
         tuple(metadata_transition(item) for item in _records(context, "metadata_transitions")),
     )
-    decisions = coverage_decisions(record, origin, target, inputs, transition)
+    retained_after = {delta["path"]: delta["after"] for unit in context["units"] for delta in unit.get("input_deltas", [])}
+    decisions = coverage_decisions(record, origin, target, inputs, transition, retained_after=retained_after)
     if (
         context["units"] != decisions
         or context["original_findings"] != record["findings"]
@@ -4855,7 +4884,7 @@ def _verify_delta_context(context: dict[str, Any], dispatch: dict[str, Any]) -> 
     ):
         msg = "delta coverage differs from original immutable findings or verified unit decisions"
         raise ValueError(msg)
-    if not reused_paths(context):
+    if not reused_paths(context) and not any(unit["disposition"] == "instruction-review" for unit in context["units"]):
         msg = "delta coverage has no reusable units"
         raise ValueError(msg)
 
@@ -4931,7 +4960,9 @@ def _plan_delta_audits(  # noqa: C901 - keep source and validation eligibility g
             units = coverage_decisions(record, audit_origin, target, inputs, transition)
             if failed := _failed_validation_limits(record):
                 units = [
-                    {**unit, "disposition": "recheck", "reason_code": failed[0], "reason": failed[1]} if unit["disposition"] == "reused" else unit
+                    {**unit, "disposition": "recheck", "reason_code": failed[0], "reason": failed[1]}
+                    if unit["disposition"] in {"reused", "instruction-review"}
+                    else unit
                     for unit in units
                 ]
             reconciliation = _validation_reconciliation(replace(candidate, audit_reuse_transitions=(transition,)), [record])
@@ -4948,7 +4979,7 @@ def _plan_delta_audits(  # noqa: C901 - keep source and validation eligibility g
                 )
                 continue
             reviews.append({"node_id": node.node_id, "evidence_id": evidence.evidence_id, "units": coverage_decision_report(units, audit_origin, target)})
-            if not any(unit["disposition"] == "reused" for unit in units):
+            if not any(unit["disposition"] in {"reused", "instruction-review"} for unit in units):
                 continue
             context = {
                 **source,
@@ -6653,6 +6684,8 @@ def next_ready_nodes(document: dict[str, Any], *, journal_events: tuple[dict[str
         missing = tuple(predecessor for predecessor in node.predecessors if predecessor not in accepted)
         if missing:
             waiting.append({"missing_predecessors": list(missing), "node_id": node.node_id})
+        elif node.mode == "validation" and (timing := timing_blocker(dispatches[node.node_id]["dispatch"])) is not None:
+            waiting.append({"node_id": node.node_id, "timing_prerequisite": timing})
         else:
             ready.append(node.node_id)
     node_ids = {node.node_id for node in plan.actual_worker_nodes}
@@ -8026,6 +8059,9 @@ def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     dispatch_parser = _runtime_subparser(subparsers, "materialize-dispatches", "derive exact dispatch bases from a graph plan")
     dispatch_parser.add_argument("--input", type=Path, required=True)
     dispatch_parser.add_argument("--output", type=Path, required=True, help="operation-result JSON path; must be outside the artifact store")
+    timing_parser = _runtime_subparser(subparsers, "prepare-validation-timing", "bind an explicit execution-tool shell policy before validator creation")
+    timing_parser.add_argument("--input", type=Path, required=True, help="materialized validator worker-payload contract")
+    timing_parser.add_argument("--shell-policy", type=Path, required=True, help="operator-approved literal shell_argv JSON")
     preflight_parser = _runtime_subparser(subparsers, "preflight-validation", "inspect command policy, caches and validation obligations before fanout")
     preflight_parser.add_argument("--input", type=Path, required=True)
     preflight_parser.add_argument("--output", type=Path, required=True)
@@ -8069,6 +8105,8 @@ def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     schedule_parser.add_argument("--dispatches", type=Path, required=True)
     schedule_parser.add_argument("--current-capture", type=Path, required=True)
     schedule_parser.add_argument("--output", type=Path, required=True)
+    schedule_parser.add_argument("--worker-capacity", type=Path, help="fresh aggregate capacity JSON; required when scheduling a bootstrap bundle")
+    schedule_parser.add_argument("--artifact-store", type=Path, help="explicit scheduling artifact store override")
     journal_parser = _runtime_subparser(
         subparsers,
         "journal-append",
@@ -8237,23 +8275,9 @@ def _lifecycle_dispatch(document: dict[str, Any], dispatches_path: Path, node_id
         raise ValueError(msg) from None
     dispatch = selected.get("dispatch")
     if isinstance(dispatch, dict) and dispatch.get("fresh_context") is True:
-        forbidden: set[str] = set()
-        for other_id, entry in entries.items():
-            if other_id == node_id:
-                continue
-            for field in (
-                "artifact_path",
-                "metadata_path",
-                "worker_input_path",
-                "worker_payload_candidate_path",
-                "worker_payload_contract_path",
-                "worker_payload_path",
-            ):
-                value = entry.get(field)
-                if isinstance(value, str) and value:
-                    path = Path(value)
-                    forbidden.update((str(path), path.name))
-        dispatch["fresh_context_forbidden_artifacts"] = sorted(forbidden)
+        dispatch["fresh_context_forbidden_artifacts"] = sorted(
+            set(dispatch.get("fresh_context_forbidden_artifacts", [])) | set(forbidden_artifacts(node_id, entries))
+        )
     return plan, selected
 
 
@@ -8522,9 +8546,44 @@ def _json_operation_output(document: dict[str, Any], args: argparse.Namespace) -
     return finalize_proof(_finalize_document_from_files(document, args))
 
 
+def _isolation_attempts(document: dict[str, Any]) -> list[str]:
+    target = Path(document["worker_payload_path"])
+    return sorted(str(path) for path in target.parent.glob(f"{document['node_id']}.isolation-rejected.*.json") if not path.name.endswith(".receipt.json"))
+
+
+def _require_isolation_budget(document: dict[str, Any]) -> None:
+    if len(_isolation_attempts(document)) >= 2:
+        msg = "audit isolation replacement exhausted; retain rejected attempts and leave only this node blocked"
+        raise ValueError(msg)
+
+
+def _retain_isolation_rejection(document: dict[str, Any], payload_bytes: bytes, error: ValueError) -> dict[str, Any]:
+    target = Path(document["worker_payload_path"])
+    with target.with_name(f".{document['node_id']}.isolation.lock").open("ab") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        identity = digest_bytes(payload_bytes).removeprefix("sha256:")
+        rejected = target.with_name(f"{document['node_id']}.isolation-rejected.{identity}.json")
+        _write_bytes_atomically_once(rejected, payload_bytes, mode=0o400)
+        receipt = {
+            "schema_version": 1,
+            "status": "rejected",
+            "error": "fresh-audit-isolation",
+            "message": str(error),
+            "node_id": document["node_id"],
+            "rejected_payload": {"path": str(rejected), "digest": digest_bytes(payload_bytes)},
+            "maximum_replacement_workers": 1,
+            "recovery": (
+                "Retain this attempt. Replace only this node with a clean fresh worker using the same dispatch; do not replay accepted nodes or restart review."
+            ),
+        }
+        _write_bytes_atomically_once(rejected.with_suffix(".receipt.json"), (canonical_json(receipt) + "\n").encode(), mode=0o400)
+        attempts = _isolation_attempts(document)
+        return {**receipt, "rejected_attempts": attempts, "replacement_allowed": len(attempts) == 1}
+
+
 def publish_worker_payload_bytes(document: dict[str, Any], payload_bytes: bytes, *, approval_identity: str | None = None) -> dict[str, Any]:
     """Review and publish identical bound bytes in one supported transaction."""
-    review = review_worker_payload_write(document, payload_bytes)
+    review = _approved_worker_payload_write(document, payload_bytes, approval_identity, candidate_is_write_target=False)
     return persist_worker_payload_bytes(document, payload_bytes, approval_identity=approval_identity or review["approval_identity"])
 
 
@@ -8573,10 +8632,48 @@ def _print_operation_result(args: argparse.Namespace, output_path: Path, output:
     receipt = stage_receipt(args.operation, output_path, output)
     if args.operation == "materialize-dispatches":
         receipt["next_operation_inputs"] = {"dispatches": str(output_path.resolve())}
+        bundle = _read_json_object(args.input)
+        if "lifecycle_input" in bundle and "capture_path" in bundle and bundle["plan"]["execution_profile"] in {"grouped", "mixed"}:
+            capacity_path = args.input.resolve().with_suffix(".capacity.json")
+            receipt["next_command"] = runtime_command(
+                Path(__file__),
+                "schedule-ready",
+                "--input",
+                str(args.input.resolve()),
+                "--dispatches",
+                str(output_path.resolve()),
+                "--journal",
+                str(args.input.resolve().with_suffix(".journal.jsonl")),
+                "--current-capture",
+                bundle["capture_path"],
+                "--worker-capacity",
+                str(capacity_path),
+                "--output",
+                str(args.input.resolve().with_suffix(".schedule.json")),
+            )
+            receipt["scheduler_prerequisite"] = {
+                "path": str(capacity_path),
+                "required_fields": ["source", "concurrent_worker_limit", "active_workers"],
+                "instruction": "Write a fresh authoritative aggregate capacity observation before executing next_command. Recapture if source changed.",
+            }
     print(canonical_json(output if args.full_output else receipt))
 
 
-def _run_operation(document: dict[str, Any], args: argparse.Namespace) -> int:  # noqa: C901, PLR0912
+def _prepare_validation_timing(document: dict[str, Any], args: argparse.Namespace) -> int:
+    dispatch = _publication_dispatch(document)
+    if dispatch is None:
+        msg = "timing preparation requires a bound validator publication contract"
+        raise ValueError(msg)
+    writes, manifest = timing_documents(dispatch, _read_json_object(args.shell_policy))
+    for path, content in writes.items():
+        _write_bytes_atomically_once(path, content, mode=0o444)
+    print(canonical_json({"status": "prepared", "manifest_path": dispatch["timing_prerequisite"]["manifest_path"], "launches": manifest["launches"]}))
+    return 0
+
+
+def _run_operation(document: dict[str, Any], args: argparse.Namespace) -> int:  # noqa: C901, PLR0912, PLR0911
+    if args.operation == "prepare-validation-timing":
+        return _prepare_validation_timing(document, args)
     if args.operation in {"persist-worker-payload", "review-worker-payload-write", "publish-worker-payload"}:
         return _run_worker_payload_operation(document, args)
     if args.operation in {"compile-independent-review", "compile-review", "compile-validation"}:
@@ -8637,6 +8734,20 @@ def _run_operation(document: dict[str, Any], args: argparse.Namespace) -> int:  
     return 2 if args.operation == "finalize-proof" and output["status"] != "complete" else 0
 
 
+def _operation_input(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    operation_document = _operation_document(document, args.operation)
+    if args.operation == "schedule-ready":
+        if "lifecycle_input" in document and args.worker_capacity is None:
+            msg = "bootstrap scheduling requires --worker-capacity <fresh-capacity.json>; signed plan identities stay in the retained bundle"
+            raise ValueError(msg)
+        if args.worker_capacity is not None:
+            operation_document["worker_capacity"] = _read_json_object(args.worker_capacity)
+        if args.artifact_store is not None:
+            operation_document["artifact_store"] = str(args.artifact_store.resolve())
+    require_schema_definition(operation_document, _RUNTIME_OPERATION_INPUT_SCHEMA, args.operation)
+    return operation_document
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run one deterministic review-graph compiler operation."""
     args = _argument_parser().parse_args(argv)
@@ -8646,8 +8757,7 @@ def main(argv: list[str] | None = None) -> int:
         if not isinstance(document, dict):
             msg = "input root must be an object"
             raise TypeError(msg)
-        operation_document = _operation_document(document, args.operation)
-        require_schema_definition(operation_document, _RUNTIME_OPERATION_INPUT_SCHEMA, args.operation)
+        operation_document = _operation_input(document, args)
         usage_ledger = os.environ.get("REVIEW_GRAPH_USAGE_LEDGER", "")
         if usage_ledger:
             return measure_call(
@@ -8658,7 +8768,9 @@ def main(argv: list[str] | None = None) -> int:
             )
         return _run_operation(operation_document, args)
     except (ExecutableNotFoundError, OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError, subprocess.SubprocessError) as error:
-        if isinstance(error, WorkerPayloadWriteError):
+        if isinstance(error, IsolationPublicationError):
+            print(canonical_json(error.receipt), file=sys.stderr)
+        elif isinstance(error, WorkerPayloadWriteError):
             review = error.artifact_write_review
             output = {
                 "schema_version": 1,

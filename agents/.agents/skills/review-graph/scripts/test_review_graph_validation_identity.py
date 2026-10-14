@@ -25,6 +25,7 @@ from test_review_graph_runtime import (
     _source_by_node,
     _sparse_plan_document,
 )
+from test_support_review_graph import _prepare_all_fixture_timing
 
 
 def _runtime_cli(arguments: list[str]) -> None:
@@ -172,6 +173,7 @@ def test_planned_validation_reference_survives_two_repairs_with_fresh_validation
         assert validator.evidence_ids == ()
         assert runtime._planned_validation_digest(validator) != original_requirement["planned_validation_digest"]
         dispatches, journal = result["dispatch_set"], Path(result["journal_path"])
+        _prepare_all_fixture_timing(dispatches)
         ready = runtime.next_ready_nodes({**lifecycle, "current_source_state": lifecycle["source_state"]}, journal_events=(), dispatch_set=dispatches)
         assert ready["blockers"] == []
         assert validator.node_id in ready["ready_node_ids"]
@@ -323,6 +325,7 @@ def test_repair_rechecks_audit_when_delegated_validation_identity_changes(tmp_pa
     assert replacement[0]["dispatch"]["owned_paths"] == original["dispatch"]["owned_paths"]
     lifecycle = result["lifecycle_input"]
     plan = runtime._graph_plan(lifecycle["plan"])
+    _prepare_all_fixture_timing(result["dispatch_set"])
     journal = Path(result["journal_path"])
     sources = []
     executed = []

@@ -30,15 +30,16 @@ from review_graph_runtime import (
 )
 from test_review_graph_repairs import _recovery_fixture
 from test_review_graph_runtime import ROUTING_CATALOG, SKILL_ROOT, _compile_repair_fixture_entry, _json_plan, _publish_worker_bytes, _sparse_plan_document
+from test_support_review_graph import _prepare_all_fixture_timing
 
 DENIAL = "PermissionError: [Errno 1] Operation not permitted"
 
 
 def _ready(lifecycle: dict[str, Any], args: Namespace) -> dict[str, Any]:
+    dispatch_set = json.loads(args.dispatches.read_bytes())
+    _prepare_all_fixture_timing(dispatch_set)
     events, _state, _head = read_execution_journal(args.journal, plan=_graph_plan(lifecycle["plan"]), source_state=tuple(lifecycle["source_state"]))
-    return next_ready_nodes(
-        {**lifecycle, "current_source_state": lifecycle["source_state"]}, journal_events=events, dispatch_set=json.loads(args.dispatches.read_bytes())
-    )
+    return next_ready_nodes({**lifecycle, "current_source_state": lifecycle["source_state"]}, journal_events=events, dispatch_set=dispatch_set)
 
 
 def _compile_aggregate(lifecycle: dict[str, Any], args: Namespace, entry: dict[str, Any], directory: Path, *, permitted: bool) -> dict[str, str]:

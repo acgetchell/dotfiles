@@ -3,6 +3,13 @@
 Read when reporting execution facts, validation limits, or uncertainty in an
 audit payload.
 
+Fresh audits cannot read another node's input, payload, report, or evidence,
+including CI evidence. Validation remains delegated through planned requirement
+references. Own-node contracts, raw source, supplied shared source packets, and
+explicitly inherited coverage references are permitted. Predecessor IDs grant
+no broader reading permission. The compact view and worker prompt carry this
+boundary; publication and compilation check truthful read/command ledgers.
+
 Classify audit context explicitly; never suppress a truthful caveat to gain reuse:
 
 | Field | Meaning | Reuse effect |
@@ -60,3 +67,38 @@ can publish this payload (substitute the actual dispatched paths):
   }]
 }
 ```
+
+## Instruction And Recipe Changes
+
+Complete fresh audits retain the full bytes of applicable repository instructions.
+For recipe dependencies, a coverage unit may additionally declare
+`"recipe_dependencies": [{"path": "justfile", "recipes": ["check"]}]`. Name the
+recipes actually inspected, including dependencies and relevant shared settings;
+the path must be in `dependency_paths`. This retains full recipe-document bytes
+and permits focused semantic review of a later delta; the declaration alone
+never establishes irrelevance.
+
+After a repair, `instruction-review` coverage units have unchanged owned source
+and other dependencies, but changed instruction/recipe documents. Their compact
+views include exact changed sections and both complete file identities. Full
+before/after text stays in the bound proof. Missing text, changed modes, symlinks,
+changed source, uncertain dependencies, or changed instruction applicability
+remain full rechecks.
+
+A **fresh audit worker** inspects every changed section against its contract and
+submits `instruction_reconciliations`, using the payload schema's optional shape.
+Each unit assesses every changed document and records actual reads in
+`nearby_contract_owners`. For each document, `rules`, `commands`, `applicability`,
+and `obligations` each contain `changed` and a concrete `reason`.
+`changed_sections_inspected` must be true. Disposition `unchanged` is permitted
+only when every dimension is unchanged; it retains original findings and source
+evidence. `reinspect` requires fresh inspection of every owned path in that unit.
+`uncertain` requires blocked status. Omission performs the full source recheck.
+Coordinators cannot submit reconciliation waivers. Never decide irrelevance from
+a filename or from the preserved source alone.
+
+The compiler replays both source captures, complete document bytes and the
+original coverage proof at publication and acceptance. It binds the new semantic
+judgment to its worker payload and preserves original validation obligations and
+handoffs. Independent final review, scientific checks, validator ownership,
+native CI requirements, and the two-batch boundary continue unchanged.

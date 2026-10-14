@@ -16,6 +16,14 @@ If the review artifact cannot be saved, its reference is null and publication
 is blocked. The read-only review command still returns full details without
 writing, and Python publication receipts include full details plus the reference.
 
+Fresh-context cross-node reads fail `publish-worker-payload` before success. The
+rejection retains the exact attempted bytes and returns a node-local recovery
+receipt. Keep the truthful ledger; one clean replacement worker may use that
+node's unchanged dispatch. Repeating identical rejected bytes is an idempotent
+receipt replay. A second distinct isolation failure blocks that node. Accepted
+nodes, source/Git identities, validators, and the review's repair budget are not
+replayed or reset by this recovery.
+
 ## Audit Coverage
 
 `payload_schema.optional_shapes.coverage_units` includes all required unit fields.

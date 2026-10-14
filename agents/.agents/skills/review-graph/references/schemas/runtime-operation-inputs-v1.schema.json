@@ -951,6 +951,9 @@
       ],
       "type": "object"
     },
+    "prepare-validation-timing": {
+      "$ref": "#/$defs/stdinWorkerPayloadContract"
+    },
     "schedule-ready": {
       "type": "object",
       "additionalProperties": false,
