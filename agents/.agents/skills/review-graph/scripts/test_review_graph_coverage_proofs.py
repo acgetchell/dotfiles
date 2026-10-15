@@ -58,11 +58,17 @@ def _proof_fixture(
     fresh = next(entry for entry in entries["dispatches"] if entry["dispatch"]["skill_id"] == "python-test-quality")
     validation = fresh["dispatch"]["command_policy"]["planned_validation_units"][0]
     payload = {
-        **_payload(owned),
+        **_payload(owned, dispatch=fresh["dispatch"]),
         "status": "completed",
-        "nearby_contract_owners": ["cliff.toml"],
+        "nearby_contract_owners": ["cliff.toml", *fresh["dispatch"]["required_read_paths"]],
         "coverage_units": [
-            {"unit_id": "configuration", "owned_paths": [owned[0]], "dependency_paths": ["cliff.toml"], "dependency_uncertainty": "", "finding_indices": [1]},
+            {
+                "unit_id": "configuration",
+                "owned_paths": [owned[0]],
+                "dependency_paths": ["cliff.toml", *fresh["dispatch"]["required_read_paths"]],
+                "dependency_uncertainty": "",
+                "finding_indices": [1],
+            },
             {"unit_id": "adoption-tests", "owned_paths": [owned[1]], "dependency_paths": [owned[0]], "dependency_uncertainty": "", "finding_indices": [2]},
         ],
         "findings": [
@@ -124,10 +130,10 @@ def _proof_fixture(
     partial = next(entry for entry in result["dispatch_set"]["dispatches"] if entry["dispatch"]["skill_id"] == "python-test-quality")
     validation = partial["dispatch"]["command_policy"]["planned_validation_units"][0]
     updated = {
-        **_payload([owned[1]]),
+        **_payload([owned[1]], dispatch=partial["dispatch"]),
         "status": "completed",
         "findings": payload["findings"][1:],
-        "nearby_contract_owners": [owned[0]],
+        "nearby_contract_owners": [owned[0], *partial["dispatch"]["required_read_paths"]],
         "validation_requirements": [{**payload["validation_requirements"][0], "planned_validation_digest": validation["planned_validation_digest"]}],
         "handoffs": payload["handoffs"],
     }
@@ -163,7 +169,7 @@ def test_changed_validation_contract_requires_fresh_partitioned_audit(tmp_path: 
     assert decision["reason_code"] == "validation-requirements-changed"
     validation = replacement["dispatch"]["command_policy"]["planned_validation_units"][0]
     payload = {
-        **_payload(["pyproject.toml", "tests/tooling/test_adoption.py"]),
+        **_payload(["pyproject.toml", "tests/tooling/test_adoption.py"], dispatch=replacement["dispatch"]),
         "validation_requirements": [
             {
                 "requirement_id": validation["requirement_ids"][0],

@@ -30,7 +30,7 @@ def test_fixed_branch_base_does_not_hide_index_moving_ref_or_compound_dependenci
 
 def _discovery_payload(audit: dict[str, Any], command: str = "git --no-pager diff -- tool.py state.rs") -> dict[str, Any]:
     return {
-        **_payload(audit["dispatch"]["owned_paths"]),
+        **_payload(audit["dispatch"]["owned_paths"], dispatch=audit["dispatch"]),
         "commands_executed": [command],
         "git_dependencies": [{"kind": "source-discovery", "command": command, "reason": "Located changes; judgments use the inspected worktree files."}],
     }
@@ -172,7 +172,7 @@ def test_external_read_cannot_be_preserved_without_captured_identity(tmp_path: P
     dependency = tmp_path / "dependency.toml"
     dependency.write_text('version = "1"\n')
     payload = _discovery_payload(audit)
-    payload["nearby_contract_owners"] = [str(dependency)]
+    payload["nearby_contract_owners"].append(str(dependency))
     _accept(request, audit, payload)
     result = resume_after_external_metadata(request)
     decision = next(item for item in result["node_decisions"] if item["node_id"] == audit["node_id"])

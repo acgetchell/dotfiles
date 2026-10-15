@@ -89,8 +89,10 @@ def test_large_real_commit_handoff_compiles_all_four_modes(tmp_path: Path, monke
     with monkeypatch.context() as original_rendering:
         original_rendering.setattr(runtime, "_state_verification", inline_state)
         with pytest.raises(ValueError, match="maximum size"):
-            runtime.compile_review({"dispatch": _dispatch(audit, result), "payload": _payload(audit["dispatch"]["owned_paths"])})
-    content, metadata = runtime.compile_review({"dispatch": _dispatch(audit, result), "payload": _payload(audit["dispatch"]["owned_paths"])})
+            runtime.compile_review({"dispatch": _dispatch(audit, result), "payload": _payload(audit["dispatch"]["owned_paths"], dispatch=audit["dispatch"])})
+    content, metadata = runtime.compile_review(
+        {"dispatch": _dispatch(audit, result), "payload": _payload(audit["dispatch"]["owned_paths"], dispatch=audit["dispatch"])}
+    )
     _assert_reference(content, metadata)
     _load_compiled(tmp_path, "audit-large", content, metadata)
     independent = next(entry for entry in entries if entry["dispatch"]["mode"] == "independent-review")
@@ -135,7 +137,9 @@ def test_large_real_commit_handoff_compiles_all_four_modes(tmp_path: Path, monke
 def test_transition_reference_and_full_history_are_both_verified(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str) -> None:
     _request, result, _sources = _handoff(tmp_path, monkeypatch, large=False)
     entry = next(entry for entry in result["dispatch_set"]["dispatches"] if entry["dispatch"]["mode"] == "audit")
-    content, metadata = runtime.compile_review({"dispatch": _dispatch(entry, result), "payload": _payload(entry["dispatch"]["owned_paths"])})
+    content, metadata = runtime.compile_review(
+        {"dispatch": _dispatch(entry, result), "payload": _payload(entry["dispatch"]["owned_paths"], dispatch=entry["dispatch"])}
+    )
     fingerprints = runtime._fingerprint_evidence(json.loads(json.dumps(metadata["evidence"]["fingerprints"])))
     reference = metadata_transition_reference(fingerprints.metadata_transitions)
     line = "- External metadata transitions reference: " + canonical_json(reference)
@@ -168,7 +172,9 @@ def test_transition_reference_and_full_history_are_both_verified(tmp_path: Path,
 def test_existing_inline_native_transition_evidence_remains_readable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _request, result, _sources = _handoff(tmp_path, monkeypatch, large=False)
     entry = next(entry for entry in result["dispatch_set"]["dispatches"] if entry["dispatch"]["mode"] == "audit")
-    content, metadata = runtime.compile_review({"dispatch": _dispatch(entry, result), "payload": _payload(entry["dispatch"]["owned_paths"])})
+    content, metadata = runtime.compile_review(
+        {"dispatch": _dispatch(entry, result), "payload": _payload(entry["dispatch"]["owned_paths"], dispatch=entry["dispatch"])}
+    )
     fingerprints = runtime._fingerprint_evidence(json.loads(json.dumps(metadata["evidence"]["fingerprints"])))
     reference = canonical_json(metadata_transition_reference(fingerprints.metadata_transitions))
     inline = canonical_json([asdict(item) for item in fingerprints.metadata_transitions])

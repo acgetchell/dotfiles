@@ -198,7 +198,7 @@ def test_optional_coverage_shape_publishes_and_compiles_first_attempt(dispatch_s
     payload = _compact_audit_payload(entry)
     payload.update(
         status="completed",
-        nearby_contract_owners=["tests/context.py"],
+        nearby_contract_owners=[*payload["nearby_contract_owners"], "tests/context.py"],
         findings=[{"severity": "P3", "location": dispatch["owned_paths"][0] + ":1", "summary": "Fixture finding", "evidence": "Fixture", "remediation": "Fix"}],
         coverage_units=[dict.fromkeys(shape)],
     )
@@ -221,11 +221,11 @@ def test_optional_coverage_remains_strict(dispatch_set: dict[str, Any], damage: 
     materialized = dispatch_set
     entry = next(item for item in materialized["dispatches"] if item["dispatch"].get("mode") == "audit")
     payload = _compact_audit_payload(entry)
-    payload["nearby_contract_owners"] = ["tests/context.py"]
+    payload["nearby_contract_owners"].append("tests/context.py")
     unit = {
         "unit_id": "contract",
         "owned_paths": entry["dispatch"]["owned_paths"],
-        "dependency_paths": ["tests/context.py"],
+        "dependency_paths": list(payload["nearby_contract_owners"]),
         "dependency_uncertainty": "",
         "finding_indices": [],
     }

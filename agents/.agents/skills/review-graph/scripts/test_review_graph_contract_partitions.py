@@ -80,9 +80,9 @@ def _contract_request(
     lifecycle, entries, _dispatches = _materialize(tmp_path, capture, plan)
     entry = next(item for item in entries["dispatches"] if item["dispatch"]["skill_id"] == "python-cli-review")
     payload = {
-        **_payload(entry["dispatch"]["owned_paths"]),
+        **_payload(entry["dispatch"]["owned_paths"], dispatch=entry["dispatch"]),
         "status": "completed",
-        "nearby_contract_owners": ["pyproject.toml", *(contract for _path, contract in CAPABILITIES.values())],
+        "nearby_contract_owners": ["pyproject.toml", *entry["dispatch"]["required_read_paths"], *(contract for _path, contract in CAPABILITIES.values())],
         "findings": [
             {
                 "severity": "P2",
@@ -97,7 +97,7 @@ def _contract_request(
             {
                 "unit_id": capability,
                 "owned_paths": [path],
-                "dependency_paths": sorted({"pyproject.toml", contract, *(["docs/api.md"] if broad else [])}),
+                "dependency_paths": sorted({"pyproject.toml", contract, *entry["dispatch"]["required_read_paths"], *(["docs/api.md"] if broad else [])}),
                 "dependency_uncertainty": "The notebook may also use operational support policy." if uncertain and capability == "notebook" else "",
                 "finding_indices": [ordinal],
             }
@@ -165,7 +165,7 @@ def _replay_contract_repair(
     decision = next(item for item in result["coverage_reuse_decisions"] if item["node_id"] == entry["node_id"])
     rechecked = {path for unit in decision["units"] if unit["disposition"] in {"recheck", "instruction-review"} for path in unit["owned_paths"]}
     updated = {
-        **_payload(sorted(rechecked)),
+        **_payload(sorted(rechecked), dispatch=entry["dispatch"]),
         "status": "completed",
         "findings": fresh_findings
         if fresh_findings is not None
@@ -180,6 +180,7 @@ def _replay_contract_repair(
             }
         ),
     }
+    updated["nearby_contract_owners"] = sorted({*updated["nearby_contract_owners"], *entry["dispatch"]["required_read_paths"]})
     # A changed contract is still an actual dependency when it remains present.
     changed = request["changed_paths"][0]
     if (

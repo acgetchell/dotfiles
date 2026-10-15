@@ -44,8 +44,16 @@ from review_graph_coverage import (
 )
 from review_graph_doi import captured_doi_inputs, captured_software_inputs, inspect_canonical_recheck
 from review_graph_executor import executor_permissions, remedied_features
-from review_graph_git import audit_git_context, discovery_reconciliation, intervening_metadata_blockers, metadata_audit_blockers, validate_git_dependencies
+from review_graph_git import (
+    audit_git_context,
+    discovery_reconciliation,
+    intervening_metadata_blockers,
+    metadata_audit_blockers,
+    refresh_comparison_scope,
+    validate_git_dependencies,
+)
 from review_graph_git_objects import GitPathIdentity
+from review_graph_handoffs import validation_observations
 from review_graph_independent import CHECK_LABELS, SCHEMA as _INDEPENDENT_PAYLOAD_SCHEMA, render_independent_payload
 from review_graph_instruction_delta import reconcile_instructions, retained_input_texts
 from review_graph_integrity import canonical_json, digest_bytes
@@ -126,7 +134,9 @@ from review_graph_plan import (
     validation_requirements_from_document,
 )
 from review_graph_preflight import inspect_executor_executables
-from review_graph_provenance import metadata_transition_reference, review_scope_body, worker_payload_reference
+from review_graph_provenance import independent_scope_body, metadata_transition_reference, review_scope_body, worker_payload_reference
+from review_graph_read_provenance import MissingReadProvenanceError, bind_runtime_reads, normalized_read_provenance
+from review_graph_reads import source_read_operands
 from review_graph_receipts import stage_receipt
 from review_graph_reuse import (
     SNAPSHOT_FORMAT,
@@ -141,12 +151,12 @@ from review_graph_reuse import (
 )
 from review_graph_scheduling import select_execution_lanes
 from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
-from review_graph_session import current_execution_context, runtime_command
+from review_graph_session import current_execution_context, runtime_command, verify_current_snapshot
 from review_graph_synthesis import synthesis_fields, validate_synthesis
 from review_graph_timing import timing_blocker, timing_documents, timing_prerequisite
 from review_graph_usage import digest as usage_digest, measure_call
 from review_graph_validation import ArtifactIdentity, ValidationPayload, ValidationRecord, VerifiedValidationRecord, bind_validation_payload
-from review_graph_validation_contracts import ContractBinding, load_contract_binding
+from review_graph_validation_contracts import ContractBinding, load_contract_binding, validation_reuse_prerequisite
 from review_graph_views import execution_view_bytes
 
 if TYPE_CHECKING:
@@ -684,6 +694,7 @@ def _review_normalized_record(payload: dict[str, Any], expectation: ReviewEviden
     inherited_context = (expectation.coverage_reuse or {}).get("original_audit_context", {})
     return {
         **(synthesis_fields(payload) if evidence.mode == "synthesis" else {}),
+        **normalized_read_provenance(expectation.audit_input_identity),
         **({"coverage_units": payload["coverage_units"]} if "coverage_units" in payload else {}),
         **({"coverage_reuse": expectation.coverage_reuse} if expectation.coverage_reuse is not None else {}),
         **{key: payload[key] for key in ("execution_facts", "validation_limits", "unresolved_uncertainties") if key in payload},
@@ -942,8 +953,9 @@ def _review_scope_coverage_blockers(dispatch: dict[str, Any], payload: dict[str,
 
 
 def _compiled_audit_inputs(dispatch: dict[str, Any], payload: dict[str, Any]) -> AuditInputIdentity | None:
-    if dispatch["mode"] != "audit":
+    if dispatch["mode"] not in {"audit", "independent-review"}:
         return None
+    runtime_inputs, protocol_commands = bind_runtime_reads(dispatch, payload)
     instruction_paths = _text_list(dispatch, "instruction_paths")
     instruction_digests = tuple((path, _file_identity_digest(path)) for path in instruction_paths)
     if "instruction_digests" in dispatch and instruction_digests != _string_pairs(dispatch, "instruction_digests"):
@@ -955,6 +967,9 @@ def _compiled_audit_inputs(dispatch: dict[str, Any], payload: dict[str, Any]) ->
         _text_list(payload, "nearby_contract_owners"),
         instruction_digests,
         retained_input_texts(Path(dispatch["repository_root"]), instruction_paths, payload) if "repository_root" in dispatch else (),
+        runtime_inputs,
+        protocol_commands,
+        tuple(sorted({path for command in payload.get("commands_executed", []) for path in source_read_operands(command) or ()})),
     )
 
 
@@ -1110,7 +1125,7 @@ def compile_review(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  #
     evidence_id = _required_text(dispatch, "evidence_id")
     artifact_id = _required_text(dispatch, "artifact_id")
     fingerprints = _dispatch_fingerprints(dispatch)
-    _verify_audit_metadata(payload, fingerprints, coverage_reuse)
+    _verify_audit_metadata({**payload, **normalized_read_provenance(audit_inputs)}, fingerprints, coverage_reuse)
     expectation = ReviewEvidenceExpectation(
         node_id=node_id,
         requirement_ids=requirement_ids,
@@ -1478,6 +1493,9 @@ def _compile_independent_native(document: dict[str, Any], native_content: bytes)
     artifact_id = _required_text(dispatch, "artifact_id")
     reference_digests = tuple((str(path), _file_identity_digest(str(path))) for path in reference_paths)
     fingerprints = observed_fingerprints
+    audit_inputs = _compiled_audit_inputs(dispatch, _canonical_worker_payload(native_content))
+    if audit_inputs is not None:
+        sections["## Scope Inspected"] = independent_scope_body(sections["## Scope Inspected"], audit_inputs, section_limit=MAX_NATIVE_SECTION_BYTES)
     expectation = ReviewEvidenceExpectation(
         node_id=node_id,
         requirement_ids=_text_list(dispatch, "requirement_ids"),
@@ -1493,6 +1511,7 @@ def _compile_independent_native(document: dict[str, Any], native_content: bytes)
         change_target=change_target,
         planned_paths=planned_paths,
         planned_path_line_bounds=_path_line_bounds(dispatch, "planned_path_line_bounds"),
+        audit_input_identity=audit_inputs,
     )
     evidence = ReviewEvidence(
         schema_version=EVIDENCE_SCHEMA_VERSION,
@@ -1681,6 +1700,7 @@ def _independent_normalized_record(content: bytes, expectation: ReviewEvidenceEx
     context = _canonical_worker_payload(content) if b"- Canonical worker payload: " in content else {}
     return {
         **{key: context[key] for key in ("commands_executed", "git_dependencies", "git_sensitive", "nearby_contract_owners") if key in context},
+        **normalized_read_provenance(expectation.audit_input_identity),
         "artifact_digest": evidence.raw_result_digest,
         "artifact_id": evidence.raw_result_artifact_id,
         "changes": [],
@@ -1828,6 +1848,9 @@ def _audit_input_identity(raw: object) -> AuditInputIdentity | None:
         _string_tuple(raw, "nearby_contract_owners"),
         _string_pairs(raw, "instruction_digests"),
         _string_pairs(raw, "retained_inputs") if "retained_inputs" in raw else (),
+        _string_pairs(raw, "runtime_inputs") if "runtime_inputs" in raw else (),
+        _string_tuple(raw, "protocol_commands") if "protocol_commands" in raw else (),
+        _string_tuple(raw, "command_read_paths") if "command_read_paths" in raw else (),
     )
 
 
@@ -2839,6 +2862,10 @@ def _verify_independent_payload_binding(content: bytes, metadata: dict[str, Any]
         msg = "independent rendered payload differs from its bound native input"
         raise ValueError(msg)
     expected = _independent_input_sections(native)
+    if expectation.audit_input_identity is not None:
+        expected["## Scope Inspected"] = independent_scope_body(
+            expected["## Scope Inspected"], expectation.audit_input_identity, section_limit=MAX_NATIVE_SECTION_BYTES
+        )
     findings = _independent_findings(expected["## Findings"], evidence.node_id, evidence.status)
     handoffs = _independent_handoffs(expected["## Routing Handoffs"], evidence.node_id, {})
     expected["## Findings"] = _independent_findings_body(findings, evidence.status)
@@ -2970,7 +2997,9 @@ def _load_evidence_source(  # noqa: C901, PLR0912, PLR0915
                     },
                     payload,
                 )
-                _verify_audit_metadata(payload, evidence.fingerprints, expectation.coverage_reuse)
+                _verify_audit_metadata(
+                    {**payload, **normalized_read_provenance(expectation.audit_input_identity)}, evidence.fingerprints, expectation.coverage_reuse
+                )
                 if expectation.mode == "synthesis":
                     require_schema(payload, _SYNTHESIS_PAYLOAD_SCHEMA)
                     validate_synthesis(payload, expectation.predecessor_evidence_ids, metadata.get("synthesis_bundle"))
@@ -3657,6 +3686,7 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
         " dispatch.provenance_examples contains illustrative fragments, not performed work: merge only actual reads/commands, "
         "account for owned scope under the dispatch contract, and replace origin/main with the captured base when applicable. "
         "files_inspected is owned-only; nearby_contract_owners records inspected dependency/context paths. "
+        "Read dispatch.required_read_paths and declare those actual reads before a completed submission; omissions fail before sealing. "
         "Record each Git invocation separately and bind git_dependencies.command to its exact commands_executed entry. "
         "source-discovery supports plain git diff with optional HEAD, --cached/--staged, and -- relative/path; "
         "other revisions use conservative head (or index/history for those judgments). Never classify a compound command as source-discovery."
@@ -3681,6 +3711,7 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
     validation_text = (
         " Apply dispatch.executor_requirements.sandbox_permissions to the execution tool; it is a requirement, not an approval grant. "
         "If unavailable or denied, report blocked without silently using a different permission mode. "
+        "Run validation_observations.before capture_command then workspace_command before timed launches; repeat with .after afterwards. "
         " Omit artifacts: the runtime captures workspace status and artifact digests before and after execution. "
         "executions[].artifact_paths names only exact validation_unit.allowed_artifacts[].path roots, never generated child files. "
         "Use [] for no output or absent outputs. Child file paths may appear in evidence text; publication checks references before writing."
@@ -3814,6 +3845,8 @@ def _preflight_audit_payload(contract: dict[str, Any], payload: dict[str, Any]) 
         current_state = list(_current_metadata_state(dispatch))
         native, metadata = compiler({"dispatch": {**dispatch, "before_state": current_state, "after_state": current_state}, "payload": payload})
     except (ValueError, TypeError) as error:
+        if isinstance(error, MissingReadProvenanceError):
+            raise
         msg = f"{contract.get('mode')} compiler preflight failed before publication: {error}"
         raise ValueError(msg) from error
     headings = tuple(line for line in native.decode().splitlines() if line.startswith("## "))
@@ -3939,7 +3972,13 @@ def _approved_worker_payload_write(
         artifact_write_review = review_worker_payload_write(contract_document, payload_bytes, candidate_is_write_target=candidate_is_write_target)
     except IsolationViolationError as error:
         raise IsolationPublicationError(_retain_isolation_rejection(contract_document, payload_bytes, error)) from error
+    except MissingReadProvenanceError as error:
+        _retain_provenance_rejection(contract_document, payload_bytes, error)
+        raise
     _require_isolation_budget(contract_document)
+    if len(_provenance_attempts(contract_document)) >= 2:
+        msg = "instruction provenance correction exhausted; retain failed attempts and leave this node blocked"
+        raise ValueError(msg)
     if approval_identity is not None:
         _sha256_digest(approval_identity, "worker payload approval identity")
         if approval_identity != artifact_write_review["approval_identity"]:
@@ -4269,6 +4308,8 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         }
         if (execution_context := current_execution_context()) is not None:
             common["execution_context"] = execution_context
+        if (snapshot_reference := verify_current_snapshot()) is not None:
+            common["runtime_snapshot"] = snapshot_reference
         if node.mode in {"audit", "independent-review"}:
             common["fresh_context_forbidden_artifacts"] = forbidden_artifacts(node.node_id, isolation_entries)
         if document.get("external_metadata_transitions"):
@@ -4303,6 +4344,7 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             common["validation_unit"] = json.loads(canonical_json(asdict(unit)))
             common["executor_requirements"] = {"sandbox_permissions": executor_permissions(unit.features)}
             common["timing_prerequisite"] = timing_prerequisite(worker_payload_contract_path, node.node_id)
+            common["validation_observations"] = validation_observations(common, worker_payload_contract_path)
             recovery = next(
                 (item for item in plan.validation_recoveries if item["node_id"] == node.node_id and tuple(item["source_state"]) == source_state), None
             )
@@ -4365,6 +4407,21 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
                 common["synthesis_examples"] = _synthesis_examples(common)
         if node.mode in {"audit", "independent-review"} and common["owned_paths"]:
             common["provenance_examples"] = _worker_provenance_examples(common, line_bounds)
+            common["required_read_paths"] = sorted({node.skill_path, *instruction_paths, *node.static_references})
+            runtime_paths = {*common["required_read_paths"], str(common["payload_schema"]["path"])}
+            if shared := common.get("shared_inspection_evidence"):
+                runtime_paths.add(shared["source_packet_path"])
+            common["runtime_input_digests"] = [
+                [path, digest_bytes(pending_writes[Path(path)][0]) if Path(path) in pending_writes else _file_identity_digest(path)]
+                for path in sorted(runtime_paths)
+            ]
+            # These files are written atomically below; their exact bytes are bound
+            # during compilation, after the publication contract verifies dispatch.
+            common["protocol_input_paths"] = [
+                str(artifact_store / f"{node.node_id}.worker-input.json"),
+                str(artifact_store / f"{node.node_id}.execution.json"),
+                str(worker_payload_contract_path),
+            ]
         persistence_contract = {
             **({"coverage_reuse": common["coverage_reuse"]} if "coverage_reuse" in common else {}),
             "mode": node.mode,
@@ -5104,6 +5161,18 @@ def _metadata_resume_decisions(
         reasons = _metadata_node_reasons(node.mode, node.predecessors, trusted, transition)
         record = _record_document(trusted)
         status = lifecycle.get(node.node_id, "pending")
+        historical_gate = (
+            node.node_id in plan.pre_review_validation_nodes
+            and status == "accepted"
+            and isinstance(trusted, VerifiedValidationRecord)
+            and {reason["reason_code"] for reason in reasons} == {"validation-contract-unavailable"}
+            and trusted.historical_source_gate(transition.after)
+            and all(
+                _workspace_content_digest(_workspace_path(artifact.path, Path(transition.after.repository_root)), declared_cache=artifact.kind == "cache")[1:3]
+                == (artifact.digest, artifact.digest_mode)
+                for artifact in trusted.record.artifacts
+            )
+        )
         if status not in {"accepted", "blocked", "in-flight"}:
             reasons.append({"reason_code": "no-active-evidence", "reason": f"Node lifecycle is {status}; no accepted or active review to preserve."})
         decisions.append(
@@ -5111,7 +5180,8 @@ def _metadata_resume_decisions(
                 "node_id": node.node_id,
                 "mode": node.mode,
                 "prior_status": status,
-                "disposition": "recheck" if reasons else "preserved",
+                "disposition": "preserved" if historical_gate else "recheck" if reasons else "preserved",
+                **({"scheduling_gate": "historical-source-pass", "formal_reuse": "unproven", "automatic_reexecution": False} if historical_gate else {}),
                 "reasons": reasons
                 or [
                     {
@@ -5903,7 +5973,7 @@ def _exhausted_mutation_locked(document: dict[str, Any], plan: GraphPlan) -> dic
     return {**result, "stop_path": str(stop_path)}
 
 
-def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa: PLR0915
+def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, PLR0915 - one ordered repair transaction.
     """Close one repair epoch, recapture once, and emit a fresh final-state graph."""
     raw_plan = document.get("plan")
     previous_capture = document.get("previous_capture")
@@ -5943,6 +6013,8 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
     captured_paths = _text_list(new_capture, "captured_scope_paths")
     sources = _mutation_evidence_sources(document, old_plan)
     planning_input = bootstrap_document(new_capture, planning_template)
+    if planning_input.get("change_target"):
+        planning_input["change_target"] = refresh_comparison_scope(planning_input["change_target"], previous_capture, new_capture)
     planning_input["independent_review_after_audits"] = old_plan.independent_review_after_audits
     planning_input["review_lifecycle"] = json.loads(canonical_json(asdict(old_plan.review_lifecycle)))
     planning_input["planning_purpose"] = "repair-verification"
@@ -6731,6 +6803,10 @@ def _coordinator_lane_entry(original: dict[str, Any], store: Path, pending: dict
     entry["worker_payload_contract_path"] = str(contract_path)
     dispatch = entry["dispatch"]
     dispatch.update({"execution_location": "coordinator", "worker_created": False, "fresh_context": False})
+    if "protocol_input_paths" in dispatch:
+        dispatch["protocol_input_paths"] = [
+            entry[field] for field in ("worker_input_path", "worker_execution_path", "worker_payload_contract_path") if field in entry
+        ]
     persistence = dispatch["worker_payload_persistence"]
     persistence["input_path"] = str(contract_path)
     for field in ("command", "review_command", "publish_command"):
@@ -7365,6 +7441,7 @@ def preflight_validation(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C
         "status": "blocked" if any(unit["blockers"] for unit in units) else "ready",
         "units": units,
         "cache_checks": cache_checks,
+        "validation_reuse_prerequisite": validation_reuse_prerequisite(repository_root),
         "limits": (
             "Read-only prerequisite observations; do not certify command execution or sandbox write permission. "
             "Capture blocked evidence and continue independent audits when authorized."
@@ -8068,8 +8145,8 @@ def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     preflight_parser.add_argument("--output", type=Path, required=True)
     snapshot_parser = _runtime_subparser(subparsers, "snapshot-workspace", "capture runtime-owned validation workspace evidence")
     snapshot_parser.add_argument("--input", type=Path, required=True)
-    snapshot_parser.add_argument("--dispatches", type=Path, required=True)
-    snapshot_parser.add_argument("--node-id", required=True)
+    snapshot_parser.add_argument("--dispatches", type=Path)
+    snapshot_parser.add_argument("--node-id")
     snapshot_parser.add_argument("--current-capture", type=Path, required=True)
     snapshot_parser.add_argument("--output", type=Path, required=True)
     mutation_parser = _runtime_subparser(subparsers, "advance-after-mutation", "recapture and replan one serialized repair epoch")
@@ -8283,13 +8360,23 @@ def _lifecycle_dispatch(document: dict[str, Any], dispatches_path: Path, node_id
 
 
 def _snapshot_workspace_from_files(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
-    _plan, entry = _lifecycle_dispatch(document, args.dispatches, args.node_id)
-    source_state = _state(document, "source_state")
-    if _capture_source_state(args.current_capture) != _current_metadata_state(document):
+    if "compiler_preflight" in document:
+        dispatch = _publication_dispatch(document)
+        if dispatch is None or dispatch.get("mode") != "validation" or args.dispatches is not None or args.node_id is not None:
+            msg = "contract workspace snapshots require a bound validator identity without caller node overrides"
+            raise ValueError(msg)
+        expected = _current_metadata_state(dispatch)
+    else:
+        if args.dispatches is None or args.node_id is None:
+            msg = "lifecycle workspace snapshots require --dispatches and --node-id"
+            raise ValueError(msg)
+        _plan, entry = _lifecycle_dispatch(document, args.dispatches, args.node_id)
+        dispatch = entry.get("dispatch")
+        expected = _current_metadata_state(document)
+    if _capture_source_state(args.current_capture) != expected:
         msg = "workspace snapshot capture differs from the plan-bound source state"
         raise ValueError(msg)
-    dispatch = entry.get("dispatch")
-    if not isinstance(dispatch, dict) or entry.get("result_contract") != "compact-validation":
+    if not isinstance(dispatch, dict) or dispatch.get("mode") != "validation":
         msg = f"workspace snapshots apply only to validation nodes: {args.node_id}"
         raise ValueError(msg)
     return {**capture_workspace_snapshot(dispatch), "observed_source_state": list(_capture_source_state(args.current_capture))}
@@ -8550,6 +8637,25 @@ def _json_operation_output(document: dict[str, Any], args: argparse.Namespace) -
 def _isolation_attempts(document: dict[str, Any]) -> list[str]:
     target = Path(document["worker_payload_path"])
     return sorted(str(path) for path in target.parent.glob(f"{document['node_id']}.isolation-rejected.*.json") if not path.name.endswith(".receipt.json"))
+
+
+def _provenance_attempts(document: dict[str, Any]) -> list[Path]:
+    return list(Path(document["worker_payload_path"]).parent.glob(f"{document['node_id']}.provenance-rejected.*.json"))
+
+
+def _retain_provenance_rejection(document: dict[str, Any], content: bytes, error: ValueError) -> None:
+    target = Path(document["worker_payload_path"])
+    identity = digest_bytes(content).removeprefix("sha256:")
+    path = target.with_name(f"{document['node_id']}.provenance-rejected.{identity}.json")
+    receipt = {
+        "error": str(error),
+        "payload": json.loads(content),
+        "payload_digest": digest_bytes(content),
+        "recovery": (
+            "Correct the missing declarations from actual reads before acceptance; one correction attempt is allowed. Declarations do not prove comprehension."
+        ),
+    }
+    _write_bytes_atomically_once(path, (canonical_json(receipt) + "\n").encode(), mode=0o400)
 
 
 def _require_isolation_budget(document: dict[str, Any]) -> None:

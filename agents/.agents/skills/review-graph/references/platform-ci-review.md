@@ -41,6 +41,8 @@ do not retroactively claim a reference informed a review.
 Resolve an associated PR for branch reviews; absence of a supplied PR number
 does not establish that no PR exists. For a PR, actively retrieve its current
 head and check results; do not wait for the user to point out a failing job.
+Collect [existing PR feedback](pr-feedback.md) at the same time, before the
+first `begin-repair`, and refresh it at delivery.
 Read-only GitHub CLI examples:
 
 ```sh

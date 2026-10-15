@@ -79,7 +79,7 @@ def _validation_payload(entry: dict[str, Any], *, blocked: bool = False) -> dict
 
 
 def _commit_audit_payload(dispatch: dict[str, Any], *, mode: str, change_target: str) -> dict[str, Any]:
-    payload = _payload(dispatch["owned_paths"])
+    payload = _payload(dispatch["owned_paths"], dispatch=dispatch)
     if mode == "branch":
         payload.update(
             commands_executed=[change_target],
@@ -223,7 +223,7 @@ def test_reused_audit_native_requirement_survives_a_repair_then_commit(tmp_path:
     plan = plan_from_document(bootstrap_document(capture, template), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)
     lifecycle, dispatch_set, _dispatches = _materialize(tmp_path, capture, plan)
     audit = next(entry for entry in dispatch_set["dispatches"] if entry["dispatch"]["skill_id"] == "rust-invariant-state-transitions")
-    payload = _payload(audit["dispatch"]["owned_paths"])
+    payload = _payload(audit["dispatch"]["owned_paths"], dispatch=audit["dispatch"])
     planned = next(unit for unit in audit["dispatch"]["command_policy"]["planned_validation_units"] if "native-ci" in unit["requirement_ids"])
     payload["validation_requirements"] = [
         {

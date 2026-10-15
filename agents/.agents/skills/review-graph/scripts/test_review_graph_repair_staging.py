@@ -38,7 +38,7 @@ def _staged_repair(tmp_path: Path, dependency: str = "source") -> tuple[str, Pat
     plan = plan_from_document(bootstrap_document(capture, template), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)
     lifecycle, entries, _dispatches = _materialize(tmp_path, capture, plan)
     audit = next(item for item in entries["dispatches"] if item["dispatch"].get("mode") == "audit" and item["dispatch"]["owned_paths"] == ["tool.py"])
-    payload = _discovery_payload(audit) if dependency == "source-discovery" else _payload(["tool.py"])
+    payload = _discovery_payload(audit) if dependency == "source-discovery" else _payload(["tool.py"], dispatch=audit["dispatch"])
     if dependency == "index":
         payload["git_dependencies"] = [{"kind": "index", "reason": "Judgment depends on staging."}]
     planned = audit["dispatch"]["command_policy"]["planned_validation_units"][0]
@@ -355,7 +355,7 @@ def test_staged_repair_can_expand_late_validation_and_finish(tmp_path: Path, tra
     lifecycle = result["lifecycle_input"]
     entry = next(item for item in result["dispatch_set"]["dispatches"] if item["dispatch"].get("mode") == "audit")
     requirement = {**_late_validation_requirement(), "commands": ["true"], "working_directory": str(repository)}
-    payload = {**_payload(entry["dispatch"]["owned_paths"]), "validation_requirements": [requirement]}
+    payload = {**_payload(entry["dispatch"]["owned_paths"], dispatch=entry["dispatch"]), "validation_requirements": [requirement]}
     content, metadata = runtime.compile_review(
         {"dispatch": {**entry["dispatch"], "before_state": result["current_source_state"], "after_state": result["current_source_state"]}, "payload": payload}
     )

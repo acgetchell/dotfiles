@@ -1,11 +1,13 @@
 """Explicit audit coverage partitions and content-bound delta decisions."""
 
 from contextlib import suppress
+from pathlib import PurePosixPath
 from typing import Any, cast
 
 from review_graph_git import intervening_metadata_blockers
 from review_graph_instruction_delta import effective_units, instruction_delta_candidate
 from review_graph_integrity import canonical_json, digest_json
+from review_graph_read_provenance import normalized_read_provenance
 from review_graph_reuse import AuditInputIdentity, AuditReuseTransition, ReviewSourceSnapshot, verify_reuse_inputs
 
 
@@ -82,18 +84,32 @@ def coverage_decisions(  # noqa: PLR0913 - shared provenance proof plus optional
 ) -> list[dict[str, Any]]:
     """Prove each partition separately; uncertainty always requires fresh inspection."""
     validate_coverage_units(payload, inputs.owned_paths)
+    root = PurePosixPath(origin.repository_root)
+    declared = {root / path for unit in payload.get("coverage_units", []) for path in (*unit["owned_paths"], *unit["dependency_paths"])}
     decisions = []
     for unit in payload.get("coverage_units", []):
+        unit_paths = {root / path for path in (*unit["owned_paths"], *unit["dependency_paths"])}
+        # Declared paths belong to their units; unassigned reader operands
+        # remain conservative dependencies of every judgment.
+        command_paths = tuple(path for path in inputs.command_read_paths if root / path in unit_paths or root / path not in declared)
         reason = unit["dependency_uncertainty"]
         deltas = []
         metadata_blockers = intervening_metadata_blockers(
-            {**payload, "files_inspected": unit["owned_paths"], "nearby_contract_owners": unit["dependency_paths"]}, transition.metadata_transitions
+            {**payload, **normalized_read_provenance(inputs), "files_inspected": unit["owned_paths"], "nearby_contract_owners": unit["dependency_paths"]},
+            transition.metadata_transitions,
         )
         if metadata_blockers:
             reason = canonical_json(metadata_blockers)
         if not reason:
             unit_inputs = AuditInputIdentity(
-                tuple(unit["owned_paths"]), tuple(unit["owned_paths"]), tuple(unit["dependency_paths"]), inputs.instruction_digests, inputs.retained_inputs
+                tuple(unit["owned_paths"]),
+                tuple(unit["owned_paths"]),
+                tuple(unit["dependency_paths"]),
+                inputs.instruction_digests,
+                inputs.retained_inputs,
+                inputs.runtime_inputs,
+                inputs.protocol_commands,
+                command_paths,
             )
             try:
                 verify_reuse_inputs(origin, target, unit_inputs, transition)

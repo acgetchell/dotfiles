@@ -38,7 +38,7 @@ def test_symlink_target_change_must_recheck_source_read(tmp_path: Path, absolute
     entry = next(item for item in entries["dispatches"] if item["dispatch"].get("mode") == "audit")
     request = {**lifecycle, "journal_path": str(tmp_path / "old.jsonl")}
     payload = _discovery_payload(entry)
-    payload["nearby_contract_owners"] = [str(link) if absolute else "context.toml"]
+    payload["nearby_contract_owners"].append(str(link) if absolute else "context.toml")
     _accept(request, entry, payload)
     dependency.write_text('version = "2"\n')
     _run_test_git(git, "-C", str(repository), "add", "tool.py")
@@ -50,7 +50,7 @@ def test_symlink_target_change_must_recheck_source_read(tmp_path: Path, absolute
     )
     decision = next(item for item in result["node_decisions"] if item["node_id"] == entry["node_id"])
     assert decision["disposition"] == "recheck"
-    assert decision["reasons"][0]["path"] == payload["nearby_contract_owners"][0]
+    assert decision["reasons"][0]["path"] == payload["nearby_contract_owners"][-1]
     assert "symlink" in decision["reasons"][0]["reason"]
     dispatch = {
         **entry["dispatch"],
@@ -109,7 +109,13 @@ def _partial_audit(tmp_path: Path, kind: str, *, stage_before_repair: bool = Fal
     elif kind == "unclassified":
         payload.pop("git_dependencies")
     payload["coverage_units"] = [
-        {"unit_id": path, "owned_paths": [path], "dependency_paths": [], "dependency_uncertainty": "", "finding_indices": []}
+        {
+            "unit_id": path,
+            "owned_paths": [path],
+            "dependency_paths": list(payload["nearby_contract_owners"]),
+            "dependency_uncertainty": "",
+            "finding_indices": [],
+        }
         for path in ("tool.py", "pyproject.toml")
     ]
     source = _accept({**lifecycle, "journal_path": str(tmp_path / "original.jsonl")}, entry, payload)
@@ -161,7 +167,7 @@ def test_partial_reuse_retains_git_dependencies_at_resume_and_compilation(tmp_pa
     git, repository, repaired_capture, advanced, delta = _partial_audit(tmp_path, kind)
     lifecycle = json.loads(Path(advanced["lifecycle_input_path"]).read_text())
     if accepted:
-        _accept({**lifecycle, "journal_path": advanced["journal_path"]}, delta, _payload(["pyproject.toml"]))
+        _accept({**lifecycle, "journal_path": advanced["journal_path"]}, delta, _payload(["pyproject.toml"], dispatch=delta["dispatch"]))
     else:
         append_journal_event(Path(advanced["journal_path"]), lifecycle, JournalEventRequest(delta["node_id"], "in-flight"))
     _run_test_git(git, "-C", str(repository), "add", "tool.py")
@@ -190,12 +196,12 @@ def test_partial_reuse_retains_git_dependencies_at_resume_and_compilation(tmp_pa
         }
         # Fresh manifest reads cannot refresh the inherited implementation judgment.
         with pytest.raises(ValueError, match="current metadata state"):
-            compile_review({"dispatch": dispatch, "payload": _payload(["pyproject.toml"])})
+            compile_review({"dispatch": dispatch, "payload": _payload(["pyproject.toml"], dispatch=dispatch)})
         fresh = next(item for item in resumed["dispatch_set"]["dispatches"] if item["node_id"] == delta["node_id"])
         assert resumed["discarded_coverage_node_ids"] == [delta["node_id"]]
         assert "coverage_reuse" not in fresh["dispatch"]
         fresh_dispatch = {**fresh["dispatch"], "before_state": resumed["current_source_state"], "after_state": resumed["current_source_state"]}
-        content, metadata = compile_review({"dispatch": fresh_dispatch, "payload": _payload(fresh["dispatch"]["owned_paths"])})
+        content, metadata = compile_review({"dispatch": fresh_dispatch, "payload": _payload(fresh["dispatch"]["owned_paths"], dispatch=fresh["dispatch"])})
         assert "coverage_reuse" not in metadata["normalized_record"]
         Path(fresh["artifact_path"]).write_bytes(content)
         Path(fresh["metadata_path"]).write_text(json.dumps(metadata))
@@ -212,4 +218,4 @@ def test_partial_reuse_cannot_omit_original_git_context(tmp_path: Path) -> None:
     dispatch["before_state"] = dispatch["after_state"] = advanced["new_source_state"]
     dispatch["coverage_reuse"].pop("original_git_context")
     with pytest.raises(ValueError, match="original immutable"):
-        compile_review({"dispatch": dispatch, "payload": _payload(["pyproject.toml"])})
+        compile_review({"dispatch": dispatch, "payload": _payload(["pyproject.toml"], dispatch=dispatch)})

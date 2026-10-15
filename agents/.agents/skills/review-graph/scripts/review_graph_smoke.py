@@ -184,7 +184,7 @@ def review_payload(entry: dict[str, Any], plan: GraphPlan) -> dict[str, Any]:
         "handoffs": [],
         "limitations": [],
         "scope_limitations": [],
-        "nearby_contract_owners": [],
+        "nearby_contract_owners": list(dispatch.get("required_read_paths", [])),
         "status": "no-findings",
         "validation_requirements": [],
     }

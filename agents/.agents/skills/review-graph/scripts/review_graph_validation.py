@@ -23,7 +23,7 @@ from review_graph_plan import (
     validation_execution_result_blockers,
 )
 from review_graph_reuse import ReviewSourceSnapshot, source_snapshot
-from review_graph_validation_contracts import ContractBinding, ContractGitInput, object_fields
+from review_graph_validation_contracts import CONTRACT_PATH, ContractBinding, ContractGitInput, object_fields
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -509,6 +509,36 @@ class VerifiedValidationRecord:
             if observe_artifact(artifact) != (artifact.digest, artifact.digest_mode)
         )
         return reasons
+
+    def historical_source_gate(self, target: ReviewSourceSnapshot) -> bool:
+        """Retain a passed scheduling gate without certifying formal metadata reuse."""
+        record, origin = self.record, self.record.source_inputs
+        if (
+            origin is None
+            or record.contract_binding is not None
+            or record.git_dependencies != ()
+            or record.limitations
+            or record.status != ValidationStatus.PASSED
+        ):
+            return False
+        origin.verify()
+        target.verify()
+        if Path(target.repository_root, CONTRACT_PATH).exists() or record.native_ci_heads:
+            return False
+        fields = (
+            "repository_root",
+            "capture_mode",
+            "head",
+            "base_ref",
+            "merge_base",
+            "requested_paths",
+            "captured_scope_paths",
+            "repository_path_fingerprints",
+            "repository_symlink_paths",
+        )
+        return all(getattr(origin, key) == getattr(target, key) for key in fields) and not _unproven_inputs(
+            origin.repository_path_fingerprints, origin.repository_symlink_paths
+        )
 
 
 def _unproven_inputs(inputs: tuple[tuple[str, str], ...], symlink_paths: tuple[str, ...]) -> bool:

@@ -671,7 +671,7 @@ def _complete_structural_fixture_routing(document: dict[str, Any], paths: list[s
     )
 
 
-def _baseline_mutation_fixture(tmp_path: Path) -> tuple[str, Path, dict[str, Any], dict[str, Any], GraphPlan]:
+def _baseline_mutation_fixture(tmp_path: Path, *, instructions: bool = False) -> tuple[str, Path, dict[str, Any], dict[str, Any], GraphPlan]:
     git = shutil.which("git")
     assert git is not None
     repository = tmp_path / "repository"
@@ -684,10 +684,14 @@ def _baseline_mutation_fixture(tmp_path: Path) -> tuple[str, Path, dict[str, Any
     (repository / "tool.py").write_text("value = 1\n", encoding="utf-8")
     for name in ("LICENSE", "cliff.toml", ".codecov.yml"):
         (repository / name).write_text("unchanged baseline fixture\n", encoding="utf-8")
+    if instructions:
+        (repository / "AGENTS.md").write_text("Baseline review instructions.\n", encoding="utf-8")
     _run_test_git(git, "-C", str(repository), "add", ".")
     _run_test_git(git, "-C", str(repository), "commit", "-m", "initial")
     template = _sparse_plan_document()
     template["consulted_routers"] = ["review-graph", "rust-review-orchestrator", "python-review-orchestrator"]
+    if instructions:
+        template["consulted_routers"].append("docs-review-orchestrator")
     for override in template["routing_overrides"]:
         override["review_surface"] = ["state.rs"]
     template["validation_requirements"][0]["working_directories"] = [str(repository)]
@@ -697,8 +701,8 @@ def _baseline_mutation_fixture(tmp_path: Path) -> tuple[str, Path, dict[str, Any
     return git, repository, template, capture, plan
 
 
-def _mutation_request(tmp_path: Path) -> dict[str, Any]:
-    git, repository, template, previous_capture, plan = _baseline_mutation_fixture(tmp_path)
+def _mutation_request(tmp_path: Path, *, instructions: bool = False) -> dict[str, Any]:
+    git, repository, template, previous_capture, plan = _baseline_mutation_fixture(tmp_path, instructions=instructions)
     (repository / "state.rs").write_text("pub fn state() { assert!(true); }\n", encoding="utf-8")
     return {
         "artifact_store": str(tmp_path / "proof-store"),
@@ -769,9 +773,14 @@ def test_mutation_delta_uses_immediately_prior_capture_for_already_dirty_files(t
 
 
 def _mutation_with_audit_source(
-    tmp_path: Path, *, nearby_contract_owners: tuple[str, ...] = (), limitations: tuple[str, ...] = (), reference_planned_validation: bool = False
+    tmp_path: Path,
+    *,
+    nearby_contract_owners: tuple[str, ...] = (),
+    limitations: tuple[str, ...] = (),
+    reference_planned_validation: bool = False,
+    instructions: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, str]]:
-    request = _mutation_request(tmp_path)
+    request = _mutation_request(tmp_path, instructions=instructions)
     materialized = materialize_dispatches(
         {
             "artifact_store": str(tmp_path / "old-evidence"),
@@ -793,7 +802,7 @@ def _mutation_with_audit_source(
         "handoffs": [],
         "limitations": list(limitations),
         "scope_limitations": [],
-        "nearby_contract_owners": list(nearby_contract_owners),
+        "nearby_contract_owners": [*dispatch.get("required_read_paths", []), *nearby_contract_owners],
         "status": "no-findings",
         "validation_requirements": [],
     }
@@ -850,10 +859,11 @@ def test_mutation_reuses_only_unaffected_raw_evidence_without_relabeling_its_sou
 
 @pytest.mark.parametrize("changed_path", ["state.rs", "tool.py", "AGENTS.md"])
 def test_repeated_mutation_retains_or_expires_prior_nonexecutable_reuse(tmp_path: Path, changed_path: str) -> None:
-    request, entry, source = _mutation_with_audit_source(tmp_path)
+    request, entry, source = _mutation_with_audit_source(tmp_path, instructions=changed_path == "AGENTS.md")
     first = advance_after_mutation(request)
     artifact_bytes = Path(source["artifact_path"]).read_bytes()
     repository = Path(request["new_capture"]["repository_root"])
+    assert changed_path in first["capture"]["captured_scope_paths"]
     (repository / changed_path).write_text("// another source change\n", encoding="utf-8")
     git = shutil.which("git")
     assert git is not None
@@ -866,14 +876,6 @@ def test_repeated_mutation_retains_or_expires_prior_nonexecutable_reuse(tmp_path
         "repair_epoch": 2,
     }
     next_request.pop("sources")  # The prior plan owns immutable reused-source locations.
-    if changed_path == "AGENTS.md":
-        # New instructions also expand documentation routing in the repaired scope.
-        next_request["planning_template"] = {
-            **request["planning_template"],
-            "consulted_routers": [*request["planning_template"]["consulted_routers"], "docs-review-orchestrator"],
-        }
-        _complete_structural_fixture_routing(next_request["planning_template"], cast("list[str]", next_request["new_capture"]["captured_scope_paths"]))
-
     second = advance_after_mutation(next_request)
 
     evidence_id = entry["dispatch"]["evidence_id"]
@@ -972,7 +974,7 @@ def _compile_repair_fixture_entry(entry: dict[str, Any], lifecycle: dict[str, An
             "findings": [],
             "handoffs": [],
             "limitations": [],
-            "nearby_contract_owners": [],
+            "nearby_contract_owners": list(dispatch.get("required_read_paths", [])),
             "scope_limitations": [],
             "status": "no-findings",
             "validation_requirements": [],
@@ -2082,6 +2084,7 @@ def _worker_input_fixture(tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any
 
 def _compact_independent_payload(dispatch: dict[str, Any]) -> dict[str, Any]:
     return {
+        "nearby_contract_owners": list(dispatch.get("required_read_paths", [])),
         "status": "no-findings",
         "files_inspected": list(dispatch["planned_paths"]),
         "branches": "Captured change and adjacent control flow inspected.",
@@ -2118,7 +2121,7 @@ def _compact_audit_payload(entry: dict[str, Any], *, commands: tuple[str, ...] =
         "findings": [],
         "handoffs": [],
         "limitations": [],
-        "nearby_contract_owners": [],
+        "nearby_contract_owners": list(entry["dispatch"].get("required_read_paths", [])),
         "scope_limitations": [],
         "status": "no-findings",
         "validation_requirements": [],
@@ -2160,7 +2163,7 @@ entry = json.loads(Path(sys.argv[1]).read_text())
 dispatch = entry["dispatch"]
 payload = {
     "changes": [], "commands_executed": [], "command_policy_attested": True,
-    "files_inspected": dispatch["owned_paths"], "nearby_contract_owners": [],
+    "files_inspected": dispatch["owned_paths"], "nearby_contract_owners": dispatch["required_read_paths"],
     "findings": [], "validation_requirements": [], "handoffs": [],
     "limitations": [], "scope_limitations": [], "status": "no-findings"
 }
@@ -2901,7 +2904,7 @@ def test_compile_node_survives_context_compaction_by_reading_bound_worker_payloa
         "handoffs": [],
         "limitations": [],
         "scope_limitations": [],
-        "nearby_contract_owners": [],
+        "nearby_contract_owners": list(entry["dispatch"].get("required_read_paths", [])),
         "status": "no-findings",
         "validation_requirements": [],
     }
@@ -2999,7 +3002,7 @@ def test_legacy_candidate_persistence_preserves_valid_target_when_validation_or_
         "handoffs": [],
         "limitations": [],
         "scope_limitations": [],
-        "nearby_contract_owners": [],
+        "nearby_contract_owners": list(entry["dispatch"].get("required_read_paths", [])),
         "status": "no-findings",
         "validation_requirements": [],
     }
@@ -3139,7 +3142,7 @@ def test_nearby_audit_context_persists_compiles_and_journals_with_stable_approva
     payload = {
         **_compact_audit_payload(entry),
         "limitations": ["Nearby tests were inspected as context but are outside this audit's owned paths."],
-        "nearby_contract_owners": ["tests/prelude_exports.rs", "tests/proptest_interval.rs"],
+        "nearby_contract_owners": [*entry["dispatch"]["required_read_paths"], "tests/prelude_exports.rs", "tests/proptest_interval.rs"],
     }
     payload_bytes = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode()
     persistence_command = ["persist-worker-payload", "--input", entry["worker_payload_contract_path"], "--payload-stdin"]
@@ -3156,7 +3159,7 @@ def test_nearby_audit_context_persists_compiles_and_journals_with_stable_approva
     assert write_review["audit_path_roles"] == {
         "dispatch_owned_paths": entry["dispatch"]["owned_paths"],
         "inspected_dispatch_owned_paths": entry["dispatch"]["owned_paths"],
-        "nearby_context_paths": ["tests/prelude_exports.rs", "tests/proptest_interval.rs"],
+        "nearby_context_paths": payload["nearby_contract_owners"],
         "omitted_dispatch_owned_paths": [],
         "scope_limitation_paths": [],
     }
@@ -3508,7 +3511,7 @@ def test_compact_branch_runs_from_bootstrap_through_journal_and_final_proof(tmp_
                 "handoffs": [],
                 "limitations": [],
                 "scope_limitations": [],
-                "nearby_contract_owners": [],
+                "nearby_contract_owners": list(dispatch.get("required_read_paths", [])),
                 "status": "no-findings",
                 "validation_requirements": [],
             }
@@ -3802,7 +3805,7 @@ def _compile_materialized_evidence(  # noqa: PLR0913
                 "handoffs": handoffs,
                 "limitations": [],
                 "scope_limitations": [],
-                "nearby_contract_owners": [],
+                "nearby_contract_owners": list(dispatch.get("required_read_paths", [])),
                 "status": "no-findings",
                 "validation_requirements": validation_requirements,
             }
@@ -3924,7 +3927,7 @@ def test_compile_review_rejects_conflicting_planned_validation_identity(tmp_path
         "findings": [],
         "handoffs": [],
         "limitations": [],
-        "nearby_contract_owners": [],
+        "nearby_contract_owners": list(dispatch.get("required_read_paths", [])),
         "scope_limitations": [],
         "status": "no-findings",
         "validation_requirements": [requirement],

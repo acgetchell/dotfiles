@@ -103,6 +103,16 @@ base, captured scope, file bytes and modes must remain unchanged; staged scope
 changes still require replanning. Neither metadata transitions, missing CI nor
 proof bookkeeping restart a comprehensive review or reset the repair budget.
 
+Without `review-validation-contracts.json`, a passed gate with explicit empty
+Git dependencies and identical complete captured source may continue to admit
+source audits and the independent review after staging. The runtime retains its
+original execution as `historical-source-pass`, with `formal_reuse: unproven`;
+it does not schedule another CI run. Formal certification and current-metadata
+readiness remain blocked by the missing reviewed contract. A source/instruction
+change, declared Git dependency, changed execution contract or failed check still
+reopens the affected gate. Preflight exposes this registry prerequisite before
+expensive execution.
+
 ## Matched Protocol Measurement
 
 [Retained measurements](measurements/frozen-runs-2026-10-12.json) compare the

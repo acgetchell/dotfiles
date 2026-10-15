@@ -41,7 +41,7 @@ def test_dispatch_provenance_examples_publish_and_compile_first_time(materialize
     dispatch = entry["dispatch"]
     examples = dispatch["provenance_examples"]
     payload = _compact_independent_payload(dispatch) if mode == "independent-review" else _compact_audit_payload(entry)
-    payload["nearby_contract_owners"] = examples["context_read"]["nearby_contract_owners"]
+    payload["nearby_contract_owners"] = list(dict.fromkeys([*payload["nearby_contract_owners"], *examples["context_read"]["nearby_contract_owners"]]))
     payload["git_dependencies"] = examples[diff_example]["git_dependencies"]
     payload["commands_executed"] = [command for key in ("owned_read", "context_read", diff_example) for command in examples[key]["commands_executed"]]
     receipt = _publish(entry, payload)
