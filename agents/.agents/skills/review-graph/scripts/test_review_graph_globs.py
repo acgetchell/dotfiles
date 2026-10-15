@@ -28,3 +28,13 @@ def test_intersecting_sidecars_keep_directory_identity(tmp_path: Path, operand: 
         "fresh_context_forbidden_artifacts": ["/artifact-store/validation-001.*"],
     }
     assert bool(isolation_violations(dispatch, {"commands_executed": [f"cat {operand}"]})) is blocked
+
+
+def test_hash_in_filename_cannot_hide_later_peer_glob(tmp_path: Path) -> None:
+    dispatch = {
+        "fresh_context": True,
+        "mode": "audit",
+        "repository_root": str(tmp_path),
+        "fresh_context_forbidden_artifacts": ["/artifact-store/validation-001.*"],
+    }
+    assert isolation_violations(dispatch, {"commands_executed": ["cat tool.py#suffix; cat /artifact-store/*.receipt.jsonl"]})

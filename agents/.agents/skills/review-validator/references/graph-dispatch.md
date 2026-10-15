@@ -24,8 +24,9 @@ Missing fields mean `blocked`, never standalone discovery.
 
 ## Execution
 
-1. Wait for the runtime-owned pre-execution workspace snapshot; verify source
-   state.
+1. Run `validation_observations.before.capture_command`, then its
+   `workspace_command`. Without `validation_observations`, obtain before/after
+   source captures and workspace snapshots from the coordinator.
 2. Recheck that every dispatched command is non-mutating under repository-owned
    definitions or policy.
 3. Apply required tool permissions; respect approvals. If unavailable, report
@@ -38,11 +39,11 @@ Missing fields mean `blocked`, never standalone discovery.
    emulation in `limitations`.
    Report additional `git_dependencies`; repository contracts remain authoritative.
    For failures, classify `failure_kind` as source, infrastructure, timeout or inconclusive.
-5. Repeat the source-state check. Follow `worker_prompt`: serialize the complete
+5. Run `validation_observations.after.capture_command`, then its
+   `workspace_command`, before publication. Follow `worker_prompt`: serialize the complete
    payload once and stream it to `worker_payload_persistence.publish_command`,
    which reviews and publishes identical bytes. Return its bound receipt without
    echoing the payload.
-6. The coordinator immediately takes the runtime-owned post-execution snapshot.
 
 Do not report artifact digests, snapshots, fingerprints, or compiler identities.
 When checks never started, leave `executions` empty and explain the observed

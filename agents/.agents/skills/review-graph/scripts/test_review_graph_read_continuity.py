@@ -6,12 +6,25 @@ from pathlib import Path
 
 import pytest
 import review_graph_runtime as runtime
+from capture_scope import _scope_data
+from review_graph_bootstrap import bootstrap_document
 from review_graph_git import refresh_comparison_scope
+from review_graph_plan import plan_from_document
 from review_graph_read_provenance import MissingReadProvenanceError, file_identity, verify_runtime_inputs
 from review_graph_reads import source_read_operands
+from review_graph_session import runtime_command
 from test_review_graph_git import _accept, _discovery_payload
-from test_review_graph_runtime import _compact_audit_payload, _mutation_with_audit_source, _worker_input_fixture
-from test_review_graph_transitions import _staging_fixture
+from test_review_graph_runtime import (
+    ROUTING_CATALOG,
+    SKILL_ROOT,
+    _baseline_mutation_fixture,
+    _compact_audit_payload,
+    _mutation_with_audit_source,
+    _publish_worker_bytes,
+    _run_test_git,
+    _worker_input_fixture,
+)
+from test_review_graph_transitions import _materialize, _staging_fixture
 
 
 @pytest.mark.parametrize("paths", [["tool.py", "added.txt"], ["tool.py"]])
@@ -76,6 +89,9 @@ def test_numeric_sed_selection_is_a_bounded_reader(program: str) -> None:
         "rg -f patterns tool.py",
         "rg pattern",
         "cat tool.py; touch changed",
+        "cat tool.py#suffix; git log --oneline",
+        "cat tool.py # comment; git log --oneline",
+        "cat 'tool.py#suffix'; git log --oneline",
         "cat $(pwd)/tool.py",
         "sed -i '1p' tool.py",
         "sed -n '1,10w /tmp/output' tool.py",
@@ -87,6 +103,36 @@ def test_numeric_sed_selection_is_a_bounded_reader(program: str) -> None:
 )
 def test_ambiguous_readers_remain_unclassified(command: str) -> None:
     assert source_read_operands(command) is None
+
+
+@pytest.mark.parametrize("operand", ["tool.py#suffix", "'tool.py#suffix'", '"tool.py#suffix"'])
+def test_hash_bearing_reader_operands_keep_their_actual_identity(operand: str) -> None:
+    assert source_read_operands(f"cat {operand}") == ("tool.py#suffix",)
+
+
+@pytest.mark.parametrize("content", [None, "", "{", "[]", "null", "{}"])
+def test_failed_capture_does_not_prevent_truthful_blocked_publication(tmp_path: Path, content: str | None) -> None:
+    document, _entries = _worker_input_fixture(tmp_path)
+    command = shlex.join([*runtime_command(Path(runtime.__file__).with_name("capture_scope.py")), "--mode", "baseline"])
+    document["artifact_store"] = str(tmp_path / "failed-capture-proof")
+    document["state_verification_command"] = command
+    entries = runtime.materialize_dispatches(document)
+    entry = next(item for item in entries["dispatches"] if item["dispatch"]["mode"] == "audit")
+    output = tmp_path / "failed-capture.json"
+    if content is not None:
+        output.write_text(content)
+    ledger = [command + " > " + shlex.quote(str(output))]
+    payload = {**_compact_audit_payload(entry, commands=tuple(ledger)), "status": "blocked", "limitations": ["Source capture failed before verification."]}
+    contract = json.loads(Path(entry["worker_payload_contract_path"]).read_bytes())
+    runtime.publish_worker_payload_bytes(contract, json.dumps(payload).encode())
+    assert json.loads(Path(entry["worker_payload_path"]).read_bytes()) == payload
+    _native, metadata = runtime.compile_review(
+        {"dispatch": {**entry["dispatch"], "before_state": document["source_state"], "after_state": document["source_state"]}, "payload": payload}
+    )
+    inputs = metadata["expectation"]["audit_input_identity"]
+    assert str(output) not in dict(inputs.get("runtime_inputs", []))
+    assert ledger[0] not in inputs.get("protocol_commands", [])
+    assert metadata["normalized_record"]["commands_executed"] == ledger
 
 
 @pytest.mark.parametrize("reader", ["rg -n -A2 -B1 value tool.py", "sed -n '1,600p' tool.py"])
@@ -103,6 +149,51 @@ def test_live_staging_span_keeps_actual_reader_ledger(tmp_path: Path, reader: st
     record = runtime._load_evidence_source(source, require_normalized=True)[4]
     assert isinstance(record, dict)
     assert record["commands_executed"] == [reader]
+
+
+@pytest.mark.parametrize("operation", ["schedule-ready", "fallback-to-coordinator"])
+def test_relocated_coordinator_reads_remain_bound_across_staging(tmp_path: Path, operation: str) -> None:
+    git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
+    (repository / "tool.py").write_text("value = 2\n")
+    capture = _scope_data(git, repository, "baseline", None, ())
+    plan = plan_from_document(bootstrap_document(capture, template), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)
+    lifecycle, entries, dispatches = _materialize(tmp_path, capture, plan)
+    audit = next(entry for entry in entries["dispatches"] if entry["dispatch"].get("mode") == "audit")
+    request = {**lifecycle, "artifact_store": str(tmp_path / "coordinator")}
+    if operation == "schedule-ready":
+        request["worker_capacity"] = {"source": "fixture", "concurrent_worker_limit": 3, "active_workers": 3}
+    else:
+        request.update(node_id=audit["node_id"], worker_created=False, reason="fixture capacity exhaustion")
+    request_path, capture_path, journal = (tmp_path / name for name in ("request.json", "capture.json", "journal.jsonl"))
+    request_path.write_text(json.dumps(request))
+    capture_path.write_text(json.dumps(capture))
+    output = tmp_path / "relocated.json"
+    arguments = {"input": request_path, "dispatches": dispatches, "current-capture": capture_path, "journal": journal, "output": output}
+    assert runtime.main([operation, *(arg for key, path in arguments.items() for arg in (f"--{key}", str(path)))]) == 0
+    relocated = json.loads(output.read_text())
+    updated = json.loads(Path(relocated["dispatches_path"]).read_text())
+    entry = next(item for item in updated["dispatches"] if item["dispatch"]["execution_location"] == "coordinator")
+    protocol_paths = [entry[field] for field in ("worker_input_path", "worker_execution_path", "worker_payload_contract_path")]
+    payload = _compact_audit_payload(entry, commands=(shlex.join(["cat", *protocol_paths]),))
+    _publish_worker_bytes(entry, json.dumps(payload).encode())
+    current = {**lifecycle, "journal_path": str(journal)}
+    source = _accept(current, entry, payload)
+    originals = {path: Path(path).read_bytes() for path in source.values()}
+    _run_test_git(git, "-C", str(repository), "add", "tool.py")
+    resumed = runtime.resume_after_external_metadata(
+        {
+            **current,
+            "dispatches_path": relocated["dispatches_path"],
+            "previous_capture": capture,
+            "new_capture": _scope_data(git, repository, "baseline", None, ()),
+            "artifact_store": str(tmp_path / "resumed"),
+        }
+    )
+    assert entry["node_id"] in resumed["preserved_node_ids"]
+    metadata = json.loads(Path(entry["metadata_path"]).read_text())
+    assert set(protocol_paths) <= dict(metadata["expectation"]["audit_input_identity"]["runtime_inputs"]).keys()
+    assert metadata["normalized_record"]["commands_executed"] == payload["commands_executed"]
+    assert all(Path(path).read_bytes() == content for path, content in originals.items())
 
 
 def test_undeclared_reader_operand_cannot_hide_external_dependency(tmp_path: Path) -> None:

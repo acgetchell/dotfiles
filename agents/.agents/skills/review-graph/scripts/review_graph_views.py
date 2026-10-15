@@ -88,8 +88,11 @@ def execution_view_bytes(entry: dict[str, Any], canonical_bytes: bytes) -> bytes
     elif mode == "validation":
         view["instructions"] += (
             " Apply executor permissions; report blocked if unavailable. Omit artifacts (runtime owns snapshots/digests). "
+            "Before execution, run validation_observations.before.capture_command then its workspace_command. "
             "Read the prepared timing manifest; execute its exact launch commands in the dispatched environment and retain the receipts. "
             "An existing receipt is an execution attempt: recover it without rerunning. "
+            "After execution, run validation_observations.after.capture_command then its workspace_command before publishing. "
+            "If validation_observations is absent, obtain both observations from the coordinator. "
             "executions[].artifact_paths contains exact allowed output roots only; children belong in evidence text."
             " Declare semantic git_dependencies for the whole invoked recipe; [] means source-only, omission remains conservative."
         )

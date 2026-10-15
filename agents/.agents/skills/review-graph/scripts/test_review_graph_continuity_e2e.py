@@ -88,6 +88,8 @@ def test_frozen_validator_handoffs_release_source_review_without_metadata_ci_rep
     validator = next(entry for entry in dispatches["dispatches"] if entry["dispatch"]["mode"] == "validation")
     view = json.loads(Path(validator["worker_execution_path"]).read_bytes())
     assert view["dispatch"]["validation_observations"] == validator["dispatch"]["validation_observations"]
+    assert "Before execution, run validation_observations.before.capture_command then its workspace_command" in view["instructions"]
+    assert "After execution, run validation_observations.after.capture_command then its workspace_command before publishing" in view["instructions"]
     policy = tmp_path / "shell.json"
     policy.write_text(json.dumps({"shell_argv": ["/bin/sh", "-c"]}))
     _cli(frozen, "prepare-validation-timing", "--input", validator["worker_payload_contract_path"], "--shell-policy", str(policy))

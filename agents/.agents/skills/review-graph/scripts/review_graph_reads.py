@@ -46,6 +46,7 @@ def shell_words(command: str) -> list[str] | None:
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|<>()")
         lexer.whitespace_split = True
+        lexer.commenters = ""  # An in-word hash is a filename character in the shell.
         words = list(lexer)
     except ValueError:
         return None

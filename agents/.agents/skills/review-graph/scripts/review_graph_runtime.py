@@ -134,7 +134,7 @@ from review_graph_plan import (
     validation_requirements_from_document,
 )
 from review_graph_preflight import inspect_executor_executables
-from review_graph_provenance import metadata_transition_reference, review_scope_body, worker_payload_reference
+from review_graph_provenance import independent_scope_body, metadata_transition_reference, review_scope_body, worker_payload_reference
 from review_graph_read_provenance import MissingReadProvenanceError, bind_runtime_reads, normalized_read_provenance
 from review_graph_reads import source_read_operands
 from review_graph_receipts import stage_receipt
@@ -144,7 +144,6 @@ from review_graph_reuse import (
     AuditReuseTransition,
     CommitHandoffTransition,
     ExternalMetadataTransition,
-    audit_inputs_document,
     metadata_states,
     metadata_transition,
     source_snapshot,
@@ -1496,7 +1495,7 @@ def _compile_independent_native(document: dict[str, Any], native_content: bytes)
     fingerprints = observed_fingerprints
     audit_inputs = _compiled_audit_inputs(dispatch, _canonical_worker_payload(native_content))
     if audit_inputs is not None:
-        sections["## Scope Inspected"] += "\n- Audit input identity: " + canonical_json(audit_inputs_document(audit_inputs))
+        sections["## Scope Inspected"] = independent_scope_body(sections["## Scope Inspected"], audit_inputs, section_limit=MAX_NATIVE_SECTION_BYTES)
     expectation = ReviewEvidenceExpectation(
         node_id=node_id,
         requirement_ids=_text_list(dispatch, "requirement_ids"),
@@ -2864,7 +2863,9 @@ def _verify_independent_payload_binding(content: bytes, metadata: dict[str, Any]
         raise ValueError(msg)
     expected = _independent_input_sections(native)
     if expectation.audit_input_identity is not None:
-        expected["## Scope Inspected"] += "\n- Audit input identity: " + canonical_json(audit_inputs_document(expectation.audit_input_identity))
+        expected["## Scope Inspected"] = independent_scope_body(
+            expected["## Scope Inspected"], expectation.audit_input_identity, section_limit=MAX_NATIVE_SECTION_BYTES
+        )
     findings = _independent_findings(expected["## Findings"], evidence.node_id, evidence.status)
     handoffs = _independent_handoffs(expected["## Routing Handoffs"], evidence.node_id, {})
     expected["## Findings"] = _independent_findings_body(findings, evidence.status)
@@ -6802,6 +6803,10 @@ def _coordinator_lane_entry(original: dict[str, Any], store: Path, pending: dict
     entry["worker_payload_contract_path"] = str(contract_path)
     dispatch = entry["dispatch"]
     dispatch.update({"execution_location": "coordinator", "worker_created": False, "fresh_context": False})
+    if "protocol_input_paths" in dispatch:
+        dispatch["protocol_input_paths"] = [
+            entry[field] for field in ("worker_input_path", "worker_execution_path", "worker_payload_contract_path") if field in entry
+        ]
     persistence = dispatch["worker_payload_persistence"]
     persistence["input_path"] = str(contract_path)
     for field in ("command", "review_command", "publish_command"):

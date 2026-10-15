@@ -69,11 +69,16 @@ def _capture_output(command: str, dispatch: dict[str, Any]) -> str | None:  # no
     path = outputs[0]
     if Path(path).is_relative_to(Path(dispatch["repository_root"])):
         return None
-    file_identity(path)
     from review_graph_reuse import source_snapshot  # noqa: PLC0415 - identity module cycle, parsed only for protocol captures.
 
-    snapshot = source_snapshot(json.loads(Path(path).read_bytes()))
-    snapshot.verify()
+    try:
+        file_identity(path)
+        snapshot = source_snapshot(json.loads(Path(path).read_bytes()))
+        snapshot.verify()
+    except OSError, ValueError, TypeError:
+        # A failed capture stays in the ledger as an unclassified command. It
+        # cannot certify protocol provenance or prevent a blocked submission.
+        return None
     states = [tuple(dispatch["source_state"])]
     states.extend(
         tuple(item["after"][key] for key in ("scope_fingerprint", "captured_worktree_fingerprint", "repository_state_fingerprint"))

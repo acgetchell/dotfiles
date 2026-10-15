@@ -162,6 +162,7 @@ def _shell_words(line: str) -> list[str]:
     try:
         lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
+        lexer.commenters = ""  # Never hide later commands behind an in-word hash.
         return list(lexer)
     except ValueError:
         return []  # Structured read provenance remains authoritative for opaque syntax.

@@ -22,7 +22,7 @@ from review_graph_coverage import coverage_reference
 from review_graph_executor import executor_permissions
 from review_graph_integrity import digest_bytes, digest_json
 from review_graph_lifecycle import ReviewLifecycle, lifecycle_from_document
-from review_graph_provenance import metadata_transition_reference, review_scope_body
+from review_graph_provenance import audit_input_reference, metadata_transition_reference, review_scope_body
 from review_graph_reuse import (
     AuditInputIdentity,
     AuditReuseTransition,
@@ -2937,12 +2937,19 @@ def _scope_provenance_blockers(scope: str, expectation: ReviewEvidenceExpectatio
     """Require compact scope references to match the complete bound metadata."""
     payload = expectation.canonical_worker_payload
     if payload is None:
-        if _native_field_values(scope, "Worker payload reference") or _native_field_values(scope, "Audit input identity reference"):
+        reference = _native_field_values(scope, "Audit input identity reference")
+        if _native_field_values(scope, "Worker payload reference") or (
+            reference and (expectation.mode != "independent-review" or expectation.audit_input_identity is None)
+        ):
             return ("native review provenance reference lacks its bound canonical worker payload",)
         blockers = list(_coverage_reuse_native_blockers(scope, expectation.coverage_reuse))
         if expectation.audit_input_identity is not None:
-            serialized = json.dumps(audit_inputs_document(expectation.audit_input_identity), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-            blockers.extend(_native_values_blockers(scope, section="Scope Inspected", label="Audit input identity", expected=(serialized,)))
+            identity = audit_input_reference(expectation.audit_input_identity) if reference else audit_inputs_document(expectation.audit_input_identity)
+            serialized = json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+            label = "Audit input identity reference" if reference else "Audit input identity"
+            blockers.extend(_native_values_blockers(scope, section="Scope Inspected", label=label, expected=(serialized,)))
+            if reference and _native_field_values(scope, "Audit input identity"):
+                blockers.append("native review provenance contains competing audit input identities")
         return tuple(blockers)
     inputs = expectation.audit_input_identity
     if expectation.mode != "audit" or inputs is None:

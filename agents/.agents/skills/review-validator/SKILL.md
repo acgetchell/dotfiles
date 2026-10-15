@@ -25,7 +25,8 @@ dispatch is `blocked` and never falls back to standalone discovery.
 
 Honor placement and the coalesced unit. Do not re-plan, split or broaden it,
 create another worker, or inspect implementation semantics. The coordinator
-owns before/after snapshots and all evidence identities and digests.
+compiles evidence. The runtime owns snapshots and identities; invoke its
+dispatched observation commands.
 
 Stream the payload through the dispatch-bound publication command; return its
 bound receipt. The runtime consumes persisted bytes. Skip candidate writes.

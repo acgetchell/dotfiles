@@ -41,8 +41,9 @@ red/green checks, metadata staging, commits, pushes, and waiting for CI do not
 increment this counter. A no-content-change batch is not a repair epoch. Epochs
 must be consecutive; replanning, continuation, or publication never resets them.
 
-For PRs, complete [initial feedback intake](pr-feedback.md) alongside CI inspection
-and include reproduced comments in the repair inventory before the first batch.
+For PRs, attempt [initial feedback intake](pr-feedback.md) alongside CI inspection.
+Record unavailable surfaces before budgeting repairs, and include reproduced
+comments in the repair inventory before the first batch.
 Before editing, run `review-control` with `action: begin-repair` and
 `authorization: review-and-fix`. Use the lifecycle `plan` and `source_state`, an
 external `artifact_store`, and these CLI arguments:

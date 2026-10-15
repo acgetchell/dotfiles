@@ -40,6 +40,19 @@ def worker_payload_reference(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def audit_input_reference(inputs: AuditInputIdentity) -> dict[str, Any]:
+    """Bind the full input identity, including retained instruction text."""
+    return {"schema_version": 1, "metadata_field": "expectation.audit_input_identity", "digest": digest_json(audit_inputs_document(inputs))}
+
+
+def independent_scope_body(scope: str, inputs: AuditInputIdentity, *, section_limit: int) -> str:
+    """Keep small independent identities inline and bound large ones by digest."""
+    inline = scope + "\n- Audit input identity: " + canonical_json(audit_inputs_document(inputs))
+    if len(inline.encode()) <= section_limit:
+        return inline
+    return scope + "\n- Audit input identity reference: " + canonical_json(audit_input_reference(inputs))
+
+
 def review_scope_body(
     payload: dict[str, Any], *, mode: str, audit_inputs: AuditInputIdentity | None, coverage_reuse: dict[str, Any] | None, compact: bool = False
 ) -> str:
@@ -61,7 +74,7 @@ def review_scope_body(
     if audit_inputs is not None:
         inputs = audit_inputs_document(audit_inputs)
         if compact:
-            reference = {"schema_version": 1, "metadata_field": "expectation.audit_input_identity", "digest": digest_json(inputs)}
+            reference = audit_input_reference(audit_inputs)
             lines.append(f"- Audit input identity reference: {canonical_json(reference)}")
         else:
             lines.append(f"- Audit input identity: {canonical_json(inputs)}")

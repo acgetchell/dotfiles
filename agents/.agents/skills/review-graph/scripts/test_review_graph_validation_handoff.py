@@ -96,8 +96,9 @@ def _handoff(  # noqa: PLR0913 - orthogonal fixture execution and contract contr
     failure_kind: str | None = None,
     prefixes: list[str] | None = None,
     contract: bool = True,
+    instructions: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], str, Path, dict[str, Any]]:
-    git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
+    git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path, instructions=instructions)
     commands = template["validation_requirements"][0]["commands"]
     registry = {
         "schema_version": 1,
@@ -411,14 +412,16 @@ def test_worker_empty_dependencies_do_not_authorize_reuse_of_an_unknown_command(
 @pytest.mark.parametrize("change", ["source", "instructions", "git-dependency", "failure", "undeclared-dependencies"])
 def test_historical_gate_never_waives_changed_or_unproven_validation_inputs(tmp_path: Path, change: str) -> None:
     dependencies = [{"kind": "index", "reason": "The check examines staging."}] if change == "git-dependency" else []
-    _lifecycle, entry, _capture, git, repository, _metadata = _handoff(
+    _lifecycle, entry, capture, git, repository, _metadata = _handoff(
         tmp_path,
         dependencies=None if change == "undeclared-dependencies" else dependencies,
         contract=False,
         result="failed" if change == "failure" else "passed",
+        instructions=change == "instructions",
     )
     if change in {"source", "instructions"}:
         path = "tool.py" if change == "source" else "AGENTS.md"
+        assert path in capture["captured_scope_paths"]
         (repository / path).write_text("Changed review input\n")
     assert not _verified(entry).historical_source_gate(source_snapshot(_scope_data(git, repository, "baseline", None, ())))
 

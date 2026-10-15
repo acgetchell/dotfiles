@@ -1,6 +1,7 @@
 """Live repository regressions for partial coverage, external staging, and readiness."""
 
 import json
+import shlex
 from pathlib import Path
 from typing import Any, cast
 
@@ -114,8 +115,9 @@ def _materialize(tmp_path: Path, capture: dict[str, Any], plan: Any) -> tuple[di
     return lifecycle, entries, dispatches
 
 
-@pytest.mark.parametrize("dependency", ["independent", "manifest", "uncertain"])
-def test_manifest_delta_reuses_implementation_and_preserves_findings(tmp_path: Path, dependency: str) -> None:
+@pytest.mark.parametrize("dependency", ["independent", "manifest", "uncertain", "undeclared"])
+@pytest.mark.parametrize("absolute", [False, True])
+def test_manifest_delta_reuses_implementation_and_preserves_findings(tmp_path: Path, dependency: str, absolute: bool) -> None:
     git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
     (repository / "pyproject.toml").write_text('[project]\nname = "example"\nversion = "0.1.0"\ndependencies = []\n')
     _run_test_git(git, "-C", str(repository), "add", "pyproject.toml")
@@ -137,6 +139,8 @@ def test_manifest_delta_reuses_implementation_and_preserves_findings(tmp_path: P
     lifecycle, entries, _dispatches = _materialize(tmp_path, capture, plan)
     entry = next(item for item in entries["dispatches"] if item["dispatch"]["skill_id"] == "python-cli-review")
     payload = _payload(entry["dispatch"]["owned_paths"], dispatch=entry["dispatch"])
+    operands = ["tool.py", "pyproject.toml", *(["context.txt"] if dependency == "undeclared" else [])]
+    payload["commands_executed"] = [shlex.join(["cat", *(str(repository / path) if absolute else path for path in operands)])]
     payload.update(
         {
             "status": "completed",
