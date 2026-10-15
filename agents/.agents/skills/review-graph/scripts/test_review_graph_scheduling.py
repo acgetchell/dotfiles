@@ -21,6 +21,7 @@ from test_review_graph_runtime import (
     _sparse_plan_document,
     _typed_synthesis_payload,
 )
+from test_support_review_graph import _prepare_fixture_timing
 
 
 def _fixture(tmp_path: Path, *, profile: str = "grouped", mixed_surfaces: bool = False) -> tuple[dict[str, Any], dict[str, Any], dict[str, Path]]:
@@ -55,6 +56,10 @@ def _fixture(tmp_path: Path, *, profile: str = "grouped", mixed_surfaces: bool =
         }
     )
     paths = {key: tmp_path / f"{key}.json" for key in ("input", "dispatches", "journal", "current-capture")}
+    for entry in dispatches["dispatches"]:
+        if entry["dispatch"]["mode"] == "validation":
+            # Scheduling fixtures explicitly approve their stand-in shell policy.
+            _prepare_fixture_timing(entry)
     paths["dispatches"].write_text(json.dumps(dispatches))
     paths["current-capture"].write_text(
         json.dumps({"scope_fingerprint": "scope", "captured_worktree_fingerprint": "worktree", "repository_state_fingerprint": "repository"})

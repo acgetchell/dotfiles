@@ -26,6 +26,7 @@ from test_review_graph_runtime import (
     _run_test_git,
 )
 from test_review_graph_transitions import _materialize, _payload, _synthesis_payload
+from test_support_review_graph import _prepare_fixture_timing
 
 
 def _save(entry: dict[str, Any], lifecycle: dict[str, Any], journal: Path, payload: dict[str, Any]) -> dict[str, str]:
@@ -313,7 +314,9 @@ def _native_synthesis_payload(dispatch: dict[str, Any], bundle: dict[str, Any], 
 
 @pytest.mark.parametrize("mode", ["baseline", "worktree", "branch"])
 @pytest.mark.parametrize("git_sensitive_review", [False, True])
-def test_commit_handoff_preserves_evidence_and_finalizes_exact_commit(tmp_path: Path, mode: str, git_sensitive_review: bool) -> None:
+def test_commit_handoff_preserves_evidence_and_finalizes_exact_commit(  # noqa: PLR0915 - full commit handoff and certification scenario.
+    tmp_path: Path, mode: str, git_sensitive_review: bool
+) -> None:
     request, entries, sources = _commit_fixture(tmp_path, mode=mode, git_sensitive_review=git_sensitive_review)
     originals = {path: Path(path).read_bytes() for source in sources.values() for path in source.values()}
     with pytest.raises(ValueError, match=r"only the index|require replanning"):
@@ -326,6 +329,7 @@ def test_commit_handoff_preserves_evidence_and_finalizes_exact_commit(tmp_path: 
     sources = {key: source for key, source in sources.items() if key not in rechecked}
     journal = Path(result["journal_path"])
     plan = runtime._graph_plan(lifecycle["plan"])
+    _prepare_fixture_timing(next(entry for entry in result["dispatch_set"]["dispatches"] if entry["node_id"] == native_id))
     for _ in range(plan.complete_node_count + 1):
         events, _states, _head = runtime.read_execution_journal(journal, plan=plan, source_state=tuple(lifecycle["source_state"]))
         ready = runtime.next_ready_nodes(lifecycle, journal_events=events, dispatch_set=result["dispatch_set"])

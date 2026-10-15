@@ -11,6 +11,7 @@ import pytest
 import review_graph_runtime as runtime
 from capture_scope import _scope_data
 from review_graph_bootstrap import bootstrap_document
+from review_graph_execution import capture_execution_context
 from review_graph_plan import plan_from_document
 from review_graph_receipts import dispatch_summary
 from review_graph_session import freeze_runtime, verify_snapshot
@@ -141,6 +142,74 @@ def test_runtime_rejects_repository_store_and_unpinned_interpreter(tmp_path: Pat
     reference = freeze_runtime(SKILL_ROOT, tmp_path / "runtime", repository=repository)
     with pytest.raises(ValueError, match="manifest digest"):
         verify_snapshot({**reference, "digest": "sha256:" + "0" * 64})
+
+
+@pytest.mark.parametrize("winner", ["same", "different", "missing"])
+def test_concurrent_freeze_checks_the_winning_runner_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, winner: str) -> None:
+    repository, skills, destination = tmp_path / "repository", tmp_path / "skills", tmp_path / "runtime"
+    repository.mkdir()
+    skills.mkdir()
+    (skills / "SKILL.md").write_text("fixture skill\n")
+    policy = {"argv": [sys.executable], "working_directory": str(repository), "environment": {}, "identity_files": []}
+    requested = capture_execution_context(policy, repository)
+    retained = (
+        requested
+        if winner == "same"
+        else capture_execution_context({**policy, "environment": {"REVIEW_RUNNER": "winner"}}, repository)
+        if winner == "different"
+        else None
+    )
+    rename = Path.rename
+    won = False
+    winning_reference: dict[str, str] = {}
+
+    def concurrent_rename(staged: Path, target: Path) -> Path:
+        nonlocal won
+        if target == destination and not won:
+            won = True
+            winning_reference.update(freeze_runtime(skills, destination, repository=repository, execution_context=retained))
+            msg = "another bootstrap published first"
+            raise FileExistsError(msg)
+        return rename(staged, target)
+
+    monkeypatch.setattr(Path, "rename", concurrent_rename)
+    if winner == "same":
+        assert freeze_runtime(skills, destination, repository=repository, execution_context=requested) == winning_reference
+    else:
+        with pytest.raises(ValueError, match="Python runner cannot change"):
+            freeze_runtime(skills, destination, repository=repository, execution_context=requested)
+    assert won
+    assert verify_snapshot(winning_reference).files
+    context = destination / "execution-context.json"
+    assert json.loads(context.read_bytes()) == retained if retained is not None else not context.exists()
+
+
+@pytest.mark.parametrize("portable", ["relative", "token"])
+def test_absolute_reference_failure_leaves_bootstrap_retryable(tmp_path: Path, portable: str) -> None:
+    _git, _repository, template, capture, _plan = _baseline_mutation_fixture(tmp_path)
+    relative = "rust-invariant-state-transitions/references/standalone-workflow.md"
+    source = SKILL_ROOT / relative
+    template["routing_overrides"][0]["static_references"] = [str(source)]
+    capture_path, input_path, output = (tmp_path / name for name in ("capture.json", "template.json", "bootstrap.json"))
+    capture_path.write_text(json.dumps(capture))
+    input_path.write_text(json.dumps(template))
+    bootstrap = SKILL_ROOT / "review-graph/scripts/review_graph_bootstrap.py"
+    arguments = ("--capture", str(capture_path), "--input", str(input_path), "--output", str(output))
+    with pytest.raises(subprocess.CalledProcessError) as failure:
+        _cli(bootstrap, *arguments)
+    assert f"use $SKILLS_ROOT/{relative} or {relative}" in failure.value.stderr.decode()
+    assert not output.exists()
+    assert not output.with_suffix(".runtime").exists()
+    template["routing_overrides"][0]["static_references"] = [("$SKILLS_ROOT/" if portable == "token" else "") + relative]
+    input_path.write_text(json.dumps(template))
+    _cli(bootstrap, *arguments)
+    original = output.read_bytes()
+    bundle = json.loads(original)
+    frozen_reference = Path(bundle["runtime_snapshot"]["path"]).parent / "skills" / relative
+    assert frozen_reference.read_bytes() == source.read_bytes()
+    assert any(str(frozen_reference) in node["static_references"] for node in bundle["plan"]["actual_worker_nodes"])
+    _cli(bootstrap, *arguments)
+    assert output.read_bytes() == original
 
 
 def test_blocked_starter_resume_retains_original_runtime_and_plan(tmp_path: Path) -> None:

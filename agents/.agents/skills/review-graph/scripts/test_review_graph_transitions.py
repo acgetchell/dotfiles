@@ -40,6 +40,7 @@ from test_review_graph_runtime import (
     _set_fixture_routing,
     _sparse_plan_document,
 )
+from test_support_review_graph import _prepare_all_fixture_timing
 
 
 def _payload(paths: list[str]) -> dict[str, Any]:
@@ -316,6 +317,7 @@ def test_external_staging_between_dispatch_and_compile_completes_without_rollbac
     assert metadata["evidence"]["git_mutated"] is False
     lifecycle = json.loads(Path(result["lifecycle_input_path"]).read_text())
     plan = _graph_plan(lifecycle["plan"])
+    _prepare_all_fixture_timing(result["dispatch_set"])
     sources = [{"artifact_path": audit["artifact_path"], "metadata_path": audit["metadata_path"]}]
     for _ in range(plan.complete_node_count):
         events, _states, _head = read_execution_journal(Path(result["journal_path"]), plan=plan, source_state=tuple(lifecycle["source_state"]))

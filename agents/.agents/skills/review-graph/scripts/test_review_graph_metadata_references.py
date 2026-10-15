@@ -15,6 +15,7 @@ from review_graph_reuse import CommitHandoffTransition
 from test_review_graph_commit import _save, _validation_payload
 from test_review_graph_runtime import _compact_independent_payload, _run_test_git
 from test_review_graph_transitions import _payload, _synthesis_payload
+from test_support_review_graph import _prepare_all_fixture_timing
 
 
 def _handoff(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, large: bool = True) -> tuple[dict[str, Any], dict[str, Any], dict[str, dict[str, str]]]:
@@ -101,6 +102,7 @@ def test_large_real_commit_handoff_compiles_all_four_modes(tmp_path: Path, monke
 
     lifecycle = {**result["lifecycle_input"], "current_source_state": result["current_source_state"]}
     plan = runtime._graph_plan(lifecycle["plan"])
+    _prepare_all_fixture_timing(result["dispatch_set"])
     seen: set[str] = set()
     for _ordinal in range(plan.complete_node_count + 1):
         events, _state, _head = runtime.read_execution_journal(Path(result["journal_path"]), plan=plan, source_state=tuple(lifecycle["source_state"]))

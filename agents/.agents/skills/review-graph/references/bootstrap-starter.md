@@ -121,6 +121,15 @@ uv run --locked python "$SKILLS_ROOT/review-graph/scripts/review_graph_runtime.p
 Continuation operations retain their existing immutable dispatch/journal
 bindings and [continuation inputs](state-transitions.md).
 
+For grouped plans, the materialization receipt also supplies the first scheduler
+command using the original bootstrap bundle. Supply only the requested fresh
+capacity observation; the plan stays on disk. Follow the returned
+`schedule_input_path` for later scheduling and refresh capacity with
+`--worker-capacity`. Validator receipts expose their timing preparation command
+and explicit shell-policy choice before worker creation. A repository-specific
+Python wrapper/cache can be frozen with `--python-runner` as described in
+[Python environment](python-environment.md).
+
 ## Deterministic Fixture And Accounting
 
 From dotfiles, run the focused fixture with metrics visible:

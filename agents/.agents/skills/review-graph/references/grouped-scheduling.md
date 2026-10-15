@@ -7,11 +7,20 @@ Add an external `artifact_store`, optional `worker_capacity` (`source`,
 the lifecycle input. The worker limit excludes the coordinator: four total agent
 slots means three worker lanes plus one coordinator lane.
 
+For the initial grouped handoff, pass the bootstrap bundle directly as `--input`.
+The materialization receipt supplies `next_command` and the small capacity-file
+prerequisite. Write a fresh capacity object there, or use
+`--worker-capacity <current-capacity.json>`; `--artifact-store <external-dir>` is
+an optional explicit override. The runtime extracts its own retained lifecycle
+and plan. Do not copy or edit plan identities. The same capacity flag works with
+subsequent `schedule_input_path` requests, preserving their reservations.
+
 Count completed workers whose slots remain occupied in `active_workers`;
 completion alone does not prove release. Use a current authoritative aggregate
 surface or exact host occupancy accounting, never task content or throwaway
-creation probes. Omit capacity when uncertain. This scheduling metadata does not
-require the isolated capability gate.
+creation probes. Later lifecycle requests may omit capacity when uncertain;
+the initial bootstrap handoff requires the fresh observation described above.
+This scheduling metadata does not require the isolated capability gate.
 
 ```sh
 uv run --locked python scripts/review_graph_runtime.py schedule-ready \
@@ -28,10 +37,31 @@ explicitly canceled reservations. Journal-bound started/accepted work drops out
 automatically. Refresh capacity in a new request each time; the generated input
 omits the prior snapshot rather than assuming it remains current.
 
+Instruction-reconciliation audits keep a fresh worker lane. They wait for
+capacity instead of receiving a coordinator waiver or repeating source reads.
+An unexpected creation failure or exhausted capacity retry returns
+`fresh-worker-blocked` with a concrete blocker, while other ready nodes may
+continue. Retain the failure and stop automatic attempts for that node. An
+explicit executor-recovery decision may resume from the returned lifecycle
+with a fresh capacity observation and no active `creation_failure`; preserve
+the failed scheduling continuation as history. This is a new authorized attempt,
+not another automatic retry or a coordinator reconciliation waiver.
+
 Use `preflight_blocked_nodes` for unstarted validators whose execution preflight
 is blocked. These holds persist in the continuation and receipt, consume no
 capacity, and keep independent audits eligible. They cannot overlap reservations.
 See [validation preflight](validation-preflight.md) for release and recovery.
+
+Validators additionally require the materialized `timing_prerequisite`. Both
+schedulers return the exact preparation command in `waiting` before creating
+a validator. Write its operator-selected `shell_argv` policy (absolute shell and
+exact invocation flags), then execute `prepare-validation-timing`. This appends
+each dispatched command as one unchanged shell argument, writes immutable launch
+JSON and a manifest, and names fresh receipt paths. It never chooses a shell or
+splits command text. The worker reads that manifest and uses its `execute_command`
+under the dispatched environment/permissions. Changed launch bytes and existing
+receipts hold scheduling; recover any started attempt instead of rerunning it.
+See [execution timing](../../review-validator/references/execution-timing.md).
 
 A reservation is not a creation receipt: append `in-flight` only after a worker
 actually starts, or immediately before the selected coordinator audit starts.

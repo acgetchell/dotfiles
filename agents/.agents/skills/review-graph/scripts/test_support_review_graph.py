@@ -7,12 +7,28 @@ from typing import Any
 from capture_scope import _scope_data
 from research_repo_tools.process import run_command_bytes
 from review_graph_runtime import build_routing_projection_document
+from review_graph_timing import timing_documents
 
 SKILL_ROOT = Path(__file__).resolve().parents[2]
 ROUTING_CATALOG = Path(__file__).resolve().parents[1] / "references" / "routing-catalog.json"
 VALIDATOR_SKILL = SKILL_ROOT / "review-validator" / "SKILL.md"
 VALIDATOR_CONTRACT = SKILL_ROOT / "review-validator" / "references" / "graph-dispatch.md"
 STATE_FIXTURE = "agents/.agents/skills/review-graph/scripts/fixtures/state.rs"
+
+
+def _prepare_fixture_timing(entry: dict[str, Any]) -> None:
+    """Explicitly approve a fixture shell without executing the dispatched command."""
+    writes, _manifest = timing_documents(entry["dispatch"], {"shell_argv": ["/bin/sh", "-c"]})
+    for path, content in writes.items():
+        path.write_bytes(content)
+
+
+def _prepare_all_fixture_timing(dispatch_set: dict[str, Any]) -> None:
+    """Prepare missing validator transport for lifecycle-only execution fixtures."""
+    for entry in dispatch_set["dispatches"]:
+        dispatch = entry["dispatch"]
+        if dispatch["mode"] == "validation" and not Path(dispatch["timing_prerequisite"]["manifest_path"]).exists():
+            _prepare_fixture_timing(entry)
 
 
 def _captured_rust_repository(tmp_path: Path, *, branch: bool = False) -> dict[str, Any]:

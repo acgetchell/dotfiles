@@ -163,7 +163,7 @@ def _replay_contract_repair(
     assert len(audits) == 1
     entry = audits[0]
     decision = next(item for item in result["coverage_reuse_decisions"] if item["node_id"] == entry["node_id"])
-    rechecked = {path for unit in decision["units"] if unit["disposition"] == "recheck" for path in unit["owned_paths"]}
+    rechecked = {path for unit in decision["units"] if unit["disposition"] in {"recheck", "instruction-review"} for path in unit["owned_paths"]}
     updated = {
         **_payload(sorted(rechecked)),
         "status": "completed",
@@ -171,13 +171,19 @@ def _replay_contract_repair(
         if fresh_findings is not None
         else [finding for finding in payload["findings"] if finding["location"].split(":")[0] in rechecked],
         "nearby_contract_owners": sorted(
-            {path for unit in decision["units"] if unit["disposition"] == "recheck" for path in unit["dependency_paths"] if path != request["changed_paths"][0]}
+            {
+                path
+                for unit in decision["units"]
+                if unit["disposition"] in {"recheck", "instruction-review"}
+                for path in unit["dependency_paths"]
+                if path != request["changed_paths"][0]
+            }
         ),
     }
     # A changed contract is still an actual dependency when it remains present.
     changed = request["changed_paths"][0]
     if (
-        any(changed in unit["dependency_paths"] for unit in decision["units"] if unit["disposition"] == "recheck")
+        any(changed in unit["dependency_paths"] for unit in decision["units"] if unit["disposition"] in {"recheck", "instruction-review"})
         and (Path(request["new_capture"]["repository_root"]) / changed).is_file()
     ):
         updated["nearby_contract_owners"].append(changed)
@@ -273,8 +279,8 @@ def test_contract_repair_rechecks_only_its_capability_and_preserves_other_findin
 def test_shared_manifest_or_instructions_still_require_every_capability_recheck(tmp_path: Path, change: str) -> None:
     request, original, payload = _contract_request(tmp_path, change=change)
     decision, record, measurement = _replay_contract_repair(tmp_path, request, original, payload)
-    assert all(unit["disposition"] == "recheck" and unit["reason"] for unit in decision["units"])
-    assert "coverage_reuse" not in record
+    assert all(unit["disposition"] in {"recheck", "instruction-review"} and unit["reason"] for unit in decision["units"])
+    assert not runtime.reused_paths(record.get("coverage_reuse"))
     assert measurement["rechecked_paths"] == 3
 
 

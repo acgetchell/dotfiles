@@ -18,6 +18,7 @@ def dispatch_summary(entry: dict[str, Any]) -> dict[str, Any]:
         "result_contract": entry["result_contract"],
         "execution_location": entry.get("dispatch", entry)["execution_location"],
         **({"executor_requirements": entry["dispatch"]["executor_requirements"]} if "executor_requirements" in entry.get("dispatch", {}) else {}),
+        **({"timing_prerequisite": entry["dispatch"]["timing_prerequisite"]} if "timing_prerequisite" in entry.get("dispatch", {}) else {}),
         "worker_input": artifact_reference(Path(entry.get("worker_execution_path", entry["worker_input_path"]))),
     }
 

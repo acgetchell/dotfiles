@@ -28,6 +28,7 @@ from test_review_graph_runtime import (
     _run_test_git,
 )
 from test_review_graph_transitions import _materialize, _payload
+from test_support_review_graph import _prepare_all_fixture_timing
 
 
 def _git_payload(entry: dict[str, Any], kind: str) -> dict[str, Any]:
@@ -78,6 +79,7 @@ def test_staging_after_whole_audit_reuse_completes_with_current_evidence(tmp_pat
 
     lifecycle = {**json.loads(Path(resumed["lifecycle_input_path"]).read_text()), "current_source_state": resumed["current_source_state"]}
     plan = _graph_plan(lifecycle["plan"])
+    _prepare_all_fixture_timing(resumed["dispatch_set"])
     sources = []
     executed = []
     journal = Path(resumed["journal_path"])

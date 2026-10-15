@@ -14,7 +14,7 @@ from research_repo_tools.process import ExecutableNotFoundError, format_exceptio
 from review_graph_plan import DEFAULT_ROUTING_CATALOG, DEFAULT_SKILL_ROOT, plan_from_document
 from review_graph_receipts import stage_receipt
 from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
-from review_graph_session import bootstrap_frozen, verify_current_snapshot
+from review_graph_session import bootstrap_frozen, runtime_command, verify_current_snapshot
 from review_graph_starter import STARTER_EXAMPLE, STARTER_SCHEMA, starter_metrics, starter_preflight, starter_template
 
 PLANNING_SCHEMA = Path(__file__).resolve().parents[1] / "references" / "schemas" / "planning-input-v1.schema.json"
@@ -28,7 +28,7 @@ def _source_state(capture: dict[str, Any]) -> list[object]:
 
 def _capture_command(capture: dict[str, Any]) -> str:
     capture_script = Path(__file__).resolve().with_name("capture_scope.py")
-    command = [str(Path(sys.executable).absolute()), str(capture_script), "--mode", str(capture.get("capture_mode", "<missing>"))]
+    command = runtime_command(capture_script, "--mode", str(capture.get("capture_mode", "<missing>")))
     repository_root = capture.get("repository_root")
     if isinstance(repository_root, str) and repository_root:
         command.extend(("--repo", repository_root))
@@ -144,6 +144,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", type=Path, required=True, help="immutable normalized planning document")
     parser.add_argument("--catalog", type=Path, default=DEFAULT_ROUTING_CATALOG)
     parser.add_argument("--skill-root", action="append", type=Path)
+    parser.add_argument("--python-runner", type=Path, help="explicit Python argv/environment/lock policy, verified and frozen before planning")
     parser.add_argument("--full-output", action="store_true", help="print the complete saved bundle instead of a compact receipt")
     parser.add_argument(
         "--delivery-profile",
@@ -212,6 +213,7 @@ def main(argv: list[str] | None = None) -> int:
             require_schema_definition(lifecycle_input, RUNTIME_SCHEMA, operation)
         output = {
             "capture": capture,
+            "capture_path": str(args.capture.resolve()),
             "lifecycle_input": lifecycle_input,
             "materialization_input": materialization_input,
             "plan": plan_document,
@@ -233,15 +235,14 @@ def main(argv: list[str] | None = None) -> int:
                 starter_metrics=output["starter_metrics"],
             )
         receipt["next_command"] = (
-            [
-                sys.executable,
-                str(Path(__file__).with_name("review_graph_runtime.py").resolve()),
+            runtime_command(
+                Path(__file__).with_name("review_graph_runtime.py"),
                 "materialize-dispatches",
                 "--input",
                 str(args.output.resolve()),
                 "--output",
                 str(args.output.resolve().with_suffix(".dispatches.json")),
-            ]
+            )
             if dispatch_ready
             else None
         )
@@ -259,9 +260,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _retry_command(args: argparse.Namespace) -> list[str]:
-    return [
-        sys.executable,
-        str(Path(__file__).resolve()),
+    return runtime_command(
+        Path(__file__),
         "--resume-from",
         str(args.output.resolve()),
         "--capture",
@@ -270,7 +270,7 @@ def _retry_command(args: argparse.Namespace) -> list[str]:
         str(args.starter_config.resolve()),
         "--output",
         str(args.output.resolve().with_suffix(".preflight.json")),
-    ]
+    )
 
 
 def _resume_starter(capture: dict[str, Any], choices: dict[str, Any], args: argparse.Namespace) -> int:
@@ -297,15 +297,14 @@ def _resume_starter(capture: dict[str, Any], choices: dict[str, Any], args: argp
         blockers=[*output["plan"]["blockers"], *(blocker for unit in report["units"] for blocker in unit["blockers"])],
         starter_metrics=output["starter_metrics"],
         preflight_retry_command=_retry_command(args),
-        next_command=[
-            sys.executable,
-            str(Path(__file__).with_name("review_graph_runtime.py").resolve()),
+        next_command=runtime_command(
+            Path(__file__).with_name("review_graph_runtime.py"),
             "materialize-dispatches",
             "--input",
             str(args.output.resolve()),
             "--output",
             str(args.output.resolve().with_suffix(".dispatches.json")),
-        ]
+        )
         if ready
         else None,
         next_operation_inputs={"input": str(args.output.resolve()), "current_capture": str(args.capture.resolve())},
@@ -315,5 +314,9 @@ def _resume_starter(capture: dict[str, Any], choices: dict[str, Any], args: argp
 
 
 if __name__ == "__main__":
-    bootstrap_frozen(_parser().parse_args(), sys.argv[1:])
+    try:
+        bootstrap_frozen(_parser().parse_args(), sys.argv[1:])
+    except (OSError, TypeError, ValueError, subprocess.SubprocessError) as error:
+        print(f"review_graph_bootstrap: {format_exception_diagnostics(error)}", file=sys.stderr)
+        raise SystemExit(2) from error
     raise SystemExit(main())

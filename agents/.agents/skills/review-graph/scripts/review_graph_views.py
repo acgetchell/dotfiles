@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from review_graph_integrity import digest_bytes
+from review_graph_isolation import ISOLATION_INSTRUCTIONS
 
 _EXECUTION_FIELDS = (
     "node_id",
@@ -15,6 +16,7 @@ _EXECUTION_FIELDS = (
     "repository_root",
     "authorization",
     "state_verification_command",
+    "execution_context",
     "owned_paths",
     "command_policy",
     "worker_payload_path",
@@ -34,6 +36,7 @@ _EXECUTION_FIELDS = (
     "validation_unit",
     "launch_recovery",
     "execution_recovery",
+    "timing_prerequisite",
 )
 
 
@@ -59,8 +62,14 @@ def execution_view_bytes(entry: dict[str, Any], canonical_bytes: bytes) -> bytes
         ),
     }
     if mode == "audit":
+        if dispatch.get("fresh_context"):
+            view["instructions"] += " " + ISOLATION_INSTRUCTIONS
         view["instructions"] += (
             " Inspect recheck units only when coverage_reuse is present; retain inherited findings/validation/handoffs. "
+            "For instruction-review units, inspect every supplied input delta against this contract, its rules, commands, applicability and obligations. "
+            "A fresh worker may submit instruction_reconciliations with reasons for all four dimensions and actual changed-document reads. "
+            "Only unchanged judgments preserve source evidence; material changes require full affected-unit inspection, and uncertainty blocks acceptance. "
+            "Without reconciliation, inspect all pending units. Full before/after documents remain in the bound coverage proof when context is needed. "
             "Never claim reused paths as fresh reads. "
             "Optional coverage_units partitions all owned paths, findings and dependencies; record dependency uncertainty. "
             "Put source gaps in scope_limitations, uncertainty in unresolved_uncertainties, platform caveats in requirement-bound validation_limits. "
@@ -68,6 +77,7 @@ def execution_view_bytes(entry: dict[str, Any], canonical_bytes: bytes) -> bytes
             "Record exact Git commands with semantic git_dependencies; unknown dependencies remain conservative."
         )
     elif mode == "independent-review":
+        view["instructions"] += " " + ISOLATION_INSTRUCTIONS
         view["instructions"] += (
             " Work fresh and conclusion-blind from raw source only. Account for every owned path and dispatched adversarial check. "
             "Pending/delegated tests are not passed checks. Observe before/after captures; "
@@ -76,6 +86,8 @@ def execution_view_bytes(entry: dict[str, Any], canonical_bytes: bytes) -> bytes
     elif mode == "validation":
         view["instructions"] += (
             " Apply executor permissions; report blocked if unavailable. Omit artifacts (runtime owns snapshots/digests). "
+            "Read the prepared timing manifest; execute its exact launch commands in the dispatched environment and retain the receipts. "
+            "An existing receipt is an execution attempt: recover it without rerunning. "
             "executions[].artifact_paths contains exact allowed output roots only; children belong in evidence text."
             " Declare semantic git_dependencies for the whole invoked recipe; [] means source-only, omission remains conservative."
         )

@@ -43,6 +43,7 @@ from test_review_graph_runtime import (
     _sparse_plan_document,
     _worker_input_fixture,
 )
+from test_support_review_graph import _prepare_all_fixture_timing
 
 
 def _partitioned_payload(entry: dict[str, Any]) -> dict[str, Any]:
@@ -195,7 +196,9 @@ def _recovery_fixture(tmp_path: Path, *, late: bool = False, extra_validator: bo
 
 
 @pytest.mark.parametrize("other_has_evidence", [False, True])
-def test_launch_recovery_retains_other_blocked_nodes_and_recovers_each_once(tmp_path: Path, other_has_evidence: bool) -> None:
+def test_launch_recovery_retains_other_blocked_nodes_and_recovers_each_once(  # noqa: PLR0915 - two bounded recovery attempts with retained history.
+    tmp_path: Path, other_has_evidence: bool
+) -> None:
     request, args, first = _recovery_fixture(tmp_path, extra_validator=True)
     lifecycle = {key: request[key] for key in ("plan", "source_state")}
     original_dispatches = json.loads(args.dispatches.read_bytes())
@@ -213,6 +216,7 @@ def test_launch_recovery_retains_other_blocked_nodes_and_recovers_each_once(tmp_
     lifecycle = recovered["lifecycle_input"]
     journal = Path(recovered["journal_path"])
     dispatches = json.loads(Path(recovered["dispatches_path"]).read_bytes())
+    _prepare_all_fixture_timing(dispatches)
     events, state, _head = read_execution_journal(journal, plan=_graph_plan(lifecycle["plan"]), source_state=tuple(request["source_state"]))
     retained_blocked = next(event for event in events if event["node_id"] == second["node_id"])
     assert state[second["node_id"]] == "blocked"
@@ -236,6 +240,7 @@ def test_launch_recovery_retains_other_blocked_nodes_and_recovers_each_once(tmp_
     lifecycle = recovered_again["lifecycle_input"]
     journal = Path(recovered_again["journal_path"])
     dispatches = json.loads(Path(recovered_again["dispatches_path"]).read_bytes())
+    _prepare_all_fixture_timing(dispatches)
     assert next(entry for entry in dispatches["dispatches"] if entry["node_id"] == first["node_id"]) == first_retry
     events, state, _head = read_execution_journal(journal, plan=_graph_plan(lifecycle["plan"]), source_state=tuple(request["source_state"]))
     assert all(value == "accepted" for value in state.values())
@@ -357,6 +362,7 @@ def test_interrupted_recovery_publication_can_retry_identical_request(
         Path(result["journal_path"]), plan=_graph_plan(result["lifecycle_input"]["plan"]), source_state=tuple(request["source_state"])
     )
     assert all(value == "accepted" for value in state.values())
+    _prepare_all_fixture_timing(json.loads(Path(result["dispatches_path"]).read_bytes()))
     ready = next_ready_nodes(
         {**result["lifecycle_input"], "current_source_state": request["source_state"]},
         journal_events=events,
@@ -392,6 +398,7 @@ def test_launch_recovery_preserves_audits_failure_and_schedules_one_new_attempt(
     assert result["validation_reconciliation"]["blockers"] == []
     assert set(state) == set(result["retained_node_ids"])
     dispatches = json.loads(Path(result["dispatches_path"]).read_bytes())
+    _prepare_all_fixture_timing(dispatches)
     ready = next_ready_nodes({**lifecycle, "current_source_state": request["source_state"]}, journal_events=events, dispatch_set=dispatches)
     assert request["node_id"] in ready["ready_node_ids"]
     validation = next(entry for entry in dispatches["dispatches"] if entry["node_id"] == request["node_id"])

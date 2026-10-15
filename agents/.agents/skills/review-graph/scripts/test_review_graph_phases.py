@@ -40,6 +40,7 @@ from test_review_graph_runtime import (
     _run_test_git,
     _sparse_plan_document,
 )
+from test_support_review_graph import _prepare_all_fixture_timing
 
 
 def _phase_plan(profile: str = "grouped") -> dict[str, Any]:
@@ -117,6 +118,7 @@ def test_multiple_early_units_require_verified_success_in_declared_order(tmp_pat
     first, second = plan.pre_review_validation_nodes
     assert entries[first]["dispatch"]["validation_unit"]["commands"] == ["just check ci"]
     ready_input = {**lifecycle, "current_source_state": lifecycle["source_state"]}
+    _prepare_all_fixture_timing(dispatches)
     ready = next_ready_nodes(ready_input, journal_events=(), dispatch_set=dispatches)
     assert ready["ready_node_ids"] == [first]
     lanes = select_execution_lanes(
@@ -176,6 +178,7 @@ def test_multiple_early_units_require_verified_success_in_declared_order(tmp_pat
 
 
 def _ready(result: dict[str, Any]) -> dict[str, Any]:
+    _prepare_all_fixture_timing(result["dispatch_set"])
     lifecycle = result["lifecycle_input"]
     events, _state, _head = read_execution_journal(
         Path(result["journal_path"]), plan=_graph_plan(lifecycle["plan"]), source_state=tuple(lifecycle["source_state"])
@@ -437,6 +440,7 @@ def test_early_validation_unexpected_effects_do_not_release_barrier(tmp_path: Pa
         compile_validation(
             {"dispatch": dispatch, "payload": {"schema_version": 3, "status": "blocked", "limitations": ["unapproved output"], "executions": []}}
         )
+    _prepare_all_fixture_timing(dispatches)
     ready = next_ready_nodes({**lifecycle, "current_source_state": lifecycle["source_state"]}, journal_events=(), dispatch_set=dispatches)
     assert ready["ready_node_ids"] == list(plan.pre_review_validation_nodes)
 
@@ -475,6 +479,7 @@ def test_metadata_resume_retains_audits_and_restarts_only_current_validation(tmp
     events, _state, _head = read_execution_journal(
         Path(resumed["journal_path"]), plan=_graph_plan(resumed_lifecycle["plan"]), source_state=tuple(lifecycle["source_state"])
     )
+    _prepare_all_fixture_timing(resumed["dispatch_set"])
     ready = next_ready_nodes(
         {**resumed_lifecycle, "current_source_state": resumed["current_source_state"]}, journal_events=events, dispatch_set=resumed["dispatch_set"]
     )

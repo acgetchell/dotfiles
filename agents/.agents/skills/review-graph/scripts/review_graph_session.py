@@ -11,6 +11,9 @@ import sys
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
+
+from review_graph_execution import CONTEXT_FILE, capture_execution_context, command_prefix, verify_execution_context
 
 _MANIFEST = "runtime-manifest.json"
 _REFERENCE = "runtime-reference.json"
@@ -182,10 +185,19 @@ def verify_snapshot(reference: object) -> RuntimeManifest:
     if actual != {relative for relative, _identity in manifest.files}:
         msg = "frozen runtime resource inventory changed"
         raise ValueError(msg)
+    if (root / CONTEXT_FILE).is_file():
+        verify_execution_context(json.loads((root / CONTEXT_FILE).read_bytes()))
     return manifest
 
 
-def freeze_runtime(skill_root: Path, destination: Path, *, repository: Path) -> dict[str, str]:
+def _check_retained_context(destination: Path, execution_context: dict[str, object] | None) -> None:
+    retained = destination / CONTEXT_FILE
+    if execution_context is not None and (not retained.is_file() or json.loads(retained.read_bytes()) != execution_context):
+        msg = "frozen runtime Python runner cannot change on retry"
+        raise ValueError(msg)
+
+
+def freeze_runtime(skill_root: Path, destination: Path, *, repository: Path, execution_context: dict[str, object] | None = None) -> dict[str, str]:
     """Atomically retain skills, routing, schemas, scripts and Python support code."""
     root, destination, repository = skill_root.resolve(), destination.absolute(), repository.resolve()
     if destination.resolve() != destination or destination.is_relative_to(repository) or repository.is_relative_to(destination):
@@ -195,6 +207,7 @@ def freeze_runtime(skill_root: Path, destination: Path, *, repository: Path) -> 
     if reference_path.exists():
         reference = _read_reference(reference_path)
         verify_snapshot(reference)
+        _check_retained_context(destination, execution_context)
         return reference.as_raw()
     spec = importlib.util.find_spec("research_repo_tools")
     if spec is None or spec.origin is None:
@@ -204,6 +217,8 @@ def freeze_runtime(skill_root: Path, destination: Path, *, repository: Path) -> 
     skills, support = _files(root), _files(dependency)
     content = {"skills/" + path: data for path, data in skills.items()}
     content.update({"skills/review-graph/scripts/research_repo_tools/" + path: data for path, data in support.items()})
+    if execution_context is not None:
+        content[CONTEXT_FILE] = (json.dumps(execution_context, sort_keys=True, indent=2) + "\n").encode()
     # A concurrent edit during acquisition must not produce a mixed snapshot.
     if skills != _files(root) or support != _files(dependency):
         msg = "runtime resources changed during capture; retry startup"
@@ -224,6 +239,7 @@ def freeze_runtime(skill_root: Path, destination: Path, *, repository: Path) -> 
         except FileExistsError:
             saved = _read_reference(reference_path)
             verify_snapshot(saved)
+            _check_retained_context(destination, execution_context)
             return saved.as_raw()
     verify_snapshot(reference)
     return reference.as_raw()
@@ -239,8 +255,52 @@ def verify_current_snapshot() -> dict[str, str] | None:
     if root not in _VERIFIED:
         verify_snapshot(reference)
         _VERIFIED.add(root)
+    context_path = root / CONTEXT_FILE
+    if context_path.is_file() and Path.cwd().resolve() != Path(json.loads(context_path.read_bytes())["working_directory"]):
+        msg = "run frozen helpers from the retained Python runner working_directory"
+        raise ValueError(msg)
     sys.dont_write_bytecode = True
     return reference.as_raw()
+
+
+def current_execution_context() -> dict[str, Any] | None:
+    """Read the invocation policy from this runtime's verified resource inventory."""
+    path = _SCRIPT_ROOT.parents[2] / CONTEXT_FILE
+    if not path.is_file():
+        return None
+    reference = _read_reference(path.parent / _REFERENCE)
+    verify_current_snapshot()
+    manifest_bytes = reference.path.read_bytes()
+    if _digest(manifest_bytes) != reference.digest:
+        msg = "frozen runtime manifest digest changed"
+        raise ValueError(msg)
+    manifest = RuntimeManifest.parse(json.loads(manifest_bytes))
+    content = path.read_bytes()
+    if _digest(content) != dict(manifest.files)[CONTEXT_FILE]:
+        msg = "frozen Python runner context changed during acquisition"
+        raise ValueError(msg)
+    context = json.loads(content)
+    verify_execution_context(context)
+    return context
+
+
+def runtime_command(script: Path, *arguments: str) -> list[str]:
+    """Use the retained repository runner for exact graph helper arguments."""
+    prefix = command_prefix(current_execution_context())
+    reference_path = _SCRIPT_ROOT.parents[2] / _REFERENCE
+    if script.name == "run_timed.py" and reference_path.is_file():
+        return [*prefix, str(Path(__file__).resolve()), "--reference", str(reference_path), "--script", "run_timed.py", "--", *arguments]
+    return [*prefix, str(script.resolve()), *arguments]
+
+
+def _check_resumed_runner(reference: RuntimeReference, runner_path: Path | None) -> None:
+    if runner_path is None:
+        return
+    retained = json.loads((reference.path.parent / CONTEXT_FILE).read_bytes())
+    proposed = capture_execution_context(json.loads(runner_path.read_bytes()), Path(retained["working_directory"]))
+    if proposed != retained:
+        msg = "frozen runtime Python runner cannot change on resume"
+        raise ValueError(msg)
 
 
 def bootstrap_frozen(args: argparse.Namespace, argv: list[str]) -> None:
@@ -251,6 +311,7 @@ def bootstrap_frozen(args: argparse.Namespace, argv: list[str]) -> None:
     if len(roots) != 1:
         msg = "frozen bootstrap requires one skill root containing its routing catalog"
         raise ValueError(msg)
+    _check_portable_references(args.starter_config or args.input, roots[0])
     saved = json.loads(args.resume_from.read_bytes()) if args.resume_from is not None else {}
     if not isinstance(saved, dict):
         msg = "saved bootstrap must be an object"
@@ -258,13 +319,17 @@ def bootstrap_frozen(args: argparse.Namespace, argv: list[str]) -> None:
     if saved.get("runtime_snapshot") is not None:
         reference = RuntimeReference.parse(saved["runtime_snapshot"])
         verify_snapshot(reference)
+        _check_resumed_runner(reference, args.python_runner)
     else:
         capture = json.loads(args.capture.read_bytes())
         if not isinstance(capture, dict):
             msg = "bootstrap capture must be an object"
             raise ValueError(msg)
         repository = Path(_text(capture.get("repository_root"), "captured repository root"))
-        reference = RuntimeReference.parse(freeze_runtime(roots[0], args.output.resolve().with_suffix(".runtime"), repository=repository))
+        context = capture_execution_context(json.loads(args.python_runner.read_bytes()), repository) if args.python_runner else None
+        reference = RuntimeReference.parse(
+            freeze_runtime(roots[0], args.output.resolve().with_suffix(".runtime"), repository=repository, execution_context=context)
+        )
     frozen = reference.path.parent / "skills"
     catalog = args.catalog.resolve().relative_to(roots[0].resolve())
     remapped = []
@@ -282,21 +347,62 @@ def bootstrap_frozen(args: argparse.Namespace, argv: list[str]) -> None:
     os.execv(sys.executable, [sys.executable, "-B", str(script), *remapped])  # noqa: S606 - pinned interpreter and verified snapshot script.
 
 
+def _check_absolute_reference(raw: str, skill_root: Path) -> None:
+    root = skill_root.resolve()
+    path = Path(raw)
+    resolved = path.resolve()
+    if not resolved.is_relative_to(root) or not resolved.is_file():
+        msg = f"static reference is missing or outside the approved skill root: {raw}"
+        raise ValueError(msg)
+    # Resolve the configured root alias, but reject links within it.
+    relative = path.relative_to(skill_root.absolute()) if path.is_relative_to(skill_root.absolute()) else path.relative_to(root)
+    if root / relative != resolved:
+        msg = f"static reference traverses a symlink: {raw}"
+        raise ValueError(msg)
+    msg = f"absolute static reference cannot survive runtime freezing: {raw}; use $SKILLS_ROOT/{relative.as_posix()} or {relative.as_posix()}"
+    raise ValueError(msg)
+
+
+def _check_portable_references(input_path: Path, skill_root: Path) -> None:
+    """Reject unsupported absolute static references before creating a freeze."""
+
+    def inspect(value: object) -> None:
+        if isinstance(value, list):
+            for item in value:
+                inspect(item)
+        elif isinstance(value, dict):
+            for key, item in value.items():
+                if key in {"static_references", "required_static_references"} and isinstance(item, list):
+                    for raw in item:
+                        if isinstance(raw, str) and Path(raw).is_absolute():
+                            _check_absolute_reference(raw, skill_root)
+                inspect(item)
+
+    inspect(json.loads(input_path.read_bytes()))
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run a retained script using only verified snapshot resources."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reference", type=Path, required=True, help="retained runtime-reference.json")
-    parser.add_argument("--script", choices=("review_graph_bootstrap.py", "review_graph_runtime.py", "review_graph_plan.py", "capture_scope.py"), required=True)
+    parser.add_argument(
+        "--script", choices=("review_graph_bootstrap.py", "review_graph_runtime.py", "review_graph_plan.py", "capture_scope.py", "run_timed.py"), required=True
+    )
     parser.add_argument("args", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     try:
         reference = _read_reference(args.reference)
         verify_snapshot(reference)
+        context_path = reference.path.parent / CONTEXT_FILE
+        if context_path.is_file() and Path.cwd().resolve() != Path(json.loads(context_path.read_bytes())["working_directory"]):
+            msg = "run frozen helpers from the retained Python runner working_directory"
+            raise ValueError(msg)
         scripts = reference.path.parent / "skills/review-graph/scripts"
         sys.path.insert(0, str(scripts))
         sys.dont_write_bytecode = True
         arguments = args.args[1:] if args.args[:1] == ["--"] else args.args
-        sys.argv = [str(scripts / args.script), *arguments]
+        script = scripts.parents[1] / "review-validator/scripts/run_timed.py" if args.script == "run_timed.py" else scripts / args.script
+        sys.argv = [str(script), *arguments]
         runpy.run_path(sys.argv[0], run_name="__main__")
     except (OSError, ValueError, TypeError) as error:
         print(json.dumps({"status": "blocked", "error": str(error)}), file=sys.stderr)
