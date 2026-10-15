@@ -793,7 +793,7 @@ def _mutation_with_audit_source(
         "handoffs": [],
         "limitations": list(limitations),
         "scope_limitations": [],
-        "nearby_contract_owners": list(nearby_contract_owners),
+        "nearby_contract_owners": [*dispatch.get("required_read_paths", []), *nearby_contract_owners],
         "status": "no-findings",
         "validation_requirements": [],
     }
@@ -972,7 +972,7 @@ def _compile_repair_fixture_entry(entry: dict[str, Any], lifecycle: dict[str, An
             "findings": [],
             "handoffs": [],
             "limitations": [],
-            "nearby_contract_owners": [],
+            "nearby_contract_owners": list(dispatch.get("required_read_paths", [])),
             "scope_limitations": [],
             "status": "no-findings",
             "validation_requirements": [],
@@ -2082,6 +2082,7 @@ def _worker_input_fixture(tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any
 
 def _compact_independent_payload(dispatch: dict[str, Any]) -> dict[str, Any]:
     return {
+        "nearby_contract_owners": list(dispatch.get("required_read_paths", [])),
         "status": "no-findings",
         "files_inspected": list(dispatch["planned_paths"]),
         "branches": "Captured change and adjacent control flow inspected.",
@@ -2118,7 +2119,7 @@ def _compact_audit_payload(entry: dict[str, Any], *, commands: tuple[str, ...] =
         "findings": [],
         "handoffs": [],
         "limitations": [],
-        "nearby_contract_owners": [],
+        "nearby_contract_owners": list(entry["dispatch"].get("required_read_paths", [])),
         "scope_limitations": [],
         "status": "no-findings",
         "validation_requirements": [],
@@ -2160,7 +2161,7 @@ entry = json.loads(Path(sys.argv[1]).read_text())
 dispatch = entry["dispatch"]
 payload = {
     "changes": [], "commands_executed": [], "command_policy_attested": True,
-    "files_inspected": dispatch["owned_paths"], "nearby_contract_owners": [],
+    "files_inspected": dispatch["owned_paths"], "nearby_contract_owners": dispatch["required_read_paths"],
     "findings": [], "validation_requirements": [], "handoffs": [],
     "limitations": [], "scope_limitations": [], "status": "no-findings"
 }
@@ -2901,7 +2902,7 @@ def test_compile_node_survives_context_compaction_by_reading_bound_worker_payloa
         "handoffs": [],
         "limitations": [],
         "scope_limitations": [],
-        "nearby_contract_owners": [],
+        "nearby_contract_owners": list(entry["dispatch"].get("required_read_paths", [])),
         "status": "no-findings",
         "validation_requirements": [],
     }
@@ -2999,7 +3000,7 @@ def test_legacy_candidate_persistence_preserves_valid_target_when_validation_or_
         "handoffs": [],
         "limitations": [],
         "scope_limitations": [],
-        "nearby_contract_owners": [],
+        "nearby_contract_owners": list(entry["dispatch"].get("required_read_paths", [])),
         "status": "no-findings",
         "validation_requirements": [],
     }
@@ -3139,7 +3140,7 @@ def test_nearby_audit_context_persists_compiles_and_journals_with_stable_approva
     payload = {
         **_compact_audit_payload(entry),
         "limitations": ["Nearby tests were inspected as context but are outside this audit's owned paths."],
-        "nearby_contract_owners": ["tests/prelude_exports.rs", "tests/proptest_interval.rs"],
+        "nearby_contract_owners": [*entry["dispatch"]["required_read_paths"], "tests/prelude_exports.rs", "tests/proptest_interval.rs"],
     }
     payload_bytes = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode()
     persistence_command = ["persist-worker-payload", "--input", entry["worker_payload_contract_path"], "--payload-stdin"]
@@ -3156,7 +3157,7 @@ def test_nearby_audit_context_persists_compiles_and_journals_with_stable_approva
     assert write_review["audit_path_roles"] == {
         "dispatch_owned_paths": entry["dispatch"]["owned_paths"],
         "inspected_dispatch_owned_paths": entry["dispatch"]["owned_paths"],
-        "nearby_context_paths": ["tests/prelude_exports.rs", "tests/proptest_interval.rs"],
+        "nearby_context_paths": payload["nearby_contract_owners"],
         "omitted_dispatch_owned_paths": [],
         "scope_limitation_paths": [],
     }
@@ -3508,7 +3509,7 @@ def test_compact_branch_runs_from_bootstrap_through_journal_and_final_proof(tmp_
                 "handoffs": [],
                 "limitations": [],
                 "scope_limitations": [],
-                "nearby_contract_owners": [],
+                "nearby_contract_owners": list(dispatch.get("required_read_paths", [])),
                 "status": "no-findings",
                 "validation_requirements": [],
             }
@@ -3802,7 +3803,7 @@ def _compile_materialized_evidence(  # noqa: PLR0913
                 "handoffs": handoffs,
                 "limitations": [],
                 "scope_limitations": [],
-                "nearby_contract_owners": [],
+                "nearby_contract_owners": list(dispatch.get("required_read_paths", [])),
                 "status": "no-findings",
                 "validation_requirements": validation_requirements,
             }
@@ -3924,7 +3925,7 @@ def test_compile_review_rejects_conflicting_planned_validation_identity(tmp_path
         "findings": [],
         "handoffs": [],
         "limitations": [],
-        "nearby_contract_owners": [],
+        "nearby_contract_owners": list(dispatch.get("required_read_paths", [])),
         "scope_limitations": [],
         "status": "no-findings",
         "validation_requirements": [requirement],

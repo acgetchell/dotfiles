@@ -48,12 +48,12 @@ from test_support_review_graph import _prepare_all_fixture_timing
 
 def _partitioned_payload(entry: dict[str, Any]) -> dict[str, Any]:
     payload = _compact_audit_payload(entry)
-    payload["nearby_contract_owners"] = ["AGENTS.md", "pyproject.toml"]
+    payload["nearby_contract_owners"].extend(["AGENTS.md", "pyproject.toml"])
     payload["coverage_units"] = [
         {
             "unit_id": "library",
             "owned_paths": entry["dispatch"]["owned_paths"],
-            "dependency_paths": ["AGENTS.md", "pyproject.toml"],
+            "dependency_paths": list(payload["nearby_contract_owners"]),
             "dependency_uncertainty": "",
             "finding_indices": [],
         }
@@ -69,7 +69,7 @@ def test_partition_rejection_matches_publication_and_compilation_without_writes(
     payload = _partitioned_payload(entry)
     unit = payload["coverage_units"][0]
     if defect == "dependency":
-        unit["dependency_paths"] = ["pyproject.toml"]
+        unit["dependency_paths"].remove("AGENTS.md")
     elif defect == "duplicate-path":
         unit["owned_paths"] = [*unit["owned_paths"], unit["owned_paths"][0]]
     elif defect == "missing-path":

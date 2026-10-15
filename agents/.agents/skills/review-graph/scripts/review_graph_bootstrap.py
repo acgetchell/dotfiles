@@ -16,6 +16,7 @@ from review_graph_receipts import stage_receipt
 from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
 from review_graph_session import bootstrap_frozen, runtime_command, verify_current_snapshot
 from review_graph_starter import STARTER_EXAMPLE, STARTER_SCHEMA, starter_metrics, starter_preflight, starter_template
+from review_graph_validation_contracts import validation_reuse_prerequisite
 
 PLANNING_SCHEMA = Path(__file__).resolve().parents[1] / "references" / "schemas" / "planning-input-v1.schema.json"
 RUNTIME_SCHEMA = Path(__file__).resolve().parents[1] / "references" / "schemas" / "runtime-operation-inputs-v1.schema.json"
@@ -220,6 +221,7 @@ def main(argv: list[str] | None = None) -> int:
             "planning_input": document,
             "schema_version": 1,
             "delivery_profile": args.delivery_profile,
+            "validation_reuse_prerequisite": validation_reuse_prerequisite(root),
         }
         if (reference := verify_current_snapshot()) is not None:
             output["runtime_snapshot"] = reference
@@ -227,12 +229,14 @@ def main(argv: list[str] | None = None) -> int:
         dispatch_ready = plan.dispatch_allowed and (preflight is None or preflight["status"] == "ready")
         _write_once(args.output, output)
         receipt = stage_receipt("bootstrap", args.output, output)
+        receipt["validation_reuse_prerequisite"] = output["validation_reuse_prerequisite"]
         if preflight is not None:
             receipt.update(
                 dispatch_allowed=dispatch_ready,
                 preflight_status=preflight["status"],
                 blockers=[*plan.blockers, *(blocker for unit in preflight["units"] for blocker in unit["blockers"])],
                 starter_metrics=output["starter_metrics"],
+                validation_reuse_prerequisite=preflight["validation_reuse_prerequisite"],
             )
         receipt["next_command"] = (
             runtime_command(

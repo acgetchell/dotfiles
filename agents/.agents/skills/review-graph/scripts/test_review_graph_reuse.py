@@ -71,11 +71,18 @@ def _audit_request(tmp_path: Path, *, large: bool = False, caveat: str = "facts"
     skill = "python-scientific-review" if large else "python-cli-review"
     entry = next(item for item in entries["dispatches"] if item["dispatch"]["skill_id"] == skill)
     owned = entry["dispatch"]["owned_paths"]
-    payload = _payload(owned)
+    payload = _payload(owned, dispatch=entry["dispatch"])
     payload["coverage_units"] = [
-        {"unit_id": path, "owned_paths": [path], "dependency_paths": ["cliff.toml"], "dependency_uncertainty": "", "finding_indices": []} for path in owned
+        {
+            "unit_id": path,
+            "owned_paths": [path],
+            "dependency_paths": ["cliff.toml", *entry["dispatch"].get("required_read_paths", [])],
+            "dependency_uncertainty": "",
+            "finding_indices": [],
+        }
+        for path in owned
     ]
-    payload["nearby_contract_owners"] = ["cliff.toml"]
+    payload["nearby_contract_owners"].append("cliff.toml")
     if caveat == "facts":
         payload["execution_facts"] = ["validators-not-executed", "source-captures-match", "git-not-mutated"]
         payload["commands_executed"] = [f"nl -ba {owned[0]}", shlex.join(entry["dispatch"]["worker_payload_persistence"]["publish_command"])]
@@ -162,7 +169,7 @@ def test_large_recheck_publishes_retries_and_finalizes_without_expanding_markdow
     assert "repository_path_fingerprints" not in json.dumps(context)
     assert sum(unit["disposition"] == "reused" for unit in context["units"]) == 22
     assert sum(unit["disposition"] == "recheck" for unit in context["units"]) == 1
-    payload = _payload(request["changed_paths"])
+    payload = _payload(request["changed_paths"], dispatch=entry["dispatch"])
     payload_bytes = json.dumps(payload).encode()
     _publish_worker_bytes(entry, payload_bytes)
     original_bytes = Path(original["artifact_path"]).read_bytes()
@@ -268,7 +275,7 @@ def test_typed_caveats_control_unit_reuse_and_explain_rejections(tmp_path: Path,
         planned = entry["dispatch"]["command_policy"]["planned_validation_units"]
         digests = {requirement: unit["planned_validation_digest"] for unit in planned for requirement in unit["requirement_ids"]}
         updated = {
-            **_payload(request["changed_paths"]),
+            **_payload(request["changed_paths"], dispatch=entry["dispatch"]),
             "validation_requirements": [{**item, "planned_validation_digest": digests[item["requirement_id"]]} for item in payload["validation_requirements"]],
         }
         state = result["new_source_state"]
@@ -287,7 +294,7 @@ def test_saved_payload_compiles_unchanged_and_legacy_native_proof_still_verifies
     contract = json.loads(Path(entry["worker_payload_contract_path"]).read_bytes())
     del contract["compiler_preflight"]
     contract["coverage_reuse"] = runtime._coverage_proof(contract["coverage_reuse"])
-    payload_bytes = json.dumps(_payload(request["changed_paths"])).encode()
+    payload_bytes = json.dumps(_payload(request["changed_paths"], dispatch=entry["dispatch"])).encode()
     receipt = runtime.publish_worker_payload_bytes(contract, payload_bytes)
     assert receipt["artifact_write_review"]["audit_path_roles"]["omitted_dispatch_owned_paths"] == []
     assert runtime.main(_compile_args(result, entry, tmp_path / "compiled.json")) == 0
@@ -323,13 +330,13 @@ def test_oversized_payload_and_modified_preflight_fail_before_publication(tmp_pa
     _document, entries = _worker_input_fixture(tmp_path)
     entry = next(item for item in entries["dispatches"] if item["dispatch"].get("mode") == "audit")
     contract = json.loads(Path(entry["worker_payload_contract_path"]).read_bytes())
-    payload = {**_payload(entry["dispatch"]["owned_paths"]), "limitations": ["x" * MAX_NATIVE_SECTION_BYTES]}
+    payload = {**_payload(entry["dispatch"]["owned_paths"], dispatch=entry["dispatch"]), "limitations": ["x" * MAX_NATIVE_SECTION_BYTES]}
     with pytest.raises(ValueError, match=r"preflight.*maximum size"):
         runtime.review_worker_payload_write(contract, json.dumps(payload).encode())
     assert not Path(entry["worker_payload_path"]).exists()
     changed = {**contract, "compiler_preflight": {**contract["compiler_preflight"], "digest": "sha256:" + "0" * 64}}
     with pytest.raises(ValueError, match="preflight worker input digest"):
-        runtime.review_worker_payload_write(changed, json.dumps(_payload(entry["dispatch"]["owned_paths"])).encode())
+        runtime.review_worker_payload_write(changed, json.dumps(_payload(entry["dispatch"]["owned_paths"], dispatch=entry["dispatch"])).encode())
 
 
 @pytest.mark.parametrize(
@@ -348,7 +355,7 @@ def test_oversized_payload_and_modified_preflight_fail_before_publication(tmp_pa
 def test_unclassified_or_false_typed_context_cannot_authorize_publication(tmp_path: Path, field: str, value: Any, message: str) -> None:
     document, entries = _worker_input_fixture(tmp_path)
     entry = next(item for item in entries["dispatches"] if item["dispatch"].get("mode") == "audit")
-    payload = {**_payload(entry["dispatch"]["owned_paths"]), field: value}
+    payload = {**_payload(entry["dispatch"]["owned_paths"], dispatch=entry["dispatch"]), field: value}
     if value == ["validators-not-executed"]:
         payload["commands_executed"] = [entry["dispatch"]["command_policy"]["prohibited_commands"][0]]
     contract = json.loads(Path(entry["worker_payload_contract_path"]).read_bytes())
@@ -370,7 +377,7 @@ def test_execution_fact_contradicting_capture_or_mutation_is_rejected(tmp_path: 
     else:
         dispatch["git_mutated"] = True
     with pytest.raises(ValueError, match="contradicts"):
-        runtime.compile_review({"dispatch": dispatch, "payload": {**_payload(dispatch["owned_paths"]), "execution_facts": [fact]}})
+        runtime.compile_review({"dispatch": dispatch, "payload": {**_payload(dispatch["owned_paths"], dispatch=dispatch), "execution_facts": [fact]}})
 
 
 def test_authorized_validator_execution_still_contradicts_nonexecution_fact(tmp_path: Path) -> None:
@@ -384,7 +391,7 @@ def test_authorized_validator_execution_still_contradicts_nonexecution_fact(tmp_
     assert command not in entry["dispatch"]["command_policy"]["prohibited_commands"]
     contract = json.loads(Path(entry["worker_payload_contract_path"]).read_bytes())
     dispatch = {**entry["dispatch"], "before_state": document["source_state"], "after_state": document["source_state"]}
-    payload = {**_payload(dispatch["owned_paths"]), "commands_executed": [command]}
+    payload = {**_payload(dispatch["owned_paths"], dispatch=dispatch), "commands_executed": [command]}
     assert runtime.review_worker_payload_write(contract, json.dumps(payload).encode())["decision"] == "valid-bound-artifact-write"
     _content, metadata = runtime.compile_review({"dispatch": dispatch, "payload": payload})
     assert metadata["normalized_record"]["commands_executed"] == [command]
@@ -402,7 +409,7 @@ def test_authorized_validator_execution_still_contradicts_nonexecution_fact(tmp_
 def test_multiline_audit_reason_is_rejected_at_every_boundary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str, status: str) -> None:
     document, entries = _worker_input_fixture(tmp_path)
     entry = next(item for item in entries["dispatches"] if item["dispatch"].get("mode") == "audit")
-    payload = _payload(entry["dispatch"]["owned_paths"])
+    payload = _payload(entry["dispatch"]["owned_paths"], dispatch=entry["dispatch"])
     reason = "Evidence is incomplete\nAdditional explanation"
     if field == "unresolved_uncertainties":
         payload[field] = [{"kind": status, "reason": reason}]

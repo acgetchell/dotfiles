@@ -3026,6 +3026,7 @@ def _independent_review_native_blockers(  # noqa: C901, PLR0912, PLR0915
 ) -> tuple[str, ...]:
     blockers: list[str] = []
     scope = sections["## Scope Inspected"]
+    blockers.extend(_scope_provenance_blockers(scope, expectation))
     inspected_paths: tuple[str, ...] = ()
     blockers.extend(_native_nonempty_section_blockers(scope, section="Scope Inspected"))
     blockers.extend(_native_values_blockers(scope, section="Scope Inspected", label="Change target", expected=(expectation.change_target or "",)))

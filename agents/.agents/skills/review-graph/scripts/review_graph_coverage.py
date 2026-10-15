@@ -6,6 +6,7 @@ from typing import Any, cast
 from review_graph_git import intervening_metadata_blockers
 from review_graph_instruction_delta import effective_units, instruction_delta_candidate
 from review_graph_integrity import canonical_json, digest_json
+from review_graph_read_provenance import normalized_read_provenance
 from review_graph_reuse import AuditInputIdentity, AuditReuseTransition, ReviewSourceSnapshot, verify_reuse_inputs
 
 
@@ -87,13 +88,21 @@ def coverage_decisions(  # noqa: PLR0913 - shared provenance proof plus optional
         reason = unit["dependency_uncertainty"]
         deltas = []
         metadata_blockers = intervening_metadata_blockers(
-            {**payload, "files_inspected": unit["owned_paths"], "nearby_contract_owners": unit["dependency_paths"]}, transition.metadata_transitions
+            {**payload, **normalized_read_provenance(inputs), "files_inspected": unit["owned_paths"], "nearby_contract_owners": unit["dependency_paths"]},
+            transition.metadata_transitions,
         )
         if metadata_blockers:
             reason = canonical_json(metadata_blockers)
         if not reason:
             unit_inputs = AuditInputIdentity(
-                tuple(unit["owned_paths"]), tuple(unit["owned_paths"]), tuple(unit["dependency_paths"]), inputs.instruction_digests, inputs.retained_inputs
+                tuple(unit["owned_paths"]),
+                tuple(unit["owned_paths"]),
+                tuple(unit["dependency_paths"]),
+                inputs.instruction_digests,
+                inputs.retained_inputs,
+                inputs.runtime_inputs,
+                inputs.protocol_commands,
+                inputs.command_read_paths,
             )
             try:
                 verify_reuse_inputs(origin, target, unit_inputs, transition)

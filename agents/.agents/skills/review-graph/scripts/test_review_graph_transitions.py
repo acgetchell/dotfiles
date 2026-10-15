@@ -43,7 +43,7 @@ from test_review_graph_runtime import (
 from test_support_review_graph import _prepare_all_fixture_timing
 
 
-def _payload(paths: list[str]) -> dict[str, Any]:
+def _payload(paths: list[str], *, dispatch: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "status": "no-findings",
         "files_inspected": paths,
@@ -52,7 +52,7 @@ def _payload(paths: list[str]) -> dict[str, Any]:
         "handoffs": [],
         "limitations": [],
         "scope_limitations": [],
-        "nearby_contract_owners": [],
+        "nearby_contract_owners": list((dispatch or {}).get("required_read_paths", [])),
         "validation_requirements": [],
         "commands_executed": [],
         "command_policy_attested": True,
@@ -136,7 +136,7 @@ def test_manifest_delta_reuses_implementation_and_preserves_findings(tmp_path: P
     plan = plan_from_document(bootstrap_document(capture, template), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)
     lifecycle, entries, _dispatches = _materialize(tmp_path, capture, plan)
     entry = next(item for item in entries["dispatches"] if item["dispatch"]["skill_id"] == "python-cli-review")
-    payload = _payload(entry["dispatch"]["owned_paths"])
+    payload = _payload(entry["dispatch"]["owned_paths"], dispatch=entry["dispatch"])
     payload.update(
         {
             "status": "completed",
@@ -150,13 +150,25 @@ def test_manifest_delta_reuses_implementation_and_preserves_findings(tmp_path: P
                 }
             ],
             "coverage_units": [
-                {"unit_id": "implementation", "owned_paths": ["tool.py"], "dependency_paths": [], "dependency_uncertainty": "", "finding_indices": [1]},
-                {"unit_id": "installation", "owned_paths": ["pyproject.toml"], "dependency_paths": [], "dependency_uncertainty": "", "finding_indices": []},
+                {
+                    "unit_id": "implementation",
+                    "owned_paths": ["tool.py"],
+                    "dependency_paths": list(payload["nearby_contract_owners"]),
+                    "dependency_uncertainty": "",
+                    "finding_indices": [1],
+                },
+                {
+                    "unit_id": "installation",
+                    "owned_paths": ["pyproject.toml"],
+                    "dependency_paths": list(payload["nearby_contract_owners"]),
+                    "dependency_uncertainty": "",
+                    "finding_indices": [],
+                },
             ],
         }
     )
     if dependency == "manifest":
-        payload["coverage_units"][0]["dependency_paths"] = ["pyproject.toml"]
+        payload["coverage_units"][0]["dependency_paths"].append("pyproject.toml")
     elif dependency == "uncertain":
         payload["coverage_units"][0]["dependency_uncertainty"] = "Installation may affect command discovery."
     content, metadata = compile_review(
@@ -192,7 +204,7 @@ def test_manifest_delta_reuses_implementation_and_preserves_findings(tmp_path: P
         "implementation": "reused",
         "installation": "recheck",
     }
-    updated = {**_payload(["pyproject.toml"]), "status": "completed"}
+    updated = {**_payload(["pyproject.toml"], dispatch=delta["dispatch"]), "status": "completed"}
     contract = json.loads(Path(delta["worker_payload_contract_path"]).read_text())
     require_schema_definition(contract, SCHEMA_ROOT / "runtime-operation-inputs-v1.schema.json", "stdinWorkerPayloadContract")
     _publish_worker_bytes(delta, json.dumps(updated).encode())
@@ -225,7 +237,12 @@ def test_manifest_delta_reuses_implementation_and_preserves_findings(tmp_path: P
         == 0
     )
     with pytest.raises(ValueError, match="structured scope limitation"):
-        compile_review({"dispatch": {**delta["dispatch"], "before_state": state, "after_state": state}, "payload": {**_payload([]), "status": "completed"}})
+        compile_review(
+            {
+                "dispatch": {**delta["dispatch"], "before_state": state, "after_state": state},
+                "payload": {**_payload([], dispatch=delta["dispatch"]), "status": "completed"},
+            }
+        )
     tampered = json.loads(json.dumps(delta["dispatch"]))
     tampered["coverage_reuse"]["units"][1]["disposition"] = "reused"
     with pytest.raises(ValueError, match="verified unit decisions"):
@@ -249,7 +266,7 @@ def _staging_fixture(
     lifecycle, entries, dispatches = _materialize(tmp_path, capture, plan)
     journal = tmp_path / "old.jsonl"
     audit = next(item for item in entries["dispatches"] if item["dispatch"].get("mode") == "audit")
-    _publish_worker_bytes(audit, json.dumps(_payload(audit["dispatch"]["owned_paths"])).encode())
+    _publish_worker_bytes(audit, json.dumps(_payload(audit["dispatch"]["owned_paths"], dispatch=audit["dispatch"])).encode())
     append_journal_event(journal, lifecycle, JournalEventRequest(audit["node_id"], "in-flight"))
     _run_test_git(git, "-C", str(repository), "add", "." if staging == "all" else "tool.py")
     request = {
@@ -266,7 +283,7 @@ def _staging_fixture(
 @pytest.mark.parametrize("remaining_findings", [False, True])
 def test_external_staging_between_dispatch_and_compile_completes_without_rollback(tmp_path: Path, remaining_findings: bool) -> None:  # noqa: PLR0915
     git, repository, request, audit, _entries = _staging_fixture(tmp_path)
-    payload = _payload(audit["dispatch"]["owned_paths"])
+    payload = _payload(audit["dispatch"]["owned_paths"], dispatch=audit["dispatch"])
     command = "git --no-pager diff -- tool.py state.rs"
     payload.update(
         commands_executed=[command],
@@ -374,7 +391,7 @@ def test_external_staging_between_dispatch_and_compile_completes_without_rollbac
             elif dispatch["mode"] == "synthesis":
                 payload = _synthesis_payload(dispatch, build_synthesis_bundle({**lifecycle, "sources": sources}))
             else:
-                payload = _payload(dispatch["owned_paths"])
+                payload = _payload(dispatch["owned_paths"], dispatch=dispatch)
             _publish_worker_bytes(entry, json.dumps(payload).encode())
             assert (
                 main(
@@ -469,7 +486,7 @@ def test_independent_review_can_revalidate_on_resumed_metadata(tmp_path: Path) -
 
 def test_compound_git_command_is_rechecked_after_staging(tmp_path: Path) -> None:
     _git, _repository, request, audit, _entries = _staging_fixture(tmp_path)
-    payload = _payload(audit["dispatch"]["owned_paths"])
+    payload = _payload(audit["dispatch"]["owned_paths"], dispatch=audit["dispatch"])
     payload["commands_executed"] = ["rg value tool.py && git diff --cached --stat"]
     content, metadata = compile_review(
         {"dispatch": {**audit["dispatch"], "before_state": request["source_state"], "after_state": request["source_state"]}, "payload": payload}
@@ -583,10 +600,16 @@ def test_partitioned_audit_retains_original_capture_across_multiple_repairs(tmp_
     plan = plan_from_document(bootstrap_document(capture, template), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)
     lifecycle, entries, _dispatches = _materialize(tmp_path, capture, plan)
     entry = next(item for item in entries["dispatches"] if item["dispatch"]["skill_id"] == "python-cli-review")
-    payload = _payload(entry["dispatch"]["owned_paths"])
+    payload = _payload(entry["dispatch"]["owned_paths"], dispatch=entry["dispatch"])
     payload["execution_facts"] = ["validators-not-executed", "source-captures-match", "git-not-mutated"]
     payload["coverage_units"] = [
-        {"unit_id": path, "owned_paths": [path], "dependency_paths": [], "dependency_uncertainty": "", "finding_indices": []}
+        {
+            "unit_id": path,
+            "owned_paths": [path],
+            "dependency_paths": list(payload["nearby_contract_owners"]),
+            "dependency_uncertainty": "",
+            "finding_indices": [],
+        }
         for path in ("tool.py", "pyproject.toml")
     ]
     content, metadata = compile_review(
@@ -634,7 +657,7 @@ def test_partitioned_audit_retains_original_capture_across_multiple_repairs(tmp_
     assert {unit["unit_id"]: unit["disposition"] for unit in context["units"]} == {"tool.py": "reused", "pyproject.toml": "recheck"}
     state = result["new_source_state"]
     _content, updated = compile_review(
-        {"dispatch": {**delta["dispatch"], "before_state": state, "after_state": state}, "payload": _payload(["pyproject.toml"])}
+        {"dispatch": {**delta["dispatch"], "before_state": state, "after_state": state}, "payload": _payload(["pyproject.toml"], dispatch=delta["dispatch"])}
     )
     assert updated["normalized_record"]["files_inspected"] == ["pyproject.toml"]
     assert Path(entry["artifact_path"]).read_bytes() == content

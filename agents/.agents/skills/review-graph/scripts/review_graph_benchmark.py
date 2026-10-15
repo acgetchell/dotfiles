@@ -203,7 +203,7 @@ def _payload(entry: dict[str, Any], ordinal: int) -> dict[str, Any]:
         "findings": findings,
         "handoffs": [],
         "limitations": [],
-        "nearby_contract_owners": [],
+        "nearby_contract_owners": list(entry["dispatch"].get("required_read_paths", [])),
         "scope_limitations": [],
         "status": "completed" if findings else "no-findings",
         "validation_requirements": [],
@@ -247,6 +247,7 @@ def _independent_replay(module: types.ModuleType, entry: dict[str, Any], state: 
     payload = {
         "status": "no-findings",
         "files_inspected": dispatch["planned_paths"],
+        "nearby_contract_owners": list(dispatch.get("required_read_paths", [])),
         "branches": "Synthetic whole-repository staged fixture.",
         "boundary_cases": "Static integer conversion, recipe and documentation inspection only.",
         "tests": "Scripted fixture transcript; no tests executed.",

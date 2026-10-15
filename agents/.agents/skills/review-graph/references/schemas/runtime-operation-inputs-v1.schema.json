@@ -1591,6 +1591,12 @@
       "type": "object"
     },
     "snapshot-workspace": {
+      "oneOf": [
+        { "$ref": "#/$defs/stdinWorkerPayloadContract" },
+        { "$ref": "#/$defs/lifecycleWorkspaceSnapshot" }
+      ]
+    },
+    "lifecycleWorkspaceSnapshot": {
       "additionalProperties": false,
       "properties": {
         "external_metadata_transitions": {

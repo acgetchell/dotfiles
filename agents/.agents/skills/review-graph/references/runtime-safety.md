@@ -42,6 +42,27 @@ Preflight dry-compiles with hypothetical equal captures; it does not attest to
 execution. Actual capture verification still runs during compilation. Saved contracts
 without preflight remain supported.
 
+Completed audits and independent reviews must declare the actually read
+`required_read_paths` in `nearby_contract_owners` (or `files_inspected` when
+owned). Missing declarations fail before sealing and name each missing path.
+Publication retains rejected bytes and permits one corrected submission; never
+rewrite a sealed payload. Declaring a path proves neither that a command ran nor
+that the reviewer understood its contents. Keep the actual command ledger.
+
+The compiler binds frozen skills/references and own protocol inputs to immutable
+digests separately from repository paths. Verified framework capture/publication
+commands retain their exact ledger entries without becoming semantic Git
+dependencies. Bounded `rg` context options and numeric `sed -n 'N,Mp'` reads are
+classified only when all file operands have unchanged captured or bound
+identities. Unknown commands, substitutions, arbitrary external files and
+symlink traversal remain unproven.
+
+Validator dispatches include `validation_observations.before` and `.after`.
+Run each generated `capture_command`, then its `workspace_command`, before and
+after the timed launches. These commands bind the node through its own immutable
+publication contract; workers need not reconstruct lifecycle or dispatch-set
+paths. Pass the returned capture/workspace paths to `compile-node`.
+
 The read-only review command returns `native_size_preflight`: generated result
 and section byte counts, their limits, and `scope_rendering` (`inline` or
 `reference`). Use it before publication to diagnose remaining size failures.

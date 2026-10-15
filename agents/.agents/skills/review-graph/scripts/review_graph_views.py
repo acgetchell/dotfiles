@@ -13,6 +13,7 @@ _EXECUTION_FIELDS = (
     "skill_path",
     "reference_paths",
     "instruction_paths",
+    "required_read_paths",
     "repository_root",
     "authorization",
     "state_verification_command",
@@ -37,6 +38,7 @@ _EXECUTION_FIELDS = (
     "launch_recovery",
     "execution_recovery",
     "timing_prerequisite",
+    "validation_observations",
 )
 
 

@@ -34,7 +34,10 @@ from test_support_review_graph import _prepare_all_fixture_timing
 def _git_payload(entry: dict[str, Any], kind: str) -> dict[str, Any]:
     if kind == "source-discovery":
         return _discovery_payload(entry)
-    return {**_payload(entry["dispatch"]["owned_paths"]), "git_dependencies": [{"kind": kind, "reason": "Staging is part of the reviewed contract."}]}
+    return {
+        **_payload(entry["dispatch"]["owned_paths"], dispatch=entry["dispatch"]),
+        "git_dependencies": [{"kind": kind, "reason": "Staging is part of the reviewed contract."}],
+    }
 
 
 @pytest.mark.parametrize("kind", ["index", "source-discovery"])

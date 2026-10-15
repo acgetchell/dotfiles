@@ -58,7 +58,7 @@ def _barrier_fixture(tmp_path: Path, *, resumes: int) -> tuple[dict[str, Any], d
     content, metadata = runtime.compile_review(
         {
             "dispatch": {**audit["dispatch"], "before_state": result["current_source_state"], "after_state": result["current_source_state"]},
-            "payload": {**_payload(audit["dispatch"]["owned_paths"]), "validation_requirements": [requirement]},
+            "payload": {**_payload(audit["dispatch"]["owned_paths"], dispatch=audit["dispatch"]), "validation_requirements": [requirement]},
         }
     )
     Path(audit["artifact_path"]).write_bytes(content)

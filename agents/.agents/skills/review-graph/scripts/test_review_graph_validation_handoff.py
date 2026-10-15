@@ -408,6 +408,21 @@ def test_worker_empty_dependencies_do_not_authorize_reuse_of_an_unknown_command(
     assert _applicability(_verified(entry), capture)[0]["reason_code"] == "validation-contract-unavailable"
 
 
+@pytest.mark.parametrize("change", ["source", "instructions", "git-dependency", "failure", "undeclared-dependencies"])
+def test_historical_gate_never_waives_changed_or_unproven_validation_inputs(tmp_path: Path, change: str) -> None:
+    dependencies = [{"kind": "index", "reason": "The check examines staging."}] if change == "git-dependency" else []
+    _lifecycle, entry, _capture, git, repository, _metadata = _handoff(
+        tmp_path,
+        dependencies=None if change == "undeclared-dependencies" else dependencies,
+        contract=False,
+        result="failed" if change == "failure" else "passed",
+    )
+    if change in {"source", "instructions"}:
+        path = "tool.py" if change == "source" else "AGENTS.md"
+        (repository / path).write_text("Changed review input\n")
+    assert not _verified(entry).historical_source_gate(source_snapshot(_scope_data(git, repository, "baseline", None, ())))
+
+
 @pytest.mark.parametrize("invalid", ["command", "directory", "executor", "version", "reported-root", "reused"])
 def test_dispatch_mismatch_or_retired_format_never_writes_a_payload(tmp_path: Path, invalid: str) -> None:
     _git, _repository, _template, capture, plan = _baseline_mutation_fixture(tmp_path)

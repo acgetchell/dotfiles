@@ -8,6 +8,7 @@ from typing import Any, override
 from research_repo_tools.evidence import sha256
 from review_graph_git_objects import GitPathIdentity, git_object_id, source_tree_id
 from review_graph_integrity import canonical_json
+from review_graph_read_provenance import verify_runtime_inputs
 
 SNAPSHOT_FORMAT = "review-graph-path-snapshot-v4"
 
@@ -130,6 +131,9 @@ class AuditInputIdentity:
     nearby_contract_owners: tuple[str, ...]
     instruction_digests: tuple[tuple[str, str], ...]
     retained_inputs: tuple[tuple[str, str], ...] = ()
+    runtime_inputs: tuple[tuple[str, str], ...] = ()
+    protocol_commands: tuple[str, ...] = ()
+    command_read_paths: tuple[str, ...] = ()
 
 
 def audit_inputs_document(inputs: AuditInputIdentity) -> dict[str, Any]:
@@ -137,6 +141,9 @@ def audit_inputs_document(inputs: AuditInputIdentity) -> dict[str, Any]:
     document = asdict(inputs)
     if not inputs.retained_inputs:
         document.pop("retained_inputs")
+    for field in ("runtime_inputs", "protocol_commands", "command_read_paths"):
+        if not getattr(inputs, field):
+            document.pop(field)
     return document
 
 
@@ -294,7 +301,10 @@ def verify_reuse_inputs(  # noqa: C901 - fail-closed source, metadata, instructi
     if list(old_instructions) != list(new_instructions) or changed_instructions - allowed_instructions:
         msg = "audit reuse instruction identities changed"
         raise ValueError(msg)
-    paths = {*inputs.owned_paths, *inputs.inspected_paths, *inputs.nearby_contract_owners}
+    paths = {*inputs.owned_paths, *inputs.inspected_paths, *inputs.nearby_contract_owners, *inputs.command_read_paths}
+    verify_runtime_inputs(inputs.runtime_inputs, origin.repository_root)
+    paths.difference_update(path for path, _digest in inputs.runtime_inputs)
+    paths = {str(PurePosixPath(path).relative_to(root)) if PurePosixPath(path).is_relative_to(root) else path for path in paths}
     for path, _digest_value in inputs.instruction_digests:
         instruction = PurePosixPath(path)
         if instruction.is_relative_to(root):

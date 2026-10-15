@@ -117,7 +117,7 @@ def test_optional_finding_cascade_stops_before_third_source_batch(tmp_path: Path
     result, args = _two_repairs(tmp_path)
     lifecycle = result["lifecycle_input"]
     audit = next(entry for entry in result["dispatch_set"]["dispatches"] if entry["dispatch"]["mode"] == "audit")
-    payload = _payload(audit["dispatch"]["owned_paths"])
+    payload = _payload(audit["dispatch"]["owned_paths"], dispatch=audit["dispatch"])
     payload.update(
         status="completed",
         findings=[

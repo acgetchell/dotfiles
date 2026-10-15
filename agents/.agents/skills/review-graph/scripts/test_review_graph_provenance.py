@@ -26,8 +26,9 @@ def broad_audit(tmp_path: Path) -> dict[str, Any]:
         manifest.parent.mkdir(parents=True)
         manifest.write_text(f'[package]\nname = "scientific-dependency-{index:03d}"\nversion = "0.12.3"\n')
         dependencies.append(str(manifest))
+    dependencies.extend(entry["dispatch"]["required_read_paths"])
     payload = {
-        **_payload(entry["dispatch"]["owned_paths"]),
+        **_payload(entry["dispatch"]["owned_paths"], dispatch=entry["dispatch"]),
         "nearby_contract_owners": dependencies,
         "coverage_units": [
             {
@@ -86,7 +87,7 @@ def test_broad_audit_compacts_without_changing_provenance(broad_audit: dict[str,
     assert isinstance(expectation, runtime.ReviewEvidenceExpectation)
     assert isinstance(evidence, runtime.ReviewEvidence)
     assert record is not None
-    assert len(broad_audit["payload"]["nearby_contract_owners"]) == 124
+    assert len(broad_audit["payload"]["nearby_contract_owners"]) == 124 + len(broad_audit["dispatch"]["required_read_paths"])
     assert expectation.canonical_worker_payload == broad_audit["payload"]
     assert runtime._canonical_worker_payload(content, expectation=expectation) == broad_audit["payload"]
     assert Path(metadata["worker_payload_path"]).read_bytes() == broad_audit["payload_bytes"]
@@ -154,7 +155,8 @@ def test_broad_audit_rejects_missing_or_changed_bound_evidence(broad_audit: dict
         if damage == "reference":
             native = native.replace(metadata["payload_digest"], "sha256:" + "0" * 64)
         elif damage == "summary":
-            native = native.replace("124 context paths", "123 context paths")
+            count = len(broad_audit["payload"]["nearby_contract_owners"])
+            native = native.replace(f"{count} context paths", f"{count - 1} context paths")
         else:
             native = native.replace("## Findings", "- Canonical worker payload: {}\n\n## Findings")
         artifact.chmod(0o644)

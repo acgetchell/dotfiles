@@ -56,13 +56,13 @@ def _fixture(tmp_path: Path, *, material: bool = False, recipe: bool = False) ->
     lifecycle, entries, _dispatches = _materialize(tmp_path, capture, plan)
     original = next(item for item in entries["dispatches"] if item["dispatch"]["skill_id"] == "rust-build-portability")
     payload = {
-        **_payload(owned),
-        "nearby_contract_owners": ["CONTRIBUTING.md", "justfile"],
+        **_payload(owned, dispatch=original["dispatch"]),
+        "nearby_contract_owners": ["CONTRIBUTING.md", "justfile", *original["dispatch"]["required_read_paths"]],
         "coverage_units": [
             {
                 "unit_id": "rust-build",
                 "owned_paths": owned,
-                "dependency_paths": ["CONTRIBUTING.md", "justfile"],
+                "dependency_paths": ["CONTRIBUTING.md", "justfile", *original["dispatch"]["required_read_paths"]],
                 "recipe_dependencies": [{"path": "justfile", "recipes": ["check"]}],
                 "dependency_uncertainty": "",
                 "finding_indices": [],
@@ -110,8 +110,8 @@ def _assessment(entry: dict[str, Any], *, material: bool = False) -> dict[str, A
     units = entry["dispatch"]["coverage_reuse"]["units"]
     deltas = units[0]["input_deltas"]
     return {
-        **_payload(entry["dispatch"]["owned_paths"] if material else []),
-        "nearby_contract_owners": [item["path"] for item in deltas],
+        **_payload(entry["dispatch"]["owned_paths"] if material else [], dispatch=entry["dispatch"]),
+        "nearby_contract_owners": list(dict.fromkeys([*entry["dispatch"]["required_read_paths"], *(item["path"] for item in deltas)])),
         "instruction_reconciliations": [
             {
                 "unit_id": "rust-build",

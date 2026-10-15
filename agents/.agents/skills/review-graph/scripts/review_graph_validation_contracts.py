@@ -18,6 +18,19 @@ CONTRACT_PATH = "review-validation-contracts.json"
 CONTRACT_VERSION = 1
 
 
+def validation_reuse_prerequisite(repository_root: Path) -> dict[str, str | bool]:
+    """Announce formal reuse requirements before any validation is launched."""
+    return {
+        "registry_path": str(repository_root / CONTRACT_PATH),
+        "registry_present": (repository_root / CONTRACT_PATH).is_file(),
+        "instruction": (
+            "Formal reuse after Git metadata changes requires reviewed repository-owned command contracts. "
+            "Without them, a historical source-only pass may release source review, but current-metadata readiness "
+            "remains unproven; do not automatically rerun CI."
+        ),
+    }
+
+
 class InputScope(StrEnum):
     """Repository inputs are broad unless a reviewed contract narrows them."""
 

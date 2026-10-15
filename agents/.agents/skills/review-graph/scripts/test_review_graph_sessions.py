@@ -78,7 +78,7 @@ def test_bootstrap_freezes_resources_and_recovers_signed_dispatch_publication(tm
     (live / "python-cli-review/SKILL.md").write_text("changed live skill")
     _cli(bootstrap, *arguments)  # Recovery must use the original bundle, not replan.
     assert json.loads(output.read_bytes()) == bundle
-    payload = json.dumps(_payload(audit["dispatch"]["owned_paths"])).encode()
+    payload = json.dumps(_payload(audit["dispatch"]["owned_paths"], dispatch=audit["dispatch"])).encode()
     _cli(recovery, *run, "publish-worker-payload", "--input", audit["worker_payload_contract_path"], stdin=payload)
     lifecycle = tmp_path / "lifecycle.json"
     lifecycle.write_text(json.dumps(bundle["lifecycle_input"]))
@@ -298,7 +298,7 @@ def test_compact_view_publishes_semantics_and_tampering_blocks_scheduling(tmp_pa
     view_path = Path(dispatch_summary(audit)["worker_input"]["path"])
     view = json.loads(view_path.read_bytes())
     assert view_path.stat().st_size < Path(audit["worker_input_path"]).stat().st_size
-    payload = json.dumps(_payload(view["dispatch"]["owned_paths"])).encode()
+    payload = json.dumps(_payload(view["dispatch"]["owned_paths"], dispatch=view["dispatch"])).encode()
     _publish_worker_bytes(audit, payload)
     assert Path(audit["worker_payload_path"]).read_bytes() == payload
     view_path.chmod(0o644)

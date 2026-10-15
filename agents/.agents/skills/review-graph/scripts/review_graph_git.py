@@ -5,6 +5,9 @@ import shlex
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
+from review_graph_read_provenance import verify_runtime_inputs
+from review_graph_reads import source_read_operands
+
 if TYPE_CHECKING:
     from review_graph_reuse import ExternalMetadataTransition
 
@@ -96,14 +99,14 @@ def git_dependency_blockers(record: dict[str, Any]) -> list[dict[str, str]]:
     blockers.extend(
         {"reason_code": "unclassified-command", "command": command, "reason": "The command has no verified source-only dependency classification."}
         for command in record.get("commands_executed", [])
-        if command not in declared and (not re.match(r"^(?:cat|rg|head|tail|wc|ls)\s", command) or re.search(r"[;&|`$\n]|\bgit\b|--pre", command))
+        if command not in declared and command not in record.get("protocol_commands", []) and source_read_operands(command) is None
     )
     return blockers
 
 
 def audit_git_context(record: dict[str, Any]) -> dict[str, Any]:
     """Retain audit-wide dependencies; no unit-specific Git attribution exists."""
-    return {key: record[key] for key in ("git_sensitive", "git_dependencies", "commands_executed") if record.get(key)}
+    return {key: record[key] for key in ("git_sensitive", "git_dependencies", "commands_executed", "runtime_inputs", "protocol_commands") if record.get(key)}
 
 
 def _inherited_metadata_context(record: dict[str, Any]) -> dict[str, Any] | None:
@@ -128,6 +131,14 @@ def _metadata_context_blockers(record: dict[str, Any], transition: ExternalMetad
             if not (blocker.get("dependency") == "head" and fixed_branch_comparison(blocker.get("command", ""), transition.before.merge_base))
         ]
     paths = set(record.get("files_inspected", [])) | set(record.get("nearby_contract_owners", []))
+    paths.update(path for command in record.get("commands_executed", []) for path in source_read_operands(command) or ())
+    bindings = tuple(tuple(item) for item in record.get("runtime_inputs", []))
+    try:
+        verify_runtime_inputs(bindings, transition.before.repository_root)
+    except (OSError, ValueError) as error:
+        blockers.append({"reason_code": "unproven-runtime-read", "reason": str(error)})
+    else:
+        paths.difference_update(path for path, _digest in bindings)
     before = dict(transition.before.repository_path_fingerprints)
     after = dict(transition.after.repository_path_fingerprints)
     root = PurePosixPath(transition.before.repository_root)
@@ -157,6 +168,22 @@ def fixed_branch_comparison(command: str, base: str | None) -> bool:
         and not {"HEAD", "--cached", "--staged"}.intersection(options)
         and _source_discovery_command(shlex.join(["HEAD" if word == base else word for word in words]))
     )
+
+
+def refresh_comparison_scope(command: str, previous: dict[str, Any], current: dict[str, Any]) -> str:
+    """Refresh only a new repair dispatch, retaining the original comparison base."""
+    if set(previous["captured_scope_paths"]) == set(current["captured_scope_paths"]):
+        return command
+    if not (
+        _source_discovery_command(command)
+        or fixed_branch_comparison(command, previous.get("merge_base"))
+        or fixed_branch_comparison(command, previous.get("head"))
+    ):
+        msg = "repair changed comparison scope; provide a plain git diff against the captured immutable base before dispatch"
+        raise ValueError(msg)
+    words = shlex.split(command)
+    boundary = words.index("--") if "--" in words else len(words)
+    return shlex.join([*words[:boundary], "--", *current["captured_scope_paths"]])
 
 
 def metadata_audit_blockers(record: dict[str, Any], transition: ExternalMetadataTransition, *, fresh_current: bool = False) -> list[dict[str, str]]:
