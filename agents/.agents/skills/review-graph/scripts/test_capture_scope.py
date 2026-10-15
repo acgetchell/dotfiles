@@ -108,7 +108,9 @@ def _run(command: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
 def _git(repo: Path, *arguments: str) -> str:
     git = shutil.which("git")
     assert git is not None
-    return _run((git, *arguments), repo).stdout
+    # Keep the complete object/index mutation oracle independent of asynchronous
+    # maintenance started by fixture commits, including inherited Git settings.
+    return _run((git, "-c", "maintenance.auto=false", "-c", "gc.auto=0", *arguments), repo).stdout
 
 
 def _init_repo(repo: Path) -> None:

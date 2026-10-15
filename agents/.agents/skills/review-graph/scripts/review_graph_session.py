@@ -190,6 +190,13 @@ def verify_snapshot(reference: object) -> RuntimeManifest:
     return manifest
 
 
+def _check_retained_context(destination: Path, execution_context: dict[str, object] | None) -> None:
+    retained = destination / CONTEXT_FILE
+    if execution_context is not None and (not retained.is_file() or json.loads(retained.read_bytes()) != execution_context):
+        msg = "frozen runtime Python runner cannot change on retry"
+        raise ValueError(msg)
+
+
 def freeze_runtime(skill_root: Path, destination: Path, *, repository: Path, execution_context: dict[str, object] | None = None) -> dict[str, str]:
     """Atomically retain skills, routing, schemas, scripts and Python support code."""
     root, destination, repository = skill_root.resolve(), destination.absolute(), repository.resolve()
@@ -200,10 +207,7 @@ def freeze_runtime(skill_root: Path, destination: Path, *, repository: Path, exe
     if reference_path.exists():
         reference = _read_reference(reference_path)
         verify_snapshot(reference)
-        retained = destination / CONTEXT_FILE
-        if execution_context is not None and (not retained.is_file() or json.loads(retained.read_bytes()) != execution_context):
-            msg_0 = "frozen runtime Python runner cannot change on retry"
-            raise ValueError(msg_0)
+        _check_retained_context(destination, execution_context)
         return reference.as_raw()
     spec = importlib.util.find_spec("research_repo_tools")
     if spec is None or spec.origin is None:
@@ -235,6 +239,7 @@ def freeze_runtime(skill_root: Path, destination: Path, *, repository: Path, exe
         except FileExistsError:
             saved = _read_reference(reference_path)
             verify_snapshot(saved)
+            _check_retained_context(destination, execution_context)
             return saved.as_raw()
     verify_snapshot(reference)
     return reference.as_raw()

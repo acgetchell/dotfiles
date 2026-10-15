@@ -31,7 +31,7 @@ shape is:
 
 ```json
 {
-  "argv": ["/absolute/path/to/uv", "run", "--locked", "python"],
+  "argv": ["/absolute/path/to/uv", "run", "--no-sync", "--locked", "python"],
   "working_directory": "/absolute/repository",
   "environment": {"UV_CACHE_DIR": "/absolute/external/writable/cache"},
   "identity_files": ["/absolute/repository/pyproject.toml", "/absolute/repository/uv.lock"]
@@ -39,11 +39,14 @@ shape is:
 ```
 
 Choose the runner and approve its resources before startup. An `uv` runner needs
-`run --locked`, both project/lock identities, and an existing writable external
-cache. Bootstrap probes that exact runner for its interpreter identity and
+`run --no-sync --locked`, both project/lock identities, and an existing writable
+external cache. Put `--no-sync` before the command or any option values so it is
+an effective runner option. Bootstrap probes that exact runner for its interpreter identity and
 freezes the invocation policy, executable identities, and lock identities.
 Subsequent helpers reject changed prerequisites. Wrapper environments require
 the host's `env` executable; raw interpreter mode remains available separately.
+Environment names use the portable `[A-Za-z_][A-Za-z0-9_]*` grammar and values
+must be NUL-free strings, so probe mappings and generated `env` arguments agree.
 
 Every compact worker view retains `execution_context`, including the working
 directory. Run its generated commands in that directory. Capture, publication,

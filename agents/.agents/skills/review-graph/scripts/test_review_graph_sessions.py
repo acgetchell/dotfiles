@@ -11,6 +11,7 @@ import pytest
 import review_graph_runtime as runtime
 from capture_scope import _scope_data
 from review_graph_bootstrap import bootstrap_document
+from review_graph_execution import capture_execution_context
 from review_graph_plan import plan_from_document
 from review_graph_receipts import dispatch_summary
 from review_graph_session import freeze_runtime, verify_snapshot
@@ -141,6 +142,46 @@ def test_runtime_rejects_repository_store_and_unpinned_interpreter(tmp_path: Pat
     reference = freeze_runtime(SKILL_ROOT, tmp_path / "runtime", repository=repository)
     with pytest.raises(ValueError, match="manifest digest"):
         verify_snapshot({**reference, "digest": "sha256:" + "0" * 64})
+
+
+@pytest.mark.parametrize("winner", ["same", "different", "missing"])
+def test_concurrent_freeze_checks_the_winning_runner_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, winner: str) -> None:
+    repository, skills, destination = tmp_path / "repository", tmp_path / "skills", tmp_path / "runtime"
+    repository.mkdir()
+    skills.mkdir()
+    (skills / "SKILL.md").write_text("fixture skill\n")
+    policy = {"argv": [sys.executable], "working_directory": str(repository), "environment": {}, "identity_files": []}
+    requested = capture_execution_context(policy, repository)
+    retained = (
+        requested
+        if winner == "same"
+        else capture_execution_context({**policy, "environment": {"REVIEW_RUNNER": "winner"}}, repository)
+        if winner == "different"
+        else None
+    )
+    rename = Path.rename
+    won = False
+    winning_reference: dict[str, str] = {}
+
+    def concurrent_rename(staged: Path, target: Path) -> Path:
+        nonlocal won
+        if target == destination and not won:
+            won = True
+            winning_reference.update(freeze_runtime(skills, destination, repository=repository, execution_context=retained))
+            msg = "another bootstrap published first"
+            raise FileExistsError(msg)
+        return rename(staged, target)
+
+    monkeypatch.setattr(Path, "rename", concurrent_rename)
+    if winner == "same":
+        assert freeze_runtime(skills, destination, repository=repository, execution_context=requested) == winning_reference
+    else:
+        with pytest.raises(ValueError, match="Python runner cannot change"):
+            freeze_runtime(skills, destination, repository=repository, execution_context=requested)
+    assert won
+    assert verify_snapshot(winning_reference).files
+    context = destination / "execution-context.json"
+    assert json.loads(context.read_bytes()) == retained if retained is not None else not context.exists()
 
 
 @pytest.mark.parametrize("portable", ["relative", "token"])

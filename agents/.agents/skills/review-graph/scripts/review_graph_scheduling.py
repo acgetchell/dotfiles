@@ -94,6 +94,15 @@ def select_execution_lanes(  # noqa: C901, PLR0912, PLR0915 - selection preserve
         for node_id in candidates
         if any(unit["disposition"] == "instruction-review" for unit in entries[node_id]["dispatch"].get("coverage_reuse", {}).get("units", []))
     }
+    creation_blockers = []
+    if failure is not None and failed_id in fresh_required and action == "coordinator-fallback":
+        action = "fresh-worker-blocked"
+        creation_blockers.append(
+            f"{failed_id} requires a fresh worker after creation failed: {failure['reason']}. "
+            "Automatic creation retries are exhausted or ineligible; coordinator fallback cannot reconcile instructions. "
+            "Retain this continuation and report the blocked node. Resume only after an explicit executor-recovery decision "
+            "with a new authoritative capacity observation; preserve the previous failure as lineage."
+        )
     coordinator_id = None
     workers: list[str] = []
     if not coordinator_busy and not serial_busy:
@@ -137,5 +146,6 @@ def select_execution_lanes(  # noqa: C901, PLR0912, PLR0915 - selection preserve
         "preflight_blocked_nodes": preflight_blocked,
         "creation_failure": failure,
         "creation_failure_action": action,
+        "creation_failure_blockers": creation_blockers,
         "retry_after_seconds": 30 if action == "bounded-retry" else 0,
     }

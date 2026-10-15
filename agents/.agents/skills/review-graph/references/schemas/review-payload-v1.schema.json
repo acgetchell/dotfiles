@@ -16,7 +16,7 @@
       }
     },
     "validation_limits": {
-      "description": "Environmental evidence caveats bound to a validation_requirements entry. Only delegated evidence permits source-audit reuse; unavailable or failed evidence blocks it.",
+      "description": "Environmental evidence caveats bound to a validation_requirements entry. Delegated or unavailable checks remain readiness obligations independently of source-audit reuse; failed checks reopen their owning source contract.",
       "type": "array",
       "items": {
         "type": "object",

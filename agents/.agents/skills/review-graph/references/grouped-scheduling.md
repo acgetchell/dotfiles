@@ -18,8 +18,9 @@ subsequent `schedule_input_path` requests, preserving their reservations.
 Count completed workers whose slots remain occupied in `active_workers`;
 completion alone does not prove release. Use a current authoritative aggregate
 surface or exact host occupancy accounting, never task content or throwaway
-creation probes. Omit capacity when uncertain. This scheduling metadata does not
-require the isolated capability gate.
+creation probes. Later lifecycle requests may omit capacity when uncertain;
+the initial bootstrap handoff requires the fresh observation described above.
+This scheduling metadata does not require the isolated capability gate.
 
 ```sh
 uv run --locked python scripts/review_graph_runtime.py schedule-ready \
@@ -38,6 +39,13 @@ omits the prior snapshot rather than assuming it remains current.
 
 Instruction-reconciliation audits keep a fresh worker lane. They wait for
 capacity instead of receiving a coordinator waiver or repeating source reads.
+An unexpected creation failure or exhausted capacity retry returns
+`fresh-worker-blocked` with a concrete blocker, while other ready nodes may
+continue. Retain the failure and stop automatic attempts for that node. An
+explicit executor-recovery decision may resume from the returned lifecycle
+with a fresh capacity observation and no active `creation_failure`; preserve
+the failed scheduling continuation as history. This is a new authorized attempt,
+not another automatic retry or a coordinator reconciliation waiver.
 
 Use `preflight_blocked_nodes` for unstarted validators whose execution preflight
 is blocked. These holds persist in the continuation and receipt, consume no

@@ -47,31 +47,30 @@ def timing_documents(dispatch: dict[str, Any], policy: object) -> tuple[dict[Pat
     unit = dispatch["validation_unit"]
     writes: dict[Path, bytes] = {}
     launches = []
-    for directory in unit["working_directories"]:
+    for command, directory in zip(unit["commands"], unit["working_directories"], strict=True):
         if not Path(directory).is_absolute() or not Path(directory).is_dir():
             msg = "timing launch requires an existing absolute dispatched working directory"
             raise ValueError(msg)
-        for command in unit["commands"]:
-            index = len(launches)
-            launch_path = manifest_path.with_name(f"{dispatch['node_id']}.timing-{index}.launch.json")
-            receipt_path = manifest_path.with_name(f"{dispatch['node_id']}.timing-{index}.receipt.jsonl")
-            if receipt_path.exists(follow_symlinks=False):
-                msg = "timing receipt already exists; recover its result without rerunning validation"
-                raise ValueError(msg)
-            launch = {"schema_version": 1, "argv": [*shell, command], "working_directory": directory}
-            content = (canonical_json(launch) + "\n").encode()
-            writes[launch_path] = content
-            launches.append(
-                {
-                    "command": command,
-                    "working_directory": directory,
-                    "launch": {"path": str(launch_path), "digest": digest_bytes(content)},
-                    "receipt_path": str(receipt_path),
-                    "execute_command": runtime_command(
-                        Path(dispatch["skill_path"]).parent / "scripts/run_timed.py", "--input", str(launch_path), "--receipt", str(receipt_path)
-                    ),
-                }
-            )
+        index = len(launches)
+        launch_path = manifest_path.with_name(f"{dispatch['node_id']}.timing-{index}.launch.json")
+        receipt_path = manifest_path.with_name(f"{dispatch['node_id']}.timing-{index}.receipt.jsonl")
+        if receipt_path.exists(follow_symlinks=False):
+            msg = "timing receipt already exists; recover its result without rerunning validation"
+            raise ValueError(msg)
+        launch = {"schema_version": 1, "argv": [*shell, command], "working_directory": directory}
+        content = (canonical_json(launch) + "\n").encode()
+        writes[launch_path] = content
+        launches.append(
+            {
+                "command": command,
+                "working_directory": directory,
+                "launch": {"path": str(launch_path), "digest": digest_bytes(content)},
+                "receipt_path": str(receipt_path),
+                "execute_command": runtime_command(
+                    Path(dispatch["skill_path"]).parent / "scripts/run_timed.py", "--input", str(launch_path), "--receipt", str(receipt_path)
+                ),
+            }
+        )
     manifest = {
         "schema_version": 1,
         "node_id": dispatch["node_id"],

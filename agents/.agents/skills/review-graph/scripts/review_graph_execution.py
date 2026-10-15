@@ -3,9 +3,11 @@
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
+from itertools import takewhile
 from pathlib import Path
 from typing import Any
 
@@ -32,8 +34,10 @@ def _runner_policy(raw: object, repository: Path) -> dict[str, Any]:
     if not isinstance(argv, list) or not argv or any(not isinstance(arg, str) or not arg for arg in argv):
         msg = "Python runner argv requires nonempty literal arguments"
         raise ValueError(msg)
-    if not isinstance(environment, dict) or any(not isinstance(k, str) or not k or "=" in k or not isinstance(v, str) for k, v in environment.items()):
-        msg = "Python runner environment requires string names and values"
+    if not isinstance(environment, dict) or any(
+        not isinstance(k, str) or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", k) is None or not isinstance(v, str) or "\0" in v for k, v in environment.items()
+    ):
+        msg = "Python runner environment requires portable variable names and NUL-free string values"
         raise ValueError(msg)
     if not isinstance(files, list) or any(not isinstance(path, str) for path in files):
         msg = "Python runner identity_files requires explicit paths"
@@ -63,6 +67,10 @@ def _check_uv_policy(  # noqa: PLR0913 - explicit policy components, no ambient 
     if executable.stem == "uv":
         if "run" not in argv or "--locked" not in argv or not {directory / "uv.lock", directory / "pyproject.toml"} <= set(paths):
             msg = "uv runner requires run --locked and both project/lock identities"
+            raise ValueError(msg)
+        options = takewhile(lambda arg: arg.startswith("-") and arg != "--", argv[argv.index("run") + 1 :])
+        if "--no-sync" not in options:
+            msg = "uv runner requires --no-sync before the command or option values to prevent synchronization during the probe"
             raise ValueError(msg)
         cache = Path(environment.get("UV_CACHE_DIR", ""))
         if not cache.is_absolute() or not cache.is_dir() or cache.resolve().is_relative_to(repository.resolve()) or not os.access(cache, os.W_OK):

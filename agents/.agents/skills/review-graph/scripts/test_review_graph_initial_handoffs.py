@@ -1,5 +1,6 @@
 """Executable bootstrap, runner, timing and fresh-worker handoff regressions."""
 
+import hashlib
 import json
 import os
 import shlex
@@ -16,8 +17,8 @@ from review_graph_isolation import IsolationPublicationError
 from review_graph_plan import plan_from_document
 from review_graph_schema import require_schema_definition
 from review_graph_session import _check_portable_references, freeze_runtime, verify_snapshot
-from review_graph_timing import timing_blocker
-from test_review_graph_runtime import SKILL_ROOT, _compact_audit_payload, _json_plan, _sparse_plan_document, _worker_input_fixture
+from review_graph_timing import timing_blocker, timing_documents
+from test_review_graph_runtime import SKILL_ROOT, _compact_audit_payload, _json_plan, _run_test_git, _sparse_plan_document, _worker_input_fixture
 from test_review_graph_starter import RUNTIME_SCHEMA, _fixture, _invoke
 
 
@@ -147,6 +148,32 @@ def test_starter_validator_is_held_until_exact_timing_launch_exists(tmp_path: Pa
     assert entry["node_id"] not in runtime.next_ready_nodes(lifecycle, journal_events=(), dispatch_set=dispatch_set)["ready_node_ids"]
 
 
+def test_timing_launches_preserve_command_directory_pairs(tmp_path: Path) -> None:
+    first, second = tmp_path / "first", tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    dispatch: dict[str, Any] = {
+        "mode": "validation",
+        "node_id": "validation-pairs",
+        "source_state": ["scope", "worktree", "repository"],
+        "skill_path": str(SKILL_ROOT / "review-validator/SKILL.md"),
+        "timing_prerequisite": {"manifest_path": str(tmp_path / "timing.json")},
+        "validation_unit": {"commands": ["printf first", "printf second"], "working_directories": [str(first), str(second)]},
+    }
+    writes, manifest = timing_documents(dispatch, {"shell_argv": ["/bin/sh", "-c"]})
+    launches = manifest["launches"]
+    assert [(item["command"], item["working_directory"]) for item in launches] == [("printf first", str(first)), ("printf second", str(second))]
+    assert [json.loads(writes[Path(item["launch"]["path"])]) for item in launches] == [
+        {"schema_version": 1, "argv": ["/bin/sh", "-c", "printf first"], "working_directory": str(first)},
+        {"schema_version": 1, "argv": ["/bin/sh", "-c", "printf second"], "working_directory": str(second)},
+    ]
+    for directories in ([str(first)], [str(first), str(second), str(first)]):
+        dispatch["validation_unit"]["working_directories"] = directories
+        with pytest.raises(ValueError, match="zip"):
+            timing_documents(dispatch, {"shell_argv": ["/bin/sh", "-c"]})
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["first", "second"]
+
+
 @pytest.mark.parametrize("ledger", ["commands_executed", "files_inspected", "nearby_contract_owners"])
 def test_fresh_audit_rejection_retains_attempt_and_only_replaces_failed_node(tmp_path: Path, ledger: str) -> None:
     _lifecycle, entries = _worker_input_fixture(tmp_path)
@@ -196,7 +223,9 @@ def test_second_isolation_failure_exhausts_only_this_node(tmp_path: Path) -> Non
     assert len(failure.value.receipt["rejected_attempts"]) == 2
 
 
-@pytest.mark.parametrize("selector", ["absolute-glob", "relative-glob", "directory", "sealed-payload", "timing-receipt", "coverage-proof"])
+@pytest.mark.parametrize(
+    "selector", ["absolute-glob", "relative-glob", "directory", "sealed-payload", "timing-receipt", "coverage-proof", "chdir-glob", "pattern-file"]
+)
 def test_isolation_rejects_selectors_that_read_other_workers(tmp_path: Path, selector: str) -> None:
     _lifecycle, entries = _worker_input_fixture(tmp_path)
     audit = next(entry for entry in entries["dispatches"] if entry["dispatch"]["mode"] == "audit")
@@ -204,13 +233,19 @@ def test_isolation_rejects_selectors_that_read_other_workers(tmp_path: Path, sel
     other = next(entry for entry in entries["dispatches"] if entry["dispatch"]["mode"] == "validation")
     selected = {
         "absolute-glob": f"{directory}/*.execution.json",
-        "relative-glob": "./*.execution.json",
+        "relative-glob": os.path.relpath(directory, audit["dispatch"]["repository_root"]) + "/*.execution.json",
         "directory": str(directory),
         "sealed-payload": f"{directory}/{other['node_id']}.worker-payload.digest.sealed.json",
         "timing-receipt": f"{directory}/{other['node_id']}.timing-0.receipt.jsonl",
         "coverage-proof": f"{directory}/{other['node_id']}.coverage-proof.json",
+        "chdir-glob": str(directory),
+        "pattern-file": os.path.relpath(other["metadata_path"], audit["dispatch"]["repository_root"]),
     }[selector]
     command = f"cat {selected}" if selector != "directory" else f"rg -n . {selected}"
+    if selector == "chdir-glob":
+        command = f"cd {selected} && cat ./*.execution.json"
+    elif selector == "pattern-file":
+        command = f"rg -f {selected} source.py"
     payload = _compact_audit_payload(audit, commands=(command,))
     contract = json.loads(Path(audit["worker_payload_contract_path"]).read_bytes())
     with pytest.raises(IsolationPublicationError, match="another node"):
@@ -220,15 +255,30 @@ def test_isolation_rejects_selectors_that_read_other_workers(tmp_path: Path, sel
         runtime.compile_review({"dispatch": {**audit["dispatch"], "before_state": state, "after_state": state}, "payload": payload})
 
 
-def test_frozen_uv_runner_supplies_writable_cache_for_capture_and_publication(tmp_path: Path) -> None:
-    uv = shutil.which("uv")
-    assert uv is not None
+def _runner_project(tmp_path: Path) -> Path:
     project = tmp_path / "project"
     project.mkdir()
     for name in ("pyproject.toml", "uv.lock"):
         shutil.copyfile(SKILL_ROOT.parents[2] / name, project / name)
     (project / "AGENTS.md").write_text("Use uv run --locked for all Python commands.\n")
     (project / ".venv").symlink_to(SKILL_ROOT.parents[2] / ".venv", target_is_directory=True)
+    git = shutil.which("git")
+    assert git is not None
+    _run_test_git(git, "-C", str(project), "init", "--quiet", "--object-format=sha1")
+    _run_test_git(git, "-C", str(project), "config", "user.name", "Review Graph Test")
+    _run_test_git(git, "-C", str(project), "config", "user.email", "review-graph@example.invalid")
+    (project / ".gitignore").write_text(".venv/\n")
+    (project / "source.txt").write_text("original\n")
+    _run_test_git(git, "-C", str(project), "add", ".")
+    _run_test_git(git, "-C", str(project), "-c", "maintenance.auto=false", "-c", "gc.auto=0", "commit", "--quiet", "-m", "fixture")
+    (project / "source.txt").write_text("changed\n")
+    return project
+
+
+def test_frozen_uv_runner_supplies_writable_cache_for_capture_and_publication(tmp_path: Path) -> None:
+    uv = shutil.which("uv")
+    assert uv is not None
+    project = _runner_project(tmp_path)
     cache = tmp_path / "approved-cache"
     cache.mkdir()
     context = capture_execution_context(
@@ -265,13 +315,18 @@ def test_frozen_uv_runner_supplies_writable_cache_for_capture_and_publication(tm
     result = subprocess.run(command, cwd=project, env=environment, input=json.dumps(_compact_audit_payload(audit)).encode(), capture_output=True, check=True)  # noqa: S603
     assert json.loads(result.stdout)["status"] == "published"
     # Exercise the exact capture helper through the same wrapper; source is read only.
-    subprocess.run(  # noqa: S603 - capture reads the real repository without changing source or Git.
-        [*command_prefix(context), str(frozen / "capture_scope.py"), "--repo", str(SKILL_ROOT.parents[2]), "--mode", "worktree", "--path", "README.md"],
+    captured = subprocess.run(  # noqa: S603 - capture reads only the fixture repository.
+        [*command_prefix(context), str(frozen / "capture_scope.py"), "--repo", str(project), "--mode", "worktree", "--path", "source.txt"],
         cwd=project,
         env=environment,
         check=True,
         capture_output=True,
     )
+    snapshot = json.loads(captured.stdout)
+    assert Path(snapshot["repository_root"]).samefile(project)
+    assert snapshot["captured_scope_paths"] == ["source.txt"]
+    expected_blob = hashlib.sha1(b"blob 8\0changed\n", usedforsecurity=False).hexdigest()
+    assert snapshot["repository_path_fingerprints"]["source.txt"] == f"git:sha1:100644:{expected_blob}"
     validator = next(entry for entry in json.loads(output.read_bytes())["dispatches"] if entry["dispatch"]["mode"] == "validation")
     policy = Path(validator["dispatch"]["timing_prerequisite"]["prepare_command"][-1])
     policy.write_text(json.dumps({"shell_argv": ["/bin/sh", "-c"]}))
@@ -293,3 +348,61 @@ def test_runner_rejects_interpreter_mismatch(tmp_path: Path, monkeypatch: pytest
     monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0, stdout='{"path":"different"}'))
     with pytest.raises(ValueError, match="different interpreter"):
         capture_execution_context({"argv": [sys.executable], "working_directory": str(tmp_path), "environment": {}, "identity_files": []}, tmp_path)
+
+
+@pytest.mark.parametrize(
+    "arguments", [["run", "--locked", "python"], ["run", "--locked", "python", "--no-sync"], ["run", "--locked", "--", "--no-sync", "python"]]
+)
+def test_uv_runner_rejects_sync_before_executing_probe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, arguments: list[str]) -> None:
+    uv = shutil.which("uv")
+    assert uv is not None
+    for name in ("pyproject.toml", "uv.lock"):
+        (tmp_path / name).write_text("fixture\n")
+
+    def unexpected_probe(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("synchronizing runner reached the interpreter probe")
+
+    monkeypatch.setattr(subprocess, "run", unexpected_probe)
+    with pytest.raises(ValueError, match="requires --no-sync"):
+        capture_execution_context(
+            {
+                "argv": [uv, *arguments],
+                "working_directory": str(tmp_path),
+                "environment": {},
+                "identity_files": [str(tmp_path / name) for name in ("pyproject.toml", "uv.lock")],
+            },
+            tmp_path,
+        )
+
+
+@pytest.mark.parametrize("environment", [{"-REVIEW_PROBE": "value"}, {"A=B": "value"}, {"": "value"}, {"REVIEW_PROBE": "bad\0value"}])
+def test_runner_rejects_unrepresentable_environment_before_probe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, environment: dict[str, str]) -> None:
+    def unexpected_probe(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("invalid environment reached the interpreter probe")
+
+    monkeypatch.setattr(subprocess, "run", unexpected_probe)
+    with pytest.raises(ValueError, match="portable variable names"):
+        capture_execution_context({"argv": [sys.executable], "working_directory": str(tmp_path), "environment": environment, "identity_files": []}, tmp_path)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat agents/.agents/skills/review-graph/references/schemas/*.json",
+        "rg --files agents/.agents/skills/review-graph/references/schemas -g '*.json'",
+        "rg -n '/' source.py",
+        "rg -F '*' source.py",
+        "rg -e '/' -g '*.py' source.py",
+        "python - <<'CODE'\nprint(2 * 3)\nCODE",
+        "python - <<'CODE'\nprint(6 / 2)\nCODE",
+        "python -c 'print(2 * 3)'",
+    ],
+)
+def test_source_patterns_and_program_text_do_not_consume_isolation_replacements(tmp_path: Path, command: str) -> None:
+    _lifecycle, entries = _worker_input_fixture(tmp_path)
+    audit = next(entry for entry in entries["dispatches"] if entry["dispatch"]["mode"] == "audit")
+    contract = json.loads(Path(audit["worker_payload_contract_path"]).read_bytes())
+    content = json.dumps(_compact_audit_payload(audit, commands=(command,))).encode()
+    assert runtime.publish_worker_payload_bytes(contract, content)["status"] == "published"
+    assert Path(audit["worker_payload_path"]).read_bytes() == content
+    assert not list(Path(audit["worker_payload_path"]).parent.glob("*.isolation-rejected.*.json"))

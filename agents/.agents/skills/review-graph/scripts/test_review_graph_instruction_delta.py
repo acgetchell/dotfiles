@@ -208,9 +208,60 @@ def test_reconciliation_cannot_be_a_coordinator_waiver_or_omit_changed_documents
         runtime.publish_worker_payload_bytes(contract, json.dumps(uncertain).encode())
 
 
+@pytest.mark.parametrize("dimension", ["rules", "commands", "applicability", "obligations"])
+def test_each_material_dimension_independently_prevents_unchanged_reuse(tmp_path: Path, dimension: str) -> None:
+    _result, _original, entry = _fixture(tmp_path, material=True)
+    payload = _assessment(entry)
+    judgment = payload["instruction_reconciliations"][0]["assessments"][0][dimension]
+    judgment.update(changed=True, reason=f"The {dimension} contract changed and requires source reinspection.")
+    contract = json.loads(Path(entry["worker_payload_contract_path"]).read_bytes())
+    with pytest.raises(ValueError, match="require source reinspection"):
+        runtime.publish_worker_payload_bytes(contract, json.dumps(payload).encode())
+    assert not Path(entry["worker_payload_path"]).exists()
+
+
 def test_retained_delta_bytes_are_verified_against_both_captures(tmp_path: Path) -> None:
     _result, _original, entry = _fixture(tmp_path)
     proof = runtime._coverage_proof(entry["dispatch"]["coverage_reuse"])
     proof["units"][0]["input_deltas"][0]["after"] = "unrelated substituted policy"
     with pytest.raises(ValueError, match="immutable findings or verified unit decisions"):
         runtime._verify_delta_context(proof, entry["dispatch"])
+
+
+@pytest.mark.parametrize(("failure_kind", "attempts"), [("unexpected", 1), ("capacity", 2)])
+def test_fresh_reconciliation_creation_failure_reports_blocker_across_continuations(tmp_path: Path, failure_kind: str, attempts: int) -> None:
+    result, _original, entry = _fixture(tmp_path)
+    lifecycle = json.loads(Path(result["lifecycle_input_path"]).read_bytes())
+    failure = {"node_id": entry["node_id"], "failure_kind": failure_kind, "attempts": attempts, "reason": "observed executor failure", "worker_created": False}
+    request = {**lifecycle, "artifact_store": str(tmp_path / "schedules"), "creation_failure": failure}
+    dispatches = result["dispatches_path"]
+    for active in (1, 0):
+        request["worker_capacity"] = {"source": "fresh host observation", "concurrent_worker_limit": 1, "active_workers": active}
+        request_path, output = tmp_path / f"request-{active}.json", tmp_path / f"schedule-{active}.json"
+        request_path.write_text(json.dumps(request))
+        assert (
+            runtime.main(
+                [
+                    "schedule-ready",
+                    "--input",
+                    str(request_path),
+                    "--dispatches",
+                    dispatches,
+                    "--journal",
+                    result["journal_path"],
+                    "--current-capture",
+                    result["capture_path"],
+                    "--output",
+                    str(output),
+                ]
+            )
+            == 0
+        )
+        scheduled = json.loads(output.read_bytes())
+        assert scheduled["creation_failure_action"] == "fresh-worker-blocked"
+        assert any("requires a fresh worker" in blocker for blocker in scheduled["blockers"])
+        assert entry["node_id"] not in scheduled["ready_node_ids"]
+        assert scheduled["coordinator_node_id"] != entry["node_id"]
+        request = json.loads(Path(scheduled["schedule_input_path"]).read_bytes())
+        assert request["creation_failure"] == failure
+        dispatches = scheduled["dispatches_path"]
