@@ -3,15 +3,27 @@
 import json
 import shlex
 import subprocess
+import tarfile
 from pathlib import Path
 from typing import Any
 
+import pytest
 from capture_scope import _scope_data
-from test_review_graph_runtime import SKILL_ROOT, _baseline_mutation_fixture, _compact_audit_payload, _compact_independent_payload, _run_test_git
+from review_graph_reuse import WORKTREE_SELECTION_ALGORITHM, source_snapshot
+from test_review_graph_runtime import (
+    SKILL_ROOT,
+    _baseline_mutation_fixture,
+    _compact_audit_payload,
+    _compact_independent_payload,
+    _complete_structural_fixture_routing,
+    _run_test_git,
+)
 from test_review_graph_sessions import _cli
 
 
-def _frozen_run(tmp_path: Path, *, early: bool) -> tuple[str, Path, dict[str, Any], dict[str, Any], Path, Path]:
+def _frozen_run(
+    tmp_path: Path, *, early: bool, input_selection: bool = False, log_kind: str = "file"
+) -> tuple[str, Path, dict[str, Any], dict[str, Any], Path, Path]:
     git, repository, template, capture, _plan = _baseline_mutation_fixture(tmp_path)
     template.update(
         authorization="review-and-fix",
@@ -21,15 +33,38 @@ def _frozen_run(tmp_path: Path, *, early: bool) -> tuple[str, Path, dict[str, An
     requirement = template["validation_requirements"][0]
     isolation = tmp_path / "validator"
     isolation.mkdir()
+    if log_kind == "aliased-directory":
+        alias = tmp_path / "validator-alias"
+        alias.symlink_to(isolation, target_is_directory=True)
+        isolation = alias
     log = isolation / "ci.log"
+    artifact = log
+    if log_kind in {"directory", "aliased-directory"}:
+        artifact = isolation / "logs"
+        log = artifact / "nested" / "ci.log"
+        log.parent.mkdir(parents=True)
+        (artifact / "empty").mkdir()
+        outside = tmp_path / "outside.log"
+        outside.write_text("external bytes must not be archived\n")
+        (artifact / "external-link").symlink_to(outside)
+    elif log_kind == "symlink":
+        artifact = isolation / "log-link"
+        artifact.symlink_to(log.name)
     requirement.update(
         commands=["printf passed > " + shlex.quote(str(log))],
         canonical_recipe=None,
         requires_isolation=True,
         isolation_root=str(isolation),
         working_directories=[str(isolation)],
-        allowed_artifacts=[{"path": str(log), "kind": "log", "repository_status": "outside-repository"}],
+        allowed_artifacts=[{"path": str(artifact), "kind": "log", "repository_status": "outside-repository"}],
     )
+    if input_selection:
+        (repository / "enumerate.sh").write_text('git -C "$1" ls-files --cached --others --exclude-standard -z\n')
+        requirement.update(commands=[shlex.join(["sh", str(repository / "enumerate.sh"), str(repository)]) + " > " + shlex.quote(str(log))])
+        capture = _scope_data(git, repository, "baseline", None, ())
+        snapshot = source_snapshot(capture)
+        template["change_target"] = shlex.join(["git", "diff", snapshot.head, "--", *snapshot.captured_scope_paths])
+        _complete_structural_fixture_routing(template, list(snapshot.captured_scope_paths))
     if early:
         template["pre_review_validation_requirement_ids"] = [requirement["requirement_id"]]
     capture_path, template_path, bundle_path = (tmp_path / name for name in ("initial-capture.json", "template.json", "bootstrap.json"))
@@ -83,8 +118,22 @@ def _observe(entry: dict[str, Any], phase: str) -> dict[str, Any]:
     return observation
 
 
-def test_frozen_validator_handoffs_release_source_review_without_metadata_ci_replay(tmp_path: Path) -> None:
-    git, repository, bundle, dispatches, frozen, dispatch_path = _frozen_run(tmp_path, early=True)
+@pytest.mark.parametrize(
+    ("dependency_kind", "log_kind"),
+    [
+        ("none", "file"),
+        ("none", "symlink"),
+        ("input-selection", "file"),
+        ("index", "file"),
+        ("index", "directory"),
+        ("index", "aliased-directory"),
+        ("index", "symlink"),
+    ],
+)
+def test_frozen_validator_handoffs_release_source_review_without_metadata_ci_replay(tmp_path: Path, dependency_kind: str, log_kind: str) -> None:  # noqa: PLR0915 - frozen execution through metadata continuation.
+    git, repository, bundle, dispatches, frozen, dispatch_path = _frozen_run(
+        tmp_path, early=True, input_selection=dependency_kind == "input-selection", log_kind=log_kind
+    )
     validator = next(entry for entry in dispatches["dispatches"] if entry["dispatch"]["mode"] == "validation")
     view = json.loads(Path(validator["worker_execution_path"]).read_bytes())
     assert view["dispatch"]["validation_observations"] == validator["dispatch"]["validation_observations"]
@@ -114,10 +163,19 @@ def test_frozen_validator_handoffs_release_source_review_without_metadata_ci_rep
                 "exit_code": 0,
                 "elapsed": f"{timing['elapsed_seconds']}s",
                 "evidence": "Observed timed fixture pass",
-                "artifact_paths": [str(tmp_path / "validator/ci.log")],
+                "artifact_paths": [validator["dispatch"]["validation_unit"]["allowed_artifacts"][0]["path"]],
             }
         ],
     }
+    if dependency_kind != "none":
+        payload["git_dependencies"] = [
+            {
+                "kind": dependency_kind,
+                "command": launch["command"],
+                "reason": "Fixture Git dependency",
+                **({"selection_algorithm": WORKTREE_SELECTION_ALGORITHM} if dependency_kind == "input-selection" else {}),
+            }
+        ]
     _cli(frozen, "publish-worker-payload", "--input", validator["worker_payload_contract_path"], stdin=json.dumps(payload).encode())
     journal = tmp_path / "execution.jsonl"
     _compile(
@@ -151,6 +209,37 @@ def test_frozen_validator_handoffs_release_source_review_without_metadata_ci_rep
     _cli(frozen, "resume-after-external-metadata", "--input", str(request_path), "--output", str(output))
     result = json.loads(output.read_bytes())
     decision = next(item for item in result["node_decisions"] if item["node_id"] == validator["node_id"])
+    if dependency_kind == "index":
+        assert decision["disposition"] == "recheck"
+        archive = result["validation_log_archives"][0]
+        assert archive["evidence_id"] == validator["dispatch"]["evidence_id"]
+        if log_kind in {"directory", "aliased-directory"}:
+            assert archive["original_digest_mode"] == "recursive-content-sha256-v2"
+            archived_bytes = Path(archive["path"]).read_bytes()
+            with tarfile.open(archive["path"]) as retained:
+                output = retained.extractfile("nested/ci.log")
+                assert output is not None
+                assert output.read() == b"passed"
+                assert retained.getmember("empty").isdir()
+                assert retained.getmember("external-link").issym()
+                assert retained.getmember("external-link").linkname == str(tmp_path / "outside.log")
+            assert b"external bytes must not be archived" not in archived_bytes
+            (Path(archive["original_path"]) / "nested/ci.log").write_text("subsequent validation output\n")
+            assert Path(archive["path"]).read_bytes() == archived_bytes
+        elif log_kind == "symlink":
+            assert archive["original_digest_mode"] == "symlink-target-v1"
+            assert Path(archive["path"]).read_bytes() == b"ci.log"
+            original = Path(archive["original_path"])
+            original.unlink()
+            original.symlink_to("replacement.log")
+            assert Path(archive["path"]).read_bytes() == b"ci.log"
+        else:
+            assert Path(archive["path"]).read_bytes() == b"passed"
+            Path(archive["original_path"]).write_text("subsequent validation output\n")
+            assert Path(archive["path"]).read_bytes() == b"passed"
+        assert Path(archive["path"]).stat().st_mode & 0o222 == 0
+        assert receipt_path.read_bytes() == receipt_bytes
+        return
     assert decision["scheduling_gate"] == "historical-source-pass"
     assert decision["formal_reuse"] == "unproven"
     lifecycle = result["lifecycle_input"]
@@ -193,10 +282,15 @@ def test_frozen_validator_handoffs_release_source_review_without_metadata_ci_rep
     assert any("validation-contract-unavailable" in blocker for blocker in delivery["blockers"])
 
 
-def test_frozen_audit_repair_reuse_and_range_read_commit_continuation(tmp_path: Path) -> None:  # noqa: PLR0915 - complete frozen workflow.
+@pytest.mark.parametrize("external_read", [False, True])
+def test_frozen_audit_repair_reuse_and_range_read_commit_continuation(tmp_path: Path, external_read: bool) -> None:  # noqa: PLR0915 - complete frozen workflow.
     git, repository, bundle, dispatches, frozen, dispatch_path = _frozen_run(tmp_path, early=False)
     audit = next(entry for entry in dispatches["dispatches"] if entry["dispatch"].get("skill_id") == "python-cli-review")
     payload = _compact_audit_payload(audit)
+    external = tmp_path / "registry-dependency.rs"
+    if external_read:
+        external.write_text("pub fn dependency() {}\n")
+        payload["nearby_contract_owners"].append(str(external))
     payload["commands_executed"] = [shlex.join(["cat", path]) for path in payload["nearby_contract_owners"]]
     for command in payload["commands_executed"]:
         subprocess.run(shlex.split(command), check=True, capture_output=True)  # noqa: S603 - exact fixture instruction reads.
@@ -225,6 +319,12 @@ def test_frozen_audit_repair_reuse_and_range_read_commit_continuation(tmp_path: 
     request_path.write_text(json.dumps(request))
     _cli(frozen, "advance-after-mutation", "--input", str(request_path), "--output", str(output))
     result = json.loads(output.read_bytes())
+    if external_read:
+        assert audit["dispatch"]["evidence_id"] not in result["reused_evidence_ids"]
+        decision = next(item for item in result["reuse_decisions"] if item["node_id"] == audit["node_id"])
+        assert decision["rejected_inputs"] == [{"path": str(external), "classification": "unbound-external-source"}]
+        assert Path(audit["artifact_path"]).read_bytes() == original
+        return
     assert audit["dispatch"]["evidence_id"] in result["reused_evidence_ids"]
     assert Path(audit["artifact_path"]).read_bytes() == original
     independent = next(entry for entry in result["dispatch_set"]["dispatches"] if entry["dispatch"]["mode"] == "independent-review")

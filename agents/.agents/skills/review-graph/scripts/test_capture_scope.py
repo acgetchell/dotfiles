@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Sequence  # noqa: TC003 - keep available for runtime annotation evaluation.
+from dataclasses import asdict
 from pathlib import Path
 from typing import cast
 
@@ -12,9 +13,39 @@ import capture_scope
 import pytest
 from capture_scope import _file_blob_id, _scope_data
 from review_graph_git_objects import GitPathIdentity
+from review_graph_integrity import digest_json
 from review_graph_reuse import source_snapshot
 
 _TIMEOUT_SECONDS = 30
+
+
+def test_selection_capture_preserves_union_across_staging_and_detects_ignore_changes(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    (repo / "tracked.txt").write_text("tracked\n")
+    _commit_all(repo)
+    (repo / "new.txt").write_text("new\n")
+    git = shutil.which("git") or "git"
+    before = source_snapshot(_scope_data(git, repo, "baseline", None, ()))
+    _git(repo, "add", "new.txt")
+    staged = source_snapshot(_scope_data(git, repo, "baseline", None, ()))
+    assert staged.repository_selection_paths == before.repository_selection_paths
+    assert staged.index_fingerprint != before.index_fingerprint
+    _git(repo, "rm", "--cached", "new.txt")
+    (repo / ".git/info/exclude").write_text("new.txt\n")
+    ignored = source_snapshot(_scope_data(git, repo, "baseline", None, ()))
+    assert ignored.repository_selection_paths is not None
+    assert "new.txt" not in ignored.repository_selection_paths
+    assert before.repository_selection_paths != ignored.repository_selection_paths
+    # Historical snapshots retain their exact serialized fields and hashes.
+    historical = asdict(before)
+    historical.pop("repository_selection_paths")
+    historical.pop("repository_state_fingerprint")
+    historical["repository_state_fingerprint"] = digest_json(historical).removeprefix("sha256:")
+    legacy = source_snapshot(historical)
+    legacy.verify()
+    assert legacy.repository_selection_paths is None
+    assert asdict(legacy) == historical
 
 
 @pytest.mark.parametrize("algorithm", ["sha1", "sha256"])

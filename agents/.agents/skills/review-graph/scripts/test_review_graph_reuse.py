@@ -257,7 +257,7 @@ def test_large_recheck_publishes_retries_and_finalizes_without_expanding_markdow
         ("dependency", "dependency-uncertainty"),
         ("unavailable", "verified"),
         ("failed", "validation-evidence-failed"),
-        ("no-partition", "no-coverage-partition"),
+        ("no-partition", "input-proof-failed"),
     ],
 )
 def test_typed_caveats_control_unit_reuse_and_explain_rejections(tmp_path: Path, caveat: str, category: str) -> None:

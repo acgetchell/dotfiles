@@ -11,6 +11,17 @@ from review_graph_integrity import canonical_json
 from review_graph_read_provenance import verify_runtime_inputs
 
 SNAPSHOT_FORMAT = "review-graph-path-snapshot-v4"
+WORKTREE_SELECTION_ALGORITHM = "git-ls-files-cached-others-exclude-standard-v1"
+
+
+class ReuseInputError(ValueError):
+    """Concrete read blockers retained in whole-audit and partition receipts."""
+
+    def __init__(self, rejected_inputs: list[dict[str, str]]) -> None:
+        """Name every unproved input and the required owning-audit action."""
+        self.rejected_inputs = rejected_inputs
+        detail = "; ".join(f"{item['classification']}: {item['path']}" for item in rejected_inputs)
+        super().__init__(f"audit reuse input proof failed ({detail}); the owning audit needs fresh inspection")
 
 
 def regular_file_fingerprint(path: str, content: bytes, *, executable: bool = False, algorithm: str = "sha1") -> str:
@@ -46,6 +57,11 @@ class ReviewSourceSnapshot:
     repository_symlink_paths: tuple[str, ...]
 
     @property
+    def repository_selection_paths(self) -> tuple[str, ...] | None:
+        """Historical v4 captures do not prove tracked/nonignored selection."""
+        return None
+
+    @property
     def source_state(self) -> tuple[str, str, str]:
         """Return the same source triple used by review evidence."""
         return self.scope_fingerprint, self.captured_worktree_fingerprint, self.repository_state_fingerprint
@@ -59,6 +75,8 @@ class ReviewSourceSnapshot:
         """Bind capture context and the complete repository path map."""
         fields = asdict(self)
         fields.pop("repository_state_fingerprint")
+        if self.repository_selection_paths is None:
+            fields.pop("repository_selection_paths", None)  # Preserve historical v4 identities.
         return sha256(canonical_json(fields).encode("utf-8"))
 
     @property
@@ -77,6 +95,10 @@ class ReviewSourceSnapshot:
         if paths != tuple(sorted(set(paths))) or any(not _repository_path(path) for path in paths):
             msg = "source snapshot requires unique sorted canonical repository paths"
             raise ValueError(msg)
+        selected = self.repository_selection_paths
+        if selected is not None and (selected != tuple(sorted(set(selected))) or not set(selected) <= set(paths)):
+            msg = "source snapshot selection requires unique sorted captured repository paths"
+            raise ValueError(msg)
         symlinks = self.repository_symlink_paths
         if symlinks != tuple(sorted(set(symlinks))) or not set(symlinks) <= set(paths):
             msg = "source snapshot requires unique sorted captured symlink paths"
@@ -92,6 +114,13 @@ class ReviewSourceSnapshot:
             if identity == "absent" or re.fullmatch(r"submodule:[0-9a-f]{64}", identity):
                 continue
             GitPathIdentity.parse(identity)
+
+
+@dataclass(frozen=True)
+class WorktreeSelectionSnapshot(ReviewSourceSnapshot):
+    """Add captured selection without changing historical snapshot serialization."""
+
+    repository_selection_paths: tuple[str, ...] = ()
 
 
 def source_snapshot(raw: dict[str, Any]) -> ReviewSourceSnapshot:
@@ -111,15 +140,22 @@ def source_snapshot(raw: dict[str, Any]) -> ReviewSourceSnapshot:
         msg = "source snapshot repository_path_fingerprints requires path/digest pairs"
         raise ValueError(msg)
     fields["repository_path_fingerprints"] = tuple(sorted(tuple(pair) for pair in pairs))
+    selected = fields.get("repository_selection_paths")
+    if selected is not None and (not isinstance(selected, (list, tuple)) or any(not isinstance(path, str) for path in selected)):
+        msg = "source snapshot repository_selection_paths must contain strings"
+        raise ValueError(msg)
     for field in ReviewSourceSnapshot.__dataclass_fields__:
-        if field in {"requested_paths", "captured_scope_paths", "repository_path_fingerprints", "repository_symlink_paths"}:
+        if field in {"requested_paths", "captured_scope_paths", "repository_path_fingerprints", "repository_symlink_paths", "repository_selection_paths"}:
             continue
         value = fields.get(field)
         if not isinstance(value, str) and not (field in {"base_ref", "merge_base", "branch"} and value is None):
             msg = f"source snapshot {field} must be a string"
             raise ValueError(msg)
         fields[field] = value
-    return ReviewSourceSnapshot(**{field: fields[field] for field in ReviewSourceSnapshot.__dataclass_fields__})
+    constructor = WorktreeSelectionSnapshot if selected is not None else ReviewSourceSnapshot
+    if selected is not None:
+        fields["repository_selection_paths"] = tuple(selected)
+    return constructor(**{field: fields[field] for field in constructor.__dataclass_fields__})
 
 
 @dataclass(frozen=True)
@@ -298,19 +334,34 @@ def verify_reuse_inputs(  # noqa: C901 - fail-closed source, metadata, instructi
         raise ValueError(msg)
     changed_instructions = {path for path in old_instructions.keys() | new_instructions.keys() if old_instructions.get(path) != new_instructions.get(path)}
     allowed_instructions = {str(root / path) for path in instruction_delta_paths}
-    if list(old_instructions) != list(new_instructions) or changed_instructions - allowed_instructions:
-        msg = "audit reuse instruction identities changed"
-        raise ValueError(msg)
     paths = {*inputs.owned_paths, *inputs.inspected_paths, *inputs.nearby_contract_owners, *inputs.command_read_paths}
-    verify_runtime_inputs(inputs.runtime_inputs, origin.repository_root)
+    for binding in inputs.runtime_inputs:
+        try:
+            verify_runtime_inputs((binding,), origin.repository_root)
+        except (OSError, ValueError) as error:
+            raise ReuseInputError([{"path": binding[0], "classification": "invalid-frozen-runtime-binding"}]) from error
     paths.difference_update(path for path, _digest in inputs.runtime_inputs)
     paths = {str(PurePosixPath(path).relative_to(root)) if PurePosixPath(path).is_relative_to(root) else path for path in paths}
     for path, _digest_value in inputs.instruction_digests:
         instruction = PurePosixPath(path)
         if instruction.is_relative_to(root):
             paths.add(instruction.relative_to(root).as_posix())
-    if any(not _repository_path(path) for path in paths):
-        msg = "audit reuse dependencies must be concrete repository-relative paths"
+    rejected = [
+        {
+            "path": path,
+            "classification": "missing-frozen-runtime-binding"
+            if path in old_instructions
+            else "unbound-external-source"
+            if PurePosixPath(path).is_absolute()
+            else "invalid-repository-path",
+        }
+        for path in sorted(paths)
+        if not _repository_path(path)
+    ]
+    if rejected:
+        raise ReuseInputError(rejected)
+    if list(old_instructions) != list(new_instructions) or changed_instructions - allowed_instructions:
+        msg = "audit reuse instruction identities changed"
         raise ValueError(msg)
     before = dict(origin.repository_path_fingerprints)
     after = dict(target.repository_path_fingerprints)

@@ -11,7 +11,7 @@ import review_graph_runtime as runtime
 from capture_scope import _scope_data
 from review_graph_bootstrap import bootstrap_document
 from review_graph_plan import ValidationRequirementBinding, plan_from_document
-from review_graph_reuse import AuthorizedGitContextTransition, source_snapshot
+from review_graph_reuse import WORKTREE_SELECTION_ALGORITHM, AuthorizedGitContextTransition, source_snapshot
 from review_graph_validation import ValidationPayload, ValidationRecord, ValidationStatus, VerifiedValidationRecord
 from test_review_graph_runtime import (
     ROUTING_CATALOG,
@@ -97,8 +97,12 @@ def _handoff(  # noqa: PLR0913 - orthogonal fixture execution and contract contr
     prefixes: list[str] | None = None,
     contract: bool = True,
     instructions: bool = False,
+    command: str | None = None,
+    worktree: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], str, Path, dict[str, Any]]:
     git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path, instructions=instructions)
+    if command is not None:
+        template["validation_requirements"][0].update(commands=[command], canonical_recipe=None)
     commands = template["validation_requirements"][0]["commands"]
     registry = {
         "schema_version": 1,
@@ -119,7 +123,13 @@ def _handoff(  # noqa: PLR0913 - orthogonal fixture execution and contract contr
     registry["contracts"].append({**registry["contracts"][0], "contract_id": "another-check", "commands": ["echo other"], "implementation_paths": ["LICENSE"]})
     if contract:
         (repository / "review-validation-contracts.json").write_text(json.dumps(registry))
-    capture = _scope_data(git, repository, "baseline", None, ())
+    if worktree:
+        (repository / "tool.py").write_text("value = 2\n")
+    capture = _scope_data(git, repository, "worktree" if worktree else "baseline", None, ())
+    if worktree:
+        template["consulted_routers"].remove("rust-review-orchestrator")
+        captured = set(source_snapshot(capture).captured_scope_paths)
+        template["routing_overrides"] = [item for item in template["routing_overrides"] if captured.intersection(item["review_surface"])]
     _complete_structural_fixture_routing(template, list(source_snapshot(capture).captured_scope_paths))
     plan = plan_from_document(bootstrap_document(capture, template), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)
     lifecycle, entries, dispatches = _materialize(tmp_path, capture, plan)
@@ -156,6 +166,102 @@ def _handoff(  # noqa: PLR0913 - orthogonal fixture execution and contract contr
     )
     metadata = json.loads(Path(entry["metadata_path"]).read_bytes())
     return lifecycle, entry, capture, git, repository, metadata
+
+
+@pytest.mark.parametrize("changed", ["index", "head"])
+def test_cargo_head_and_unit_wide_index_publish_once_and_both_prevent_reuse(tmp_path: Path, changed: str) -> None:
+    command = "cargo publish --locked --dry-run --allow-dirty"
+    dependencies = [
+        {"kind": "head", "command": command, "reason": "Package VCS metadata uses HEAD."},
+        {"kind": "index", "reason": "Package selection uses index."},
+    ]
+    _lifecycle, entry, _capture, git, repository, _metadata = _handoff(tmp_path, dependencies=dependencies, command=command)
+    record = _verified(entry)
+    assert len(record.record.executions) == 1
+    if changed == "head":
+        _run_test_git(git, "-C", str(repository), "commit", "--allow-empty", "-m", "New VCS metadata")
+    else:
+        (repository / "tool.py").write_text("staged contents\n")
+        _run_test_git(git, "-C", str(repository), "add", "tool.py")
+        (repository / "tool.py").write_text("value = 1\n")
+    reasons = _applicability(record, _scope_data(git, repository, "baseline", None, ()))
+    assert {item["reason"] for item in reasons} == {f"Declared {changed} input changed."}
+
+
+@pytest.mark.parametrize("defect", ["unknown", "duplicate"])
+def test_git_dependency_diagnostics_explain_metadata_only_correction(defect: str) -> None:
+    payload = _source_only_payload("cargo publish --locked --dry-run --allow-dirty")
+    command = payload["executions"][0]["command"]
+    payload["git_dependencies"] = [{"kind": "head", "command": command, "reason": "Package VCS metadata"}]
+    payload["git_dependencies"].append({"kind": "index", "command": "unknown" if defect == "unknown" else command, "reason": "Package selection"})
+    with pytest.raises(ValueError, match="unknown executed command" if defect == "unknown" else "duplicate command binding"):
+        ValidationPayload.from_raw(payload)
+    payload["git_dependencies"][1].pop("command")
+    assert len(ValidationPayload.from_raw(payload).executions) == 1
+
+
+@pytest.mark.parametrize("contract", [False, True])
+def test_input_selection_binds_membership_and_keeps_staged_blobs_conservative(tmp_path: Path, contract: bool) -> None:
+    command = "just check-fast"
+    dependencies = [{"kind": "input-selection", "command": command, "selection_algorithm": WORKTREE_SELECTION_ALGORITHM, "reason": "Worktree enumeration"}]
+    _lifecycle, entry, capture, git, repository, metadata = _handoff(tmp_path, dependencies=dependencies, contract=contract, command=command)
+    record = _verified(entry)
+    assert metadata["normalized_record"]["input_selection_bindings"] == [
+        {"command": command, "algorithm": WORKTREE_SELECTION_ALGORITHM, "paths": capture["repository_selection_paths"]}
+    ]
+    (repository / "tool.py").write_text("different staged blob\n")
+    _run_test_git(git, "-C", str(repository), "add", "tool.py")
+    (repository / "tool.py").write_text("value = 1\n")
+    current = _scope_data(git, repository, "baseline", None, ())
+    assert record.historical_source_gate(source_snapshot(current)) is not contract
+    assert bool(_applicability(record, current)) is not contract
+    (repository / "added.py").write_text("additional input\n")
+    changed = _scope_data(git, repository, "baseline", None, ())
+    assert not record.historical_source_gate(source_snapshot(changed))
+    assert _applicability(record, changed)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git show :tool.py",
+        "git ls-files --stage",
+        "git ls-files -z",
+        "git log",
+        "git diff HEAD",
+        "git ls-files --cached --others --exclude-standard -z; git show :tool.py",
+    ],
+)
+def test_input_selection_cannot_waive_other_git_commands(command: str) -> None:
+    payload = _source_only_payload(command)
+    payload["git_dependencies"] = [
+        {"kind": "input-selection", "command": command, "selection_algorithm": WORKTREE_SELECTION_ALGORITHM, "reason": "Unsafe declaration"}
+    ]
+    with pytest.raises(ValueError, match="staged blobs, HEAD and history stay conservative"):
+        ValidationPayload.from_raw(payload)
+
+
+@pytest.mark.parametrize("contract", [False, True])
+def test_input_selection_rejects_membership_only_changes_with_identical_source(tmp_path: Path, contract: bool) -> None:
+    command = "just check-fast"
+    dependencies = [{"kind": "input-selection", "command": command, "selection_algorithm": WORKTREE_SELECTION_ALGORITHM, "reason": "Worktree enumeration"}]
+    _lifecycle, entry, capture, git, repository, _metadata = _handoff(tmp_path, dependencies=dependencies, contract=contract, command=command, worktree=True)
+    record = _verified(entry)
+    origin = source_snapshot(capture)
+    assert record.historical_source_gate(origin) is not contract
+    if contract:
+        assert _applicability(record, capture) == []
+    _run_test_git(git, "-C", str(repository), "rm", "--cached", "tool.py")
+    (repository / ".git/info/exclude").write_text("tool.py\n")
+    changed = _scope_data(git, repository, "worktree", None, ())
+    target = source_snapshot(changed)
+    assert origin.repository_path_fingerprints == target.repository_path_fingerprints
+    assert origin.captured_scope_paths == target.captured_scope_paths
+    assert origin.captured_worktree_fingerprint == target.captured_worktree_fingerprint
+    assert origin.repository_selection_paths != target.repository_selection_paths
+    assert not record.historical_source_gate(target)
+    if contract:
+        assert [item["reason_code"] for item in _applicability(record, changed)] == ["validation-selection-changed"]
 
 
 @pytest.mark.parametrize("change", ["stage", "branch", "commit"])

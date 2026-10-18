@@ -45,6 +45,32 @@ also hold the barrier. Diagnose and repair through the coordinator's authorized
 workflow, then capture and advance a new epoch. Launch recovery remains limited
 to proven failures before checks started.
 
+## Diagnostics Inside An Open Repair Batch
+
+After `review-control begin-repair` authorizes a batch, the coordinator may run
+focused canonical diagnostics outside the graph against evolving source. The
+coordinator owns each execution; do not dispatch an additional graph validator
+for the same attempt. Before each attempt, record the exact command, working
+directory, environment/toolchain, purpose, overlap with the failed check and
+final aggregate, and an intermediate source capture in a unique external
+proof-store directory. Record actual executor, start/end timing, exit status,
+raw output, and an after capture there. Preserve every attempt, including red
+results, with write-once logs and identities; never overwrite a prior log or
+edit sealed graph evidence. Unexpected command mutations require investigation.
+
+These supplemental diagnostic records do not satisfy graph requirements or
+release the failed early-validation barrier. Do not publish or retrofit them
+as accepted graph validation. No reconciliation or `advance-after-mutation`
+is needed between diagnostic-driven edits. Remain within the authorized scope
+and repair budget; check review control before further edits and stop on user
+stop. Close the batch with one final capture and `advance-after-mutation` when
+the repair is ready. Only that closure counts the content-changing repair.
+The final planned validators execute against the final capture, even if the
+same command passed as a supplemental diagnostic. Their evidence retains native
+platform and hosted-CI limitations normally.
+
+## Final Validation And Reuse
+
 Successful early evidence stays in the same plan and final proof. Later audits
 reference its planned requirement IDs/digests; no second validator is created
 for those requirements. The scheduler verifies the source, command/environment
@@ -54,10 +80,27 @@ its new captured state. Keep old failures and captures. The barrier is a
 scheduling constraint, so it does not make unchanged source audits semantically
 dependent on validation or prevent their verified reuse across repairs.
 
-External staging preserves the historical barrier that admitted retained audits
-and invalidates its validation results for the new repository state. Preserved
-audits may finish; new launches wait for current validation. Repeated metadata
-resumes retain that history without treating the old success as current evidence.
+The repair receipt exposes `validation_reconciliation` with original and
+replacement planned digests. When only `source_state` and capture-derived
+`captured_paths` change, verified unchanged audits retain their sealed judgments
+and pending validation obligations. Both path inventories are bound to retained
+captures; command, environment, artifact and other execution-contract changes
+still require rechecks. `audit_reuse_counts` reports retained evidence and newly
+scheduled audits, not measured executions or provider-cost savings.
+
+Audits without an explicit coverage partition use a conservative whole-audit
+unit assembled from all owned paths, findings and recorded dependencies.
+Publication reports `coverage_reuse_policy`. For instruction-only changes, a
+fresh specialist still assesses rules, commands, applicability and obligations;
+material or uncertain changes require source reinspection. Unbound external
+reads remain blockers and receipts identify their exact paths and classification.
+
+External staging preserves historical admission for retained audits. Validators
+whose Git inputs changed require current validation before new launches.
+Source-only or verified worktree-selection gates can retain historical admission
+under the [metadata continuation policy](run-profiles.md), while formal reuse
+remains unproven without a repository contract. Repeated resumes retain that
+history without treating the old success as current evidence.
 
 Record `in-flight` only after an actual worker launch or coordinator start.
 Scheduling receipts expose `phase_accounting` for early validation, semantic

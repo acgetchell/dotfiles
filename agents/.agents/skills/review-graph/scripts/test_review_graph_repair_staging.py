@@ -188,7 +188,7 @@ def _finish_repair(tmp_path: Path, result: dict[str, Any]) -> list[str]:
 
 
 @pytest.mark.parametrize("dependency", ["source", "source-discovery", "index", "changed-validation"])
-def test_repair_then_external_staging_preserves_only_eligible_evidence(tmp_path: Path, dependency: str) -> None:
+def test_repair_then_external_staging_preserves_only_eligible_evidence(tmp_path: Path, dependency: str, capsys: pytest.CaptureFixture[str]) -> None:
     git, repository, request, audit, history = _staged_repair(tmp_path, dependency)
     if dependency == "changed-validation":
         request["planning_template"]["validation_requirements"][0]["commands"] = ["just check-fast > ci-release-review.log"]
@@ -196,6 +196,7 @@ def test_repair_then_external_staging_preserves_only_eligible_evidence(tmp_path:
     input_path, output_path = tmp_path / "request.json", tmp_path / "result.json"
     input_path.write_text(json.dumps(request))
     assert runtime.main(["advance-after-mutation", "--input", str(input_path), "--output", str(output_path)]) == 0
+    receipt = json.loads(capsys.readouterr().out)
     result = json.loads(output_path.read_bytes())
     assert result["transition_kind"] == "repair-then-observed-external-git-metadata"
     assert result["capture"] == request["post_repair_capture"]
@@ -205,6 +206,13 @@ def test_repair_then_external_staging_preserves_only_eligible_evidence(tmp_path:
     assert retained["historical_evidence_sources"] == request["sources"]
     old_id = audit["dispatch"]["evidence_id"]
     assert (old_id in result["reused_evidence_ids"]) is (dependency in {"source", "source-discovery"})
+    retained_ids = {old_id} if dependency in {"source", "source-discovery"} else set()
+    assert result["audit_reuse_counts"]["retained"] == len(retained_ids)
+    reconciliation = result["validation_reconciliation"]
+    assert reconciliation["blockers"] == []
+    assert {item["originating_evidence_id"] for item in reconciliation["requirements"]} == retained_ids
+    assert receipt["audit_reuse_counts"] == result["audit_reuse_counts"]
+    assert receipt["validation_reconciliation"]["requirement_count"] == len(retained_ids)
     lineage = {item["node_id"]: item["replaces_node_ids"] for item in result["replacement_lineage"]}
     assert set(lineage) == {node["node_id"] for node in result["new_plan"]["actual_worker_nodes"]}
     if dependency == "index":
@@ -216,6 +224,8 @@ def test_repair_then_external_staging_preserves_only_eligible_evidence(tmp_path:
         assert audit["node_id"] not in result["unaffected_node_ids"]
     executed = _finish_repair(tmp_path, result)
     assert len(executed) == len(set(executed))
+    audit_nodes = {node["node_id"] for node in result["new_plan"]["actual_worker_nodes"] if node["mode"] == "audit"}
+    assert result["audit_reuse_counts"]["scheduled_audits"] == len(audit_nodes.intersection(executed))
     assert all(path.read_bytes() == content for path, content in history.items())
     assert _scope_data(git, repository, "baseline", None, ()) == request["post_repair_capture"]
     assert json.dumps(request, sort_keys=True) == original_request

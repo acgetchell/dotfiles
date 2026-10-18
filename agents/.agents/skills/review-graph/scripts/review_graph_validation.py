@@ -22,7 +22,7 @@ from review_graph_plan import (
     validation_environment_digest,
     validation_execution_result_blockers,
 )
-from review_graph_reuse import ReviewSourceSnapshot, source_snapshot
+from review_graph_reuse import WORKTREE_SELECTION_ALGORITHM, ReviewSourceSnapshot, source_snapshot
 from review_graph_validation_contracts import CONTRACT_PATH, ContractBinding, ContractGitInput, object_fields
 
 if TYPE_CHECKING:
@@ -59,6 +59,7 @@ class GitDependencyKind(StrEnum):
     """The existing standard semantic Git dependency categories."""
 
     SOURCE_DISCOVERY = "source-discovery"
+    INPUT_SELECTION = "input-selection"
     INDEX = "index"
     HEAD = "head"
     HISTORY = "history"
@@ -203,6 +204,7 @@ class GitDependency:
     kind: GitDependencyKind
     reason: str
     command: str | None
+    selection_algorithm: str | None = None
 
     def __post_init__(self) -> None:
         """Reject unsupported categories and empty reasons at construction."""
@@ -212,6 +214,13 @@ class GitDependency:
         _text(self.reason, "Git dependency reason")
         if self.command is not None:
             _text(self.command, "Git dependency command")
+        if self.kind == GitDependencyKind.INPUT_SELECTION:
+            if self.command is None or self.selection_algorithm != WORKTREE_SELECTION_ALGORITHM:
+                msg = f"input-selection requires an exact executed command and selection_algorithm={WORKTREE_SELECTION_ALGORITHM!r}"
+                raise ValueError(msg)
+        elif self.selection_algorithm is not None:
+            msg = "selection_algorithm applies only to input-selection dependencies"
+            raise ValueError(msg)
 
     @classmethod
     def from_raw(cls, raw: object) -> GitDependency:
@@ -222,6 +231,7 @@ class GitDependency:
             GitDependencyKind(_text(data.get("kind"), "Git dependency kind")),
             _text(data.get("reason"), "Git dependency reason"),
             _text(command, "Git dependency command") if command is not None else None,
+            _text(data["selection_algorithm"], "selection algorithm") if "selection_algorithm" in data else None,
         )
 
 
@@ -343,6 +353,11 @@ class ValidationRecord:
             if self.source_inputs.source_state != self.source_state:
                 msg = "validation source inputs differ from its observed source state"
                 raise ValueError(msg)
+        if any(dependency.kind == GitDependencyKind.INPUT_SELECTION for dependency in self.git_dependencies or ()) and (
+            self.source_inputs is None or self.source_inputs.repository_selection_paths is None
+        ):
+            msg = "input-selection validation requires runtime-captured selection membership; recapture before execution"
+            raise ValueError(msg)
 
     @classmethod
     def from_raw(cls, raw: object) -> ValidationRecord:
@@ -446,7 +461,7 @@ class VerifiedValidationRecord:
         """Serialize passive report data without exposing mutable trusted state."""
         return _object(json.loads(self.report_json), "validation report")
 
-    def applicability_reasons(  # noqa: PLR0911 - reject distinct applicability conditions.
+    def applicability_reasons(  # noqa: C901, PLR0911 - distinct source, selection, Git and artifact applicability gates.
         self, target: ReviewSourceSnapshot, *, current_unit: ValidationUnit, observe_artifact: Callable[[ArtifactIdentity], tuple[str, str]]
     ) -> list[dict[str, str]]:
         """Check current applicability once, without parsing or executing again."""
@@ -483,6 +498,10 @@ class VerifiedValidationRecord:
             return [{"reason_code": "validation-inputs-unproven", "reason": "Selected submodule or symlink traversal inputs are not completely proved."}]
         dependencies = set(contract.git_inputs)
         for dependency in record.git_dependencies or ():
+            if dependency.kind == GitDependencyKind.INPUT_SELECTION:
+                if original.repository_selection_paths is None or original.repository_selection_paths != target.repository_selection_paths:
+                    return [{"reason_code": "validation-selection-changed", "reason": "Tracked/nonignored worktree selection changed or is unproven."}]
+                continue
             if dependency.kind == GitDependencyKind.SOURCE_DISCOVERY:
                 dependencies.update((ContractGitInput.INDEX, ContractGitInput.HEAD))
                 continue
@@ -516,7 +535,8 @@ class VerifiedValidationRecord:
         if (
             origin is None
             or record.contract_binding is not None
-            or record.git_dependencies != ()
+            or record.git_dependencies is None
+            or any(dependency.kind != GitDependencyKind.INPUT_SELECTION for dependency in record.git_dependencies)
             or record.limitations
             or record.status != ValidationStatus.PASSED
         ):
@@ -536,6 +556,8 @@ class VerifiedValidationRecord:
             "repository_path_fingerprints",
             "repository_symlink_paths",
         )
+        if record.git_dependencies and (origin.repository_selection_paths is None or origin.repository_selection_paths != target.repository_selection_paths):
+            return False
         return all(getattr(origin, key) == getattr(target, key) for key in fields) and not _unproven_inputs(
             origin.repository_path_fingerprints, origin.repository_symlink_paths
         )
@@ -616,13 +638,27 @@ def _require_git_dependencies(executions: tuple[ValidationExecution, ...], depen
     declared: set[str] = set()
     for dependency in dependencies:
         if dependency.command is not None:
-            if dependency.command not in commands or dependency.command in declared:
-                msg = "validation Git dependency must bind to a unique executed command"
+            if dependency.command not in commands:
+                msg = f"validation Git dependency names an unknown executed command: {dependency.command!r}; copy an exact executions[].command"
+                raise ValueError(msg)
+            if dependency.command in declared:
+                msg = (
+                    f"validation Git dependency has a duplicate command binding: {dependency.command!r}; "
+                    "bind one dependency to the command and omit command on additional unit-wide dependencies, "
+                    "for example command-bound head plus command-less index; correct metadata without rerunning commands"
+                )
                 raise ValueError(msg)
             declared.add(dependency.command)
         if dependency.kind == GitDependencyKind.SOURCE_DISCOVERY and (dependency.command is None or not _source_discovery_command(dependency.command)):
             msg = "validation source discovery requires a plain local Git diff"
             raise ValueError(msg)
+        if dependency.kind == GitDependencyKind.INPUT_SELECTION and dependency.command is not None and _command_requires_git_declaration(dependency.command):
+            words = shlex.split(dependency.command)
+            if len(words) != 6 or words[:2] != ["git", "ls-files"] or set(words[2:]) != {"--cached", "--others", "--exclude-standard", "-z"}:
+                msg = (
+                    "input-selection supports only plain git ls-files --cached --others --exclude-standard -z; staged blobs, HEAD and history stay conservative"
+                )
+                raise ValueError(msg)
     if any(_command_requires_git_declaration(command) and command not in declared for command in commands):
         msg = "source-only validation cannot execute an unclassified Git command"
         raise ValueError(msg)

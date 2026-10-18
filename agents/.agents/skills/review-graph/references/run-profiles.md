@@ -104,12 +104,15 @@ changes still require replanning. Neither metadata transitions, missing CI nor
 proof bookkeeping restart a comprehensive review or reset the repair budget.
 
 Without `review-validation-contracts.json`, a passed gate with explicit empty
-Git dependencies and identical complete captured source may continue to admit
-source audits and the independent review after staging. The runtime retains its
+Git dependencies, or verified `input-selection` dependencies with unchanged
+tracked/nonignored membership, may continue to admit source audits and the
+independent review after staging when complete captured source is identical.
+See the validator's [dependency contract](../../review-validator/references/git-dependencies.md).
+The runtime retains its
 original execution as `historical-source-pass`, with `formal_reuse: unproven`;
 it does not schedule another CI run. Formal certification and current-metadata
 readiness remain blocked by the missing reviewed contract. A source/instruction
-change, declared Git dependency, changed execution contract or failed check still
+change, other Git dependency, changed execution contract or failed check still
 reopens the affected gate. Preflight exposes this registry prerequisite before
 expensive execution.
 

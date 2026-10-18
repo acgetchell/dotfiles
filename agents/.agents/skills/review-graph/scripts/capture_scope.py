@@ -323,7 +323,7 @@ def _captured_path_line_bounds(*, git: str, repo: Path, mode: str, base_revision
     return bounds
 
 
-def _repository_state_snapshot(*, git: str, repo: Path, head: str, branch: str, captured_paths: Sequence[str]) -> tuple[str, dict[str, str], str]:
+def _repository_state_snapshot(*, git: str, repo: Path, head: str, branch: str, captured_paths: Sequence[str]) -> tuple[str, dict[str, str], str, list[str]]:
     """Hash HEAD, branch, index, tracked worktree, and nonignored untracked content."""
     tracked = _decode_zlist(_run_git(git, repo, ("ls-files", "-z")))
     untracked = _decode_zlist(_run_git(git, repo, ("ls-files", "--others", "--exclude-standard", "-z")))
@@ -347,7 +347,7 @@ def _repository_state_snapshot(*, git: str, repo: Path, head: str, branch: str, 
         path_digest = hashlib.sha256()
         algorithm = _decode(_run_git(git, repo, ("rev-parse", "--show-object-format")))
         path_fingerprints[relative] = _update_worktree_path(path_digest, git, repo, relative, algorithm)
-    return digest.hexdigest(), path_fingerprints, hashlib.sha256(index_entries).hexdigest()
+    return digest.hexdigest(), path_fingerprints, hashlib.sha256(index_entries).hexdigest(), sorted(set(tracked) | set(untracked))
 
 
 def _scope_data(git: str, repo: Path, mode: str, base: str | None, pathspecs: Sequence[str]) -> dict[str, object]:  # noqa: PLR0915
@@ -432,7 +432,7 @@ def _scope_data(git: str, repo: Path, mode: str, base: str | None, pathspecs: Se
     )
     status_arguments = _with_paths(("status", "--porcelain=v1", "-z", "--untracked-files=all"), pathspecs)
     status = _decode_zlist(_run_git(git, repo, status_arguments))
-    repository_state_fingerprint, repository_path_fingerprints, index_fingerprint = _repository_state_snapshot(
+    repository_state_fingerprint, repository_path_fingerprints, index_fingerprint, selection_paths = _repository_state_snapshot(
         git=git, repo=repo, head=head, branch=branch, captured_paths=captured_scope_paths
     )
 
@@ -448,6 +448,7 @@ def _scope_data(git: str, repo: Path, mode: str, base: str | None, pathspecs: Se
         "merge_base": merge_base,
         "repository_root": os.fspath(repo),
         "repository_path_fingerprints": repository_path_fingerprints,
+        "repository_selection_paths": selection_paths,
         # Symlink hashes bind link text, not bytes read through the link. Record
         # traversal separately so later proof replay never consults the live tree.
         "repository_symlink_paths": [

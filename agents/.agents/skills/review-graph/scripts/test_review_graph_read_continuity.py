@@ -64,10 +64,17 @@ def test_bound_external_reads_require_unchanged_external_regular_files(tmp_path:
 def test_arbitrary_external_declaration_cannot_be_relabelled_for_repair_reuse(tmp_path: Path) -> None:
     external = tmp_path / "external.md"
     external.write_text("Unbound context\n")
-    request, entry, _source = _mutation_with_audit_source(tmp_path, nearby_contract_owners=(str(external),))
+    request, entry, source = _mutation_with_audit_source(tmp_path, nearby_contract_owners=(str(external),))
+    bindings = json.loads(Path(source["metadata_path"]).read_bytes())["expectation"]["audit_input_identity"]["runtime_inputs"]
+    assert entry["dispatch"]["skill_path"] in dict(bindings)
     result = runtime.advance_after_mutation(request)
     assert entry["dispatch"]["evidence_id"] not in result["reused_evidence_ids"]
     assert any(item["reason_code"] == "input-proof-failed" for item in result["reuse_decisions"])
+    decision = next(item for item in result["reuse_decisions"] if item["node_id"] == entry["node_id"])
+    assert decision["rejected_inputs"] == [{"path": str(external), "classification": "unbound-external-source"}]
+    assert "fresh inspection" in decision["reason"]
+    coverage = next(item for item in result["coverage_reuse_decisions"] if item["evidence_id"] == entry["dispatch"]["evidence_id"])
+    assert coverage["units"][0]["rejected_inputs"] == decision["rejected_inputs"]
 
 
 @pytest.mark.parametrize("flags", ["-n -A2 -B1", "-C3", "--after-context=2 --before-context=1", "--context 3", "--color never -n"])

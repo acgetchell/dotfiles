@@ -55,14 +55,14 @@ def test_update_orders_managers_and_stops_after_failures(tmp_path: Path, failure
     shutil.copy2(REPOSITORY / "pyproject.toml", checkout)
     (checkout / "scripts").mkdir()
     shutil.copy2(REPOSITORY / "scripts/python_update_preflight.py", checkout / "scripts")
+    manifest = checkout / "pyproject.toml"
+    uv_version = tomllib.loads(manifest.read_text())["tool"]["uv"]["required-version"].removeprefix("==")
     if failure != "python-preflight":
-        manifest = checkout / "pyproject.toml"
-        # Later updater scenarios require a consumer without the unsupported override.
-        manifest.write_text("".join(line for line in manifest.read_text().splitlines(keepends=True) if not line.startswith("override-dependencies =")))
+        # These manager-ordering scenarios need only the pin and no resolver overrides.
+        manifest.write_text(f'[tool.uv]\nrequired-version = "=={uv_version}"\n')
     binaries = tmp_path / "bin"
     binaries.mkdir()
     log = tmp_path / "calls.jsonl"
-    uv_version = tomllib.loads((checkout / "pyproject.toml").read_text())["tool"]["uv"]["required-version"].removeprefix("==")
     major, minor, patch = uv_version.split(".")
     upgraded_uv = f"{major}.{minor}.{int(patch) + 1}"
     # Host managers are stand-ins; execute the real Just recipes, including nested calls.

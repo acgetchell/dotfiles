@@ -47,6 +47,20 @@ def _continuation_receipt(output: dict[str, Any]) -> dict[str, Any]:
     return receipt
 
 
+def _validation_reconciliation_receipt(output: dict[str, Any]) -> dict[str, Any]:
+    """Expose source rebinding without copying full execution and capture documents."""
+    if reconciliation := output.get("validation_reconciliation"):
+        return {
+            "validation_reconciliation": {
+                "blockers": reconciliation["blockers"],
+                "requirement_count": len(reconciliation["requirements"]),
+                "source_rebinding_count": sum("reuse_binding" in item for item in reconciliation["requirements"]),
+                "details_field": "validation_reconciliation",
+            }
+        }
+    return {}
+
+
 def stage_receipt(operation: str, output_path: Path, output: dict[str, Any]) -> dict[str, Any]:
     """Keep proof bodies on disk and return only stage status and handoff references."""
     receipt: dict[str, Any] = {"schema_version": 1, "operation": operation, "output": artifact_reference(output_path)}
@@ -72,6 +86,8 @@ def stage_receipt(operation: str, output_path: Path, output: dict[str, Any]) -> 
         "retry_after_seconds",
         "node_counts",
         "recheck_reason_counts",
+        "audit_reuse_counts",
+        "validation_log_archives",
         "phase_accounting",
         "review_lifecycle",
         "repair_epoch",
@@ -89,6 +105,7 @@ def stage_receipt(operation: str, output_path: Path, output: dict[str, Any]) -> 
         if key in output:
             receipt[key] = output[key]
     plan = output.get("plan", {})
+    receipt.update(_validation_reconciliation_receipt(output))
     if plan:
         receipt["dispatch_allowed"] = plan["dispatch_allowed"]
         receipt["blockers"] = plan.get("blockers", [])

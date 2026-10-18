@@ -10,12 +10,14 @@ import shutil
 import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 import tomllib
 from collections import Counter
 from contextlib import nullcontext, suppress
 from dataclasses import asdict, dataclass, replace
+from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -144,6 +146,7 @@ from review_graph_reuse import (
     AuditReuseTransition,
     CommitHandoffTransition,
     ExternalMetadataTransition,
+    ReuseInputError,
     metadata_states,
     metadata_transition,
     source_snapshot,
@@ -2187,6 +2190,13 @@ def _validation_normalized_record(
             msg = "validation source capture differs from its observed source state"
             raise ValueError(msg)
         record["source_inputs"] = json.loads(canonical_json(asdict(inputs)))
+        selections = [
+            {"command": item["command"], "algorithm": item["selection_algorithm"], "paths": list(inputs.repository_selection_paths or ())}
+            for item in payload.get("git_dependencies", [])
+            if item["kind"] == "input-selection"
+        ]
+        if selections:
+            record["input_selection_bindings"] = selections
         if contract_binding is not None:
             record["contract_binding"] = contract_binding.to_document()
     inputs = captured_software_inputs(record, capture) if capture is not None else {}
@@ -2198,9 +2208,10 @@ def _validation_normalized_record(
     return record
 
 
-def _workspace_path(path: str, repository_root: Path) -> Path:
+def _workspace_path(path: str, repository_root: Path, *, follow_symlinks: bool = True) -> Path:
     candidate = Path(path)
-    return candidate.resolve(strict=False) if candidate.is_absolute() else (repository_root / candidate).resolve(strict=False)
+    absolute = candidate if candidate.is_absolute() else repository_root / candidate
+    return absolute.resolve(strict=False) if follow_symlinks else absolute
 
 
 def _bounded_workspace_directory_digest(path: Path) -> str:
@@ -2321,7 +2332,8 @@ def capture_workspace_snapshot(dispatch: dict[str, Any]) -> dict[str, Any]:
         declared_cache = (
             artifact is not None and artifact.kind == "cache" and artifact.repository_status == status and status in {"ignored", "outside-repository"}
         )
-        exists, digest, snapshot_mode = _workspace_content_digest(resolved, declared_cache=declared_cache)
+        source = _workspace_path(raw_path, repository_root, follow_symlinks=False)
+        exists, digest, snapshot_mode = _workspace_content_digest(source, declared_cache=declared_cache)
         records.append({"digest": digest, "exists": exists, "path": raw_path, "snapshot_mode": snapshot_mode, "status": status})
     return {"node_id": unit.node_id, "records": records, "schema_version": 1, "source_state": list(unit.source_state)}
 
@@ -3076,15 +3088,27 @@ def _reused_validation_reference(
     # Reconstruct the original digest without changing any execution-contract field.
     # Callers have already verified the immutable record and audit reuse transition.
     candidates = (unit,) if prior is None else (unit, prior)
-    if requirement["planned_validation_digest"] not in {
-        _planned_validation_digest(replace(candidate, source_state=transition.source_state)) for candidate in candidates
-    }:
+    identities = [replace(candidate, source_state=transition.source_state) for candidate in candidates]
+    snapshots = {snapshot.source_state: snapshot for snapshot in plan.reuse_source_snapshots}
+    origin, target = snapshots.get(transition.source_state), snapshots.get(transition.target_state)
+    if origin is not None and target is not None and unit.captured_paths == target.captured_scope_paths:
+        origin.verify()
+        target.verify()
+        identities.extend(replace(candidate, source_state=origin.source_state, captured_paths=origin.captured_scope_paths) for candidate in candidates)
+    original = next((identity for identity in identities if _planned_validation_digest(identity) == requirement["planned_validation_digest"]), None)
+    if original is None:
         return None
+    path_binding = (
+        {"original_captured_paths": list(original.captured_paths), "replacement_captured_paths": list(unit.captured_paths)}
+        if original.captured_paths != unit.captured_paths
+        else None
+    )
     return {
         "original_planned_validation_digest": requirement["planned_validation_digest"],
         "original_source_state": list(transition.source_state),
         "replacement_planned_validation_digest": _planned_validation_digest(unit),
         "replacement_source_state": list(unit.source_state),
+        **({"capture_binding": path_binding} if path_binding is not None else {}),
     }
 
 
@@ -3715,6 +3739,12 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
         " Omit artifacts: the runtime captures workspace status and artifact digests before and after execution. "
         "executions[].artifact_paths names only exact validation_unit.allowed_artifacts[].path roots, never generated child files. "
         "Use [] for no output or absent outputs. Child file paths may appear in evidence text; publication checks references before writing."
+        " Each git_dependencies.command must name an exact executions[].command and occur in at most one declaration. "
+        "Omit command for a dependency applying to the entire unit: Cargo packaging may use command-bound head plus command-less index. "
+        "Correct metadata binding errors without rerunning commands; repository-owned contracts remain authoritative."
+        " For worktree enumeration, declare kind=input-selection, the exact command, and "
+        "selection_algorithm=git-ls-files-cached-others-exclude-standard-v1 only after confirming this selection algorithm; "
+        "the runtime binds captured membership. Declare staged-blob, HEAD and history inputs separately."
         if contract == "compact-validation"
         else ""
     )
@@ -3728,6 +3758,9 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
         "partition every owned path and every finding exactly once "
         "using one-based finding_indices, give each unit a unique unit_id, and account for every nearby_contract_owners path in dependency_paths. "
         'See payload_schema.optional_shapes.coverage_units; dependency_uncertainty="" means no uncertainty, and [] means no findings/dependencies. '
+        "If omitted, the runtime derives one conservative whole-audit unit from all owned paths, findings and recorded dependencies. "
+        "An instruction-only repair still requires fresh assessment of rules, commands, applicability and obligations; "
+        "any material change reopens the entire derived unit. Unbound external reads remain reuse blockers. "
         "Source-discovery judgments must come from the captured "
         "files_inspected/nearby_contract_owners reads, independent of the staging split; undeclared commands remain conservative. "
         "Legacy git_sensitive=true always requires rechecking. "
@@ -3962,6 +3995,13 @@ def review_worker_payload_write(contract_document: dict[str, Any], payload_bytes
             "nearby_contract_owners": "inspected-context-only",
             "scope_limitations": "omitted-dispatch-owned-only",
         }
+        review["coverage_reuse_policy"] = (
+            "existing-delta-proof"
+            if contract_document.get("coverage_reuse")
+            else "explicit-partition"
+            if payload.get("coverage_units")
+            else "derived-whole-audit"
+        )
     return review
 
 
@@ -4722,9 +4762,9 @@ def _carry_forward_audits(  # noqa: C901, PLR0912, PLR0913, PLR0915 - preserve p
     invalidated: tuple[str, ...],
     sources: dict[str, tuple[dict[str, Any], dict[str, Any]]],
     observed_metadata_transition: ExternalMetadataTransition | None = None,
-) -> tuple[GraphPlan, list[dict[str, str]]]:
+) -> tuple[GraphPlan, list[dict[str, Any]]]:
     """Convert only proven unchanged leaves into non-executable routed reuse."""
-    decisions = {
+    decisions: dict[str, dict[str, Any]] = {
         node.node_id: {"node_id": node.node_id, "disposition": "not-reused", "reason_code": "missing-evidence", "reason": "No accepted source was supplied."}
         for node in old_plan.actual_worker_nodes
     }
@@ -4799,11 +4839,15 @@ def _carry_forward_audits(  # noqa: C901, PLR0912, PLR0913, PLR0915 - preserve p
         except ValueError as error:
             # Incomplete/changed inputs are ordinary fresh review work, not reuse.
             decision(node_id, "input-proof-failed", str(error))
+            if isinstance(error, ReuseInputError):
+                decisions[node_id]["rejected_inputs"] = error.rejected_inputs
             continue
         if failed := _failed_validation_limits(record):
             decision(node_id, *failed)
             continue
-        reconciliation = _validation_reconciliation(replace(candidate_plan, audit_reuse_transitions=(transition,)), [record])
+        reconciliation = _validation_reconciliation(
+            replace(candidate_plan, audit_reuse_transitions=(transition,), reuse_source_snapshots=(origin, target)), [record]
+        )
         if reconciliation["blockers"]:
             decision(node_id, "validation-requirements-changed", "; ".join(reconciliation["blockers"]))
             continue
@@ -4949,8 +4993,6 @@ def _verify_delta_context(context: dict[str, Any], dispatch: dict[str, Any]) -> 
 def _blocked_coverage_reviews(record: dict[str, Any], candidate: GraphPlan) -> list[dict[str, Any]] | None:
     """Expose why a partition, or an audit without one, cannot support reuse."""
     blocker = _audit_reuse_blocker(record, invalidated=False)
-    if blocker is None and not record.get("coverage_units"):
-        blocker = ("no-coverage-partition", "The audit did not supply a complete coverage partition.")
     if blocker is None and record.get("coverage_reuse"):
         blocker = ("derived-coverage-origin", "A partial recheck cannot replace its original fresh partition proof.")
     if blocker is None:
@@ -5022,7 +5064,9 @@ def _plan_delta_audits(  # noqa: C901 - keep source and validation eligibility g
                     else unit
                     for unit in units
                 ]
-            reconciliation = _validation_reconciliation(replace(candidate, audit_reuse_transitions=(transition,)), [record])
+            reconciliation = _validation_reconciliation(
+                replace(candidate, audit_reuse_transitions=(transition,), reuse_source_snapshots=(audit_origin, target)), [record]
+            )
             if reconciliation["blockers"]:
                 reviews.append(
                     {
@@ -5168,7 +5212,9 @@ def _metadata_resume_decisions(
             and {reason["reason_code"] for reason in reasons} == {"validation-contract-unavailable"}
             and trusted.historical_source_gate(transition.after)
             and all(
-                _workspace_content_digest(_workspace_path(artifact.path, Path(transition.after.repository_root)), declared_cache=artifact.kind == "cache")[1:3]
+                _workspace_content_digest(
+                    _workspace_path(artifact.path, Path(transition.after.repository_root), follow_symlinks=False), declared_cache=artifact.kind == "cache"
+                )[1:3]
                 == (artifact.digest, artifact.digest_mode)
                 for artifact in trusted.record.artifacts
             )
@@ -5386,6 +5432,103 @@ def _prepare_commit_handoff(  # noqa: PLR0913 - the continuation binds the compl
     return replace(updated, commit_handoffs=(*plan.commit_handoffs, transition)), transition
 
 
+def _log_directory_archive(source: Path) -> bytes:
+    """Retain a deterministic directory tree without dereferencing log symlinks."""
+
+    def fail_walk(error: OSError) -> None:
+        raise error
+
+    if source.is_symlink():
+        msg = f"log archive root must not be a symlink: {source}"
+        raise ValueError(msg)
+    root = source.resolve()
+    stream = BytesIO()
+    with tarfile.open(fileobj=stream, mode="w", dereference=False) as archive:
+        for directory, directories, files in root.walk(on_error=fail_walk, follow_symlinks=False):
+            directories.sort()
+            for child in (directory, *(directory / name for name in sorted(files))):
+                if child != root and child.parent.resolve() != child.parent:
+                    msg = f"log archive source must not traverse symlink directories: {child}"
+                    raise ValueError(msg)
+                name = child.relative_to(root).as_posix()
+                info = archive.gettarinfo(str(child), arcname=name)
+                if info is None:
+                    msg = f"log archive cannot represent special filesystem entry: {child}"
+                    raise ValueError(msg)
+                info.uid = info.gid = info.mtime = 0
+                info.uname = info.gname = ""
+                info.pax_headers = {}
+                content = _read_regular_file_no_follow(child) if info.isfile() else b""
+                if info.isfile():
+                    info.size = len(content)
+                archive.addfile(info, BytesIO(content) if info.isfile() else None)
+    return stream.getvalue()
+
+
+def _metadata_log_archive_content(source: Path, artifact: ArtifactIdentity) -> tuple[bytes, str]:
+    """Verify original log identity and retain file bytes, link text, or a directory tar."""
+    expected = (True, artifact.digest, artifact.digest_mode)
+    if _workspace_content_digest(source) != expected:
+        msg = f"prior validation log changed before archival: {source}; recover its original bytes before replay"
+        raise ValueError(msg)
+    if artifact.digest_mode == "content-sha256-v1":
+        content, suffix = _read_regular_file_no_follow(source), ".log"
+        unchanged = digest_bytes(content) == artifact.digest
+    elif artifact.digest_mode == "symlink-target-v1":
+        content, suffix = str(source.readlink()).encode(), ".log"
+        unchanged = digest_bytes(b"symlink:" + content) == artifact.digest and _workspace_content_digest(source) == expected
+    elif artifact.digest_mode in {_RECURSIVE_WORKSPACE_POLICY, _BOUNDED_WORKSPACE_POLICY}:
+        content, suffix = _log_directory_archive(source), ".tar"
+        unchanged = _workspace_content_digest(source) == expected
+    else:
+        msg = f"metadata replay requires a regular log file, symlink, or directory for immutable archival: {source}"
+        raise ValueError(msg)
+    if not unchanged:
+        msg = f"prior validation log changed during archival: {source}; recover its original bytes before replay"
+        raise ValueError(msg)
+    return content, suffix
+
+
+def _archive_metadata_validation_logs(
+    records: dict[str, EvidenceRecord], decisions: list[dict[str, Any]], root: Path, repository: Path
+) -> list[dict[str, str]]:
+    """Preserve prior raw logs before returning commands that may overwrite them."""
+    if root.is_relative_to(repository) or repository.is_relative_to(root) or root.resolve() != root:
+        msg = "metadata log archive must use an external proof store without symlink traversal"
+        raise ValueError(msg)
+    archives = []
+    for decision in decisions:
+        record = records.get(decision["node_id"])
+        if decision["disposition"] != "recheck" or not isinstance(record, VerifiedValidationRecord):
+            continue
+        for artifact in record.record.artifacts:
+            if artifact.kind != "log" or not artifact.exists:
+                continue
+            source = Path(artifact.path) if Path(artifact.path).is_absolute() else repository / artifact.path
+            content, suffix = _metadata_log_archive_content(source, artifact)
+            archive_digest = digest_bytes(content)
+            path = root / "validation-log-history" / (archive_digest.removeprefix("sha256:") + suffix)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.parent.resolve() != path.parent:
+                msg = "validation log archive must not traverse symlinks"
+                raise ValueError(msg)
+            _write_bytes_atomically_once(path, content, mode=0o444)
+            archives.append(
+                {
+                    "node_id": record.record.node_id,
+                    "evidence_id": record.record.evidence_id,
+                    "original_path": str(source),
+                    "path": str(path),
+                    "digest": archive_digest,
+                    "original_digest": artifact.digest,
+                    "original_digest_mode": artifact.digest_mode,
+                }
+            )
+    if archives:
+        _write_bytes_atomically_once(root / "validation-log-history" / "manifest.json", (canonical_json(archives) + "\n").encode(), mode=0o444)
+    return archives
+
+
 def _resume_metadata(document: dict[str, Any], transition: ExternalMetadataTransition) -> dict[str, Any]:
     """Share publication machinery while retaining distinct transition contracts."""
     if transition.before.source_state != _current_metadata_state(document):
@@ -5438,6 +5581,7 @@ def _resume_metadata(document: dict[str, Any], transition: ExternalMetadataTrans
         },
         preserved_entries=preserved,
     )
+    log_archives = _archive_metadata_validation_logs(by_node, decisions, root, Path(transition.after.repository_root))
     paths = {
         "lifecycle_input_path": root / "lifecycle.json",
         "dispatches_path": root / "dispatches.json",
@@ -5464,6 +5608,7 @@ def _resume_metadata(document: dict[str, Any], transition: ExternalMetadataTrans
         "recheck_node_ids": sorted({node.node_id for node in plan.actual_worker_nodes} - set(preserved)),
         "discarded_coverage_node_ids": sorted(discarded_coverage),
         "node_decisions": decisions,
+        "validation_log_archives": log_archives,
         "node_counts": {
             "preserved": len(preserved),
             "recheck": len(plan.actual_worker_nodes) - len(preserved),
@@ -6082,6 +6227,10 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
         "preservation_policy": "verified-unchanged-audit-inputs",
         "reused_evidence_ids": sorted(reused_ids),
         "reuse_decisions": sorted(reuse_decisions, key=lambda item: item["node_id"]),
+        "audit_reuse_counts": {"retained": len(reused_ids), "scheduled_audits": sum(node.mode == "audit" for node in new_plan.actual_worker_nodes)},
+        "validation_reconciliation": _validation_reconciliation(
+            new_plan, [record for _source, record in sources.values() if record["evidence_id"] in reused_ids]
+        ),
         "coverage_reuse_decisions": [{**item, "node_id": f"repair-epoch-{epoch:03d}-" + item["node_id"]} for item in coverage_reviews],
         "unaffected_node_ids": [node.node_id for node in unaffected],
         "repair_epoch": {
@@ -6119,7 +6268,8 @@ def _resume_after_repair_metadata(
             "routing_catalog_path": document.get("routing_catalog_path", DEFAULT_ROUTING_CATALOG),
         }
     )
-    reused_ids = {evidence_id for _requirement, evidence_id in resumed["lifecycle_input"]["plan"]["exact_reused_review_evidence"]}
+    resumed_plan = _graph_plan(resumed["lifecycle_input"]["plan"])
+    reused_ids = {evidence_id for _requirement, evidence_id in resumed_plan.exact_reused_review_evidence}
     invalidated_nodes = {item["node_id"] for item in repair["preserved_evidence"] if item["evidence_id"] not in reused_ids}
     discarded_coverage = set(resumed["discarded_coverage_node_ids"])
     coverage_recheck = {
@@ -6143,10 +6293,14 @@ def _resume_after_repair_metadata(
             )
         },
         "new_plan": resumed["lifecycle_input"]["plan"],
-        "replacement_lineage": _replacement_lineage(_graph_plan(document["plan"]), _graph_plan(resumed["lifecycle_input"]["plan"]), sources),
+        "replacement_lineage": _replacement_lineage(_graph_plan(document["plan"]), resumed_plan, sources),
         "capture": document["post_repair_capture"],
         "repair_transition_path": str(history_path),
         "reused_evidence_ids": sorted(reused_ids),
+        "audit_reuse_counts": {"retained": len(reused_ids), "scheduled_audits": sum(node.mode == "audit" for node in resumed_plan.actual_worker_nodes)},
+        "validation_reconciliation": _validation_reconciliation(
+            resumed_plan, [record for _source, record in sources.values() if record["evidence_id"] in reused_ids]
+        ),
         "invalidated_nodes": [
             {"node_id": node_id, "state": "awaiting-replan"}
             for node_id in sorted({item["node_id"] for item in repair["invalidated_nodes"]} | invalidated_nodes)
