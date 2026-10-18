@@ -22,7 +22,7 @@ from test_review_graph_sessions import _cli
 
 
 def _frozen_run(
-    tmp_path: Path, *, early: bool, input_selection: bool = False, directory_logs: bool = False
+    tmp_path: Path, *, early: bool, input_selection: bool = False, log_kind: str = "file"
 ) -> tuple[str, Path, dict[str, Any], dict[str, Any], Path, Path]:
     git, repository, template, capture, _plan = _baseline_mutation_fixture(tmp_path)
     template.update(
@@ -33,9 +33,13 @@ def _frozen_run(
     requirement = template["validation_requirements"][0]
     isolation = tmp_path / "validator"
     isolation.mkdir()
+    if log_kind == "aliased-directory":
+        alias = tmp_path / "validator-alias"
+        alias.symlink_to(isolation, target_is_directory=True)
+        isolation = alias
     log = isolation / "ci.log"
     artifact = log
-    if directory_logs:
+    if log_kind in {"directory", "aliased-directory"}:
         artifact = isolation / "logs"
         log = artifact / "nested" / "ci.log"
         log.parent.mkdir(parents=True)
@@ -43,6 +47,9 @@ def _frozen_run(
         outside = tmp_path / "outside.log"
         outside.write_text("external bytes must not be archived\n")
         (artifact / "external-link").symlink_to(outside)
+    elif log_kind == "symlink":
+        artifact = isolation / "log-link"
+        artifact.symlink_to(log.name)
     requirement.update(
         commands=["printf passed > " + shlex.quote(str(log))],
         canonical_recipe=None,
@@ -111,10 +118,21 @@ def _observe(entry: dict[str, Any], phase: str) -> dict[str, Any]:
     return observation
 
 
-@pytest.mark.parametrize(("dependency_kind", "directory_logs"), [("none", False), ("input-selection", False), ("index", False), ("index", True)])
-def test_frozen_validator_handoffs_release_source_review_without_metadata_ci_replay(tmp_path: Path, dependency_kind: str, directory_logs: bool) -> None:  # noqa: PLR0915 - frozen execution through metadata continuation.
+@pytest.mark.parametrize(
+    ("dependency_kind", "log_kind"),
+    [
+        ("none", "file"),
+        ("none", "symlink"),
+        ("input-selection", "file"),
+        ("index", "file"),
+        ("index", "directory"),
+        ("index", "aliased-directory"),
+        ("index", "symlink"),
+    ],
+)
+def test_frozen_validator_handoffs_release_source_review_without_metadata_ci_replay(tmp_path: Path, dependency_kind: str, log_kind: str) -> None:  # noqa: PLR0915 - frozen execution through metadata continuation.
     git, repository, bundle, dispatches, frozen, dispatch_path = _frozen_run(
-        tmp_path, early=True, input_selection=dependency_kind == "input-selection", directory_logs=directory_logs
+        tmp_path, early=True, input_selection=dependency_kind == "input-selection", log_kind=log_kind
     )
     validator = next(entry for entry in dispatches["dispatches"] if entry["dispatch"]["mode"] == "validation")
     view = json.loads(Path(validator["worker_execution_path"]).read_bytes())
@@ -195,7 +213,7 @@ def test_frozen_validator_handoffs_release_source_review_without_metadata_ci_rep
         assert decision["disposition"] == "recheck"
         archive = result["validation_log_archives"][0]
         assert archive["evidence_id"] == validator["dispatch"]["evidence_id"]
-        if directory_logs:
+        if log_kind in {"directory", "aliased-directory"}:
             assert archive["original_digest_mode"] == "recursive-content-sha256-v2"
             archived_bytes = Path(archive["path"]).read_bytes()
             with tarfile.open(archive["path"]) as retained:
@@ -208,6 +226,13 @@ def test_frozen_validator_handoffs_release_source_review_without_metadata_ci_rep
             assert b"external bytes must not be archived" not in archived_bytes
             (Path(archive["original_path"]) / "nested/ci.log").write_text("subsequent validation output\n")
             assert Path(archive["path"]).read_bytes() == archived_bytes
+        elif log_kind == "symlink":
+            assert archive["original_digest_mode"] == "symlink-target-v1"
+            assert Path(archive["path"]).read_bytes() == b"ci.log"
+            original = Path(archive["original_path"])
+            original.unlink()
+            original.symlink_to("replacement.log")
+            assert Path(archive["path"]).read_bytes() == b"ci.log"
         else:
             assert Path(archive["path"]).read_bytes() == b"passed"
             Path(archive["original_path"]).write_text("subsequent validation output\n")

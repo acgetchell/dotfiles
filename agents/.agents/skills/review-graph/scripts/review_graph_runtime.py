@@ -2208,9 +2208,10 @@ def _validation_normalized_record(
     return record
 
 
-def _workspace_path(path: str, repository_root: Path) -> Path:
+def _workspace_path(path: str, repository_root: Path, *, follow_symlinks: bool = True) -> Path:
     candidate = Path(path)
-    return candidate.resolve(strict=False) if candidate.is_absolute() else (repository_root / candidate).resolve(strict=False)
+    absolute = candidate if candidate.is_absolute() else repository_root / candidate
+    return absolute.resolve(strict=False) if follow_symlinks else absolute
 
 
 def _bounded_workspace_directory_digest(path: Path) -> str:
@@ -2331,7 +2332,8 @@ def capture_workspace_snapshot(dispatch: dict[str, Any]) -> dict[str, Any]:
         declared_cache = (
             artifact is not None and artifact.kind == "cache" and artifact.repository_status == status and status in {"ignored", "outside-repository"}
         )
-        exists, digest, snapshot_mode = _workspace_content_digest(resolved, declared_cache=declared_cache)
+        source = _workspace_path(raw_path, repository_root, follow_symlinks=False)
+        exists, digest, snapshot_mode = _workspace_content_digest(source, declared_cache=declared_cache)
         records.append({"digest": digest, "exists": exists, "path": raw_path, "snapshot_mode": snapshot_mode, "status": status})
     return {"node_id": unit.node_id, "records": records, "schema_version": 1, "source_state": list(unit.source_state)}
 
@@ -5210,7 +5212,9 @@ def _metadata_resume_decisions(
             and {reason["reason_code"] for reason in reasons} == {"validation-contract-unavailable"}
             and trusted.historical_source_gate(transition.after)
             and all(
-                _workspace_content_digest(_workspace_path(artifact.path, Path(transition.after.repository_root)), declared_cache=artifact.kind == "cache")[1:3]
+                _workspace_content_digest(
+                    _workspace_path(artifact.path, Path(transition.after.repository_root), follow_symlinks=False), declared_cache=artifact.kind == "cache"
+                )[1:3]
                 == (artifact.digest, artifact.digest_mode)
                 for artifact in trusted.record.artifacts
             )
@@ -5434,15 +5438,19 @@ def _log_directory_archive(source: Path) -> bytes:
     def fail_walk(error: OSError) -> None:
         raise error
 
+    if source.is_symlink():
+        msg = f"log archive root must not be a symlink: {source}"
+        raise ValueError(msg)
+    root = source.resolve()
     stream = BytesIO()
     with tarfile.open(fileobj=stream, mode="w", dereference=False) as archive:
-        for directory, directories, files in source.walk(on_error=fail_walk, follow_symlinks=False):
+        for directory, directories, files in root.walk(on_error=fail_walk, follow_symlinks=False):
             directories.sort()
             for child in (directory, *(directory / name for name in sorted(files))):
-                if child.parent.resolve() != child.parent:
+                if child != root and child.parent.resolve() != child.parent:
                     msg = f"log archive source must not traverse symlink directories: {child}"
                     raise ValueError(msg)
-                name = child.relative_to(source).as_posix()
+                name = child.relative_to(root).as_posix()
                 info = archive.gettarinfo(str(child), arcname=name)
                 if info is None:
                     msg = f"log archive cannot represent special filesystem entry: {child}"
@@ -5458,7 +5466,7 @@ def _log_directory_archive(source: Path) -> bytes:
 
 
 def _metadata_log_archive_content(source: Path, artifact: ArtifactIdentity) -> tuple[bytes, str]:
-    """Verify original log identity and retain either raw bytes or a directory tar."""
+    """Verify original log identity and retain file bytes, link text, or a directory tar."""
     expected = (True, artifact.digest, artifact.digest_mode)
     if _workspace_content_digest(source) != expected:
         msg = f"prior validation log changed before archival: {source}; recover its original bytes before replay"
@@ -5466,11 +5474,14 @@ def _metadata_log_archive_content(source: Path, artifact: ArtifactIdentity) -> t
     if artifact.digest_mode == "content-sha256-v1":
         content, suffix = _read_regular_file_no_follow(source), ".log"
         unchanged = digest_bytes(content) == artifact.digest
+    elif artifact.digest_mode == "symlink-target-v1":
+        content, suffix = str(source.readlink()).encode(), ".log"
+        unchanged = digest_bytes(b"symlink:" + content) == artifact.digest and _workspace_content_digest(source) == expected
     elif artifact.digest_mode in {_RECURSIVE_WORKSPACE_POLICY, _BOUNDED_WORKSPACE_POLICY}:
         content, suffix = _log_directory_archive(source), ".tar"
         unchanged = _workspace_content_digest(source) == expected
     else:
-        msg = f"metadata replay requires a regular log file or directory for immutable archival: {source}"
+        msg = f"metadata replay requires a regular log file, symlink, or directory for immutable archival: {source}"
         raise ValueError(msg)
     if not unchanged:
         msg = f"prior validation log changed during archival: {source}; recover its original bytes before replay"
