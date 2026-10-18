@@ -8,7 +8,7 @@ from review_graph_git import intervening_metadata_blockers
 from review_graph_instruction_delta import effective_units, instruction_delta_candidate
 from review_graph_integrity import canonical_json, digest_json
 from review_graph_read_provenance import normalized_read_provenance
-from review_graph_reuse import AuditInputIdentity, AuditReuseTransition, ReviewSourceSnapshot, verify_reuse_inputs
+from review_graph_reuse import AuditInputIdentity, AuditReuseTransition, ReuseInputError, ReviewSourceSnapshot, verify_reuse_inputs
 
 
 def coverage_execution_view(context: dict[str, Any], reference: dict[str, str]) -> dict[str, Any]:
@@ -73,6 +73,22 @@ def validate_coverage_units(payload: dict[str, Any], owned_paths: tuple[str, ...
             raise ValueError(msg_0)
 
 
+def audit_coverage_units(payload: dict[str, Any], inputs: AuditInputIdentity) -> list[dict[str, Any]]:
+    """Derive one conservative unit without changing the original sealed payload."""
+    validate_coverage_units(payload, inputs.owned_paths)
+    if payload.get("coverage_units"):
+        return payload["coverage_units"]
+    return [
+        {
+            "unit_id": "whole-audit",
+            "owned_paths": list(inputs.owned_paths),
+            "dependency_paths": sorted(set(inputs.nearby_contract_owners) | set(inputs.command_read_paths)),
+            "dependency_uncertainty": "",
+            "finding_indices": list(range(1, len(payload["findings"]) + 1)),
+        }
+    ]
+
+
 def coverage_decisions(  # noqa: PLR0913 - shared provenance proof plus optional retained replay bytes.
     payload: dict[str, Any],
     origin: ReviewSourceSnapshot,
@@ -83,17 +99,18 @@ def coverage_decisions(  # noqa: PLR0913 - shared provenance proof plus optional
     retained_after: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Prove each partition separately; uncertainty always requires fresh inspection."""
-    validate_coverage_units(payload, inputs.owned_paths)
+    units = audit_coverage_units(payload, inputs)
     root = PurePosixPath(origin.repository_root)
-    declared = {root / path for unit in payload.get("coverage_units", []) for path in (*unit["owned_paths"], *unit["dependency_paths"])}
+    declared = {root / path for unit in units for path in (*unit["owned_paths"], *unit["dependency_paths"])}
     decisions = []
-    for unit in payload.get("coverage_units", []):
+    for unit in units:
         unit_paths = {root / path for path in (*unit["owned_paths"], *unit["dependency_paths"])}
         # Declared paths belong to their units; unassigned reader operands
         # remain conservative dependencies of every judgment.
         command_paths = tuple(path for path in inputs.command_read_paths if root / path in unit_paths or root / path not in declared)
         reason = unit["dependency_uncertainty"]
         deltas = []
+        rejected_inputs = []
         metadata_blockers = intervening_metadata_blockers(
             {**payload, **normalized_read_provenance(inputs), "files_inspected": unit["owned_paths"], "nearby_contract_owners": unit["dependency_paths"]},
             transition.metadata_transitions,
@@ -115,6 +132,8 @@ def coverage_decisions(  # noqa: PLR0913 - shared provenance proof plus optional
                 verify_reuse_inputs(origin, target, unit_inputs, transition)
             except ValueError as error:
                 reason = str(error)
+                if isinstance(error, ReuseInputError):
+                    rejected_inputs = error.rejected_inputs
                 # Missing bytes or ambiguous dependencies require source reinspection.
                 with suppress(OSError, ValueError, KeyError, UnicodeError):
                     deltas = instruction_delta_candidate(unit, origin, target, unit_inputs, transition, retained_after=retained_after)
@@ -123,6 +142,7 @@ def coverage_decisions(  # noqa: PLR0913 - shared provenance proof plus optional
                 **unit,
                 "disposition": "instruction-review" if deltas else "recheck" if reason else "reused",
                 **({"input_deltas": deltas} if deltas else {}),
+                **({"rejected_inputs": rejected_inputs} if rejected_inputs else {}),
                 "reason": reason or "Exact content, modes, dependencies, and instructions are unchanged.",
             }
         )

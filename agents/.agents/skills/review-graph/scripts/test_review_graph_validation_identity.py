@@ -12,10 +12,12 @@ from typing import Any
 import pytest
 import review_graph_runtime as runtime
 from capture_scope import _scope_data
+from review_graph_bootstrap import bootstrap_document
 from review_graph_plan import ValidationArtifact, plan_from_document
 from test_review_graph_runtime import (
     ROUTING_CATALOG,
     SKILL_ROOT,
+    _baseline_mutation_fixture,
     _compile_materialized_evidence,
     _compile_repair_fixture_entry,
     _json_plan,
@@ -25,6 +27,7 @@ from test_review_graph_runtime import (
     _source_by_node,
     _sparse_plan_document,
 )
+from test_review_graph_transitions import _materialize, _payload
 from test_support_review_graph import _prepare_all_fixture_timing
 
 
@@ -229,6 +232,89 @@ def test_planned_validation_reference_survives_two_repairs_with_fresh_validation
         assert audit["validation_requirements"] == [original_requirement]
         assert audit["reuse"]["original_source_state"] == original["dispatch"]["source_state"]
     assert all(path.read_bytes() == content for path, content in original_bytes.items())
+
+
+def test_restoring_unowned_file_to_head_rebinds_paths_without_reexecuting_audit(tmp_path: Path) -> None:
+    git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
+    (repository / "tool.py").write_text("value = 2\n")
+    (repository / "state.rs").write_text("pub fn state() { assert!(true); }\n")
+    before = _scope_data(git, repository, "worktree", None, ())
+    template["routing_overrides"] = [
+        item for item in template["routing_overrides"] if set(item.get("review_surface", [])).intersection(runtime._text_list(before, "captured_scope_paths"))
+    ]
+    plan = plan_from_document(bootstrap_document(before, template), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)
+    lifecycle, dispatches, _dispatch_path = _materialize(tmp_path, before, plan)
+    entry = next(item for item in dispatches["dispatches"] if item["dispatch"].get("skill_id") == "python-cli-review")
+    planned = entry["dispatch"]["command_policy"]["planned_validation_units"][0]
+    payload = _payload(["tool.py"], dispatch=entry["dispatch"])
+    payload["validation_requirements"] = [
+        {
+            "requirement_id": planned["requirement_ids"][0],
+            "planned_validation_digest": planned["planned_validation_digest"],
+            "owner": "review-validator",
+            "reason": "Check final repaired source",
+            "expected_evidence": "Canonical check passes",
+        }
+    ]
+    content, metadata = runtime.compile_review(
+        {"dispatch": {**entry["dispatch"], "before_state": lifecycle["source_state"], "after_state": lifecycle["source_state"]}, "payload": payload}
+    )
+    Path(entry["artifact_path"]).write_bytes(content)
+    Path(entry["metadata_path"]).write_text(json.dumps(metadata))
+    saved = {key: Path(entry[key]).read_bytes() for key in ("artifact_path", "metadata_path")}
+    (repository / "state.rs").write_text("pub fn state() {}\n")
+    after = _scope_data(git, repository, "worktree", None, ())
+    assert before["captured_scope_paths"] == ["state.rs", "tool.py"]
+    assert after["captured_scope_paths"] == ["tool.py"]
+    template["consulted_routers"].remove("rust-review-orchestrator")
+    template["routing_overrides"] = [item for item in template["routing_overrides"] if "tool.py" in item.get("review_surface", [])]
+    result = runtime.advance_after_mutation(
+        {
+            **lifecycle,
+            "previous_capture": before,
+            "new_capture": after,
+            "planning_template": template,
+            "repair_epoch": 1,
+            "changed_paths": ["state.rs"],
+            "authorization_before": "review-only",
+            "authorization_after": "review-and-fix",
+            "artifact_store": str(tmp_path / "repair"),
+            "state_verification_command": "capture_scope.py --mode worktree",
+            "sources": [{key: entry[key] for key in saved}],
+        }
+    )
+    assert entry["dispatch"]["evidence_id"] in result["reused_evidence_ids"]
+    binding = result["validation_reconciliation"]["requirements"][0]["reuse_binding"]
+    assert binding["capture_binding"] == {"original_captured_paths": ["state.rs", "tool.py"], "replacement_captured_paths": ["tool.py"]}
+    assert result["audit_reuse_counts"]["retained"] == 1
+    current = runtime._graph_plan(result["lifecycle_input"]["plan"])
+    assert current.coalesced_validation_units[0].evidence_ids == ()
+    assert current.review_lifecycle.repairs_completed == 1
+    bundle = runtime.build_synthesis_bundle(result["lifecycle_input"])
+    assert bundle["plan_context"]["validation_reconciliation"]["blockers"] == []
+    lifecycle, journal = result["lifecycle_input"], Path(result["journal_path"])
+    _prepare_all_fixture_timing(result["dispatch_set"])
+    executed_audits, executed_validators = [], []
+    for _ in range(current.complete_node_count + 1):
+        events, _state, _head = runtime.read_execution_journal(journal, plan=current, source_state=tuple(lifecycle["source_state"]))
+        ready = runtime.next_ready_nodes(
+            {**lifecycle, "current_source_state": lifecycle["source_state"]}, journal_events=events, dispatch_set=result["dispatch_set"]
+        )
+        if ready["complete"]:
+            break
+        assert ready["ready_dispatches"], ready["blockers"]
+        for dispatched in ready["ready_dispatches"]:
+            _compile_repair_fixture_entry(dispatched, lifecycle, journal)
+            if dispatched["dispatch"]["mode"] == "audit":
+                executed_audits.append(dispatched["node_id"])
+            elif dispatched["dispatch"]["mode"] == "validation":
+                executed_validators.append(dispatched["node_id"])
+    else:
+        pytest.fail("repair graph did not complete within its node bound")
+    assert len(executed_audits) == result["audit_reuse_counts"]["scheduled_audits"] == 3
+    assert all(node.skill_id != entry["dispatch"]["skill_id"] for node in current.actual_worker_nodes if node.node_id in executed_audits)
+    assert executed_validators == [current.coalesced_validation_units[0].node_id]
+    assert all(Path(entry[key]).read_bytes() == value for key, value in saved.items())
 
 
 @pytest.mark.parametrize(

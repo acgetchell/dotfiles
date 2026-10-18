@@ -37,7 +37,7 @@ Missing fields mean `blocked`, never standalone discovery.
    concise output evidence, actual platform and native/emulated mode, and
    approved artifact paths. Put unexecuted target cells and the boundary of any
    emulation in `limitations`.
-   Report additional `git_dependencies`; repository contracts remain authoritative.
+   For Git-dependent commands, read [dependency examples](git-dependencies.md) before execution.
    For failures, classify `failure_kind` as source, infrastructure, timeout or inconclusive.
 5. Run `validation_observations.after.capture_command`, then its
    `workspace_command`, before publication. Follow `worker_prompt`: serialize the complete

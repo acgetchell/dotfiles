@@ -1,21 +1,26 @@
 # delaunay Tooling Review Notes
 
 Use this reference when applying `project-tooling-review` to the `delaunay`
-repository. Read `AGENTS.md` and the routed owners under `docs/dev/` first;
+repository. Read `AGENTS.md`, `docs/dev/README.md`, and the routed owners under `docs/dev/` first;
 repository guidance overrides stale details here.
+
+The [tooling snapshot](delaunay-tooling-snapshot.json) records the reviewed
+upstream revision for offline example checks. Refresh it from upstream paths
+and live recipe definitions when changing these examples.
 
 ## Semgrep Surface
 
 - `semgrep.yaml` is the source of truth for repository-owned rules.
 - `tests/semgrep/` contains annotated positive and negative fixtures.
-- `scripts/semgrep_fixture_config.py` selects annotated rules from the shared
-  configuration for each fixture. Keep the shared config authoritative.
+- The pinned `research-repo-tools` package owns fixture selection and execution;
+  inspect its pin and configuration in `pyproject.toml` and the live
+  `just semgrep-test` recipe. Keep the repository rule configuration authoritative.
 - Preserve existing rule IDs when extending the same policy.
 - The normal repository scan excludes deliberate fixture violations; use
   `just semgrep-test` to validate fixtures and `just semgrep` to check the real
   repository for false positives.
 - Raw notebook JSON is suitable for narrow qualitative Semgrep patterns. Keep
-  structural notebook validation in `scripts/notebook_check.py`.
+  structural notebook validation in the shared tooling behind `just notebook-check`.
 - In synthetic TeX fixtures, use the annotation form recognized by Semgrep test
   mode; `% ruleid` is not recognized by the current harness, while
   `// ruleid` is.
@@ -34,7 +39,7 @@ repository guidance overrides stale details here.
 
 - Validate Semgrep configuration, then run `just semgrep-test` and
   `just semgrep`.
-- Run `just lint-config` after configuration changes and the focused Markdown
+- Run `just check-config` after configuration changes and the focused Markdown
   validator when tooling guidance changes.
 - Follow `docs/dev/commands.md` rather than defaulting configuration-only work
   to full `just ci`.

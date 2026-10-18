@@ -4,7 +4,7 @@
   "additionalProperties": false,
   "properties": {
     "git_dependencies": {
-      "description": "Additional observed Git dependencies. Repository-owned contracts remain authoritative; an empty array cannot weaken them.",
+      "description": "Additional observed Git dependencies. Each command must exactly match executions[].command and occur in at most one declaration. Omit command for a unit-wide dependency (for example command-bound head plus command-less index for Cargo packaging). Correct metadata without rerunning commands. Repository-owned contracts remain authoritative; an empty array cannot weaken them.",
       "type": "array",
       "items": {
         "type": "object",
@@ -15,7 +15,8 @@
               "source-discovery",
               "index",
               "head",
-              "history"
+              "history",
+              "input-selection"
             ]
           },
           "command": {
@@ -25,6 +26,10 @@
           "reason": {
             "type": "string",
             "minLength": 1
+          },
+          "selection_algorithm": {
+            "const": "git-ls-files-cached-others-exclude-standard-v1",
+            "description": "Required only for input-selection. Runtime captures and binds the sorted unique union of git ls-files -z and git ls-files --others --exclude-standard -z. Checks consume worktree bytes; declare staged blobs, HEAD and history separately."
           }
         },
         "required": [

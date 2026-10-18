@@ -23,7 +23,7 @@ from test_review_graph_runtime import (
 from test_review_graph_transitions import _materialize, _payload
 
 
-def _fixture(tmp_path: Path, *, material: bool = False, recipe: bool = False) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+def _fixture(tmp_path: Path, *, material: bool = False, recipe: bool = False, partition: bool = True) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
     files = {
         "Cargo.toml": '[package]\nname = "fixture"\nversion = "0.1.0"\nedition = "2024"\n',
@@ -69,6 +69,10 @@ def _fixture(tmp_path: Path, *, material: bool = False, recipe: bool = False) ->
             }
         ],
     }
+    if not partition:
+        payload.pop("coverage_units")
+        receipt = runtime.publish_worker_payload_bytes(json.loads(Path(original["worker_payload_contract_path"]).read_bytes()), json.dumps(payload).encode())
+        assert receipt["artifact_write_review"]["coverage_reuse_policy"] == "derived-whole-audit"
     content, metadata = runtime.compile_review(
         {"dispatch": {**original["dispatch"], "before_state": lifecycle["source_state"], "after_state": lifecycle["source_state"]}, "payload": payload}
     )
@@ -114,7 +118,7 @@ def _assessment(entry: dict[str, Any], *, material: bool = False) -> dict[str, A
         "nearby_contract_owners": list(dict.fromkeys([*entry["dispatch"]["required_read_paths"], *(item["path"] for item in deltas)])),
         "instruction_reconciliations": [
             {
-                "unit_id": "rust-build",
+                "unit_id": units[0]["unit_id"],
                 "disposition": "reinspect" if material else "unchanged",
                 "assessments": [
                     {
@@ -140,9 +144,9 @@ def _assessment(entry: dict[str, Any], *, material: bool = False) -> dict[str, A
     }
 
 
-@pytest.mark.parametrize("recipe", [False, True], ids=["security-instructions", "unrelated-recipe"])
-def test_unrelated_delta_keeps_rust_source_evidence_after_fresh_reconciliation(tmp_path: Path, recipe: bool) -> None:
-    result, original, entry = _fixture(tmp_path, recipe=recipe)
+@pytest.mark.parametrize(("recipe", "partition"), [(False, True), (True, True), (False, False)])
+def test_unrelated_delta_keeps_rust_source_evidence_after_fresh_reconciliation(tmp_path: Path, recipe: bool, partition: bool) -> None:
+    result, original, entry = _fixture(tmp_path, recipe=recipe, partition=partition)
     before = {key: Path(original[key]).read_bytes() for key in ("artifact_path", "metadata_path")}
     context = entry["dispatch"]["coverage_reuse"]
     ready = {"ready_node_ids": [entry["node_id"]], "lifecycle": {"in_flight_node_ids": []}}
@@ -172,9 +176,9 @@ def test_unrelated_delta_keeps_rust_source_evidence_after_fresh_reconciliation(t
     print(json.dumps({"retained_source_paths": 3, "rechecked_source_paths": 0, "focused_audit_dispatches": 1, "provider_tokens": None, "provider_cost": None}))
 
 
-@pytest.mark.parametrize("recipe", [False, True], ids=["rust-policy", "rust-check-command"])
-def test_material_instruction_or_recipe_change_requires_all_owned_source(tmp_path: Path, recipe: bool) -> None:
-    result, _original, entry = _fixture(tmp_path, material=True, recipe=recipe)
+@pytest.mark.parametrize(("recipe", "partition"), [(False, True), (True, True), (False, False)])
+def test_material_instruction_or_recipe_change_requires_all_owned_source(tmp_path: Path, recipe: bool, partition: bool) -> None:
+    result, _original, entry = _fixture(tmp_path, material=True, recipe=recipe, partition=partition)
     payload = _assessment(entry, material=True)
     contract = json.loads(Path(entry["worker_payload_contract_path"]).read_bytes())
     omitted = {**payload, "files_inspected": []}

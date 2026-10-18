@@ -1,0 +1,24 @@
+{
+  "repository": "acgetchell/delaunay",
+  "revision": "06284cfe4a699cc81bc1aa334524e5dcac438707",
+  "paths": [
+    "AGENTS.md",
+    "docs/dev/README.md",
+    "docs/dev/",
+    "semgrep.yaml",
+    "tests/semgrep/",
+    "pyproject.toml",
+    "docs/assets/validation/",
+    "docs/dev/commands.md"
+  ],
+  "generated_paths": [
+    "target/notebooks/"
+  ],
+  "recipes": [
+    "check-config",
+    "ci",
+    "notebook-check",
+    "semgrep",
+    "semgrep-test"
+  ]
+}
