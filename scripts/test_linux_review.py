@@ -154,6 +154,22 @@ def test_uv_environment_does_not_shadow_provisioned_tools(linux_boundary: dict[s
     assert "ci" in Path(linux_boundary["CALL_LOG"]).read_text().splitlines()
 
 
+@pytest.mark.parametrize("existing_path", [None, ""])
+def test_missing_path_does_not_add_current_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, existing_path: str | None) -> None:
+    monkeypatch.chdir(tmp_path)
+    executable(tmp_path / "untrusted-tool", "exit 0")
+    prefix = tmp_path / "install"
+    monkeypatch.setenv("DOTFILES_REVIEW_PREFIX", str(prefix))
+    monkeypatch.setenv("DOTFILES_REVIEW_ARTIFACTS", str(tmp_path / "artifacts"))
+    if existing_path is None:
+        monkeypatch.delenv("PATH", raising=False)
+    else:
+        monkeypatch.setenv("PATH", existing_path)
+    assert linux_review.main(["check"]) == 2
+    assert os.environ["PATH"] == str(prefix / "bin")
+    assert shutil.which("untrusted-tool") is None
+
+
 @pytest.mark.parametrize("caller_limit_kib", [None, 32768])
 def test_executor_keeps_scanner_stack_finite_and_respects_caller_limit(linux_boundary: dict[str, str], caller_limit_kib: int | None) -> None:
     """Exercise the real pinned scanner's preexec policy inside the installer boundary."""
