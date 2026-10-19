@@ -6,6 +6,16 @@ Supply `plan`, an existing absolute `repository_root`, `cache_paths`, and
 and `reason`. Inspect nested recipes and fixtures against user restrictions;
 omitted commands are unreviewed.
 
+At planning, `working_directories` such as `.` or `tests` resolve against the
+explicit absolute repository root before coalescing or hashing. They never
+depend on the caller's current directory. Commands and directories remain
+positional pairs, including absolute paths containing spaces. Preflight and
+timing preparation both require the resulting absolute directories to exist;
+neither executes the checks. Legacy relative dispatches are blocked with their
+absolute replacement path instead of being reported ready. Normalize in the
+planning input before materializing a new plan; do not edit an existing dispatch
+or its identity in place.
+
 For each executable unit, supply `execution_prerequisites` with `node_id`,
 explicit host `executables` including nested tools, `native_available`, and a concrete
 `reason`. The runtime checks executable discovery and working directories;

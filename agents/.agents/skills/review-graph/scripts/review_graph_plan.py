@@ -20,7 +20,7 @@ from research_repo_tools.process import ExecutableNotFoundError, format_exceptio
 from review_graph_control import issue_run_control
 from review_graph_coverage import coverage_reference
 from review_graph_executor import executor_permissions
-from review_graph_integrity import digest_bytes, digest_json
+from review_graph_integrity import MAX_NATIVE_IDENTIFIER_LENGTH, digest_bytes, digest_json
 from review_graph_lifecycle import ReviewLifecycle, lifecycle_from_document
 from review_graph_provenance import audit_input_reference, metadata_transition_reference, review_scope_body
 from review_graph_reuse import (
@@ -70,7 +70,6 @@ NATIVE_EVIDENCE_BLOCK_CLOSE = "\n-->"
 MAX_NATIVE_RESULT_BYTES = 1_048_576
 MAX_NATIVE_EVIDENCE_BLOCK_BYTES = 65_536
 MAX_NATIVE_SECTION_BYTES = 65_536
-MAX_NATIVE_IDENTIFIER_LENGTH = 4_096
 MAX_NATIVE_IDENTIFIER_COUNT = 1_024
 _SHA256_DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}")
 VALIDATION_ARTIFACT_DIGEST_MODES = frozenset(
@@ -5789,6 +5788,17 @@ def _workspace_effects_field(item: Mapping[str, Any], repository_root: Path | No
     return paths
 
 
+def _validation_working_directories(item: Mapping[str, Any], repository_root: Path | None) -> tuple[str, ...]:
+    """Bind relative directories before hashing, never to a later helper's cwd."""
+    directories = _tuple_field(item, "working_directories")
+    if any(not Path(directory).is_absolute() for directory in directories):
+        if repository_root is None or not repository_root.is_absolute():
+            msg = "relative validation working directories require an explicit absolute repository root"
+            raise ValueError(msg)
+        return tuple(str((repository_root / directory).resolve()) if not Path(directory).is_absolute() else directory for directory in directories)
+    return directories
+
+
 def validation_requirements_from_document(document: Mapping[str, Any], repository_root: Path | None) -> tuple[ValidationRequirement, ...]:
     """Parse validation plans consistently for bootstrap and source-preserving expansion."""
     requirements = tuple(
@@ -5796,7 +5806,7 @@ def validation_requirements_from_document(document: Mapping[str, Any], repositor
             requirement_id=_bounded_text_field(item, "requirement_id"),
             source_state=_source_state_field(item),
             commands=_tuple_field(item, "commands"),
-            working_directories=_tuple_field(item, "working_directories"),
+            working_directories=_validation_working_directories(item, repository_root),
             environment=_bounded_text_field(item, "environment"),
             toolchain=_bounded_text_field(item, "toolchain"),
             features=_tuple_field(item, "features"),

@@ -4,6 +4,8 @@ import json
 
 from research_repo_tools.evidence import sha256
 
+MAX_NATIVE_IDENTIFIER_LENGTH = 4_096
+
 
 def canonical_json(value: object, *, allow_nan: bool = True) -> str:
     """Preserve the graph's existing compact, ASCII-escaped JSON identities."""

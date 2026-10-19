@@ -166,7 +166,8 @@ owned files stayed unchanged. This check applies to whole audits, coverage units
 and replay of their immutable evidence. A fresh audit on the latest metadata
 state can be reused when its complete input proof still holds.
 Changed commands, directories, environment, toolchain, features, platform,
-artifacts, or mutation contracts prevent whole-audit and coverage-partition reuse. The
+artifacts, or mutation contracts prevent whole-audit reuse. Normally they also
+prevent coverage-partition reuse. The
 transition schedules the affected audit with `validation-requirements-changed`
 and names the conflicting or missing requirement before fanout. The worker
 reassesses the current validation requirement; original evidence and execution
@@ -174,6 +175,40 @@ digests remain immutable. Eligible coverage-partition reuse still requires
 the worker to reconcile every original validation need in its new payload.
 Metadata reconciliation itself does not run validation; the replacement graph
 retains its required gates.
+
+A commandless requirement with a planning blocker may instead enter
+`validation_reassessment` when its exact `canonical_recipe` becomes the sole
+command in the explicit repository directory. Environment, platform, toolchain,
+features, isolation and mutation contracts must remain identical; other changes
+still require full source review. This is a new review obligation, not an
+execution-equivalence claim. Only independently proved unchanged source units
+are candidates for reuse; changed files and affected dependencies require fresh
+inspection. The dispatch preserves both execution identities and their digests,
+old blockers, findings, and routing handoffs.
+
+The fresh specialist must submit `validation_reassessments` with both supplied
+digests, a contract assessment, native limitations, and a handoff assessment.
+`source-independent` retains the proved source judgments; `reinspect` requires
+all owned paths to be inspected again; `uncertain` blocks acceptance. Missing or
+stale reassessment is rejected at publication, compilation, and evidence replay.
+The resulting sealed audit binds the new validation requirement without changing
+old payloads. It does not reuse a validation pass or satisfy a native CI gate.
+
+Repair comparisons retain their original immutable base. When enumerating the
+captured paths would exceed the comparison identifier limit, the replacement
+dispatch uses a bounded root diff (`git diff <immutable-base> -- .`). Its separately
+bound `owned_paths` still contain the complete scope: inspect untracked paths
+directly, since Git diff omits them.
+
+For an existing frozen run whose advance failed on this representation limit,
+keep its frozen resources, accepted evidence, captures, and open repair request.
+Run the updated `review_graph_runtime.py advance-after-mutation` with the retained
+Python runner and that request, supplying `routing_catalog_path` from the original
+frozen runtime. Use a new output artifact directory if the failed attempt left
+partial files. The updated runtime retains the original plan's skill locations
+and verifies its run control and evidence; it consumes the already requested repair
+epoch once and does not restart the comprehensive review. Follow only the returned
+continuation paths. Never patch the old frozen resources or signed plan.
 Per-node `reuse_decisions` explain disposition and reason code, distinguishing
 `coverage-limitations`, `unclassified-limitations`, `unresolved-uncertainty`,
 and `validation-evidence-limits`. Typed execution facts and delegated validation

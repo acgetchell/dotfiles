@@ -52,6 +52,10 @@ def _proof_fixture(
     )
     capture = _scope_data(git, repository, "baseline", None, ())
     _complete_structural_fixture_routing(template, cast("list[str]", capture["captured_scope_paths"]))
+    if validation_change is not None and validation_change.startswith("commandless"):
+        template["validation_requirements"][0].update(
+            commands=[], working_directories=[], canonical_recipe="just ci", planning_blocker="External CI has no retained log"
+        )
     plan = plan_from_document(bootstrap_document(capture, template), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)
     assert plan.dispatch_allowed, plan.blockers
     lifecycle, entries, _dispatches = _materialize(tmp_path, capture, plan)
@@ -94,6 +98,10 @@ def _proof_fixture(
     }
     if stage_after_repair:
         payload["git_dependencies"] = [{"kind": "index", "reason": "The judgment depends on staging."}]
+    if validation_change is not None and validation_change.startswith("commandless"):
+        payload["validation_limits"] = [
+            {"requirement_id": validation["requirement_ids"][0], "environment": "fixture", "status": "unavailable", "reason": "External CI has no retained log"}
+        ]
     content, metadata = runtime.compile_review(
         {"dispatch": {**fresh["dispatch"], "before_state": lifecycle["source_state"], "after_state": lifecycle["source_state"]}, "payload": payload}
     )
@@ -103,6 +111,11 @@ def _proof_fixture(
         template["validation_requirements"][0]["requirement_id"] += "-replacement"
     elif validation_change == "environment":
         template["validation_requirements"][0]["environment"] += "; changed executor"
+    elif validation_change is not None and validation_change.startswith("commandless"):
+        template["validation_requirements"][0].update(commands=["just ci"], working_directories=[str(repository)], planning_blocker=None)
+        if validation_change != "commandless":
+            field = validation_change.removeprefix("commandless-")
+            template["validation_requirements"][0][field] = ["just other"] if field == "commands" else "different"
     (repository / owned[1]).write_text("def test_adoption():\n    assert 1 == 1\n")
     repaired_capture = _scope_data(git, repository, "baseline", None, ())
     metadata_transition = {}

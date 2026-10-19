@@ -89,6 +89,8 @@ def instruction_delta_candidate(  # noqa: PLR0913 - source/target proof and opti
 
 def effective_units(context: dict[str, Any]) -> list[dict[str, Any]]:
     """Apply only compiler-bound worker decisions; pending units remain rechecks."""
+    if any(item["disposition"] != "source-independent" for item in context.get("validation_reassessments", [])):
+        return [{**unit, "disposition": "recheck"} for unit in context["units"]]
     decisions = {item["unit_id"]: item for item in context.get("instruction_reconciliations", [])}
     return [
         {**unit, "disposition": "reused" if decisions.get(unit["unit_id"], {}).get("disposition") == "unchanged" else "recheck"}
