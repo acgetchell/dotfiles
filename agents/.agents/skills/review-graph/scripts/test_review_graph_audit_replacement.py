@@ -9,8 +9,20 @@ from typing import Any
 import pytest
 import review_graph_runtime as runtime
 from test_review_graph_compact import _publish
-from test_review_graph_runtime import _compact_audit_payload, _compile_repair_fixture_entry, _continuation_fixture
+from test_review_graph_runtime import _compact_audit_payload, _compile_repair_fixture_entry, _continuation_fixture, _late_handoff_replan
 from test_support_review_graph import _prepare_all_fixture_timing
+
+
+def test_replacement_synthesis_retains_exact_reused_evidence() -> None:
+    plan = _late_handoff_replan()
+    expected = ("review:audit-001", "review:audit-002")
+    assert runtime._synthesis_reused_evidence_ids(plan, "rust-synthesis") == expected
+    replacement = runtime._replacement_plan(
+        plan, {"replacement_node_ids": {"rust-synthesis": "rust-synthesis-replacement", "repository-synthesis": "repository-synthesis-replacement"}}
+    )
+    assert runtime._synthesis_reused_evidence_ids(replacement, "rust-synthesis-replacement") == expected
+    assert runtime._synthesis_reused_evidence_ids(replacement, "repository-synthesis-replacement") == expected
+    assert runtime._synthesis_reused_evidence_ids(replacement, "rust-synthesis") == ()
 
 
 def _fixture(tmp_path: Path, *, repairs_completed: int = 0) -> tuple[dict[str, Any], Namespace, dict[str, Any], dict[str, Any]]:

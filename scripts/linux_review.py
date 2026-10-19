@@ -211,6 +211,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=("setup", "check", "smoke", "probe"))
     args = parser.parse_args(argv)
+    # uv prepends the Python environment, whose transitive tools can shadow our pins.
+    if prefix := os.environ.get("DOTFILES_REVIEW_PREFIX", ""):
+        os.environ["PATH"] = os.pathsep.join((str(Path(prefix) / "bin"), os.environ.get("PATH", "")))
     root = Path(os.environ.get("DOTFILES_REVIEW_ARTIFACTS", REPOSITORY / "target/linux-review")).resolve()
     root.mkdir(parents=True, exist_ok=True)
     output = Path(tempfile.mkdtemp(prefix=f"{args.mode}-", dir=root))

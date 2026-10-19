@@ -7557,6 +7557,7 @@ def _replacement_plan(plan: GraphPlan, record: dict[str, Any]) -> GraphPlan:
             for node in plan.actual_worker_nodes
         ),
         requirement_to_node=tuple((requirement, rename(node_id)) for requirement, node_id in plan.requirement_to_node),
+        routing_decisions=tuple(replace(decision, synthesis_dependency=rename(decision.synthesis_dependency)) for decision in plan.routing_decisions),
         synthesis_nodes=tuple(map(rename, plan.synthesis_nodes)),
         current_epoch_node_ids=tuple(map(rename, plan.current_epoch_node_ids)),
         execution_epochs=tuple(replace(epoch, node_ids=tuple(map(rename, epoch.node_ids))) for epoch in plan.execution_epochs),
