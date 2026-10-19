@@ -2716,6 +2716,51 @@ def _reused_review_identity(raw: dict[str, Any]) -> ReusedReviewEvidencePlan:
     )
 
 
+def _audit_replacement_record(raw: dict[str, Any]) -> dict[str, Any]:
+    """Decode a complete history record without retaining caller-owned containers."""
+    required = {
+        "node_id",
+        "skill_id",
+        "requirement_ids",
+        "reason",
+        "source_state",
+        "previous_plan_digest",
+        "previous_journal_head",
+        "invalidated_evidence_id",
+        "replacement_node_ids",
+        "preserved_files",
+        "forbidden_artifacts",
+    }
+    if missing := required - raw.keys():
+        msg = "audit replacement record is missing fields: " + ", ".join(sorted(missing))
+        raise ValueError(msg)
+    record: dict[str, Any] = {key: _required_text(raw, key) for key in ("node_id", "skill_id", "reason", "invalidated_evidence_id")}
+    record["requirement_ids"] = list(_text_list(raw, "requirement_ids", required=True))
+    record["source_state"] = list(_state(raw, "source_state"))
+    record["previous_plan_digest"] = _sha256_digest(raw["previous_plan_digest"], "previous_plan_digest")
+    record["previous_journal_head"] = None if raw["previous_journal_head"] is None else _sha256_digest(raw["previous_journal_head"], "previous_journal_head")
+    mapping = raw["replacement_node_ids"]
+    if not isinstance(mapping, dict) or not mapping or any(not isinstance(key, str) or not key.strip() for key in mapping):
+        msg = "replacement_node_ids must be a non-empty node mapping"
+        raise ValueError(msg)
+    record["replacement_node_ids"] = {key: _required_text(mapping, key) for key in mapping}
+    if record["node_id"] not in mapping or len(set(mapping.values())) != len(mapping) or set(mapping) & set(mapping.values()):
+        msg = "replacement_node_ids must map the invalidated node to distinct fresh identities"
+        raise ValueError(msg)
+    preserved = _records(raw, "preserved_files")
+    if not preserved:
+        msg = "preserved_files must retain non-empty digest-bound audit history"
+        raise ValueError(msg)
+    record["preserved_files"] = [
+        {"path": _required_text(item, "path"), "digest": _sha256_digest(item.get("digest"), "preserved_files digest")} for item in preserved
+    ]
+    record["forbidden_artifacts"] = list(_text_list(raw, "forbidden_artifacts", required=True))
+    if not {item["path"] for item in record["preserved_files"]}.issubset(record["forbidden_artifacts"]):
+        msg = "forbidden_artifacts must include all preserved audit history"
+        raise ValueError(msg)
+    return record
+
+
 def _graph_plan(raw: dict[str, Any]) -> GraphPlan:
     worker_nodes = _records(raw, "actual_worker_nodes")
     epochs = _records(raw, "execution_epochs")
@@ -2780,6 +2825,7 @@ def _graph_plan(raw: dict[str, Any]) -> GraphPlan:
         reuse_source_snapshots=tuple(source_snapshot(item) for item in _records(raw, "reuse_source_snapshots")),
         audit_delta_reviews=_records(raw, "audit_delta_reviews"),
         validation_recoveries=_records(raw, "validation_recoveries"),
+        audit_replacements=tuple(_audit_replacement_record(item) for item in _records(raw, "audit_replacements")),
         pre_review_validation_nodes=_string_tuple(raw, "pre_review_validation_nodes"),
         commit_handoffs=tuple(metadata_transition(item) for item in _records(raw, "commit_handoffs")),
         review_lifecycle=lifecycle_from_document(raw.get("review_lifecycle")),
@@ -3281,6 +3327,7 @@ def _synthesis_plan_context(plan: GraphPlan, records: list[dict[str, Any]]) -> d
             {"validation_requirement_bindings": [asdict(item) for item in plan.validation_requirement_bindings]} if plan.validation_requirement_bindings else {}
         ),
         "validation_recoveries": list(plan.validation_recoveries),
+        "audit_replacements": list(plan.audit_replacements),
         **({"commit_handoffs": [asdict(item) for item in plan.commit_handoffs]} if plan.commit_handoffs else {}),
         "validation_reconciliation": _validation_reconciliation(plan, records),
         "handoff_reconciliation": {"handoffs": handoffs, "unresolved_handoff_ids": list(unresolved), "blockers": list(blockers)},
@@ -3600,9 +3647,22 @@ def _worker_provenance_examples(dispatch: dict[str, Any], captured_paths: Iterab
     context = next((path for path in captured_paths if path not in dispatch["owned_paths"]), dispatch["skill_path"])
     local_diff = shlex.join(["git", "diff", "HEAD", "--", owned])
     branch_diff = shlex.join(["git", "diff", "origin/main", "--", owned])
+    root = Path(dispatch["repository_root"])
+    required_owned, required_context = [], []
+    for path in dispatch["required_read_paths"]:
+        relative = Path(path).relative_to(root).as_posix() if Path(path).is_relative_to(root) else path
+        if relative in dispatch["owned_paths"]:
+            required_owned.append(relative)
+        else:
+            required_context.append(path)
     return {
         "owned_read": {"files_inspected": [owned], "commands_executed": [shlex.join(["cat", "--", owned])]},
         "context_read": {"nearby_contract_owners": [context], "commands_executed": [shlex.join(["cat", "--", context])]},
+        "required_reads": {
+            "files_inspected": required_owned,
+            "nearby_contract_owners": required_context,
+            "commands_executed": [shlex.join(["cat", "--", path]) for path in dispatch["required_read_paths"]],
+        },
         "local_diff": {
             "commands_executed": [local_diff],
             "git_dependencies": [{"kind": "source-discovery", "command": local_diff, "reason": "Located reads; judgments use captured source, not staging."}],
@@ -4045,6 +4105,7 @@ def _worker_payload_receipt(
         "result_contract": _required_text(contract_document, "result_contract"),
         "schema_version": 1,
         "status": "published",
+        "warnings": _validation_owner_warnings(contract_document, payload_bytes),
         "approval_identity": artifact_write_review["approval_identity"],
         "worker_payload_byte_count": len(payload_bytes),
         "worker_payload_digest": digest_bytes(payload_bytes),
@@ -4326,6 +4387,7 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             "instruction_digests": [[path, _file_identity_digest(path)] for path in instruction_paths],
             "instruction_paths": list(instruction_paths),
             "mode": node.mode,
+            "selection_reason": "; ".join(node.selection_reasons) or f"planner selected {node.skill_id}",
             "node_id": node.node_id,
             "owned_paths": list(node.coverage),
             "reference_paths": list(node.static_references),
@@ -4351,7 +4413,12 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         if (snapshot_reference := verify_current_snapshot()) is not None:
             common["runtime_snapshot"] = snapshot_reference
         if node.mode in {"audit", "independent-review"}:
-            common["fresh_context_forbidden_artifacts"] = forbidden_artifacts(node.node_id, isolation_entries)
+            common["fresh_context_forbidden_artifacts"] = sorted(
+                {
+                    *forbidden_artifacts(node.node_id, isolation_entries),
+                    *(path for replacement in plan.audit_replacements for path in replacement["forbidden_artifacts"]),
+                }
+            )
         if document.get("external_metadata_transitions"):
             common["external_metadata_transitions"] = document["external_metadata_transitions"]
         if node.mode != "validation":
@@ -4446,8 +4513,8 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
                 ]
                 common["synthesis_examples"] = _synthesis_examples(common)
         if node.mode in {"audit", "independent-review"} and common["owned_paths"]:
-            common["provenance_examples"] = _worker_provenance_examples(common, line_bounds)
             common["required_read_paths"] = sorted({node.skill_path, *instruction_paths, *node.static_references})
+            common["provenance_examples"] = _worker_provenance_examples(common, line_bounds)
             runtime_paths = {*common["required_read_paths"], str(common["payload_schema"]["path"])}
             if shared := common.get("shared_inspection_evidence"):
                 runtime_paths.add(shared["source_packet_path"])
@@ -5650,6 +5717,9 @@ def _review_stop_reason(document: dict[str, Any], journal: Path | None = None) -
         )
     if lifecycle.stop_reason is not None:
         return lifecycle.stop_reason
+    superseded = _audit_replacement_marker(_graph_plan(document["plan"]))
+    if superseded.exists() or superseded.is_symlink():
+        return "audit-plan-superseded: follow " + _required_text(json.loads(read_control_file(superseded)), "continuation_path")
     return None
 
 
@@ -6180,7 +6250,7 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
     )
     new_plan, coverage_reviews = _plan_delta_audits(document, old_plan, new_plan, sources)
     new_plan = _epoch_scoped_plan(new_plan, epoch)
-    new_plan = replace(new_plan, review_lifecycle=repair_lifecycle)
+    new_plan = replace(new_plan, review_lifecycle=repair_lifecycle, audit_replacements=old_plan.audit_replacements)
     reused_ids = {item.evidence_id for item in new_plan.audit_reuse_transitions}
     artifact_store = Path(_required_text(document, "artifact_store")).resolve() / f"repair-epoch-{epoch:03d}"
     dispatch_set = materialize_dispatches(
@@ -7457,6 +7527,160 @@ def _publish_validation_continuation(  # noqa: PLR0913, PLR0917
     }
 
 
+def _audit_replacement_marker(plan: GraphPlan) -> Path:
+    binding = require_run_control(plan.review_lifecycle.run_control)
+    return Path(binding.identity.path).parent / f"audit-replacement-{_plan_digest(plan)[7:]}.json"
+
+
+def replace_invalidated_audit(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    """Retire a mistaken judgment without editing source or sealed evidence."""
+    plan = _graph_plan(document["plan"])
+    lock_path = args.journal.with_name(args.journal.name + ".lock")
+    with run_control_lock(plan.review_lifecycle.run_control), lock_path.open("a+b") as stream:
+        fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+        try:
+            return _replace_invalidated_audit_locked(document, args, plan)
+        finally:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+
+def _replacement_plan(plan: GraphPlan, record: dict[str, Any]) -> GraphPlan:
+    """Give the affected dependency closure new node and evidence identities."""
+    mapping = record["replacement_node_ids"]
+    rename = lambda node_id: mapping.get(node_id, node_id)  # noqa: E731 - local identity projection.
+    return replace(
+        plan,
+        actual_worker_nodes=tuple(
+            replace(
+                node, node_id=rename(node.node_id), predecessors=tuple(map(rename, node.predecessors)), synthesis_dependency=rename(node.synthesis_dependency)
+            )
+            for node in plan.actual_worker_nodes
+        ),
+        requirement_to_node=tuple((requirement, rename(node_id)) for requirement, node_id in plan.requirement_to_node),
+        synthesis_nodes=tuple(map(rename, plan.synthesis_nodes)),
+        current_epoch_node_ids=tuple(map(rename, plan.current_epoch_node_ids)),
+        execution_epochs=tuple(replace(epoch, node_ids=tuple(map(rename, epoch.node_ids))) for epoch in plan.execution_epochs),
+        audit_delta_reviews=tuple(item for item in plan.audit_delta_reviews if item["node_id"] not in mapping),
+        audit_replacements=(*plan.audit_replacements, record),
+    )
+
+
+def _replace_invalidated_audit_locked(document: dict[str, Any], args: argparse.Namespace, plan: GraphPlan) -> dict[str, Any]:  # noqa: C901, PLR0912, PLR0915 - one serialized replacement transaction.
+    source_state = _state(document, "source_state")
+    if _capture_source_state(args.current_capture) != _current_metadata_state(document):
+        msg = "audit replacement requires unchanged source state"
+        raise ValueError(msg)
+    node_id = _required_text(document, "node_id")
+    reason = _required_text(document, "reason")
+    request_identity = digest_bytes(canonical_json(document).encode())
+    marker = _audit_replacement_marker(plan)
+    if marker.exists() or marker.is_symlink():
+        prior = json.loads(read_control_file(marker))
+        if prior["request_identity"] != request_identity:
+            msg = "audit plan already superseded; follow the replacement continuation"
+            raise ValueError(msg)
+        result_bytes = _read_regular_file_no_follow(Path(prior["result_path"]))
+        if digest_bytes(result_bytes) != prior["result_digest"]:
+            msg = "audit replacement result changed"
+            raise ValueError(msg)
+        return json.loads(result_bytes)
+    _require_running_review(document, args.journal)
+    events, state, head = read_execution_journal(args.journal, plan=plan, source_state=source_state)
+    entries = _dispatches_by_node(_read_json_object(args.dispatches), plan=plan, source_state=source_state)
+    node = next((node for node in plan.actual_worker_nodes if node.node_id == node_id), None)
+    if node is None or node.mode != "audit" or state.get(node_id) != "invalidated":
+        msg = "audit replacement requires an explicitly invalidated audit"
+        raise ValueError(msg)
+    accepted = [event for event in events if event["node_id"] == node_id and event["status"] == "accepted"]
+    if not accepted:
+        msg = "audit replacement requires prior accepted evidence"
+        raise ValueError(msg)
+    verified, _limitations = _verified_journal_evidence(entries[node_id], plan=plan, node=node, source_state=source_state)
+    if verified != accepted[-1]["evidence"]:
+        msg = "invalidated audit evidence differs from its accepted journal record"
+        raise ValueError(msg)
+    if any(status in {"in-flight", "awaiting-replan"} for status in state.values()):
+        msg = "audit replacement requires quiescent execution"
+        raise ValueError(msg)
+    if any(
+        item["skill_id"] == node.skill_id and item["requirement_ids"] == list(node.requirement_ids) and tuple(item["source_state"]) == source_state
+        for item in plan.audit_replacements
+    ):
+        msg = "audit replacement allowance exhausted for this contract and source state"
+        raise ValueError(msg)
+    affected = {node_id}
+    while additions := {node.node_id for node in plan.actual_worker_nodes if set(node.predecessors) & affected} - affected:
+        affected.update(additions)
+    if any(status == "invalidated" and other_id not in affected for other_id, status in state.items()):
+        msg = "audit replacement requires no unrelated invalidated nodes; preserve their invalidation history"
+        raise ValueError(msg)
+    if any(node.mode == "validation" and node.node_id in affected for node in plan.actual_worker_nodes):
+        msg = "audit replacement cannot replace validator execution identities"
+        raise ValueError(msg)
+    record = {
+        "node_id": node_id,
+        "skill_id": node.skill_id,
+        "requirement_ids": list(node.requirement_ids),
+        "reason": reason,
+        "source_state": list(source_state),
+        "previous_plan_digest": _plan_digest(plan),
+        "previous_journal_head": head,
+        "invalidated_evidence_id": accepted[-1]["evidence"]["evidence_id"],
+    }
+    identity = digest_bytes(canonical_json(record).encode())[7:23]
+    record["replacement_node_ids"] = {old: f"{old}-replacement-{identity}" for old in sorted(affected)}
+    repository = Path(entries[node_id]["dispatch"]["repository_root"]).resolve()
+    history = Path(_required_text(document, "artifact_store")).resolve() / f"audit-history-{identity}"
+    if history.resolve() != history:
+        msg = "audit replacement history directory must not traverse symlinks"
+        raise ValueError(msg)
+    if history.is_relative_to(repository) or repository.is_relative_to(history):
+        msg = "audit replacement history must be outside the repository"
+        raise ValueError(msg)
+    history.mkdir(parents=True, exist_ok=True)
+    preserved = []
+    for name, content in {
+        "lifecycle.json": canonical_json({key: document[key] for key in ("plan", "source_state", "external_metadata_transitions") if key in document}).encode(),
+        "execution.jsonl": _read_regular_file_no_follow(args.journal),
+        "dispatches.json": _read_regular_file_no_follow(args.dispatches),
+    }.items():
+        path = history / name
+        _write_bytes_atomically_once(path, content, mode=0o444)
+        preserved.append({"path": str(path), "digest": digest_bytes(content)})
+    for old in sorted(affected):
+        paths = [entries[old][field] for field in ("artifact_path", "metadata_path", "worker_payload_path")]
+        if Path(entries[old]["metadata_path"]).exists() and (sealed := _read_json_object(Path(entries[old]["metadata_path"])).get("worker_payload_path")):
+            paths.append(sealed)
+        for path_text in dict.fromkeys(paths):
+            path = Path(path_text)
+            if path.exists():
+                preserved.append({"path": str(path), "digest": digest_bytes(_read_regular_file_no_follow(path))})
+    record["preserved_files"] = preserved
+    record["forbidden_artifacts"] = sorted({*forbidden_artifacts("", {old: entries[old] for old in affected}), *(item["path"] for item in preserved)})
+    sources, records = _accepted_journal_sources(plan, source_state, events, entries, include_blocked=True)
+    expanded = _replacement_plan(plan, record)
+    result = _publish_validation_continuation(
+        document, args, plan, expanded, entries, sources, records, head, status="audit-replaced", journal_events=events, replaced_node_id=node_id
+    )
+    result["audit_replacement"] = record
+    result_path = history / "result.json"
+    result_bytes = (json.dumps(result, indent=2, sort_keys=True) + "\n").encode()
+    _write_bytes_atomically_once(result_path, result_bytes, mode=0o444)
+    _write_bytes_atomically_once(
+        marker,
+        canonical_json(
+            {
+                "request_identity": request_identity,
+                "result_path": str(result_path),
+                "result_digest": digest_bytes(result_bytes),
+                "continuation_path": result["continuation_path"],
+            }
+        ).encode(),
+        mode=0o444,
+    )
+    return result
+
+
 def _verify_validation_recoveries(plan: GraphPlan) -> None:
     """Keep every failed attempt available and bound to its revision."""
     seen: set[tuple[str, tuple[str, ...]]] = set()
@@ -7470,6 +7694,11 @@ def _verify_validation_recoveries(plan: GraphPlan) -> None:
             content = _read_regular_file_no_follow(Path(_required_text(artifact, "path")))
             if digest_bytes(content) != _required_text(artifact, "digest"):
                 msg = "preserved validation recovery evidence changed"
+                raise ValueError(msg)
+    for replacement in plan.audit_replacements:
+        for artifact in _records(replacement, "preserved_files"):
+            if digest_bytes(_read_regular_file_no_follow(Path(artifact["path"]))) != artifact["digest"]:
+                msg = "preserved audit replacement evidence changed"
                 raise ValueError(msg)
 
 
@@ -8181,6 +8410,7 @@ def finalize_proof(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, P
         "blockers": list(blockers),
         "graph_proof_status": graph_proof_status,
         "validation_recoveries": list(plan.validation_recoveries),
+        "audit_replacements": list(plan.audit_replacements),
         "handoff_reconciliation": handoff_reconciliation,
         "independent_review_metrics": {
             "accepted_evidence_count": len(accepted_independent),
@@ -8316,6 +8546,7 @@ def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     validation_parser.add_argument("--current-capture", type=Path, required=True)
     validation_parser.add_argument("--output", type=Path, required=True)
     for operation, description in (
+        ("replace-invalidated-audit", "replace an accepted audit invalidated for applying the wrong semantic checklist"),
         ("recover-validation-launch", "retry one proven unstarted validator after an executor remedy"),
         ("recover-validation-execution", "retry one failed aggregate after a proven executor permission denial"),
     ):
@@ -8434,6 +8665,8 @@ def _next_ready_from_files(document: dict[str, Any], args: argparse.Namespace) -
     compact["ready_dispatches"] = [
         {
             "execution_location": entry["dispatch"]["execution_location"],
+            **{key: entry["dispatch"][key] for key in ("skill_id", "mode", "selection_reason")},
+            **({"validation_observations": entry["dispatch"]["validation_observations"]} if "validation_observations" in entry["dispatch"] else {}),
             "node_id": entry["node_id"],
             "result_contract": entry["result_contract"],
             "worker_input_path": entry["worker_input_path"],
@@ -8773,12 +9006,19 @@ def _json_operation_output(document: dict[str, Any], args: argparse.Namespace) -
         return resume_after_authorized_commit(document)
     if args.operation == "reconcile-handoffs":
         return reconcile_handoffs(document)
-    if args.operation in {"reconcile-validation-requirements", "fallback-to-coordinator", "recover-validation-launch", "recover-validation-execution"}:
+    if args.operation in {
+        "reconcile-validation-requirements",
+        "fallback-to-coordinator",
+        "recover-validation-launch",
+        "recover-validation-execution",
+        "replace-invalidated-audit",
+    }:
         operation = {
             "reconcile-validation-requirements": reconcile_validation_requirements,
             "fallback-to-coordinator": fallback_to_coordinator,
             "recover-validation-launch": recover_validation_launch,
             "recover-validation-execution": recover_validation_execution,
+            "replace-invalidated-audit": replace_invalidated_audit,
         }[args.operation]
         return operation(document, args)
     if args.operation == "next-ready":
@@ -8842,6 +9082,21 @@ def _retain_isolation_rejection(document: dict[str, Any], payload_bytes: bytes, 
         return {**receipt, "rejected_attempts": attempts, "replacement_allowed": len(attempts) == 1}
 
 
+def _validation_owner_warnings(contract: dict[str, Any], payload_bytes: bytes) -> list[str]:
+    """Flag exact alternate specialist names without policing shared owner labels."""
+    dispatch = _publication_dispatch(contract)
+    if dispatch is None or dispatch.get("mode") != "audit":
+        return []
+    skill_root = Path(dispatch["skill_path"]).parent.parent
+    return [
+        f"Validation owner {owner} differs from dispatch skill {dispatch['skill_id']}; verify the applied checklist. Shared validator owners are allowed."
+        for requirement in json.loads(payload_bytes).get("validation_requirements", [])
+        if (owner := requirement["owner"]) not in {dispatch["skill_id"], "review-validator"}
+        and re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", owner)
+        and (skill_root / owner / "SKILL.md").is_file()
+    ]
+
+
 def publish_worker_payload_bytes(document: dict[str, Any], payload_bytes: bytes, *, approval_identity: str | None = None) -> dict[str, Any]:
     """Review and publish identical bound bytes in one supported transaction."""
     review = _approved_worker_payload_write(document, payload_bytes, approval_identity, candidate_is_write_target=False)
@@ -8862,6 +9117,7 @@ def _worker_payload_cli_output(receipt: dict[str, Any], *, full_output: bool) ->
         "worker_payload_byte_count",
         "approval_identity",
         "artifact_write_review_reference",
+        "warnings",
     )
     return receipt if full_output else {key: receipt[key] for key in fields if key in receipt}
 
@@ -8891,6 +9147,31 @@ def _run_worker_payload_operation(document: dict[str, Any], args: argparse.Names
 
 def _print_operation_result(args: argparse.Namespace, output_path: Path, output: dict[str, Any]) -> None:
     receipt = stage_receipt(args.operation, output_path, output)
+    if args.operation in {"schedule-ready", "next-ready"}:
+        for summary, entry in zip(receipt["ready_dispatches"], output["ready_dispatches"], strict=True):
+            if observations := entry.get("dispatch", entry).get("validation_observations"):
+                summary["compile_command"] = runtime_command(
+                    Path(__file__),
+                    "compile-node",
+                    "--input",
+                    output.get("lifecycle_input_path", str(args.input.resolve())),
+                    "--dispatches",
+                    output.get("dispatches_path", str(args.dispatches.resolve())),
+                    "--node-id",
+                    entry["node_id"],
+                    "--before-capture",
+                    observations["before"]["capture_path"],
+                    "--after-capture",
+                    observations["after"]["capture_path"],
+                    "--workspace-before",
+                    observations["before"]["workspace_path"],
+                    "--workspace-after",
+                    observations["after"]["workspace_path"],
+                    "--journal",
+                    str(args.journal.resolve()),
+                    "--output",
+                    str(Path(entry["worker_input_path"]).with_suffix(".compiled.json")),
+                )
     if args.operation == "materialize-dispatches":
         receipt["next_operation_inputs"] = {"dispatches": str(output_path.resolve())}
         bundle = _read_json_object(args.input)
@@ -8987,7 +9268,7 @@ def _run_operation(document: dict[str, Any], args: argparse.Namespace) -> int:  
         output["output_generation"] = generation
         output["output_path"] = str(output_path)
     output_text = json.dumps(output, indent=2, sort_keys=True) + "\n"
-    if args.operation in {"recover-validation-launch", "recover-validation-execution", "reconcile-validation-requirements"}:
+    if args.operation in {"recover-validation-launch", "recover-validation-execution", "reconcile-validation-requirements", "replace-invalidated-audit"}:
         _write_bytes_atomically_once(output_path, output_text.encode(), mode=0o644)
     else:
         _write_text_once(output_path, output_text)

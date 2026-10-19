@@ -1,5 +1,6 @@
 """Small CLI receipts referencing complete immutable operation artifacts."""
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -13,8 +14,12 @@ def artifact_reference(path: Path) -> dict[str, str]:
 
 def dispatch_summary(entry: dict[str, Any]) -> dict[str, Any]:
     """Expose the worker handoff without copying its inspection context."""
+    dispatch = entry.get("dispatch", entry)
     return {
         "node_id": entry["node_id"],
+        "skill_id": dispatch["skill_id"],
+        "mode": dispatch["mode"],
+        "selection_reason": dispatch["selection_reason"][:240],
         "result_contract": entry["result_contract"],
         "execution_location": entry.get("dispatch", entry)["execution_location"],
         **({"executor_requirements": entry["dispatch"]["executor_requirements"]} if "executor_requirements" in entry.get("dispatch", {}) else {}),
@@ -63,7 +68,13 @@ def _validation_reconciliation_receipt(output: dict[str, Any]) -> dict[str, Any]
 
 def stage_receipt(operation: str, output_path: Path, output: dict[str, Any]) -> dict[str, Any]:
     """Keep proof bodies on disk and return only stage status and handoff references."""
-    receipt: dict[str, Any] = {"schema_version": 1, "operation": operation, "output": artifact_reference(output_path)}
+    saved = output_path.read_bytes()
+    receipt: dict[str, Any] = {
+        "schema_version": 1,
+        "operation": operation,
+        "output": {"path": str(output_path.resolve()), "digest": digest_bytes(saved)},
+        "output_fields": sorted(json.loads(saved)),
+    }
     for key in (
         "status",
         "blockers",
@@ -123,5 +134,7 @@ def stage_receipt(operation: str, output_path: Path, output: dict[str, Any]) -> 
         receipt["node_counts"] = {key.removesuffix("_node_ids"): len(value) for key, value in output["lifecycle"].items()}
         receipt["node_counts"].update(ready=len(output["ready_dispatches"]), waiting=len(output["waiting"]))
         receipt["waiting"] = output["waiting"]
+        receipt["in_flight_node_ids"] = output["lifecycle"]["in_flight_node_ids"]
+        receipt["completion_order"] = "Compile published payloads for finished in-flight nodes before lowering worker occupancy or admitting repairs."
     receipt.update(_continuation_receipt(output))
     return receipt

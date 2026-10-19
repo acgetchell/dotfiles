@@ -11,7 +11,8 @@ import review_graph_runtime as runtime
 from review_graph_benchmark import benchmark_fixture
 from review_graph_independent import CHECK_LABELS, SCHEMA
 from review_graph_schema import require_schema
-from test_review_graph_runtime import _compact_audit_payload, _compact_independent_payload
+from test_review_graph_runtime import _compact_audit_payload, _compact_independent_payload, _continuation_fixture, _execution_payload
+from test_support_review_graph import _prepare_all_fixture_timing
 
 
 def _digest(content: bytes) -> str:
@@ -21,6 +22,7 @@ def _digest(content: bytes) -> str:
 @pytest.fixture
 def materialized(tmp_path: Path) -> dict[str, Any]:
     document = benchmark_fixture(tmp_path / "repository")
+    (tmp_path / "repository" / "AGENTS.md").write_text("Read the source and retain truthful evidence.\n")
     return runtime.materialize_dispatches({**document, "artifact_store": str(tmp_path / "proof")})
 
 
@@ -39,11 +41,16 @@ def test_dispatch_provenance_examples_publish_and_compile_first_time(materialize
     """Replay emitted fragments with complete scripted evidence through native gates."""
     entry = next(item for item in materialized["dispatches"] if item["dispatch"].get("mode") == mode)
     dispatch = entry["dispatch"]
-    examples = dispatch["provenance_examples"]
+    view = json.loads(Path(entry["worker_execution_path"]).read_bytes())
+    examples = view["dispatch"]["provenance_examples"]
     payload = _compact_independent_payload(dispatch) if mode == "independent-review" else _compact_audit_payload(entry)
-    payload["nearby_contract_owners"] = list(dict.fromkeys([*payload["nearby_contract_owners"], *examples["context_read"]["nearby_contract_owners"]]))
+    payload["nearby_contract_owners"] = list(
+        dict.fromkeys([*examples["required_reads"]["nearby_contract_owners"], *examples["context_read"]["nearby_contract_owners"]])
+    )
     payload["git_dependencies"] = examples[diff_example]["git_dependencies"]
-    payload["commands_executed"] = [command for key in ("owned_read", "context_read", diff_example) for command in examples[key]["commands_executed"]]
+    payload["commands_executed"] = [
+        command for key in ("owned_read", "context_read", "required_reads", diff_example) for command in examples[key]["commands_executed"]
+    ]
     receipt = _publish(entry, payload)
     sealed = Path(entry["worker_payload_path"]).read_bytes()
     assert receipt["worker_payload_digest"] == _digest(sealed)
@@ -131,20 +138,68 @@ def test_default_cli_receipt_binds_full_artifact_and_explicit_full_output(tmp_pa
     receipt = json.loads(stdout)
     assert receipt["output"] == {"path": str(output), "digest": _digest(output.read_bytes())}
     assert receipt["next_operation_inputs"] == {"dispatches": str(output)}
+    assert receipt["output_fields"] == sorted(json.loads(output.read_bytes()))
     assert receipt["node_count"] == len(document["plan"]["actual_worker_nodes"])
     assert len(stdout.encode()) < output.stat().st_size / 5
     for entry in receipt["dispatches"]:
-        expected = {"node_id", "result_contract", "execution_location", "worker_input"}
+        expected = {"node_id", "skill_id", "mode", "selection_reason", "result_contract", "execution_location", "worker_input"}
         if entry["result_contract"] == "compact-validation":
             expected.add("executor_requirements")
             expected.add("timing_prerequisite")
             assert entry["executor_requirements"] == {"sandbox_permissions": "use_default"}
         assert set(entry) == expected
+        canonical = json.loads(Path(json.loads(Path(entry["worker_input"]["path"]).read_bytes())["canonical_input"]["path"]).read_bytes())
+        for key in ("skill_id", "mode", "selection_reason"):
+            assert entry[key] == canonical["dispatch"][key][:240]
         assert entry["worker_input"]["digest"] == _digest(Path(entry["worker_input"]["path"]).read_bytes())
     saved = output.read_bytes()
     assert runtime.main([*args, "--full-output"]) == 0
     assert json.loads(capsys.readouterr().out) == json.loads(saved)
     assert output.read_bytes() == saved
+
+
+@pytest.mark.parametrize("owner", ["rust-api-design", "review-validator", "shared repository gate"])
+def test_owner_warning_is_advisory_and_allows_shared_validators(materialized: dict[str, Any], owner: str) -> None:
+    entry = next(item for item in materialized["dispatches"] if item["dispatch"]["mode"] == "audit")
+    planned = entry["dispatch"]["command_policy"]["planned_validation_units"][0]
+    payload = _compact_audit_payload(entry)
+    payload["validation_requirements"] = [
+        {
+            "requirement_id": planned["requirement_ids"][0],
+            "planned_validation_digest": planned["planned_validation_digest"],
+            "owner": owner,
+            "reason": "Regression coverage",
+            "expected_evidence": "The planned check passes.",
+        }
+    ]
+    receipt = runtime._worker_payload_cli_output(_publish(entry, payload), full_output=False)
+    assert receipt["status"] == "published"
+    assert bool(receipt["warnings"]) == (owner == "rust-api-design")
+    assert json.loads(Path(entry["worker_payload_path"]).read_bytes()) == payload
+
+
+@pytest.mark.parametrize("compact", [False, True])
+def test_validator_ready_compile_command_accepts_saved_observations(tmp_path: Path, capsys: pytest.CaptureFixture[str], compact: bool) -> None:
+    lifecycle, dispatches, paths = _continuation_fixture(tmp_path)
+    _prepare_all_fixture_timing(dispatches)
+    output = tmp_path / "ready.json"
+    arguments = ["next-ready", *(arg for key, path in paths.items() for arg in ("--" + key, str(path))), "--output", str(output)]
+    assert runtime.main([*arguments, *(["--compact"] if compact else [])]) == 0
+    receipt = json.loads(capsys.readouterr().out)
+    ready = next(item for item in receipt["ready_dispatches"] if item["mode"] == "validation")
+    entry = next(item for item in dispatches["dispatches"] if item["node_id"] == ready["node_id"])
+    for phase in entry["dispatch"]["validation_observations"].values():
+        Path(phase["capture_path"]).write_bytes(paths["current-capture"].read_bytes())
+        Path(phase["workspace_path"]).write_text(json.dumps(runtime.capture_workspace_snapshot(entry["dispatch"])))
+    _publish(entry, _execution_payload(entry, "passed", 0, "0s"))
+    command = ready["compile_command"]
+    assert runtime.main(command[command.index("compile-node") :]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "accepted"
+    _events, state, _head = runtime.read_execution_journal(
+        paths["journal"], plan=runtime._graph_plan(lifecycle["plan"]), source_state=tuple(lifecycle["source_state"])
+    )
+    assert state[entry["node_id"]] == "accepted"
 
 
 def test_planned_validation_identity_is_shared(materialized: dict[str, Any]) -> None:

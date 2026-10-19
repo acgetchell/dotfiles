@@ -546,6 +546,7 @@ class GraphPlan:
     validation_requirement_bindings: tuple[ValidationRequirementBinding, ...] = field(default=(), kw_only=True)
     audit_delta_reviews: tuple[dict[str, Any], ...] = ()
     validation_recoveries: tuple[dict[str, Any], ...] = ()
+    audit_replacements: tuple[dict[str, Any], ...] = field(default=(), kw_only=True)
     pre_review_validation_nodes: tuple[str, ...] = ()
     commit_handoffs: tuple[ExternalMetadataTransition, ...] = ()
     review_lifecycle: ReviewLifecycle = field(default_factory=ReviewLifecycle)
@@ -2475,6 +2476,7 @@ def graph_plan_digest(plan: GraphPlan) -> str:
             "commit_handoffs",
             "pre_review_validation_nodes",
             "validation_recoveries",
+            "audit_replacements",
             "audit_delta_reviews",
             "validation_exclusions",
             "validation_requirement_bindings",
@@ -2495,7 +2497,15 @@ def graph_plan_digest_matches(plan: GraphPlan, digest: str) -> bool:
     if plan.review_lifecycle == ReviewLifecycle():
         legacy.pop("review_lifecycle")
     _drop_empty_plan_fields(
-        legacy, ("commit_handoffs", "pre_review_validation_nodes", "validation_recoveries", "validation_exclusions", "validation_requirement_bindings")
+        legacy,
+        (
+            "commit_handoffs",
+            "pre_review_validation_nodes",
+            "validation_recoveries",
+            "audit_replacements",
+            "validation_exclusions",
+            "validation_requirement_bindings",
+        ),
     )
     if digest == digest_json(legacy):
         return True

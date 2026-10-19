@@ -139,6 +139,31 @@ source epoch.
 
 ## Compact Transport
 
+`output_fields` lists the saved result's top-level keys. Compact
+`next_operation_inputs` projects those path fields; it is not a field in every
+saved result. Mutation results contain `new_plan`; use their returned
+`lifecycle_input_path` for subsequent commands.
+
+Ready receipts include `node_id`, `skill_id`, `mode`, and a short selection reason.
+Verify that identity before applying a checklist. Validator ready receipts also
+include a `compile_command` with both bound capture and workspace snapshot paths.
+Execute it after publication; preserve the snapshots and do not rerun successful
+validation to repair an omitted compiler argument. Compile finished in-flight
+nodes before lowering worker occupancy or admitting a repair batch.
+
+Compact execution views include illustrative provenance fragments for owned reads,
+nearby reads, and every required skill/instruction/reference read. Merge only
+performed reads and commands. `git_dependencies[].command` is singular and must
+match an exact executed command. Plain local diffs with optional `HEAD` may use
+`source-discovery`; captured-base branch comparisons use `head`. Substitute the
+captured base for the illustrative `origin/main`.
+
+Publication warns when an audit validation requirement's owner exactly names a
+different installed specialist. Shared labels and `review-validator` are allowed;
+this warning cannot establish which semantic checklist was applied. Recover a
+mistaken accepted judgment with
+[audit replacement](state-transitions.md#replace-an-invalidated-audit).
+
 Bootstrap binds capture identities with JSON-path diagnostics and saves complete
 stage inputs. Its default stdout receipt includes `output.path` and `output.digest`,
 blockers, node count, and a directly executable `next_command` argument array.

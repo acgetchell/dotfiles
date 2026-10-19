@@ -180,7 +180,7 @@ just brew-cleanup-preview
 # Uninstall the previewed formulae/casks and perform Homebrew cache cleanup
 just brew-cleanup
 
-# Run manager updates; the Python override guard currently stops this sequence
+# Run manager updates while preserving Python resolver overrides
 just update
 
 # Snapshot the current machine for review, without committing it
@@ -190,12 +190,13 @@ brew bundle dump --file=~/projects/dotfiles/Brewfile.local --force --describe
 `Brewfile.local` is gitignored. Use it to audit one-off apps before deciding whether they belong in the committed foundational `Brewfile`.
 `just brew-cleanup-preview` never passes Homebrew's destructive `--force` flag. Homebrew returns status 1 when the preview finds cleanup candidates; the recipe treats that documented result as a successful preview while preserving actual errors. `just brew-cleanup` asks for confirmation before passing `--force` and applying that cleanup.
 
-`just update` upgrades the Brewfile dependencies and reconciles uv, then currently stops
-at the Python dependency step. The Windows resolver override cannot be preserved by the
-published direct-pin updater, so `just update-python-dependencies` also stops before resolution.
-Use the [project-aware manual refresh instructions](docs/shared-tooling.md#python-authority-and-upgrades)
-for Python updates. After upstream supports overrides, the Python step can again advance
-exact direct development-tool pins, refresh `uv.lock`, and synchronize the environment.
+`just update` upgrades the Brewfile dependencies and reconciles uv, refreshes Python
+dependencies, then updates Cargo tools and managed security scanners. While Python
+resolver overrides are present, `just update-python-dependencies` retains exact direct
+pins and runs a project-aware `uv lock --upgrade` followed by environment synchronization.
+Without overrides, the shared updater first advances exact direct development-tool pins.
+See the [direct-pin update instructions](docs/shared-tooling.md#python-authority-and-upgrades)
+for deliberate Python tool upgrades while overrides remain necessary.
 The locked `research-repo-tools` package supplies pin updates, uv preflight, and tool-pin
 reconciliation. Its exact pin lives in the included `tooling` group and changes only through
 an explicit package upgrade; ranges, markers, and other included-group constraints remain intact.

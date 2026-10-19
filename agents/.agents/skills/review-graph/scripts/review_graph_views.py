@@ -14,6 +14,7 @@ _EXECUTION_FIELDS = (
     "reference_paths",
     "instruction_paths",
     "required_read_paths",
+    "provenance_examples",
     "repository_root",
     "authorization",
     "state_verification_command",
@@ -60,9 +61,17 @@ def execution_view_bytes(entry: dict[str, Any], canonical_bytes: bytes) -> bytes
             "Publish semantic JSON through publish_command (stdin); the runtime assembles provenance, canonical evidence and receipts. "
             "Record actual reads/commands and truthful limitations. Command policy is authoritative; delegate validator-owned checks. "
             "Use the shared read-only source packet when supplied; each specialist makes its own judgment. "
-            "Full schema, provenance examples and recovery commands are available through canonical_input when needed."
+            "Full provenance and recovery commands are available through canonical_input when needed."
         ),
     }
+    if "provenance_examples" in dispatch:
+        view["instructions"] += (
+            " provenance_examples are illustrative fragments, not performed work; merge only actual reads/commands. "
+            "files_inspected is owned-only; record required instruction reads there or in nearby_contract_owners according to scope. "
+            "git_dependencies[].command is singular and matches an exact commands_executed entry. "
+            "source-discovery permits only a plain local git diff with optional HEAD; fixed-base branch comparisons use head. "
+            "Replace origin/main with the captured base."
+        )
     if mode == "audit":
         if dispatch.get("fresh_context"):
             view["instructions"] += " " + ISOLATION_INSTRUCTIONS

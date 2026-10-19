@@ -2613,7 +2613,7 @@ def test_next_ready_compact_references_worker_inputs_without_embedding_dispatche
     assert result["compact"] is True
     assert result["ready_dispatches"]
     assert {tuple(entry) for entry in result["ready_dispatches"]} == {
-        ("execution_location", "node_id", "result_contract", "worker_execution_path", "worker_input_path")
+        ("execution_location", "mode", "node_id", "result_contract", "selection_reason", "skill_id", "worker_execution_path", "worker_input_path")
     }
     for entry in result["ready_dispatches"]:
         bound = json.loads(Path(entry["worker_input_path"]).read_text(encoding="utf-8"))
@@ -4483,7 +4483,14 @@ def test_validation_requirement_bindings_preserve_legacy_plan_digests() -> None:
     restored = _graph_plan(legacy)
     assert restored.validation_requirement_bindings == ()
     assert graph_plan_digest(restored) == graph_plan_digest(plan)
-    for field in ("independent_review_after_audits", "commit_handoffs", "pre_review_validation_nodes", "validation_recoveries", "validation_exclusions"):
+    for field in (
+        "independent_review_after_audits",
+        "commit_handoffs",
+        "pre_review_validation_nodes",
+        "validation_recoveries",
+        "audit_replacements",
+        "validation_exclusions",
+    ):
         legacy.pop(field)
     if plan.review_lifecycle == ReviewLifecycle():
         legacy.pop("review_lifecycle")
@@ -4497,11 +4504,12 @@ def test_validation_requirement_bindings_preserve_legacy_plan_digests() -> None:
 
 
 def test_graph_plan_preserves_legacy_positional_constructor_tail() -> None:
-    """Adding origin bindings must not shift existing optional positional arguments."""
+    """New recovery and origin fields must not shift optional positional arguments."""
     plan = _sparse_plan()
-    legacy_fields = [item.name for item in fields(GraphPlan) if item.name != "validation_requirement_bindings"]
+    additions = {"validation_requirement_bindings", "audit_replacements"}
+    legacy_fields = [item.name for item in fields(GraphPlan) if item.name not in additions]
     assert GraphPlan(*(getattr(plan, name) for name in legacy_fields)) == plan
-    assert next(item for item in fields(GraphPlan) if item.name == "validation_requirement_bindings").kw_only
+    assert all(item.kw_only for item in fields(GraphPlan) if item.name in additions)
 
 
 def test_validation_requirement_bindings_reject_ambiguous_persisted_origins() -> None:
@@ -4524,6 +4532,7 @@ def test_plan_digest_retains_nonempty_reuse_fields(tmp_path: Path) -> None:
     document.pop("commit_handoffs")
     document.pop("pre_review_validation_nodes")
     document.pop("validation_recoveries")
+    document.pop("audit_replacements")
     document.pop("audit_delta_reviews")
     document.pop("validation_exclusions")
     document.pop("validation_requirement_bindings")

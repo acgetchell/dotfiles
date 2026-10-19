@@ -4,6 +4,49 @@ Load for content repairs, external staging, or late validation/routing changes.
 Apply the [bounded lifecycle](bounded-lifecycle.md) before another source-editing
 batch or comprehensive restart; transitions retain the run-wide repair count.
 
+## Replace An Invalidated Audit
+
+If an accepted audit applied the wrong checklist, first finish compiling other
+in-flight work, then explicitly invalidate the mistaken node. Set `REVIEW_PYTHON`
+and `REVIEW_RUNTIME` to the interpreter and frozen runtime paths from this run's
+generated commands. Run both commands from the reviewed repository:
+
+```sh
+"$REVIEW_PYTHON" "$REVIEW_RUNTIME" journal-append \
+  --input <lifecycle.json> --journal <execution.jsonl> \
+  --node-id <audit-node> --status invalidated \
+  --reason 'Applied the wrong specialist checklist'
+```
+
+Create a request from the current lifecycle's `plan`, `source_state`, and any
+`external_metadata_transitions`; add an external `artifact_store`, the invalidated
+`node_id`, and a concrete `reason`. Then run:
+
+```sh
+"$REVIEW_PYTHON" "$REVIEW_RUNTIME" replace-invalidated-audit \
+  --input <replacement-request.json> --journal <execution.jsonl> \
+  --dispatches <dispatches.json> --current-capture <capture.json> \
+  --output <replacement-result.json>
+```
+
+Follow the returned lifecycle, dispatch, journal, and capture paths. The runtime
+requires unchanged source, quiescent execution, and one invalidated dependency
+closure; unrelated invalidations must be reconciled separately. It preserves the invalidated
+journal, payload, and compiled evidence by digest; the original plan cannot admit
+more work. The affected dependency closure gets fresh node/evidence identities,
+and the audit starts with full owned scope and no inherited judgment. Give the
+replacement worker only its execution view and raw inputs, never the invalidated
+conclusions. Unaffected accepted audits and validators remain bound to their
+original evidence.
+
+One replacement is permitted per specialist requirement set and source state;
+another semantic mistake remains blocked. An identical request can recover its
+saved result. Replacement leaves content-repair counters, the configured worker
+budget, and reserve unchanged. It does not authorize content changes or a comprehensive
+restart, and cannot revive a stopped run.
+
+## Validation Expansion And Recovery
+
 For completed software DOI checks needing canonical metadata, use
 [software DOI reconciliation](software-doi-reconciliation.md). It adds a focused
 validator while retaining the original failed execution; it is not launch recovery.
