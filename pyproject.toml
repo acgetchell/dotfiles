@@ -16,6 +16,8 @@ override-dependencies = [
   "pywin32==312; sys_platform == 'win32'",
   # Semgrep pins vulnerable MCP 1.29.0; retain the patched 1.x API until upstream updates.
   "mcp>=1.30.0,<2",
+  # research-repo-tools pins 1.58.0; keep uv-run tools aligned with justfile.
+  "rust-just==1.59.0",
 ]
 
 [tool.research-repo-tools.toolchain]

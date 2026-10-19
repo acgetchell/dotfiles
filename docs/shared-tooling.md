@@ -13,7 +13,7 @@ No sibling checkout or unreleased code is needed.
 | Workflow auditing | One locked Python zizmor pin and explicit persona; SHA pinning, offline local gate, required-online hosted audit, guarded SARIF upload; shared Actions allowlist command reads the committed settings |
 | Dependency/secret scanning | Managed OSV/Gitleaks, explicit root `uv.lock`, full reachable history and current files, redacted reports; required CI `verify` includes the gate |
 | Scanner lifecycle | `tools-sync`, `tools-check`, `update-security-tools`, and preview-first `clean`; package-owned cache store |
-| Dependency/tool updates | Shared helpers with a preflight guard for unsupported project overrides; Homebrew uv pin reconciliation; machine Cargo tools retain their existing owner |
+| Dependency/tool updates | Shared helpers with project-aware lock refresh for unsupported project overrides; Homebrew uv pin reconciliation; machine Cargo tools retain their existing owner |
 | Semgrep fixtures | Shared assertion runner over repository rules, syntax mutation pairs, and count expectations that retain path filters; integration tests exercise real review-graph source/test paths |
 | Notebooks | Published inspection/advice/lint/cleanup/execution in the Jupyter skill; its consumer template prohibits dependency installs inside cells |
 | Reviews | Shared opt-in CodeRabbit wrapper defaults to verified `origin/main`; no review is sent merely by running CI |
@@ -54,15 +54,21 @@ The Windows-only uv override selects 312, which publishes cp315 wheels. Remove
 the override when Semgrep advances its dependency. Universal lock resolution
 checks package availability; native Windows execution remains a hosted check.
 
+The shared package pins `rust-just==1.58.0`. A project override aligns the Python
+environment's Just with `just_version` in `justfile`, including commands launched
+by `uv run`. Keep both pins aligned when updating Just; CI checks the installed
+Python distribution and executable against the repository pin.
+
 The v0.1.9 direct-pin updater resolves through temporary PEP 723 metadata that
-does not copy this project override. It can consequently downgrade Semgrep even
-though the project lock resolves correctly. `update-python-dependencies` stops
-before shared resolution while overrides are present. Use `uv lock --upgrade`
-for a transitive refresh that retains direct pins and project overrides. For a
-deliberate direct-pin change, use `uv add --dev 'PACKAGE==VERSION'`, review the
-manifest/lock diff, and run `just ci` plus `just security`. Remove the preflight
-guard after upstream supports overrides; the shared package remains the updater
-owner. `just update` also stops at this guard during its Python dependency step.
+does not copy these project overrides. It can consequently downgrade Semgrep even
+though the project lock resolves correctly. `update-python-dependencies` skips
+shared direct-pin resolution while overrides are present and runs `uv lock --upgrade`
+for a transitive refresh that retains direct pins and project overrides, then
+synchronizes the development environment. For a deliberate direct-pin change,
+use `uv add --dev 'PACKAGE==VERSION'`, review the manifest/lock diff, and run
+`just ci` plus `just security`. Remove the preflight
+fallback after upstream supports overrides; the shared package remains the direct-pin
+updater owner. `just update` continues through Cargo and security-tool updates.
 
 Skill validation uses PyYAML's C safe loader when installed, with the Python
 safe loader as a supported fallback. Explicit Python 3.15 lazy imports defer

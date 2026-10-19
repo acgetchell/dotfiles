@@ -10,9 +10,9 @@ python_primary_paths := "agents/.agents/skills scripts"
 review_contract_tests := "agents/.agents/skills/review-graph/scripts/test_review_graph_contracts.py"
 cargo_update_version := "22.1.1"
 cargo_version_pattern := '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?'
-dprint_version := "0.63.0"
-just_version := "1.58.0"
-rumdl_version := "0.2.79"
+dprint_version := "0.64.0"
+just_version := "1.59.0"
+rumdl_version := "0.3.0"
 # Bootstrap without Python; pyproject.toml is the single uv pin authority.
 uv_version := `sed -nE 's/^required-version = "==([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' pyproject.toml`
 
@@ -352,13 +352,17 @@ update-uv:
 update-security-tools: _ensure-uv
     uv run --locked --group dev research-repo-tools toolchain upgrade
 
-# Advance direct dev pins, refresh the full lock, and explicitly synchronize dev.
+# Preserve project overrides, refresh the full lock, and synchronize dev.
 update-python-dependencies: _preflight-stable-uv
     #!/usr/bin/env bash
     set -euo pipefail
 
-    uv run --locked python scripts/python_update_preflight.py
-    just _shared-deps update-python
+    update_mode="$(uv run --locked python scripts/python_update_preflight.py)"
+    case "$update_mode" in
+        shared) just _shared-deps update-python ;;
+        project) echo "Project overrides present; retaining exact direct pins and refreshing transitive dependencies." ;;
+        *) echo "Unsupported Python update mode: $update_mode" >&2; exit 1 ;;
+    esac
     uv_executable="$(brew --prefix uv)/bin/uv"
     if [[ ! -x "$uv_executable" ]]; then
         echo "Homebrew-managed uv is unavailable at $uv_executable." >&2

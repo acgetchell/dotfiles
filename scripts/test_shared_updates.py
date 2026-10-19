@@ -14,6 +14,16 @@ import pytest
 REPOSITORY = Path(__file__).resolve().parents[1]
 
 
+def test_python_environment_uses_repository_just_pin() -> None:
+    just = Path(sys.executable).with_name("just.exe" if sys.platform == "win32" else "just")
+    expected = subprocess.run(  # noqa: S603 - the environment's installed Just reads the repository pin.
+        [str(just), "--evaluate", "just_version"], cwd=REPOSITORY, check=True, capture_output=True, text=True, timeout=10
+    ).stdout.strip()
+    assert version("rust-just") == expected
+    actual = subprocess.run([str(just), "--version"], check=True, capture_output=True, text=True, timeout=10).stdout.strip()  # noqa: S603
+    assert actual == f"just {expected}"
+
+
 def run_shared(root: Path, action: str) -> subprocess.CompletedProcess[str]:
     """Exercise the installed distribution's supported CLI in a consumer fixture."""
     command = shutil.which("research-repo-tools")
@@ -47,8 +57,12 @@ def test_shared_updater_reconciles_dotfiles_mapping(tmp_path: Path, monkeypatch:
         assert pins["assignments"][pin]["value"] == expected
 
 
-@pytest.mark.parametrize("failure", [None, "check-uv", "python-preflight", "update-python", "install-update"])
-def test_update_orders_managers_and_stops_after_failures(tmp_path: Path, failure: str | None) -> None:
+@pytest.mark.parametrize(
+    ("overrides", "failure"),
+    [(overrides, failure) for overrides in (False, True) for failure in (None, "check-uv", "python-preflight", "lock", "sync", "install-update")]
+    + [(False, "update-python")],
+)
+def test_update_orders_managers_and_stops_after_failures(tmp_path: Path, *, overrides: bool, failure: str | None) -> None:
     checkout = tmp_path / "checkout"
     checkout.mkdir()
     shutil.copy2(REPOSITORY / "justfile", checkout)
@@ -57,9 +71,10 @@ def test_update_orders_managers_and_stops_after_failures(tmp_path: Path, failure
     shutil.copy2(REPOSITORY / "scripts/python_update_preflight.py", checkout / "scripts")
     manifest = checkout / "pyproject.toml"
     uv_version = tomllib.loads(manifest.read_text())["tool"]["uv"]["required-version"].removeprefix("==")
-    if failure != "python-preflight":
+    if not overrides:
         # These manager-ordering scenarios need only the pin and no resolver overrides.
         manifest.write_text(f'[tool.uv]\nrequired-version = "=={uv_version}"\n')
+    original_manifest = manifest.read_text()
     binaries = tmp_path / "bin"
     binaries.mkdir()
     log = tmp_path / "calls.jsonl"
@@ -80,6 +95,8 @@ else:
     with Path({str(log)!r}).open("a", encoding="utf-8") as stream:
         stream.write(json.dumps([name, *args]) + "\\n")
     if name == "uv" and args == ["run", "--locked", "python", "scripts/python_update_preflight.py"]:
+        if {failure!r} == "python-preflight":
+            raise SystemExit(23)
         raise SystemExit(subprocess.run([sys.executable, args[-1]], check=False).returncode)
     if {failure!r} is not None and {failure!r} in args:
         raise SystemExit(23)
@@ -106,16 +123,20 @@ else:
         for call in calls
     ]
     expected = ["check-uv", "brew", "update-uv", "check-uv", "python-preflight", "update-python", "lock", "sync", "install-update", "update-tools", "upgrade"]
+    if overrides:
+        expected.remove("update-python")
     if failure is not None:
         expected = expected[: expected.index(failure) + 1]
     assert (result.returncode == 0) == (failure is None), result.stderr
     assert stages == expected
-    if failure == "python-preflight":
-        assert "isolated resolver" in result.stderr
-        assert "override-dependencies" in tomllib.loads((checkout / "pyproject.toml").read_text())["tool"]["uv"]
-        assert "update-python" not in stages
+    expected_manifest = original_manifest
     if "update-uv" in stages:
-        assert tomllib.loads((checkout / "pyproject.toml").read_text())["tool"]["uv"]["required-version"] == f"=={upgraded_uv}"
+        expected_manifest = expected_manifest.replace(f'required-version = "=={uv_version}"', f'required-version = "=={upgraded_uv}"')
+    assert manifest.read_text() == expected_manifest
+    if overrides:
+        assert "update-python" not in stages
+    if "lock" in stages:
+        assert ["uv", "lock", "--upgrade"] in calls
     if "install-update" in stages:
         assert ["cargo", "install-update", "-a", "--locked"] in calls
     if "sync" in stages:

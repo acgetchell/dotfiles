@@ -33,6 +33,23 @@ def prepare_omz(tmp_path: Path, omz_state: str) -> Path:
     return omz
 
 
+def write_bootstrap_justfile(repository: Path, checkout: Path, just: str) -> None:
+    just_version = (
+        subprocess.run(  # noqa: S603 - resolved Just executable and fixed version query.
+            [just, "--version"], check=True, capture_output=True, text=True
+        )
+        .stdout.strip()
+        .removeprefix("just ")
+    )
+    fixture_pins = {"cargo_update_version": "22.1.1", "just_version": just_version}
+    source = (repository / "justfile").read_text(encoding="utf-8")
+    fixture_lines = []
+    for line in source.splitlines():
+        name = line.partition(" :=")[0]
+        fixture_lines.append(f'{name} := "{fixture_pins[name]}"' if name in fixture_pins else line)
+    (checkout / "justfile").write_text("\n".join(fixture_lines) + "\n", encoding="utf-8")
+
+
 @pytest.mark.parametrize("omz_state", ["missing", "installed", "incomplete"])
 @pytest.mark.parametrize("installed_version", [None, "1.0.0", "22.1.1"])
 def test_bootstrap_installs_updater_by_package_and_checks_its_executable(tmp_path: Path, installed_version: str | None, omz_state: str) -> None:
@@ -44,11 +61,9 @@ def test_bootstrap_installs_updater_by_package_and_checks_its_executable(tmp_pat
     shutil.copy2(repository / "bin" / "resolve-just-version.sh", checkout / "bin")
     shutil.copy2(repository / "bin" / "restow-agents.sh", checkout / "bin")
     shutil.copy2(repository / "pyproject.toml", checkout)
-    source = (repository / "justfile").read_text(encoding="utf-8")
-    fixture = "\n".join('cargo_update_version := "22.1.1"' if line.startswith("cargo_update_version :=") else line for line in source.splitlines())
-    (checkout / "justfile").write_text(f"{fixture}\n", encoding="utf-8")
     just = shutil.which("just")
     assert just is not None
+    write_bootstrap_justfile(repository, checkout, just)
     (binaries / "just").symlink_to(just)
     stow = shutil.which("stow")
     assert stow is not None

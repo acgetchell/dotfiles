@@ -1592,8 +1592,12 @@
     },
     "snapshot-workspace": {
       "oneOf": [
-        { "$ref": "#/$defs/stdinWorkerPayloadContract" },
-        { "$ref": "#/$defs/lifecycleWorkspaceSnapshot" }
+        {
+          "$ref": "#/$defs/stdinWorkerPayloadContract"
+        },
+        {
+          "$ref": "#/$defs/lifecycleWorkspaceSnapshot"
+        }
       ]
     },
     "lifecycleWorkspaceSnapshot": {
@@ -1718,6 +1722,43 @@
         },
         "target_source_state": {
           "$ref": "#/$defs/sourceState"
+        }
+      }
+    },
+    "replace-invalidated-audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_store",
+        "plan",
+        "source_state",
+        "node_id",
+        "reason"
+      ],
+      "properties": {
+        "external_metadata_transitions": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "artifact_store": {
+          "type": "string",
+          "minLength": 1
+        },
+        "plan": {
+          "type": "object"
+        },
+        "source_state": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "node_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
         }
       }
     }

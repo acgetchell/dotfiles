@@ -55,7 +55,8 @@ immutable `worker_input_path` directly; never extract aggregate wrappers.
 
 `schedule-ready` selects grouped/mixed coordinator and worker lanes; see
 [grouped scheduling](grouped-scheduling.md) for capacity, reservations, and continuation.
-Isolated profiles use `next-ready`.
+Isolated profiles use `next-ready`. Verify receipt skill identities; compile finished
+nodes before capacity changes/repairs. Validator compile commands include snapshots.
 
 `inspection_profile: shared-read-only` (default) shares digest-bound structural
 observations between overlapping audits. Source text is capped at 64 KiB/packet,

@@ -86,6 +86,7 @@ retains ownership of the coalesced judgment and evidence.
 
 Capture before/after execution. Run `compile-node` with node ID, signed
 dispatches, captures and journal. Accept only compiler-verified sealed evidence.
+Wrong-checklist recovery: [audit replacement](references/state-transitions.md#replace-an-invalidated-audit).
 
 For a concrete change target, run `repository-independent-review` once on the
 finished change, fresh and conclusion-blind; repeat only when subsequent changes

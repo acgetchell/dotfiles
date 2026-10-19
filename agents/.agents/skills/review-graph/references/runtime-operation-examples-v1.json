@@ -387,5 +387,16 @@
         "metadata_path": "/tmp/review-proof/audit.evidence.json"
       }
     ]
+  },
+  "replace-invalidated-audit": {
+    "artifact_store": "/tmp/review-recovery",
+    "plan": {},
+    "source_state": [
+      "scope",
+      "worktree",
+      "repository"
+    ],
+    "node_id": "audit-001",
+    "reason": "The accepted audit applied a different specialist checklist; journal invalidation retained."
   }
 }

@@ -25,12 +25,12 @@ updates are eligible. Python version-update PRs are temporarily paused with
 The Python security-update group remains configured, but shares that runtime
 limitation; the required OSV audit remains available. The published manual updater
 also loses project `override-dependencies` during isolated resolution and can
-downgrade Semgrep. `just update-python-dependencies` therefore stops before that
-resolver while the Windows override is set. Use `uv lock --upgrade` for a
-project-aware transitive refresh, or update exact direct pins deliberately with
+downgrade Semgrep. `just update-python-dependencies` therefore skips that resolver
+while overrides are set and uses `uv lock --upgrade` for a project-aware transitive
+refresh. Update exact direct pins deliberately with
 `uv add --dev 'PACKAGE==VERSION'`. Review the manifest and lock diff, confirm
 Semgrep has not regressed, then run `just ci` and `just security`. Remove the
-preflight guard after the shared updater preserves project overrides.
+preflight fallback after the shared updater preserves project overrides.
 Restore the uv limit to 10 after a hosted update resolves the committed 3.15
 lockfile successfully. GitHub Actions updates continue on Mondays with their
 seven-day cooldown and existing groups. CodeRabbit remains a separate required

@@ -253,7 +253,7 @@ Python version-update PRs are paused with `open-pull-requests-limit: 0`, which
 That runtime limitation can also affect security PR creation; the required
 OSV audit continues. The published manual updater also loses project overrides
 in its isolated resolver, which previously downgraded Semgrep. The local recipe
-now stops before that step while the Windows override is present; see the
-[project-aware manual refresh instructions](shared-tooling.md).
+now skips shared direct-pin resolution and refreshes the project lock while
+overrides are present; see the [Python update instructions](shared-tooling.md).
 Restore the limit to 10 after a hosted 3.15 update succeeds. GitHub Actions
 updates and the separately pinned approval workflow remain enabled.

@@ -88,6 +88,7 @@ def linux_boundary(tmp_path: Path) -> dict[str, str]:
         f'if [[ "$1" == --version ]]; then echo uv {pins["uv"]}; else\n'
         'printf "%s\\n" "$*" >> "$CALL_LOG"\n'
         'if [[ "$1" == run ]]; then\nshift\nwhile [[ "$1" == --* ]]; do shift; done\n'
+        'export PATH="$UV_PROJECT_ENVIRONMENT/bin:$PATH"\n'
         '[[ "$1" == python && "$2" == scripts/linux_review.py ]]\nshift\n'
         f'exec {shlex.quote(sys.executable)} "$@"\nfi\nfi',
         uv_asset + ".sha256",
@@ -136,6 +137,37 @@ def test_fresh_setup_and_rerun_use_pins_custom_storage_and_no_shell_changes(linu
     reports = list(Path(linux_boundary["DOTFILES_REVIEW_ARTIFACTS"]).glob("setup-*/environment.json"))
     assert len(reports) == 2
     assert all(json.loads(path.read_text())["status"] == "passed" for path in reports)
+
+
+def test_uv_environment_does_not_shadow_provisioned_tools(linux_boundary: dict[str, str]) -> None:
+    prefix = Path(linux_boundary["DOTFILES_REVIEW_PREFIX"])
+    venv_bin = prefix / "venv/bin"
+    venv_bin.mkdir(parents=True)
+    executable(venv_bin / "just", "echo just 0.0.0")
+    for mode in ("setup", "check"):
+        result = run_installer(linux_boundary, mode)
+        assert result.returncode == 0, result.stderr
+        report_path = next(Path(linux_boundary["DOTFILES_REVIEW_ARTIFACTS"]).glob(f"{mode}-*/environment.json"))
+        report = json.loads(report_path.read_text())
+        assert report["status"] == "passed"
+        assert report["tools"]["just"]["executable"] == str(prefix / "bin/just")
+    assert "ci" in Path(linux_boundary["CALL_LOG"]).read_text().splitlines()
+
+
+@pytest.mark.parametrize("existing_path", [None, ""])
+def test_missing_path_does_not_add_current_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, existing_path: str | None) -> None:
+    monkeypatch.chdir(tmp_path)
+    executable(tmp_path / "untrusted-tool", "exit 0")
+    prefix = tmp_path / "install"
+    monkeypatch.setenv("DOTFILES_REVIEW_PREFIX", str(prefix))
+    monkeypatch.setenv("DOTFILES_REVIEW_ARTIFACTS", str(tmp_path / "artifacts"))
+    if existing_path is None:
+        monkeypatch.delenv("PATH", raising=False)
+    else:
+        monkeypatch.setenv("PATH", existing_path)
+    assert linux_review.main(["check"]) == 2
+    assert os.environ["PATH"] == str(prefix / "bin")
+    assert shutil.which("untrusted-tool") is None
 
 
 @pytest.mark.parametrize("caller_limit_kib", [None, 32768])
