@@ -3496,7 +3496,7 @@ def _required_schema_shape(node: dict[str, Any]) -> object:
     return shape
 
 
-def _schema_reference(path: Path) -> dict[str, object]:
+def _schema_reference(path: Path, *, validation_reassessment: bool = False) -> dict[str, object]:
     raw = _read_json_object(path)
     required = raw.get("required")
     if not isinstance(required, list) or any(not isinstance(name, str) for name in required):
@@ -3519,9 +3519,8 @@ def _schema_reference(path: Path) -> dict[str, object]:
         "version": int(match.group("version")),
     }
     if path == _REVIEW_PAYLOAD_SCHEMA:
-        reference["optional_shapes"] = {
-            name: _required_schema_shape(raw["properties"][name]) for name in ("coverage_units", "instruction_reconciliations", "validation_reassessments")
-        }
+        shapes = ("coverage_units", "instruction_reconciliations", *(("validation_reassessments",) if validation_reassessment else ()))
+        reference["optional_shapes"] = {name: _required_schema_shape(raw["properties"][name]) for name in shapes}
     return reference
 
 
@@ -3828,9 +3827,6 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
         "If omitted, the runtime derives one conservative whole-audit unit from all owned paths, findings and recorded dependencies. "
         "An instruction-only repair still requires fresh assessment of rules, commands, applicability and obligations; "
         "any material change reopens the entire derived unit. Unbound external reads remain reuse blockers. "
-        "When validation_reassessment is present, submit validation_reassessments for every listed requirement, copying both supplied digests. "
-        "Inspect the old/new execution contracts, native limitations and original handoffs; source-independent retains only proved source judgments, "
-        "reinspect requires all owned-source reads, and uncertain blocks acceptance. No disposition reuses old validation success or waives current gates. "
         "Source-discovery judgments must come from the captured "
         "files_inspected/nearby_contract_owners reads, independent of the staging split; undeclared commands remain conservative. "
         "Legacy git_sensitive=true always requires rechecking. "
@@ -3842,6 +3838,12 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
         if dispatch.get("mode") == "audit"
         else ""
     )
+    if dispatch.get("coverage_reuse", {}).get("validation_reassessment"):
+        audit_scope_text += (
+            " Submit validation_reassessments for every listed requirement, copying both supplied digests. "
+            "Inspect the old/new execution contracts, native limitations and original handoffs; source-independent retains only proved source judgments, "
+            "reinspect requires all owned-source reads, and uncertain blocks acceptance. No disposition reuses old validation success or waives current gates."
+        )
     synthesis_text = (
         " Use dispatch.synthesis_examples for field placement, replacing illustrative IDs/claims with accepted bundle evidence. "
         "synthesis_plan_reference/synthesis_sources are runtime-only preflight inputs. predecessor_coverage has one row per dispatched evidence ID; "
@@ -4260,7 +4262,7 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
     if not catalog_path.is_file():
         msg = f"routing catalog does not exist: {catalog_path}"
         raise ValueError(msg)
-    catalog_ids = sorted(entry.catalog_id for entry in load_routing_catalog(catalog_path, skill_roots=(DEFAULT_SKILL_ROOT,)))
+    catalog_ids = sorted(entry.catalog_id for entry in load_routing_catalog(catalog_path, skill_roots=_continuation_skill_roots(plan)))
     locations = document.get("execution_locations", {})
     if not isinstance(locations, dict) or any(not isinstance(key, str) or value not in {"worker", "coordinator"} for key, value in locations.items()):
         msg = "execution_locations must map node IDs to worker or coordinator"
@@ -4503,6 +4505,8 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
                 common["payload_schema"] = independent_schema
             else:
                 common["payload_schema"] = synthesis_schema if node.mode == "synthesis" else review_schema
+                if common.get("coverage_reuse", {}).get("validation_reassessment"):
+                    common["payload_schema"] = _schema_reference(_REVIEW_PAYLOAD_SCHEMA, validation_reassessment=True)
                 contract = "compact-review"
             if node.mode == "synthesis":
                 common["synthesis_plan_reference"] = synthesis_plan_reference
@@ -5390,7 +5394,7 @@ def _restart_reused_metadata_audits(
     routing = tuple(replace(item, disposition="selected", evidence_id=None) if item.evidence_id in stale else item for item in plan.routing_decisions)
     requirement_sources = {requirement_id: evidence_id for requirement_id, evidence_id in plan.exact_reused_review_evidence if evidence_id in stale}
     selected = tuple(item for item in routing if item.requirement_id in requirement_sources)
-    catalog = load_routing_catalog(catalog_path, skill_roots=(DEFAULT_SKILL_ROOT,))
+    catalog = load_routing_catalog(catalog_path, skill_roots=_continuation_skill_roots(plan))
     requirements = review_requirements_from_routing(catalog, selected)
     if {item.requirement_id for item in requirements} != set(requirement_sources):
         msg = "external metadata resume cannot restore the invalidated reused review routing; replan required"

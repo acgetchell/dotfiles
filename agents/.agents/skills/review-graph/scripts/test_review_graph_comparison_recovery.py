@@ -2,6 +2,7 @@
 
 import json
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -52,8 +53,12 @@ def test_updated_runtime_advances_large_frozen_baseline_without_reauditing_uncha
             }
         )
     )
+    updated_root = tmp_path / "updated-runtime" / "skills" / "review-graph"
+    shutil.copytree(Path(runtime.__file__).parent.parent, updated_root, ignore=shutil.ignore_patterns("test_*.py", "__pycache__", "*.pyc"))
+    # Only the frozen root has the specialist skills and their static references.
+    updated_runtime = updated_root / "scripts" / "review_graph_runtime.py"
     subprocess.run(  # noqa: S603 - fixed current runtime and isolated fixture paths.
-        [sys.executable, "-B", runtime.__file__, "advance-after-mutation", "--input", str(request_path), "--output", str(output_path)],
+        [sys.executable, "-B", str(updated_runtime), "advance-after-mutation", "--input", str(request_path), "--output", str(output_path)],
         check=True,
         capture_output=True,
         timeout=60,

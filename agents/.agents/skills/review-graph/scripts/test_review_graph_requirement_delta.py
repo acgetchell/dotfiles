@@ -24,6 +24,8 @@ def test_commandless_recipe_requires_fresh_reassessment_before_accepting_source_
     fresh, partial, result, payload = _proof_fixture(tmp_path, validation_change="commandless")
     context = partial["dispatch"].get("coverage_reuse")
     assert context is not None
+    assert "validation_reassessments" in partial["dispatch"]["payload_schema"]["optional_shapes"]
+    assert "validation_reassessments" not in fresh["dispatch"]["payload_schema"]["optional_shapes"]
     assert [(unit["unit_id"], unit["disposition"]) for unit in context["units"]] == [("configuration", "reused"), ("adoption-tests", "recheck")]
     candidate = context["validation_reassessment"][0]
     assert candidate["original_execution_identity"]["commands"] == []
