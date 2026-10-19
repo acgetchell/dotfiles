@@ -22,13 +22,21 @@ from test_review_graph_sessions import _cli
 
 
 def _frozen_run(
-    tmp_path: Path, *, early: bool, input_selection: bool = False, log_kind: str = "file"
+    tmp_path: Path, *, early: bool, input_selection: bool = False, log_kind: str = "file", large_scope: bool = False
 ) -> tuple[str, Path, dict[str, Any], dict[str, Any], Path, Path]:
     git, repository, template, capture, _plan = _baseline_mutation_fixture(tmp_path)
+    if large_scope:
+        for index in range(200):
+            (repository / f"long_baseline_document_name_{index:04d}.txt").write_text("unchanged baseline evidence\n")
+        _run_test_git(git, "-C", str(repository), "add", ".")
+        _run_test_git(git, "-C", str(repository), "commit", "-m", "large baseline")
+        capture = _scope_data(git, repository, "baseline", None, ())
+        _complete_structural_fixture_routing(template, list(source_snapshot(capture).captured_scope_paths))
+    snapshot = source_snapshot(capture)
     template.update(
         authorization="review-and-fix",
         concrete_change_target=True,
-        change_target=shlex.join(["git", "diff", capture["head"], "--", *capture["captured_scope_paths"]]),
+        change_target=shlex.join(["git", "diff", snapshot.head, "--", *(["."] if large_scope else snapshot.captured_scope_paths)]),
     )
     requirement = template["validation_requirements"][0]
     isolation = tmp_path / "validator"

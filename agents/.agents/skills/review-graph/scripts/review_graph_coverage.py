@@ -33,6 +33,7 @@ def coverage_execution_view(context: dict[str, Any], reference: dict[str, str]) 
         "original_handoffs": context["original_handoffs"],
         "original_audit_context": context.get("original_audit_context", {}),
         "original_git_context": context.get("original_git_context", {}),
+        **({"validation_reassessment": context["validation_reassessment"]} if context.get("validation_reassessment") else {}),
     }
 
 

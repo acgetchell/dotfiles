@@ -5,6 +5,7 @@ import shlex
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
+from review_graph_integrity import MAX_NATIVE_IDENTIFIER_LENGTH
 from review_graph_read_provenance import verify_runtime_inputs
 from review_graph_reads import source_read_operands
 
@@ -183,7 +184,11 @@ def refresh_comparison_scope(command: str, previous: dict[str, Any], current: di
         raise ValueError(msg)
     words = shlex.split(command)
     boundary = words.index("--") if "--" in words else len(words)
-    return shlex.join([*words[:boundary], "--", *current["captured_scope_paths"]])
+    expanded = shlex.join([*words[:boundary], "--", *current["captured_scope_paths"]])
+    # Owned paths remain separately bound by the dispatch. A root diff may
+    # show additional paths, but never drops tracked changes from that scope.
+    # Untracked paths still require the independent review's direct reads.
+    return expanded if len(expanded) <= MAX_NATIVE_IDENTIFIER_LENGTH else shlex.join([*words[:boundary], "--", "."])
 
 
 def metadata_audit_blockers(record: dict[str, Any], transition: ExternalMetadataTransition, *, fresh_current: bool = False) -> list[dict[str, str]]:

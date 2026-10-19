@@ -42,6 +42,18 @@ def test_unsupported_repair_comparison_requests_correction_before_dispatch() -> 
         refresh_comparison_scope("custom comparison script", {"captured_scope_paths": ["old.py"]}, {"captured_scope_paths": ["old.py", "new.py"]})
 
 
+def test_large_repair_comparison_retains_base_with_bounded_root_scope() -> None:
+    base = "a" * 40
+    paths = [f"source/long_module_name_{index:04d}.py" for index in range(200)]
+    previous = {"head": base, "captured_scope_paths": paths}
+    current = {"captured_scope_paths": [*paths, "new.py"]}
+    command = f"git --no-pager diff --no-ext-diff --no-textconv {base} --"
+    updated = refresh_comparison_scope(command, previous, current)
+    assert len(updated) <= 4096
+    assert shlex.split(updated) == [*shlex.split(command), "."]
+    assert previous["captured_scope_paths"] == paths
+
+
 @pytest.mark.parametrize("damage", ["changed", "missing", "symlink", "repository"])
 def test_bound_external_reads_require_unchanged_external_regular_files(tmp_path: Path, damage: str) -> None:
     repository = tmp_path / "repo"

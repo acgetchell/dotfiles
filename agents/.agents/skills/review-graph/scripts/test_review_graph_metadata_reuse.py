@@ -41,7 +41,7 @@ def _git_payload(entry: dict[str, Any], kind: str) -> dict[str, Any]:
 
 
 @pytest.mark.parametrize("kind", ["index", "source-discovery"])
-def test_staging_after_whole_audit_reuse_completes_with_current_evidence(tmp_path: Path, kind: str) -> None:
+def test_staging_after_whole_audit_reuse_completes_with_current_evidence(tmp_path: Path, kind: str, monkeypatch: pytest.MonkeyPatch) -> None:
     request, original_entry, original_source = _mutation_with_audit_source(tmp_path)
     content, metadata = compile_review(
         {
@@ -59,6 +59,7 @@ def test_staging_after_whole_audit_reuse_completes_with_current_evidence(tmp_pat
     assert git is not None
     repository = Path(request["new_capture"]["repository_root"])
     _run_test_git(git, "-C", str(repository), "add", "state.rs")
+    monkeypatch.setattr("review_graph_runtime.DEFAULT_SKILL_ROOT", tmp_path / "unavailable-current-installation")
     resumed = resume_after_external_metadata(
         {
             **json.loads(Path(advanced["lifecycle_input_path"]).read_text()),

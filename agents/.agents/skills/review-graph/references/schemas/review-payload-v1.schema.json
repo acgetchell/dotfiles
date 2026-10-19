@@ -3,6 +3,56 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
+    "validation_reassessments": {
+      "type": "array",
+      "description": "Fresh judgments bound to old/new validation digests; preserves source judgments only and never waives current validation.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "requirement_id",
+          "original_planned_validation_digest",
+          "replacement_planned_validation_digest",
+          "disposition",
+          "contract_assessment",
+          "native_limitations",
+          "handoff_assessment"
+        ],
+        "properties": {
+          "requirement_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "original_planned_validation_digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "replacement_planned_validation_digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "disposition": {
+            "enum": [
+              "source-independent",
+              "reinspect",
+              "uncertain"
+            ]
+          },
+          "contract_assessment": {
+            "type": "string",
+            "minLength": 1
+          },
+          "native_limitations": {
+            "type": "string",
+            "minLength": 1
+          },
+          "handoff_assessment": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
     "execution_facts": {
       "description": "Typed audit execution attestations, not semantic uncertainty. Contradictions with dispatched validator commands, supplied captures, or mutation records are rejected, as are unknown facts.",
       "type": "array",

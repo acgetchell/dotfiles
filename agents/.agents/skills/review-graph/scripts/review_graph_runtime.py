@@ -140,6 +140,7 @@ from review_graph_provenance import independent_scope_body, metadata_transition_
 from review_graph_read_provenance import MissingReadProvenanceError, bind_runtime_reads, normalized_read_provenance
 from review_graph_reads import source_read_operands
 from review_graph_receipts import stage_receipt
+from review_graph_requirement_delta import reassessment_candidates, reconcile_requirements, verify_reassessment_candidates
 from review_graph_reuse import (
     SNAPSHOT_FORMAT,
     AuditInputIdentity,
@@ -977,10 +978,13 @@ def _compiled_audit_inputs(dispatch: dict[str, Any], payload: dict[str, Any]) ->
 
 
 def _reconciled_coverage(dispatch: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any] | None:
-    if payload.get("instruction_reconciliations"):
+    has_reconciliation = bool(payload.get("instruction_reconciliations") or payload.get("validation_reassessments"))
+    if has_reconciliation:
         require_schema(payload, _REVIEW_PAYLOAD_SCHEMA)
-    bound = _publication_dispatch(dispatch) if payload.get("instruction_reconciliations") and "compiler_preflight" in dispatch else dispatch
-    return reconcile_instructions(dispatch.get("coverage_reuse"), payload, fresh=bool(bound and bound.get("fresh_context")))
+    bound = _publication_dispatch(dispatch) if has_reconciliation and "compiler_preflight" in dispatch else dispatch
+    fresh = bool(bound and bound.get("fresh_context"))
+    context = reconcile_instructions(dispatch.get("coverage_reuse"), payload, fresh=fresh)
+    return reconcile_requirements(context, payload, fresh=fresh)
 
 
 def _validate_review_coverage_partitions(dispatch: dict[str, Any], payload: dict[str, Any]) -> None:
@@ -3046,6 +3050,7 @@ def _load_evidence_source(  # noqa: C901, PLR0912, PLR0915
             else:
                 payload = _canonical_worker_payload(content, expectation=expectation)
                 reconcile_instructions(expectation.coverage_reuse, payload, fresh=evidence.fresh_context)
+                reconcile_requirements(expectation.coverage_reuse, payload, fresh=evidence.fresh_context)
                 _validate_audit_caveats(
                     {
                         "mode": expectation.mode,
@@ -3491,7 +3496,7 @@ def _required_schema_shape(node: dict[str, Any]) -> object:
     return shape
 
 
-def _schema_reference(path: Path) -> dict[str, object]:
+def _schema_reference(path: Path, *, validation_reassessment: bool = False) -> dict[str, object]:
     raw = _read_json_object(path)
     required = raw.get("required")
     if not isinstance(required, list) or any(not isinstance(name, str) for name in required):
@@ -3514,7 +3519,8 @@ def _schema_reference(path: Path) -> dict[str, object]:
         "version": int(match.group("version")),
     }
     if path == _REVIEW_PAYLOAD_SCHEMA:
-        reference["optional_shapes"] = {name: _required_schema_shape(raw["properties"][name]) for name in ("coverage_units", "instruction_reconciliations")}
+        shapes = ("coverage_units", "instruction_reconciliations", *(("validation_reassessments",) if validation_reassessment else ()))
+        reference["optional_shapes"] = {name: _required_schema_shape(raw["properties"][name]) for name in shapes}
     return reference
 
 
@@ -3832,6 +3838,12 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
         if dispatch.get("mode") == "audit"
         else ""
     )
+    if dispatch.get("coverage_reuse", {}).get("validation_reassessment"):
+        audit_scope_text += (
+            " Submit validation_reassessments for every listed requirement, copying both supplied digests. "
+            "Inspect the old/new execution contracts, native limitations and original handoffs; source-independent retains only proved source judgments, "
+            "reinspect requires all owned-source reads, and uncertain blocks acceptance. No disposition reuses old validation success or waives current gates."
+        )
     synthesis_text = (
         " Use dispatch.synthesis_examples for field placement, replacing illustrative IDs/claims with accepted bundle evidence. "
         "synthesis_plan_reference/synthesis_sources are runtime-only preflight inputs. predecessor_coverage has one row per dispatched evidence ID; "
@@ -4250,7 +4262,7 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
     if not catalog_path.is_file():
         msg = f"routing catalog does not exist: {catalog_path}"
         raise ValueError(msg)
-    catalog_ids = sorted(entry.catalog_id for entry in load_routing_catalog(catalog_path, skill_roots=(DEFAULT_SKILL_ROOT,)))
+    catalog_ids = sorted(entry.catalog_id for entry in load_routing_catalog(catalog_path, skill_roots=_continuation_skill_roots(plan)))
     locations = document.get("execution_locations", {})
     if not isinstance(locations, dict) or any(not isinstance(key, str) or value not in {"worker", "coordinator"} for key, value in locations.items()):
         msg = "execution_locations must map node IDs to worker or coordinator"
@@ -4493,6 +4505,8 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
                 common["payload_schema"] = independent_schema
             else:
                 common["payload_schema"] = synthesis_schema if node.mode == "synthesis" else review_schema
+                if common.get("coverage_reuse", {}).get("validation_reassessment"):
+                    common["payload_schema"] = _schema_reference(_REVIEW_PAYLOAD_SCHEMA, validation_reassessment=True)
                 contract = "compact-review"
             if node.mode == "synthesis":
                 common["synthesis_plan_reference"] = synthesis_plan_reference
@@ -4930,7 +4944,7 @@ def _carry_forward_audits(  # noqa: C901, PLR0912, PLR0913, PLR0915 - preserve p
     routed = plan_from_document(
         planning_input,
         catalog_path=Path(document.get("routing_catalog_path", DEFAULT_ROUTING_CATALOG)),
-        skill_roots=(DEFAULT_SKILL_ROOT,),
+        skill_roots=_continuation_skill_roots(old_plan),
         repository_root=root,
         observed_metadata_transition=observed_metadata_transition,
     )
@@ -4993,10 +5007,35 @@ def _coverage_proof(context: dict[str, Any]) -> dict[str, Any]:
     except (KeyError, TypeError, AttributeError) as error:
         msg = "coverage proof artifact lacks complete execution context"
         raise ValueError(msg) from error
-    if {key: value for key, value in context.items() if key != "instruction_reconciliations"} != expected:
+    if {key: value for key, value in context.items() if key not in {"instruction_reconciliations", "validation_reassessments"}} != expected:
         msg = "coverage execution view differs from original immutable findings or verified unit decisions"
         raise ValueError(msg)
     return proof
+
+
+def _verify_delta_requirements(context: dict[str, Any], dispatch: dict[str, Any]) -> None:
+    """Bind reassessment to the source proof and the current dispatched validator."""
+    if not context.get("validation_reassessment"):
+        return
+    origin, target = source_snapshot(context["origin"]), source_snapshot(context["target"])
+    verify_reassessment_candidates(context, repository_root=target.repository_root)
+    for candidate in context.get("validation_reassessment", []):
+        before, after = candidate["original_execution_identity"], candidate["replacement_execution_identity"]
+        if (before["source_state"], before["captured_paths"], after["source_state"], after["captured_paths"]) != (
+            list(origin.source_state),
+            list(origin.captured_scope_paths),
+            list(target.source_state),
+            list(target.captured_scope_paths),
+        ):
+            msg = "validation reassessment differs from its captured source identities"
+            raise ValueError(msg)
+        if "command_policy" in dispatch:
+            current = [
+                item for item in _records(dispatch["command_policy"], "planned_validation_units") if candidate["requirement_id"] in item["requirement_ids"]
+            ]
+            if len(current) != 1 or current[0]["planned_validation_digest"] != candidate["replacement_planned_validation_digest"]:
+                msg = "validation reassessment differs from the current dispatched requirement"
+                raise ValueError(msg)
 
 
 def _verify_delta_context(context: dict[str, Any], dispatch: dict[str, Any]) -> None:
@@ -5006,6 +5045,7 @@ def _verify_delta_context(context: dict[str, Any], dispatch: dict[str, Any]) -> 
         msg = "delta coverage applies only to audit mode"
         raise ValueError(msg)
     origin, target = source_snapshot(context["origin"]), source_snapshot(context["target"])
+    _verify_delta_requirements(context, dispatch)
     if target.source_state != _state(dispatch, "source_state"):
         msg = "delta coverage target differs from the dispatched source state"
         raise ValueError(msg)
@@ -5052,7 +5092,7 @@ def _verify_delta_context(context: dict[str, Any], dispatch: dict[str, Any]) -> 
     ):
         msg = "delta coverage differs from original immutable findings or verified unit decisions"
         raise ValueError(msg)
-    if not reused_paths(context) and not any(unit["disposition"] == "instruction-review" for unit in context["units"]):
+    if not any(unit["disposition"] in {"reused", "instruction-review"} for unit in context["units"]):
         msg = "delta coverage has no reusable units"
         raise ValueError(msg)
 
@@ -5134,7 +5174,17 @@ def _plan_delta_audits(  # noqa: C901 - keep source and validation eligibility g
             reconciliation = _validation_reconciliation(
                 replace(candidate, audit_reuse_transitions=(transition,), reuse_source_snapshots=(audit_origin, target)), [record]
             )
-            if reconciliation["blockers"]:
+            reassessment = (
+                reassessment_candidates(
+                    record["validation_requirements"],
+                    {requirement: _planned_validation_identity(unit) for unit in previous.coalesced_validation_units for requirement in unit.requirement_ids},
+                    {requirement: _planned_validation_identity(unit) for unit in candidate.coalesced_validation_units for requirement in unit.requirement_ids},
+                    target.repository_root,
+                )
+                if reconciliation["blockers"]
+                else None
+            )
+            if reconciliation["blockers"] and reassessment is None:
                 reviews.append(
                     {
                         "node_id": node.node_id,
@@ -5146,7 +5196,18 @@ def _plan_delta_audits(  # noqa: C901 - keep source and validation eligibility g
                     }
                 )
                 continue
-            reviews.append({"node_id": node.node_id, "evidence_id": evidence.evidence_id, "units": coverage_decision_report(units, audit_origin, target)})
+            reviews.append(
+                {
+                    "node_id": node.node_id,
+                    "evidence_id": evidence.evidence_id,
+                    "units": coverage_decision_report(units, audit_origin, target),
+                    **(
+                        {"reason_code": "validation-reassessment-required", "reason": "Fresh contract reassessment is required before accepting source reuse."}
+                        if reassessment is not None
+                        else {}
+                    ),
+                }
+            )
             if not any(unit["disposition"] in {"reused", "instruction-review"} for unit in units):
                 continue
             context = {
@@ -5164,6 +5225,7 @@ def _plan_delta_audits(  # noqa: C901 - keep source and validation eligibility g
                 "original_git_context": audit_git_context(record),
                 "instruction_digests": list(transition.instruction_digests),
                 "metadata_transitions": [asdict(item) for item in chain],
+                **({"validation_reassessment": reassessment} if reassessment is not None else {}),
             }
             contexts.append(json.loads(canonical_json(context)))
     return replace(candidate, audit_delta_reviews=tuple(contexts)), reviews
@@ -5332,7 +5394,7 @@ def _restart_reused_metadata_audits(
     routing = tuple(replace(item, disposition="selected", evidence_id=None) if item.evidence_id in stale else item for item in plan.routing_decisions)
     requirement_sources = {requirement_id: evidence_id for requirement_id, evidence_id in plan.exact_reused_review_evidence if evidence_id in stale}
     selected = tuple(item for item in routing if item.requirement_id in requirement_sources)
-    catalog = load_routing_catalog(catalog_path, skill_roots=(DEFAULT_SKILL_ROOT,))
+    catalog = load_routing_catalog(catalog_path, skill_roots=_continuation_skill_roots(plan))
     requirements = review_requirements_from_routing(catalog, selected)
     if {item.requirement_id for item in requirements} != set(requirement_sources):
         msg = "external metadata resume cannot restore the invalidated reused review routing; replan required"
@@ -6188,6 +6250,12 @@ def _exhausted_mutation_locked(document: dict[str, Any], plan: GraphPlan) -> dic
     return {**result, "stop_path": str(stop_path)}
 
 
+def _continuation_skill_roots(plan: GraphPlan) -> tuple[Path, ...]:
+    """Keep captured skill locations when a compatible newer runtime resumes a run."""
+    roots = tuple(sorted({Path(node.skill_path).parent.parent for node in plan.actual_worker_nodes}))
+    return roots or (DEFAULT_SKILL_ROOT,)
+
+
 def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, PLR0915 - one ordered repair transaction.
     """Close one repair epoch, recapture once, and emit a fresh final-state graph."""
     raw_plan = document.get("plan")
@@ -6239,7 +6307,11 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
     repository_root = Path(_required_text(planning_input, "repository_root")).resolve()
     catalog_path = Path(document.get("routing_catalog_path", DEFAULT_ROUTING_CATALOG)).resolve()
     new_plan = plan_from_document(
-        planning_input, catalog_path=catalog_path, skill_roots=(DEFAULT_SKILL_ROOT,), repository_root=repository_root, observed_metadata_transition=metadata
+        planning_input,
+        catalog_path=catalog_path,
+        skill_roots=_continuation_skill_roots(old_plan),
+        repository_root=repository_root,
+        observed_metadata_transition=metadata,
     )
     if not new_plan.dispatch_allowed:
         msg = "recaptured repair epoch produced a blocked final-state plan: " + "; ".join(new_plan.blockers)
@@ -7721,6 +7793,11 @@ def _preflight_executor(unit: ValidationUnit, prerequisite: dict[str, Any] | Non
         # Explicit contexts avoid pretending that shell parsing finds nested tools.
         observations, executable_blockers = inspect_executor_executables(prerequisite, repository_root)
         blockers.extend(executable_blockers)
+    blockers.extend(
+        f"executor working directory must be absolute before dispatch: {directory!r}; replan with {_workspace_path(directory, repository_root)}"
+        for directory in unit.working_directories
+        if not Path(directory).is_absolute()
+    )
     blockers.extend(
         f"executor working directory unavailable: {directory}"
         for directory in unit.working_directories
