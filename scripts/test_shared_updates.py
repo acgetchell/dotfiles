@@ -14,6 +14,16 @@ import pytest
 REPOSITORY = Path(__file__).resolve().parents[1]
 
 
+def test_python_environment_uses_repository_just_pin() -> None:
+    just = Path(sys.executable).with_name("just.exe" if sys.platform == "win32" else "just")
+    expected = subprocess.run(  # noqa: S603 - the environment's installed Just reads the repository pin.
+        [str(just), "--evaluate", "just_version"], cwd=REPOSITORY, check=True, capture_output=True, text=True, timeout=10
+    ).stdout.strip()
+    assert version("rust-just") == expected
+    actual = subprocess.run([str(just), "--version"], check=True, capture_output=True, text=True, timeout=10).stdout.strip()  # noqa: S603
+    assert actual == f"just {expected}"
+
+
 def run_shared(root: Path, action: str) -> subprocess.CompletedProcess[str]:
     """Exercise the installed distribution's supported CLI in a consumer fixture."""
     command = shutil.which("research-repo-tools")

@@ -54,8 +54,13 @@ The Windows-only uv override selects 312, which publishes cp315 wheels. Remove
 the override when Semgrep advances its dependency. Universal lock resolution
 checks package availability; native Windows execution remains a hosted check.
 
+The shared package pins `rust-just==1.58.0`. A project override aligns the Python
+environment's Just with `just_version` in `justfile`, including commands launched
+by `uv run`. Keep both pins aligned when updating Just; CI checks the installed
+Python distribution and executable against the repository pin.
+
 The v0.1.9 direct-pin updater resolves through temporary PEP 723 metadata that
-does not copy this project override. It can consequently downgrade Semgrep even
+does not copy these project overrides. It can consequently downgrade Semgrep even
 though the project lock resolves correctly. `update-python-dependencies` skips
 shared direct-pin resolution while overrides are present and runs `uv lock --upgrade`
 for a transitive refresh that retains direct pins and project overrides, then
