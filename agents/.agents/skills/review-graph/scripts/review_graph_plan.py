@@ -15,11 +15,12 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from capture_scope import _scope_data
+from capture_scope import _scope_data, captured_head_changes
 from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics, run_command_bytes
 from review_graph_control import issue_run_control
 from review_graph_coverage import coverage_reference
 from review_graph_executor import executor_permissions
+from review_graph_git import covers_captured_worktree
 from review_graph_integrity import MAX_NATIVE_IDENTIFIER_LENGTH, digest_bytes, digest_json
 from review_graph_lifecycle import ReviewLifecycle, lifecycle_from_document
 from review_graph_provenance import audit_input_reference, metadata_transition_reference, review_scope_body
@@ -5569,13 +5570,13 @@ def _verify_repair_metadata_recapture(transition: ExternalMetadataTransition, ex
         raise ValueError(msg)
 
 
-def _verified_captured_path_line_bounds(
+def _verified_captured_source(
     document: Mapping[str, Any],
     captured_paths: Sequence[str],
     repository_root: Path | None,
     declared_bounds: Sequence[tuple[str, int]],
     observed_metadata_transition: ExternalMetadataTransition | None = None,
-) -> tuple[tuple[str, int], ...]:
+) -> dict[str, Any]:
     """Recapture exact source state and reject caller-authored line-bound claims."""
     if repository_root is None:
         msg = "independent-review line bounds require a trusted repository_root"
@@ -5627,7 +5628,25 @@ def _verified_captured_path_line_bounds(
     if tuple(declared_bounds) != derived:
         msg = "captured_path_line_bounds do not match independently recaptured source bytes"
         raise ValueError(msg)
-    return derived
+    return manifest
+
+
+def _independent_change_surface(decision: RoutingDecision, command: str, capture: Mapping[str, Any], repository_root: Path | None) -> RoutingDecision:
+    """Keep baseline audits exhaustive while requiring the complete concrete repair."""
+    if capture["capture_mode"] != "baseline" or not covers_captured_worktree(command, capture):
+        return decision
+    git = shutil.which("git")
+    if git is None or repository_root is None:
+        msg = "independent repair coverage requires Git and a trusted repository_root"
+        raise ValueError(msg)
+    paths = captured_head_changes(git, repository_root, capture)
+    if not paths:
+        msg = "independent repair comparison contains no changed or untracked paths"
+        raise ValueError(msg)
+    if missing := sorted(set(paths) - set(decision.review_surface)):
+        msg = "independent repair coverage omits changed or untracked paths: " + ", ".join(missing)
+        raise ValueError(msg)
+    return replace(decision, review_surface=paths)
 
 
 def _constrain_routing_surfaces(
@@ -5887,13 +5906,12 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0913, PLR0915
         _normalized_repository_paths(_tuple_field(document, "captured_paths"), label="captured_paths") if document.get("captured_paths") is not None else None
     )
     captured_path_line_bounds = _captured_path_line_bounds_from_document(document, captured_paths)
+    verified_capture: dict[str, Any] | None = None
     if observed_metadata_transition is not None:
         if captured_paths is None:
             msg = "repair metadata composition requires captured_paths"
             raise ValueError(msg)
-        captured_path_line_bounds = _verified_captured_path_line_bounds(
-            document, captured_paths, repository_root, captured_path_line_bounds, observed_metadata_transition
-        )
+        verified_capture = _verified_captured_source(document, captured_paths, repository_root, captured_path_line_bounds, observed_metadata_transition)
     routing_assessment: RoutingLedgerAssessment | None = None
     routing_catalog: tuple[RoutingCatalogEntry, ...] = ()
     routing_decisions: tuple[RoutingDecision, ...] = ()
@@ -5944,7 +5962,11 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 msg = "independent-review line-bound verification requires captured_paths"
                 raise ValueError(msg)
             if observed_metadata_transition is None:
-                captured_path_line_bounds = _verified_captured_path_line_bounds(document, captured_paths, repository_root, captured_path_line_bounds)
+                verified_capture = _verified_captured_source(document, captured_paths, repository_root, captured_path_line_bounds)
+            if verified_capture is not None and purpose == "repair-verification":
+                independent_decision = _independent_change_surface(independent_decision, change_target or "", verified_capture, repository_root)
+                routing_decisions = tuple(independent_decision if item.catalog_id == "repo.independent" else item for item in routing_decisions)
+                routing_assessment = validate_routing_ledger(routing_catalog, routing_decisions, consulted_routers=consulted_routers)
         if change_target is not None:
             line_bounds = dict(captured_path_line_bounds)
             routing_assessment = replace(

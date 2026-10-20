@@ -69,6 +69,14 @@ diagnostic history, not validation of those fixes. Likewise, when the PR head
 changes, reconcile the new source and refresh evidence before closure. A PR
 merge-ref run must be related to the reviewed head and base before reuse.
 
+`report-delivery` retains hosted observations, tested target cells, observed head
+SHAs, immutable commit-tree identities, and worker limitations separately from
+`observer_platform`. `status` describes the accepted observation;
+`delivered_source_status` describes coverage of the current captured bytes.
+Green baseline CI with a dirty repair remains in `outstanding_hosted_ci`, and
+required pending coverage blocks readiness. Follow the authorized commit
+handoff and obtain matching hosted results; reporting never commits or pushes.
+
 If authentication, network, missing runs, pending jobs, cancelled jobs, or
 unavailable logs prevent inspection, retain a concrete gap. Do not call an
 empty check list a pass. For a local-only review without a PR, record that

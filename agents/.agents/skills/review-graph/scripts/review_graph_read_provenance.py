@@ -48,7 +48,8 @@ def require_instruction_reads(dispatch: dict[str, Any], payload: dict[str, Any])
 def _capture_output(command: str, dispatch: dict[str, Any]) -> str | None:  # noqa: PLR0911 - reject every unbound protocol boundary.
     """Bind the framework's exact capture operation and its observed JSON output."""
     prefix = dispatch.get("state_verification_command", "")
-    if not prefix or not command.startswith(prefix + " > "):
+    observation = next((item for item in dispatch.get("audit_observations", {}).values() if command == item["capture_command"]), None)
+    if not prefix or (observation is None and not command.startswith(prefix + " > ")):
         return None
     from review_graph_session import runtime_command  # noqa: PLC0415 - optional framework capture identity.
 
@@ -59,7 +60,7 @@ def _capture_output(command: str, dispatch: dict[str, Any]) -> str | None:  # no
     arguments = words[len(executable) :]
     if len(arguments) % 2 or any(arguments[index] not in {"--mode", "--repo", "--base", "--path"} for index in range(0, len(arguments), 2)):
         return None
-    suffix = command[len(prefix) + 3 :]
+    suffix = shlex.quote(observation["capture_path"]) if observation is not None else command[len(prefix) + 3 :]
     try:
         outputs = shlex.split(suffix)
     except ValueError:
@@ -109,6 +110,11 @@ def bind_runtime_reads(dispatch: dict[str, Any], payload: dict[str, Any]) -> tup
         elif (output := _capture_output(command, dispatch)) is not None:
             allowed[output] = file_identity(output)
             reads.add(output)
+            observation = next((item for item in dispatch.get("audit_observations", {}).values() if command == item["capture_command"]), None)
+            if observation is not None:
+                receipt = observation["receipt_path"]
+                allowed[receipt] = file_identity(receipt)
+                reads.add(receipt)
             protocol.append(command)
         elif (operands := source_read_operands(command)) is not None:
             reads.update(operands)

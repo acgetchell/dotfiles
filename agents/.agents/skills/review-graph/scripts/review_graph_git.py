@@ -10,6 +10,8 @@ from review_graph_read_provenance import verify_runtime_inputs
 from review_graph_reads import source_read_operands
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from review_graph_reuse import ExternalMetadataTransition
 
 _DIFF_OPTIONS = frozenset(
@@ -189,6 +191,20 @@ def refresh_comparison_scope(command: str, previous: dict[str, Any], current: di
     # show additional paths, but never drops tracked changes from that scope.
     # Untracked paths still require the independent review's direct reads.
     return expanded if len(expanded) <= MAX_NATIVE_IDENTIFIER_LENGTH else shlex.join([*words[:boundary], "--", "."])
+
+
+def covers_captured_worktree(command: str, capture: Mapping[str, Any]) -> bool:
+    """Recognize a full captured HEAD-to-worktree comparison without executing text."""
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return False
+    boundary = words.index("--") if "--" in words else len(words)
+    options = [capture["head"] if word == "HEAD" else word for word in words[:boundary]]
+    paths = set(words[boundary + 1 :])
+    return fixed_branch_comparison(shlex.join([*options, *words[boundary:]]), capture["head"]) and (
+        not paths or paths == {"."} or paths == set(capture["requested_paths"]) or paths == set(capture["captured_scope_paths"])
+    )
 
 
 def metadata_audit_blockers(record: dict[str, Any], transition: ExternalMetadataTransition, *, fresh_current: bool = False) -> list[dict[str, str]]:

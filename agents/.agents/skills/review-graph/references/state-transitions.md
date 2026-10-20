@@ -157,8 +157,9 @@ independent reviews, syntheses, and unproven audits rerun. Follow returned
 `lifecycle_input_path`, `dispatches_path`, `journal_path`, and `capture_path`;
 old artifacts remain unchanged. `preserved_evidence` contains only proven reuse.
 For a verified reused audit, its original planned validation digest can bind to
-the replacement validator when the complete execution identity is unchanged
-except for the captured source state. Reconciliation reports this runtime-derived
+the replacement validator when its obligation is unchanged apart from source
+state, scheduling policy, or a proved relocation of external stdout logs.
+Reconciliation reports this runtime-derived
 `reuse_binding` without rewriting the audit or reusing old validation success.
 Reuse also checks semantic Git dependencies across intervening staging. A later
 content repair cannot revive an audit invalidated by that staging, even when its
@@ -166,7 +167,15 @@ owned files stayed unchanged. This check applies to whole audits, coverage units
 and replay of their immutable evidence. A fresh audit on the latest metadata
 state can be reused when its complete input proof still holds.
 Changed commands, directories, environment, toolchain, features, platform,
-artifacts, or mutation contracts prevent whole-audit reuse. Normally they also
+artifacts, or mutation contracts prevent whole-audit reuse. The narrow log
+exception requires the original digest-bound execution sidecar, declared
+`kind: log` artifacts outside the repository, and terminal stdout redirection
+with optional `2>&1`. Paths used as command inputs, report artifacts, workspace
+effects, undeclared outputs, and other shell changes retain exact identity.
+The replacement validator always executes against the new source and its exact
+command/output contract; original logs and failed executions remain immutable.
+Compact reconciliation receipts expose the changed identity fields. Normally
+semantic contract changes also
 prevent coverage-partition reuse. The
 transition schedules the affected audit with `validation-requirements-changed`
 and names the conflicting or missing requirement before fanout. The worker
@@ -199,6 +208,14 @@ captured paths would exceed the comparison identifier limit, the replacement
 dispatch uses a bounded root diff (`git diff <immutable-base> -- .`). Its separately
 bound `owned_paths` still contain the complete scope: inspect untracked paths
 directly, since Git diff omits them.
+
+For a baseline repair whose full comparison is against the captured HEAD, the
+planner derives independent-review ownership from captured raw file identities
+against that immutable commit. Changed files, untracked files, and deletions
+remain mandatory; unchanged context belongs in `nearby_contract_owners`.
+Baseline specialist audits keep their full scope. Other comparison forms retain
+their declared boundary rather than guessing a smaller change set. Explicit
+routing cannot omit any derived changed path, and stale captures still reject.
 
 For an existing frozen run whose advance failed on this representation limit,
 keep its frozen resources, accepted evidence, captures, and open repair request.

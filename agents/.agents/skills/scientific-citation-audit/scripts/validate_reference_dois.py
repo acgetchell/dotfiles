@@ -94,9 +94,12 @@ class DoiEntry:
             "software",
             "project",
             "citation",
+            "citations",
             "canonical",
             "metadata",
             "in",
+            "of",
+            "to",
             "and",
             "version",
             "concept",
@@ -382,7 +385,7 @@ def plain_text(value: object) -> str:
 
 
 PUBLICATION_DATE_FIELDS = ("published-print", "published", "published-online", "issued")
-DATE_FIELDS = (*PUBLICATION_DATE_FIELDS, "created", "deposited", "indexed")
+DATE_FIELDS = (*PUBLICATION_DATE_FIELDS, "created", "deposited", "indexed", "updated")
 
 
 def date_year(issued: object) -> str | None:
@@ -501,7 +504,7 @@ def validate_entry(
         problems.append("resolved authors do not appear in local entry")
         fields.append("authors")
     if metadata.year is not None and metadata.year not in local_years:
-        problems.append("resolved year does not appear in local entry")
+        problems.append("resolved year does not appear in local entry; reconcile the cited edition or print issue with primary publication records")
         fields.append("year")
     if conflict:
         problems.append(conflict)

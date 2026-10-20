@@ -20,7 +20,7 @@ bibliography entry. Use `--json` for machine-readable output.
 
 Publication years prefer `published-print`, `published`, `published-online`, then
 `issued`. JSON retains all these date fields and deposit/index dates in
-`date_provenance`; deposit/index dates never supply the publication year.
+`date_provenance`; deposit/index/update dates never supply the publication year.
 Contradictory publication fields remain `MISMATCH` for primary-record review.
 Rows retain `mismatched_fields` and `local_years`; a resolver year alone is not
 authority to change a correct bibliography. For example,

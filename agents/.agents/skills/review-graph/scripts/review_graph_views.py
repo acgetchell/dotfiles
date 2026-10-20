@@ -18,6 +18,7 @@ _EXECUTION_FIELDS = (
     "repository_root",
     "authorization",
     "state_verification_command",
+    "handoff_destinations",
     "execution_context",
     "owned_paths",
     "command_policy",
@@ -40,6 +41,7 @@ _EXECUTION_FIELDS = (
     "execution_recovery",
     "timing_prerequisite",
     "validation_observations",
+    "audit_observations",
 )
 
 
@@ -60,7 +62,9 @@ def execution_view_bytes(entry: dict[str, Any], canonical_bytes: bytes) -> bytes
             "Read skill/instructions and conditional references, then perform only this dispatched contract. Read the payload schema before publication. "
             "Publish semantic JSON through publish_command (stdin); the runtime assembles provenance, canonical evidence and receipts. "
             "Record actual reads/commands and truthful limitations. Command policy is authoritative; delegate validator-owned checks. "
+            "Use handoff_destinations to choose an exact catalog_id for handoffs. "
             "Use the shared read-only source packet when supplied; each specialist makes its own judgment. "
+            "Every complete:false excerpt requires direct reads of the missing source; packet observations alone do not establish complete coverage. "
             "Full provenance and recovery commands are available through canonical_input when needed."
         ),
     }
@@ -109,5 +113,12 @@ def execution_view_bytes(entry: dict[str, Any], canonical_bytes: bytes) -> bytes
         view["instructions"] += (
             " Use the hashed synthesis bundle and accepted predecessor IDs. Report readiness separately from proof and local validation. "
             "One diagnostic-guided schema retry and one consolidated semantic correction are permitted; another failure blocks the node."
+        )
+    if "audit_observations" in dispatch:
+        view["dispatch"].pop("state_verification_command", None)
+        view["instructions"] += (
+            " Before source inspection, run audit_observations.before.capture_command and require its completed compact receipt. "
+            "After inspection, run audit_observations.after.capture_command. These commands persist complete immutable captures and receipts; "
+            "compile-node requires those exact files. Never copy expected fingerprints into a capture or reconstruct a missing before observation."
         )
     return (json.dumps(view, indent=2, sort_keys=True) + "\n").encode()

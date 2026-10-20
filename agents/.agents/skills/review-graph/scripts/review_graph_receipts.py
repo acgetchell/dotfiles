@@ -61,6 +61,11 @@ def _validation_reconciliation_receipt(output: dict[str, Any]) -> dict[str, Any]
                 "requirement_count": len(reconciliation["requirements"]),
                 "source_rebinding_count": sum("reuse_binding" in item for item in reconciliation["requirements"]),
                 "details_field": "validation_reconciliation",
+                "identity_changes": [
+                    {"requirement_id": item["requirement_id"], "changed_identity_fields": item["reuse_binding"]["output_binding"]["changed_identity_fields"]}
+                    for item in reconciliation["requirements"]
+                    if item.get("reuse_binding", {}).get("output_binding")
+                ],
             }
         }
     return {}
@@ -110,6 +115,7 @@ def stage_receipt(operation: str, output_path: Path, output: dict[str, Any]) -> 
         "validation",
         "local_validation",
         "hosted_ci",
+        "outstanding_hosted_ci",
         "remaining_findings",
         "incomplete_node_ids",
     ):

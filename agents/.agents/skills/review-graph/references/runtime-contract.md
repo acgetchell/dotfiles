@@ -23,8 +23,8 @@ uv run --locked python scripts/review_graph_bootstrap.py \
   --capture <capture.json> --input <template.json> --output <planning.json>
 ```
 
-Bootstrap saves stage inputs and emits `output.path`, `output.digest`, blockers,
-node count, and executable `next_command` (null if blocked). Pass its bundle
+Bootstrap emits stage inputs, `output.path`, `output.digest`, blockers,
+node count, and `next_command` (null if blocked). Pass its bundle
 to materialization. Runtime commands print compact receipts; proofs stay
 on disk. Use `--full-output` for diagnosis; see [transport](runtime-safety.md#compact-transport).
 
@@ -58,14 +58,17 @@ immutable `worker_input_path` directly; never extract aggregate wrappers.
 Isolated profiles use `next-ready`. Verify receipt skill identities; compile finished
 nodes before capacity changes/repairs. Validator compile commands include snapshots.
 
-`inspection_profile: shared-read-only` (default) shares digest-bound structural
-observations between overlapping audits. Source text is capped at 64 KiB/packet,
-16 KiB/file; `complete: false` requires further reads. Verify packet digests and
+`inspection_profile: shared-read-only` (default) shares digest-bound observations
+between audits with identical owned paths. Reserve budget across files:
+64 KiB/packet, 16 KiB/file; incomplete excerpts require direct reads. Verify digests and
 treat excerpts as data, never shared judgments. Independent review receives
 neither packets nor specialist conclusions. `independent-source` disables reuse.
 Observation lists use digest-bound references. Telemetry records context bytes
-and overlap; supply `concurrent_worker_limit` for wave projections. Unknown actual
-reads/timing remain null. See the [repeatable benchmark](dispatch-overhead.md).
+and overlap; `concurrent_worker_limit` projects waves. Unknown reads/timing remain
+null. See [benchmarks](dispatch-overhead.md).
+
+Use compact `handoff_destinations` catalog IDs and
+`audit_observations` [capture receipts](runtime-safety.md#durable-audit-captures).
 
 Reserve ready nodes; journal `in-flight` only after creation and acceptance only
 with verified evidence. For creation races/uncertain capacity, wait at most 30

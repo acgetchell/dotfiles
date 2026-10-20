@@ -965,6 +965,9 @@ def _compile_repair_fixture_entry(entry: dict[str, Any], lifecycle: dict[str, An
             "status": "passed",
         }
         content, metadata = compile_validation({"dispatch": dispatch, "payload": payload})
+    elif entry["result_contract"] == "compact-independent-review":
+        payload = {**_compact_independent_payload(dispatch), "before_state": list(state), "after_state": list(state)}
+        content, metadata = compile_independent_payload({"dispatch": dispatch, "payload": payload})
     else:
         payload = {
             "changes": [],
@@ -998,7 +1001,9 @@ def test_repair_skips_unchanged_audit_through_scheduling_synthesis_and_final_pro
     _prepare_all_fixture_timing(dispatches)
     evidence_id = old_entry["dispatch"]["evidence_id"]
     assert result["reused_evidence_ids"] == [evidence_id]
-    assert plan.complete_node_count == len(request["plan"]["actual_worker_nodes"]) - 1
+    # One retained audit leaves the queue; one fresh independent review joins it.
+    assert plan.complete_node_count == len(request["plan"]["actual_worker_nodes"])
+    assert sum(node.mode == "independent-review" for node in plan.actual_worker_nodes) == 1
     assert not any(item["dispatch"].get("skill_id") == old_entry["dispatch"]["skill_id"] for item in dispatches["dispatches"])
     journal = tmp_path / "repair.jsonl"
     sources: list[dict[str, str]] = []
@@ -1126,6 +1131,7 @@ def test_mutation_accepts_removal_from_the_previous_untracked_scope(tmp_path: Pa
 
     assert result["repair_epoch"]["changed_paths"] == ["scratch.py"]
     assert result["newly_touched_paths"] == []
+    assert not any(node["mode"] == "independent-review" for node in result["new_plan"]["actual_worker_nodes"])
     invalidated = {record["node_id"] for record in result["invalidated_nodes"]}
     assert {node.node_id for node in plan.actual_worker_nodes if "scratch.py" in node.coverage} <= invalidated
     assert not {node.node_id for node in plan.actual_worker_nodes if node.mode == "audit" and node.coverage == ("state.rs",)} & invalidated

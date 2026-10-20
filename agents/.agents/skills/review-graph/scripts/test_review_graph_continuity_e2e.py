@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from capture_scope import _scope_data
+from capture_scope import _scope_data, persist_capture
 from review_graph_reuse import WORKTREE_SELECTION_ALGORITHM, source_snapshot
 from test_review_graph_runtime import (
     SKILL_ROOT,
@@ -98,6 +98,12 @@ def _frozen_run(
 def _compile(  # noqa: PLR0913, PLR0917 - mirror the explicit compiler CLI boundaries.
     frozen: Path, lifecycle: Path, dispatches: Path, journal: Path, entry: dict[str, Any], before: str, after: str, output: Path, *workspace: str
 ) -> None:
+    captures = {"before": before, "after": after}
+    for phase, observation in entry["dispatch"].get("audit_observations", {}).items():
+        # Preserve the fixture's actual earlier observations, never dispatch expectations.
+        manifest = json.loads(Path(captures[phase]).read_bytes())
+        persist_capture(manifest, Path(observation["capture_path"]))
+        captures[phase] = observation["capture_path"]
     _cli(
         frozen,
         "compile-node",
@@ -110,9 +116,9 @@ def _compile(  # noqa: PLR0913, PLR0917 - mirror the explicit compiler CLI bound
         "--node-id",
         entry["node_id"],
         "--before-capture",
-        before,
+        captures["before"],
         "--after-capture",
-        after,
+        captures["after"],
         "--output",
         str(output),
         *workspace,

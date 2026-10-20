@@ -22,6 +22,11 @@ a symlink, its observed `readlink()` value is unchanged across the action, and
 absolute and relative links when both are accepted fixture forms. Preserve the
 failure-atomicity assertions; replacing path equality must not weaken them.
 
+For an `OSError`-rendered filename in stderr, assert `repr(str(path))`, including
+the full filename; `str(path)` can miss escaped Windows backslashes. Keep raw
+path assertions for application messages that deliberately print raw paths.
+Preserve checks for the error cause, exit status, and failure atomicity.
+
 After a portability repair, inspect newly added regression fixtures and their
 assertions for the same class of platform assumptions, not only the originally
 failing line. A new fixture is part of the Windows execution surface.
@@ -34,6 +39,14 @@ archives, derive expected bytes independently from the production transform and
 compare literal bytes or their independently computed digests. Cover text-mode
 translation, encoding, and newline composition when reachable; do not assume a
 downstream tool option controls earlier runtime or pipe conversion.
+
+Copy source fixtures byte-for-byte (`shutil.copyfile()` or
+`write_bytes(source.read_bytes())`) when testing unchanged content at another
+path. Build exact-byte archive fixtures with `write_bytes()`; specify newline
+behavior explicitly when text output is the contract. Do not weaken exact-byte
+assertions or static-analysis expectations to accommodate accidentally rewritten
+fixtures. The Python write boundary is independent of Git checkout settings; see
+`python-build-portability/references/windows-boundaries.md`.
 
 For subprocess pipelines, trace and test producer stdout capture, every
 intermediate representation, and consumer stdin separately. Use a real child
@@ -52,6 +65,11 @@ or publish.
 Include durable focused coverage and a sensitivity check showing, through an
 isolated copy or controlled fault injection, that the case fails with the
 original behavior and passes with the fix. Keep captured source unchanged.
+
+Where feasible, reproduce an `OSError` filename containing backslashes and a
+controlled LF-to-CRLF write (for example, `newline="\r\n"`). Verify that the
+original assertions or fixture construction fail and the repair preserves the
+intended filename and bytes.
 
 Label evidence as a native target-platform run, a model or emulation executed
 on the actual host, or an unexecuted matrix cell. Emulation can prove the modeled

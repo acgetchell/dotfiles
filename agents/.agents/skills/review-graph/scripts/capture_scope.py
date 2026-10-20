@@ -12,14 +12,14 @@ import stat
 import subprocess
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics, run_command_bytes
 from review_graph_git_objects import GitPathIdentity, git_object_id
 from review_graph_reuse import SNAPSHOT_FORMAT, source_snapshot
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
 _CHUNK_SIZE = 1024 * 1024
 _CAPTURE_MODES = frozenset(("branch", "staged", "worktree", "baseline"))
@@ -141,13 +141,14 @@ def _submodule_fingerprint(git: str, path: Path) -> str:
     """Hash a checked-out submodule commit plus tracked and untracked changes."""
     head = _decode(_run_git(git, path, ("rev-parse", "HEAD")))
     index_entries = _run_git(git, path, ("ls-files", "--stage", "-z"))
-    changed = _decode_zlist(_run_git(git, path, ("diff", "--name-only", "--no-renames", "-z", "HEAD")))
+    tracked = _decode_zlist(_run_git(git, path, ("ls-files", "-z")))
+    tracked.extend(_decode_zlist(_run_git(git, path, ("ls-tree", "--name-only", "-r", "-z", head))))
     untracked = _decode_zlist(_run_git(git, path, ("ls-files", "--others", "--exclude-standard", "-z")))
     return _worktree_fingerprint(
         git=git,
         identity=(("head", head.encode()), ("index-entries", index_entries), ("mode", b"submodule-worktree")),
         pathspecs=(),
-        paths=(*changed, *untracked),
+        paths=(*tracked, *untracked),
         repo=path,
     )
 
@@ -206,6 +207,13 @@ def _update_worktree_path(digest: _Digest, git: str, repo: Path, relative: str, 
         if not _is_gitlink(index_entry):
             message = f"unexpected directory in file scope: {relative}"
             raise RuntimeError(message)
+        if not (path / ".git").exists():
+            if any(path.iterdir()):
+                message = f"nonempty gitlink directory has no repository metadata: {relative}"
+                raise RuntimeError(message)
+            _update_part(digest, "mode", b"160000-unchecked-out")
+            _update_part(digest, "gitlink-index", index_entry)
+            return "submodule:" + hashlib.sha256(index_entry).hexdigest()
         _update_part(digest, "mode", b"160000")
         _update_part(digest, "gitlink-index", index_entry)
         submodule = _submodule_fingerprint(git, path)
@@ -385,6 +393,8 @@ def _scope_data(git: str, repo: Path, mode: str, base: str | None, pathspecs: Se
     elif mode == "baseline":
         path_arguments = _with_paths(("ls-files", "-z"), pathspecs)
         paths = _decode_zlist(_run_git(git, repo, path_arguments))
+        # Staged deletions disappear from ls-files but remain part of a repair.
+        paths.extend(_decode_zlist(_run_git(git, repo, _with_paths(("ls-tree", "--name-only", "-r", "-z", head), pathspecs))))
         paths.extend(selected_untracked)
     else:
         message = f"unsupported capture mode: {mode}"
@@ -469,6 +479,63 @@ def _scope_data(git: str, repo: Path, mode: str, base: str | None, pathspecs: Se
     return manifest
 
 
+def _committed_tree(git: str, repo: Path, revision: str) -> dict[str, GitPathIdentity]:
+    """Read immutable tree entries using their repository's object format."""
+    algorithm = _decode(_run_git(git, repo, ("rev-parse", "--show-object-format")))
+    entries = {}
+    for record in _run_git(git, repo, ("ls-tree", "-r", "-z", revision)).split(b"\0"):
+        if record:
+            metadata, path = record.split(b"\t", 1)
+            mode, _kind, object_id = metadata.split()
+            entries[os.fsdecode(path)] = GitPathIdentity(algorithm, mode.decode(), object_id.decode())
+    return entries
+
+
+def _committed_gitlink(git: str, repo: Path, relative: str, identity: GitPathIdentity) -> tuple[str, str | None]:
+    """Reconstruct a clean gitlink identity from the parent's immutable commit."""
+    index_entry = f"160000 {identity.object_id} 0\t".encode() + os.fsencode(relative) + b"\0"
+    path = repo / relative
+    if not path.exists() or (path.is_dir() and not any(path.iterdir())):
+        return "submodule:" + hashlib.sha256(index_entry).hexdigest(), None
+    # A different checkout can lack the target commit. It cannot prove clean.
+    if not path.is_dir() or _try_git(git, path, ("cat-file", "-e", f"{identity.object_id}^{{commit}}")) is None:
+        return identity.serialize(), None
+    entries = _committed_tree(git, path, identity.object_id)
+    index_entries = b"".join(f"{entry.mode} {entry.object_id} 0\t".encode() + os.fsencode(name) + b"\0" for name, entry in entries.items())
+    digest = hashlib.sha256()
+    for label, value in (("head", identity.object_id.encode()), ("index-entries", index_entries), ("mode", b"submodule-worktree")):
+        _update_part(digest, label, value)
+    _update_part(digest, "requested-paths", b"[]")
+    for name in sorted(entries):
+        entry = entries[name]
+        _update_part(digest, "path", os.fsencode(name))
+        if entry.mode == "160000":
+            _nested_identity, nested = _committed_gitlink(git, path, name, entry)
+            if nested is None and (path / name / ".git").exists():
+                return identity.serialize(), None
+            _update_part(digest, "mode", b"160000" if nested is not None else b"160000-unchecked-out")
+            _update_part(digest, "gitlink-index", f"160000 {entry.object_id} 0\t".encode() + os.fsencode(name) + b"\0")
+            if nested is not None:
+                _update_part(digest, "gitlink-worktree", nested.encode())
+        else:
+            _update_part(digest, "mode", entry.mode.encode())
+            _update_part(digest, "git-object", entry.serialize().encode())
+    clean = digest.hexdigest()
+    return "submodule:" + hashlib.sha256(index_entry + clean.encode()).hexdigest(), clean
+
+
+def captured_head_changes(git: str, repo: Path, manifest: Mapping[str, Any]) -> tuple[str, ...]:
+    """Compare captured raw identities with immutable HEAD, bypassing clean filters."""
+    snapshot = source_snapshot(dict(manifest))
+    committed = {
+        path: _committed_gitlink(git, repo, path, identity)[0] if identity.mode == "160000" else identity.serialize()
+        for path, identity in _committed_tree(git, repo, manifest["head"]).items()
+        if path in snapshot.captured_scope_paths
+    }
+    fingerprints = dict(snapshot.repository_path_fingerprints)
+    return tuple(path for path in snapshot.captured_scope_paths if fingerprints[path] != committed.get(path, "absent"))
+
+
 def _parser() -> argparse.ArgumentParser:
     """Create the command-line parser."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -476,7 +543,32 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--mode", choices=("branch", "staged", "worktree", "baseline"), default="branch", help="Review scope to fingerprint")
     parser.add_argument("--base", help="Explicit base ref for branch mode")
     parser.add_argument("--path", action="append", default=[], help="Repository-relative or absolute path boundary; repeat for multiple paths")
+    parser.add_argument("--output", type=Path, help="Atomically save the complete capture outside the repository and print a compact receipt")
     return parser
+
+
+def persist_capture(manifest: dict[str, Any], output: Path) -> dict[str, Any]:
+    """Persist immutable capture bytes before returning all observed fingerprints."""
+    from review_graph_runtime import _write_bytes_atomically_once  # noqa: PLC0415 - shared durable artifact writer, loaded only for persistence.
+
+    snapshot = source_snapshot(manifest)
+    snapshot.verify()
+    path = output.absolute()
+    if path.resolve() != path or path.is_relative_to(Path(snapshot.repository_root)):
+        msg = "capture output must be an absolute external artifact path without symlinks"
+        raise ValueError(msg)
+    content = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode()
+    receipt = {
+        "schema_version": 1,
+        "capture_path": str(path),
+        "capture_digest": "sha256:" + hashlib.sha256(content).hexdigest(),
+        "scope_fingerprint": snapshot.scope_fingerprint,
+        "captured_worktree_fingerprint": snapshot.captured_worktree_fingerprint,
+        "repository_state_fingerprint": snapshot.repository_state_fingerprint,
+    }
+    _write_bytes_atomically_once(path, content, mode=0o444)
+    _write_bytes_atomically_once(path.with_suffix(".receipt.json"), (json.dumps(receipt, sort_keys=True) + "\n").encode(), mode=0o444)
+    return receipt
 
 
 def main() -> int:
@@ -492,11 +584,12 @@ def main() -> int:
         root = Path(_decode(_run_git(git, requested_repo, ("rev-parse", "--show-toplevel"))))
         pathspecs = _normalize_pathspecs(root, requested_repo, arguments.path)
         manifest = _scope_data(git, root, arguments.mode, arguments.base, pathspecs)
-    except (ExecutableNotFoundError, OSError, RuntimeError, subprocess.TimeoutExpired) as error:
+        result = persist_capture(manifest, arguments.output) if arguments.output is not None else manifest
+    except (ExecutableNotFoundError, OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as error:
         print(f"capture_scope.py: {format_exception_diagnostics(error)}", file=sys.stderr)
         return 2
 
-    print(json.dumps(manifest, indent=2, sort_keys=True))
+    print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
 

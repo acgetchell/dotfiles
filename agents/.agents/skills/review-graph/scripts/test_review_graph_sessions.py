@@ -1,6 +1,7 @@
 """Frozen CLI recovery, compact worker integrity and delivery without certification."""
 
 import json
+import shlex
 import shutil
 import subprocess
 import sys
@@ -37,7 +38,7 @@ def _cli(script: Path, *arguments: str, stdin: bytes | None = None) -> subproces
     )
 
 
-def test_bootstrap_freezes_resources_and_recovers_signed_dispatch_publication(tmp_path: Path) -> None:
+def test_bootstrap_freezes_resources_and_recovers_signed_dispatch_publication(tmp_path: Path) -> None:  # noqa: PLR0915 - frozen recovery through capture, publication and final proof.
     _git, _repository, template, capture, _plan = _baseline_mutation_fixture(tmp_path)
     live = tmp_path / "live-skills"
     shutil.copytree(SKILL_ROOT, live, ignore=shutil.ignore_patterns("__pycache__", "test_*.py", "*.pyc"))
@@ -71,6 +72,8 @@ def test_bootstrap_freezes_resources_and_recovers_signed_dispatch_publication(tm
     signed = dispatches.read_bytes()
     entries = json.loads(signed)
     audit = next(item for item in entries["dispatches"] if item["dispatch"]["mode"] == "audit")
+    observations = audit["dispatch"]["audit_observations"]
+    subprocess.run(shlex.split(observations["before"]["capture_command"]), check=True, capture_output=True)  # noqa: S603 - frozen framework capture.
     # Simulate a concurrent update, including an incompatible schema/catalog.
     (live / "review-graph/scripts/review_graph_runtime.py").write_text("raise RuntimeError('changed live runtime')\n")
     (live / "review-graph/references/schemas/runtime-operation-inputs-v1.schema.json").write_text("{}")
@@ -80,6 +83,7 @@ def test_bootstrap_freezes_resources_and_recovers_signed_dispatch_publication(tm
     assert json.loads(output.read_bytes()) == bundle
     payload = json.dumps(_payload(audit["dispatch"]["owned_paths"], dispatch=audit["dispatch"])).encode()
     _cli(recovery, *run, "publish-worker-payload", "--input", audit["worker_payload_contract_path"], stdin=payload)
+    subprocess.run(shlex.split(observations["after"]["capture_command"]), check=True, capture_output=True)  # noqa: S603 - frozen framework capture.
     lifecycle = tmp_path / "lifecycle.json"
     lifecycle.write_text(json.dumps(bundle["lifecycle_input"]))
     journal = tmp_path / "journal.jsonl"
@@ -96,9 +100,9 @@ def test_bootstrap_freezes_resources_and_recovers_signed_dispatch_publication(tm
         "--node-id",
         audit["node_id"],
         "--before-capture",
-        str(capture_path),
+        observations["before"]["capture_path"],
         "--after-capture",
-        str(capture_path),
+        observations["after"]["capture_path"],
         "--output",
         str(tmp_path / "compiled.json"),
     )
