@@ -22,6 +22,20 @@ compiled artifact. All destinations must be distinct. The runtime preflights
 them, publishes compiled evidence and the operation result, then appends the
 journal event as the final acceptance commit.
 
+## Durable Audit Captures
+
+Framework audit dispatches provide `audit_observations` with before/after
+commands, capture paths, and receipt paths. Run the before command before source
+inspection and the after command afterward. Each command saves complete
+immutable JSON atomically and prints only its path, digest, and all three
+observed fingerprints. Pass those exact capture paths to `compile-node`; it
+requires matching durable receipts. Never reconstruct a missing before capture
+from expected or later fingerprints, or substitute truncated stdout.
+
+Legacy custom capture commands retain their original interface. Save their
+complete output externally before inspection; prefer the framework-generated
+capture commands when creating new plans.
+
 ## Artifact Write Review And Approval Retry
 
 Before publishing a worker payload, pass its exact bytes over standard input to

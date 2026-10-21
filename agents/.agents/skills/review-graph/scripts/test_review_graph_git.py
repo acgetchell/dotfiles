@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 from capture_scope import _scope_data
-from review_graph_git import fixed_branch_comparison, git_dependency_blockers
+from review_graph_git import covers_captured_worktree, fixed_branch_comparison, git_dependency_blockers
 from review_graph_receipts import stage_receipt
 from review_graph_runtime import (
     JournalEventRequest,
@@ -26,6 +26,18 @@ def test_fixed_branch_base_does_not_hide_index_moving_ref_or_compound_dependenci
     base = "a" * 40
     assert not fixed_branch_comparison(f"git diff {base} {option} -- tool.py", base)
     assert fixed_branch_comparison(f"git --no-pager diff {base} -- tool.py", base)
+
+
+@pytest.mark.parametrize("comparison", ["HEAD -- .", "HEAD", "HEAD -- tool.py state.rs"])
+def test_whole_worktree_comparison_recognizes_bound_source(comparison: str) -> None:
+    capture = {"head": "a" * 40, "requested_paths": [], "captured_scope_paths": ["tool.py", "state.rs"]}
+    assert covers_captured_worktree(f"git --no-pager diff {comparison}", capture)
+
+
+@pytest.mark.parametrize("comparison", ["HEAD -- tool.py", "--cached HEAD -- .", "--staged HEAD -- .", "origin/main -- .", "HEAD -- . && git status", "b" * 40])
+def test_other_comparisons_do_not_narrow_the_declared_review_boundary(comparison: str) -> None:
+    capture = {"head": "a" * 40, "requested_paths": [], "captured_scope_paths": ["tool.py", "state.rs"]}
+    assert not covers_captured_worktree(f"git diff {comparison}", capture)
 
 
 def _discovery_payload(audit: dict[str, Any], command: str = "git --no-pager diff -- tool.py state.rs") -> dict[str, Any]:

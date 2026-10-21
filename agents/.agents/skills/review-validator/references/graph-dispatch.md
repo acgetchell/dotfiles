@@ -1,10 +1,6 @@
 # Compact Graph Validation Dispatch
 
-Execute only the dispatched unit.
-
 ## Required Dispatch
-
-Require:
 
 - exact validation unit from the accepted graph plan
 - expected source, worktree, and repository-state fingerprints
@@ -20,15 +16,14 @@ Require:
 - dependency policy and elapsed bounds
 - execution-tool `executor_requirements.sandbox_permissions` (legacy: `use_default`)
 
-Missing fields mean `blocked`, never standalone discovery.
+Missing fields mean `blocked`, not standalone discovery.
 
 ## Execution
 
 1. Run `validation_observations.before.capture_command`, then its
    `workspace_command`. Without `validation_observations`, obtain before/after
    source captures and workspace snapshots from the coordinator.
-2. Recheck that every dispatched command is non-mutating under repository-owned
-   definitions or policy.
+2. Verify every command is non-mutating under repository policy.
 3. Apply required tool permissions; respect approvals. If unavailable, report
    blocked. Execute each command exactly once in order. Respect `stop-on-failure` or
    `continue-independent`. Isolated working directories and external artifacts
@@ -51,15 +46,19 @@ blocker in `limitations`. Never create placeholder outputs; runtime snapshots
 record absence. For executed permission failures, report `failed`, quote the
 denial in `evidence`, and retain an approved log. Only coordinators request recovery.
 
-Success proves only the dispatched environment; never describe local runs or
-emulation as native evidence for another platform.
+Success covers only the dispatched environment; local/emulated runs cannot
+establish another platform's native behavior.
+
+For strict Semgrep failures, including `0 findings`, follow
+[diagnostic guidance](../../project-tooling-review/references/static-analysis.md#validation).
+Request missing diagnostics through the coordinator.
 
 Before asynchronous execution, read [execution timing](execution-timing.md) for
 measurement and recovery.
 
 ## ValidationPayload
 
-Publish one version 3 JSON object:
+Publish version 3 JSON:
 
 ```json
 {

@@ -21,6 +21,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from capture_scope import captured_head_changes
 from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics, run_command_bytes
 from review_graph_bench import benchmark_identity, benchmark_recipes, equivalent_recipe
 from review_graph_bootstrap import bootstrap_document
@@ -55,7 +56,8 @@ from review_graph_git import (
     validate_git_dependencies,
 )
 from review_graph_git_objects import GitPathIdentity
-from review_graph_handoffs import validation_observations
+from review_graph_handoffs import audit_observations, validation_observations
+from review_graph_hosted import hosted_coverage
 from review_graph_independent import CHECK_LABELS, SCHEMA as _INDEPENDENT_PAYLOAD_SCHEMA, render_independent_payload
 from review_graph_instruction_delta import reconcile_instructions, retained_input_texts
 from review_graph_integrity import canonical_json, digest_bytes
@@ -161,6 +163,7 @@ from review_graph_timing import timing_blocker, timing_documents, timing_prerequ
 from review_graph_usage import digest as usage_digest, measure_call
 from review_graph_validation import ArtifactIdentity, ValidationPayload, ValidationRecord, VerifiedValidationRecord, bind_validation_payload
 from review_graph_validation_contracts import ContractBinding, load_contract_binding, validation_reuse_prerequisite
+from review_graph_validation_outputs import changed_identity_fields, obligation_identity
 from review_graph_views import execution_view_bytes
 
 if TYPE_CHECKING:
@@ -3147,8 +3150,14 @@ def _reused_validation_reference(
         target.verify()
         identities.extend(replace(candidate, source_state=origin.source_state, captured_paths=origin.captured_scope_paths) for candidate in candidates)
     original = next((identity for identity in identities if _planned_validation_digest(identity) == requirement["planned_validation_digest"]), None)
+    output_binding = None
     if original is None:
-        return None
+        if origin is None or target is None:
+            return None
+        output_binding = _validation_output_relocation(transition, requirement, unit, origin, target)
+        if output_binding is None:
+            return None
+        original = replace(unit, source_state=origin.source_state, captured_paths=tuple(output_binding["original_captured_paths"]))
     path_binding = (
         {"original_captured_paths": list(original.captured_paths), "replacement_captured_paths": list(unit.captured_paths)}
         if original.captured_paths != unit.captured_paths
@@ -3160,6 +3169,34 @@ def _reused_validation_reference(
         "replacement_planned_validation_digest": _planned_validation_digest(unit),
         "replacement_source_state": list(unit.source_state),
         **({"capture_binding": path_binding} if path_binding is not None else {}),
+        **({"output_binding": output_binding} if output_binding is not None else {}),
+    }
+
+
+def _validation_output_relocation(
+    transition: AuditReuseTransition, requirement: dict[str, Any], unit: ValidationUnit, origin: ReviewSourceSnapshot, target: ReviewSourceSnapshot
+) -> dict[str, Any] | None:
+    """Verify the historical obligation by its sealed digest, retaining fresh checks."""
+    digest = requirement["planned_validation_digest"]
+    path = Path(transition.metadata_path).parent / f"planned-validation.{digest.removeprefix('sha256:')}.json"
+    if not path.is_file() or path.is_symlink():
+        return None
+    content = _read_regular_file_no_follow(path)
+    if digest_bytes(content) != digest:
+        return None
+    original = json.loads(content)
+    current = _planned_validation_identity(unit)
+    if original.get("source_state") != list(origin.source_state) or current["source_state"] != list(target.source_state):
+        return None
+    comparable = {**current, "source_state": original["source_state"]}
+    if unit.captured_paths == target.captured_scope_paths and original.get("captured_paths") == list(origin.captured_scope_paths):
+        comparable["captured_paths"] = original["captured_paths"]
+    if obligation_identity(original, origin.repository_root) != obligation_identity(comparable, target.repository_root):
+        return None
+    return {
+        "original_identity": {"path": str(path), "digest": digest},
+        "original_captured_paths": original["captured_paths"],
+        "changed_identity_fields": changed_identity_fields(original, current),
     }
 
 
@@ -3584,37 +3621,25 @@ def _independent_adversarial_checks(paths: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(checks)
 
 
-def _inspection_groups(plan: GraphPlan, source_state: tuple[str, str, str], artifact_store: Path, repository_root: Path) -> dict[str, dict[str, object]]:  # noqa: C901
-    audit_nodes = [node for node in plan.actual_worker_nodes if node.mode == "audit" and node.coverage]
-    remaining = {node.node_id: node for node in audit_nodes}
-    groups: list[tuple[tuple[str, ...], list[str]]] = []
-    while remaining:
-        _seed_id, seed = remaining.popitem()
-        members = [seed]
-        paths = set(seed.coverage)
-        changed = True
-        while changed:
-            changed = False
-            for node_id, node in tuple(remaining.items()):
-                if paths.intersection(node.coverage):
-                    members.append(remaining.pop(node_id))
-                    paths.update(node.coverage)
-                    changed = True
-        groups.append((tuple(sorted(paths)), [node.node_id for node in members]))
+def _inspection_groups(plan: GraphPlan, source_state: tuple[str, str, str], artifact_store: Path, repository_root: Path) -> dict[str, dict[str, object]]:
+    groups: dict[tuple[str, ...], list[str]] = {}
+    for node in plan.actual_worker_nodes:
+        if node.mode == "audit" and node.coverage:
+            groups.setdefault(tuple(sorted(node.coverage)), []).append(node.node_id)
     output: dict[str, dict[str, object]] = {}
-    for paths, node_ids in groups:
-        if len(node_ids) < 2:
-            continue
+    for paths, node_ids in groups.items():
         observations: list[dict[str, object]] = []
         excerpts: list[dict[str, object]] = []
         remaining_bytes = 65536
-        for path in paths:
+        for index, path in enumerate(paths):
             candidate = (repository_root / path).resolve()
             if not candidate.is_relative_to(repository_root) or not candidate.is_file():
                 observations = []
                 break
             content = candidate.read_bytes()
-            limit = min(16384, remaining_bytes)
+            # Reserve a fair share for every remaining owned path. Broad context
+            # cannot consume a narrower specialist group's source budget.
+            limit = min(16384, remaining_bytes // (len(paths) - index))
             excerpt = content[:limit].decode("utf-8", errors="ignore")
             remaining_bytes -= len(content[:limit])
             excerpts.append({"path": path, "content_digest": digest_bytes(content), "text": excerpt, "complete": excerpt.encode() == content})
@@ -3640,6 +3665,7 @@ def _inspection_groups(plan: GraphPlan, source_state: tuple[str, str, str], arti
             "producer_node_id": min(node_ids),
             "reuse_policy": "trusted read-only observations may be reused; semantic findings and payloads remain node-specific",
             "source_state": list(source_state),
+            "source_excerpt_status": "available" if any(item["text"] for item in excerpts) else "empty-read-owned-files",
             "source_packet": {"source_state": list(source_state), "scope": "structural source only; no reviewer conclusions", "excerpts": excerpts},
         }
         for node_id in node_ids:
@@ -4262,7 +4288,9 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
     if not catalog_path.is_file():
         msg = f"routing catalog does not exist: {catalog_path}"
         raise ValueError(msg)
-    catalog_ids = sorted(entry.catalog_id for entry in load_routing_catalog(catalog_path, skill_roots=_continuation_skill_roots(plan)))
+    catalog = load_routing_catalog(catalog_path, skill_roots=_continuation_skill_roots(plan))
+    catalog_ids = sorted(entry.catalog_id for entry in catalog)
+    handoff_destinations = [{"catalog_id": entry.catalog_id, "skill_id": entry.skill_id} for entry in sorted(catalog, key=lambda entry: entry.catalog_id)]
     locations = document.get("execution_locations", {})
     if not isinstance(locations, dict) or any(not isinstance(key, str) or value not in {"worker", "coordinator"} for key, value in locations.items()):
         msg = "execution_locations must map node IDs to worker or coordinator"
@@ -4396,6 +4424,7 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             "command_policy": _materialized_command_policy(plan, node, authorized_duplicates),
             "handoff_catalog_digest": _file_identity_digest(str(catalog_path)),
             "handoff_catalog_ids": catalog_ids,
+            "handoff_destinations": handoff_destinations,
             "instruction_digests": [[path, _file_identity_digest(path)] for path in instruction_paths],
             "instruction_paths": list(instruction_paths),
             "mode": node.mode,
@@ -4425,6 +4454,8 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         if (snapshot_reference := verify_current_snapshot()) is not None:
             common["runtime_snapshot"] = snapshot_reference
         if node.mode in {"audit", "independent-review"}:
+            if observations := audit_observations(common, worker_payload_contract_path):
+                common["audit_observations"] = observations
             common["fresh_context_forbidden_artifacts"] = sorted(
                 {
                     *forbidden_artifacts(node.node_id, isolation_entries),
@@ -6296,6 +6327,10 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
     captured_paths = _text_list(new_capture, "captured_scope_paths")
     sources = _mutation_evidence_sources(document, old_plan)
     planning_input = bootstrap_document(new_capture, planning_template)
+    if new_capture["capture_mode"] == "baseline" and not planning_input.get("change_target"):
+        planning_input["concrete_change_target"] = bool(captured_head_changes("git", Path(new_capture["repository_root"]), new_capture))
+        if planning_input["concrete_change_target"]:
+            planning_input["change_target"] = shlex.join(["git", "--no-pager", "diff", previous_capture["head"], "--", "."])
     if planning_input.get("change_target"):
         planning_input["change_target"] = refresh_comparison_scope(planning_input["change_target"], previous_capture, new_capture)
     planning_input["independent_review_after_audits"] = old_plan.independent_review_after_audits
@@ -8172,6 +8207,16 @@ def reconcile_handoffs(document: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _delivery_validation_coverage(item: dict[str, Any], accepted: dict[str, Any], snapshot: ReviewSourceSnapshot | None) -> dict[str, Any]:
+    if item["execution"] != "hosted":
+        return item
+    return {
+        **{key: value for key, value in item.items() if key != "platform"},
+        "observer_platform": item["platform"],
+        **hosted_coverage(accepted.get(item["node_id"], {}), snapshot),
+    }
+
+
 def report_delivery(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, PLR0915 - preserve separate typed evidence, source and plan admission gates.
     """Report verified current evidence and outstanding work without certifying a proof."""
     plan = _graph_plan(document["plan"])
@@ -8233,8 +8278,14 @@ def report_delivery(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, 
         }
         for unit in plan.coalesced_validation_units
     ]
+    snapshots = [*plan.reuse_source_snapshots, *(transition.after for transition in transitions)]
+    snapshots.extend(source_snapshot(record["source_inputs"]) for record in records if record.get("source_inputs"))
+    current_snapshot = next((snapshot for snapshot in snapshots if snapshot.source_state == _current_metadata_state(document)), None)
+    validations = [_delivery_validation_coverage(item, accepted, current_snapshot) for item in validations]
     blockers.extend(
-        f"required validation {item['node_id']}: {item['status']}" for item in validations if item["required"] and item["status"] not in {"passed", "reused"}
+        f"required validation {item['node_id']}: {item.get('delivered_source_status', item['status'])}"
+        for item in validations
+        if item["required"] and item.get("delivered_source_status", item["status"]) not in {"passed", "reused"}
     )
     blockers.extend(f"rejected evidence: {identity}" for identity in rejected)
     handoffs = reconcile_handoffs(document)
@@ -8256,6 +8307,7 @@ def report_delivery(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, 
         "validation": validations,
         "local_validation": [item for item in validations if item["execution"] == "local"],
         "hosted_ci": [item for item in validations if item["execution"] == "hosted"],
+        "outstanding_hosted_ci": [item for item in validations if item["execution"] == "hosted" and item["delivered_source_status"] != "passed"],
         "remaining_findings": remaining,
         "blockers": blockers,
         "repository_readiness": "blocked" if blockers or pending_semantic or remaining else "verification-complete",
@@ -8891,6 +8943,31 @@ def _remove_attempt_created_files(paths: list[Path]) -> None:
         _fsync_directory(parent)
 
 
+def _verify_audit_captures(dispatch: dict[str, Any], before: Path, after: Path) -> None:
+    """Bind each complete capture and compact receipt to its dispatched path."""
+    for phase, path in (("before", before), ("after", after)):
+        observation = dispatch.get("audit_observations", {}).get(phase)
+        if observation is None:
+            continue
+        if str(path.absolute()) != observation["capture_path"]:
+            msg = f"audit {phase} capture must use its dispatched artifact path"
+            raise ValueError(msg)
+        content = _read_regular_file_no_follow(path)
+        snapshot = source_snapshot(json.loads(content))
+        snapshot.verify()
+        expected = {
+            "schema_version": 1,
+            "capture_path": str(path.absolute()),
+            "capture_digest": digest_bytes(content),
+            "scope_fingerprint": snapshot.scope_fingerprint,
+            "captured_worktree_fingerprint": snapshot.captured_worktree_fingerprint,
+            "repository_state_fingerprint": snapshot.repository_state_fingerprint,
+        }
+        if snapshot.repository_root != dispatch["repository_root"] or json.loads(_read_regular_file_no_follow(Path(observation["receipt_path"]))) != expected:
+            msg = f"audit {phase} capture receipt does not match its durable observation"
+            raise ValueError(msg)
+
+
 def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:  # noqa: C901, PLR0912, PLR0915
     plan, entry = _lifecycle_dispatch(document, args.dispatches, args.node_id)
     source_state = _state(document, "source_state")
@@ -8901,6 +8978,7 @@ def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace)
     if not isinstance(raw_dispatch, dict):
         msg = f"materialized node has no dispatch object: {args.node_id}"
         raise TypeError(msg)
+    _verify_audit_captures(raw_dispatch, args.before_capture, args.after_capture)
     if (
         before_state not in states
         or after_state not in states

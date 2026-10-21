@@ -156,6 +156,19 @@ exit behavior when CI enforcement changes. Keep Semgrep fixture matching and
 production path-filter enforcement distinct; an annotation test alone need not
 exercise the paths used by the actual scan.
 
+For a nonzero strict Semgrep scan, distinguish rule findings from parser errors,
+timeouts, and other coverage failures. A human summary of `0 findings` or nearly
+100% parsed lines does not establish success. Retain structured JSON `errors`
+and scanned/skipped paths with the exit code. If the original log lacks JSON
+`errors` or scanned/skipped paths, even when a finding location is present,
+request the same production scan with `--json` through its validation owner;
+preserve the failed log and use a new artifact destination. Under graph
+dispatch, request a diagnostic validation unit rather than running an
+undispatched duplicate. Verify target selection with the production ignores and
+path filters separately from rule-fixture tests. Do not weaken strict mode or
+exclude ordinary tests to hide parser failures; confirm the language accepts
+the construct and use a behavior-preserving spelling when appropriate.
+
 Treat a clean real-repository scan as false-positive evidence only. Unless the
 corpus contains a deliberate known violation, it cannot prove that the rule
 would detect a violation written in the same structural form.

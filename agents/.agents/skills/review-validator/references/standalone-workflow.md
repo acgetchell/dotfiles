@@ -68,6 +68,17 @@ modeled boundary, and every unexecuted target cell. If supplied native CI
 evidence for the same source state conflicts with local or emulated evidence,
 preserve the native failure instead of reporting the matrix as passed.
 
+For strict Semgrep scans, a nonzero exit remains a failure even when the human
+summary reports `0 findings`. Separate findings from parser errors, timeouts,
+and skipped coverage. If the log lacks structured errors or scanned/skipped
+targets, retain it and execute a diagnostic scan with the same production
+configuration plus `--json`. Publish structured errors and scanned/skipped
+targets to a new artifact before final source-state reconciliation. When
+execution is delegated, request the coordinator-run scan and keep validation
+blocked until it completes and publishes its artifact. Verify production target
+selection independently of rule-fixture success; preserve strict scanning and
+ordinary test coverage.
+
 Run the source-state check again. Any scoped source, repository source, index,
 HEAD, or branch mutation makes the evidence stale and the result `blocked`.
 

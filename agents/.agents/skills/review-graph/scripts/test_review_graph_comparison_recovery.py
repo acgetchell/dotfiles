@@ -69,8 +69,8 @@ def test_updated_runtime_advances_large_frozen_baseline_without_reauditing_uncha
     assert shlex.split(independent["change_target"]) == ["git", "diff", bundle["capture"]["head"], "--", "."]
     comparison = subprocess.run(shlex.split(independent["change_target"]), cwd=repository, capture_output=True, check=True)  # noqa: S603 - runtime-built diff.
     assert comparison.stdout == b""  # Git omits the new file; direct source obligations must retain it.
-    assert set(independent["owned_paths"]) == set(captured_paths)
-    assert "extra.txt" in independent["owned_paths"]
+    assert independent["owned_paths"] == ["extra.txt"]
+    assert set(result["capture"]["captured_scope_paths"]) == set(captured_paths)
     assert audit["dispatch"]["evidence_id"] in result["reused_evidence_ids"]
     assert all(path.read_bytes() == content for path, content in originals.items())
     assert result["new_plan"]["review_lifecycle"]["repairs_completed"] == 1

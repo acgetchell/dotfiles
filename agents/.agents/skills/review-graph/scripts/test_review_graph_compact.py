@@ -3,6 +3,7 @@
 import hashlib
 import json
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,51 @@ def _independent_entry(materialized: dict[str, Any]) -> dict[str, Any]:
 def _publish(entry: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     contract = json.loads(Path(entry["worker_payload_contract_path"]).read_bytes())
     return runtime.publish_worker_payload_bytes(contract, json.dumps(payload).encode())
+
+
+def test_compact_handoff_destinations_author_valid_payload(materialized: dict[str, Any]) -> None:
+    entry = next(item for item in materialized["dispatches"] if item["dispatch"]["mode"] == "audit")
+    view = json.loads(Path(entry["worker_execution_path"]).read_bytes())
+    destination = next(item for item in view["dispatch"]["handoff_destinations"] if item["skill_id"] == "scientific-software-docs-review")
+    payload = _compact_audit_payload(entry)
+    payload["handoffs"] = [
+        {
+            "catalog_id": destination["catalog_id"],
+            "reason": "Inspect the scientific documentation claim.",
+            "scope": entry["dispatch"]["owned_paths"],
+            "observed_trigger": "A scientific claim needs documentation review.",
+        }
+    ]
+    assert _publish(entry, payload)["status"] == "published"
+    payload["handoffs"][0]["catalog_id"] = destination["skill_id"]
+    with pytest.raises(ValueError, match="catalog"):
+        _publish(entry, payload)
+
+
+def test_source_packets_reserve_owned_text_in_mixed_repository(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    document = benchmark_fixture(repository)
+    plan = runtime._graph_plan(document["plan"])
+    seed = next(node for node in plan.actual_worker_nodes if node.mode == "audit")
+    groups = {"broad": (".github/workflows/ci.yml", "CHANGELOG.md", "src/lib.rs", "scripts/check.py"), "rust": ("src/lib.rs",), "python": ("scripts/check.py",)}
+    for path in groups["broad"]:
+        target = repository / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(("large context\n" * 10000) if path in groups["broad"][:2] else "owned source\n")
+    nodes = tuple(replace(seed, node_id=f"{name}-{index}", coverage=paths) for name, paths in groups.items() for index in range(1 if name == "python" else 2))
+    packets = runtime._inspection_groups(replace(plan, actual_worker_nodes=nodes), ("scope", "worktree", "repository"), tmp_path / "proof", repository)
+    for node in nodes:
+        record = packets[node.node_id]
+        assert record["paths"] == sorted(node.coverage)
+        packet = record["source_packet"]
+        assert isinstance(packet, dict)
+        excerpts = packet["excerpts"]
+        assert {item["path"] for item in excerpts} == set(node.coverage)
+        assert all(item["text"] for item in excerpts)
+        assert sum(len(item["text"].encode()) for item in excerpts) <= 65536
+        assert record["source_excerpt_status"] == "available"
+        for item in excerpts:
+            assert item["content_digest"] == _digest((repository / item["path"]).read_bytes())
 
 
 @pytest.mark.parametrize("mode", ["audit", "independent-review"])

@@ -11,6 +11,16 @@ when that is the contract; use explicit normalization only for a defined
 textual format. A fixture that compares a shell's cwd string to `str(Path)`
 needs this review even if production code already handles paths correctly.
 
+`OSError` renders filenames with repr-style quoting and escaping, so Windows
+backslashes can be doubled in diagnostics. Distinguish that representation from
+application messages that deliberately print raw paths.
+
+`Path.write_text()` can translate LF to CRLF on Windows; Git's
+`core.autocrlf=false` does not control Python writes. Identify whether the
+contract requires unchanged bytes or text with a specified newline convention.
+Route fixture construction and regression assertions to
+`python-test-quality/references/platform-regression-evidence.md`.
+
 Treat `readlink()` output as an OS representation, not a round trip of the
 argument passed to `symlink_to()`. Windows may return a substitution path with
 the `\\?\` prefix. Use `link.samefile(expected_target)` for an existing target's

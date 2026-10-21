@@ -57,6 +57,10 @@ def test_adjacent_list_entries_keep_only_their_own_claims(marker: str) -> None:
     [
         ("10.24033/rhm.30", "La méthode de Cholesky", ["Brezinski"], 2005, 2018),
         ("10.56021/9781421407944", "Matrix Computations", ["Golub", "Van Loan"], 2013, 2012),
+        *[
+            ("10.1234/date-fixture", "Date provenance fixture", ["Fixture"], local, resolver)
+            for local, resolver in ((1990, 2006), (2002, 2012), (2017, 2018), (2005, 2006))
+        ],
     ],
 )
 def test_primary_publication_date_disagreements_retain_provenance(doi: str, title: str, authors: list[str], local_year: int, resolver_year: int) -> None:
@@ -81,13 +85,14 @@ def test_primary_publication_date_disagreements_retain_provenance(doi: str, titl
     assert "date fields disagree" in preferred.message
 
 
-def test_deposit_year_is_not_a_publication_year() -> None:
+@pytest.mark.parametrize("field", ["created", "deposited", "indexed", "updated"])
+def test_deposit_year_is_not_a_publication_year(field: str) -> None:
     raw = metadata("Example")
     del raw["issued"]
-    raw["created"] = {"date-parts": [[2020]]}
+    raw[field] = {"date-parts": [[2020]]}
     parsed = MODULE.CslMetadata.parse(raw)
     assert parsed.year is None
-    assert parsed.date_provenance == (("created", "2020"),)
+    assert parsed.date_provenance == ((field, "2020"),)
 
 
 def test_cff_pointer_above_concept_doi_has_insufficient_context() -> None:
@@ -259,7 +264,20 @@ SOFTWARE_LINKS = [
     f"For software citation metadata, see [CITATION.cff](CITATION.cff). https://doi.org/{SOFTWARE_DOI}",
     f"- DOI: <https://doi.org/{SOFTWARE_DOI}>\n- Citation metadata: [CITATION.cff](CITATION.cff)",
     f"- DOI: <https://doi.org/{SOFTWARE_DOI}>\n- Citation metadata: [CITATION.cff][citation-metadata]",
+    f"Tagged releases are archived on Zenodo under the all-versions concept DOI\n[{SOFTWARE_DOI}](https://doi.org/{SOFTWARE_DOI}).",
+    f"For citations of this software, see [CITATION.cff](CITATION.cff) and the DOI: https://doi.org/{SOFTWARE_DOI}",
 ]
+
+
+def test_repeated_software_pointer_is_checked_per_occurrence(tmp_path: Path) -> None:
+    cff = tmp_path / "CITATION.cff"
+    cff.write_text(CFF)
+    text = "\n\n".join([SOFTWARE_LINKS[0], SOFTWARE_LINKS[-1], f"Wrong Author. Another title (2001). https://doi.org/{SOFTWARE_DOI}"])
+    rows = MODULE.validate_entries(MODULE.extract_entries(text), 1, 0.45, lambda *_: software_metadata(), citation=MODULE.SoftwareCitation.load(cff))
+    assert [row.status for row in rows] == [MODULE.AuditStatus.OK, MODULE.AuditStatus.OK, MODULE.AuditStatus.MISMATCH]
+    assert len({row.line for row in rows}) == 3
+    assert rows[0].canonical_software == rows[1].canonical_software
+    assert rows[2].canonical_software is None
 
 
 def software_metadata() -> dict[str, object]:

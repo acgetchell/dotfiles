@@ -11,7 +11,7 @@ from typing import cast
 
 import capture_scope
 import pytest
-from capture_scope import _file_blob_id, _scope_data
+from capture_scope import _file_blob_id, _scope_data, captured_head_changes
 from review_graph_git_objects import GitPathIdentity
 from review_graph_integrity import digest_json
 from review_graph_reuse import source_snapshot
@@ -117,15 +117,33 @@ def test_clean_filters_cannot_hide_changed_worktree_bytes(tmp_path: Path) -> Non
     git = shutil.which("git") or "git"
     before = source_snapshot(_scope_data(git, repo, "baseline", None, ()))
     source.write_bytes(b"source\r\n")
-    after = source_snapshot(_scope_data(git, repo, "baseline", None, ()))
+    capture = _scope_data(git, repo, "baseline", None, ())
+    after = source_snapshot(capture)
     before.verify()
     after.verify()
     assert _git(repo, "hash-object", "source.txt").strip() == filtered
     assert dict(before.repository_path_fingerprints)["source.txt"] != dict(after.repository_path_fingerprints)["source.txt"]
     assert before.git_tree_id != after.git_tree_id
     assert before.repository_state_fingerprint != after.repository_state_fingerprint
+    assert captured_head_changes(git, repo, capture) == ("source.txt",)
     assert (repo / ".git/index").read_bytes() == index
     assert {str(path.relative_to(repo / ".git/objects")) for path in (repo / ".git/objects").rglob("*")} == objects
+
+
+def test_baseline_capture_retains_staged_deletions(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    (repo / "removed.txt").write_text("removed\nsource\n")
+    (repo / "retained.txt").write_text("unchanged\n")
+    _commit_all(repo)
+    _git(repo, "rm", "removed.txt")
+    git = shutil.which("git") or "git"
+    capture = _scope_data(git, repo, "baseline", None, ())
+    assert capture["captured_scope_paths"] == ["removed.txt", "retained.txt"]
+    bounds = capture["captured_path_line_bounds"]
+    assert isinstance(bounds, dict)
+    assert bounds["removed.txt"] == 2
+    assert captured_head_changes(git, repo, capture) == ("removed.txt",)
 
 
 def _run(command: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -153,7 +171,7 @@ def _init_repo(repo: Path) -> None:
 
 def _commit_all(repo: Path) -> None:
     _git(repo, "add", ".")
-    _git(repo, "commit", "--quiet", "-m", "fixture")
+    _git(repo, "-c", "user.name=Review Graph Test", "-c", "user.email=review-graph@example.invalid", "commit", "--quiet", "-m", "fixture")
 
 
 def _capture(repo: Path, mode: str, *arguments: str) -> dict[str, object]:
@@ -496,11 +514,16 @@ def test_repository_root_preserves_trailing_space(tmp_path: Path) -> None:
     assert manifest["repository_root"] == str(repo)
 
 
-def test_baseline_hashes_checked_out_submodule_state(tmp_path: Path) -> None:
+@pytest.mark.parametrize("change", ["tracked", "untracked", "filtered", "commit", "index", "unchecked-out"])
+def test_baseline_hashes_checked_out_submodule_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str) -> None:
+    # Clones do not inherit the source repository's local author configuration.
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "empty-gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     nested = tmp_path / "nested"
     _init_repo(nested)
     nested_file = nested / "nested.txt"
     nested_file.write_text("one\n", encoding="utf-8")
+    (nested / ".gitattributes").write_text("*.txt text eol=lf\n")
     _commit_all(nested)
 
     repo = tmp_path / "repo"
@@ -510,10 +533,32 @@ def test_baseline_hashes_checked_out_submodule_state(tmp_path: Path) -> None:
     checkout_file = repo / "vendor" / "nested" / "nested.txt"
 
     clean = _capture(repo, "baseline")
-    checkout_file.write_text("two\n", encoding="utf-8")
+    git = shutil.which("git")
+    assert git is not None
+    assert captured_head_changes(git, repo, clean) == ()
+    if change == "unchecked-out":
+        _git(repo, "submodule", "deinit", "--force", "--all")
+        assert captured_head_changes(git, repo, _capture(repo, "baseline")) == ()
+        checkout_file.write_text("unexpected source\n")
+        with pytest.raises(RuntimeError, match="nonempty gitlink directory"):
+            _scope_data(git, repo, "baseline", None, ())
+        return
+    if change == "untracked":
+        (checkout_file.parent / "untracked.txt").write_text("new\n")
+    elif change == "filtered":
+        checkout_file.write_bytes(b"one\r\n")
+        assert _git(checkout_file.parent, "diff", "--name-only", "HEAD") == ""
+    else:
+        checkout_file.write_text("two\n", encoding="utf-8")
+        if change == "commit":
+            _commit_all(checkout_file.parent)
+        elif change == "index":
+            _git(checkout_file.parent, "add", "nested.txt")
+            checkout_file.write_text("one\n", encoding="utf-8")
     dirty = _capture(repo, "baseline")
 
     assert clean["scope_fingerprint"] != dirty["scope_fingerprint"]
+    assert captured_head_changes(git, repo, dirty) == ("vendor/nested",)
 
 
 def test_repository_state_fingerprint_covers_submodule_index(tmp_path: Path) -> None:
