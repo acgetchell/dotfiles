@@ -527,10 +527,11 @@ def _committed_gitlink(git: str, repo: Path, relative: str, identity: GitPathIde
 def captured_head_changes(git: str, repo: Path, manifest: Mapping[str, Any]) -> tuple[str, ...]:
     """Compare captured raw identities with immutable HEAD, bypassing clean filters."""
     snapshot = source_snapshot(dict(manifest))
+    captured_paths = set(snapshot.captured_scope_paths)
     committed = {
         path: _committed_gitlink(git, repo, path, identity)[0] if identity.mode == "160000" else identity.serialize()
         for path, identity in _committed_tree(git, repo, manifest["head"]).items()
-        if path in snapshot.captured_scope_paths
+        if path in captured_paths
     }
     fingerprints = dict(snapshot.repository_path_fingerprints)
     return tuple(path for path in snapshot.captured_scope_paths if fingerprints[path] != committed.get(path, "absent"))

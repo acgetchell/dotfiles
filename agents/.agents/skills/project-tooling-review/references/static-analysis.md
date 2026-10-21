@@ -159,9 +159,10 @@ exercise the paths used by the actual scan.
 For a nonzero strict Semgrep scan, distinguish rule findings from parser errors,
 timeouts, and other coverage failures. A human summary of `0 findings` or nearly
 100% parsed lines does not establish success. Retain structured JSON `errors`
-and scanned/skipped paths with the exit code. If the original log omits the
-location, request the same production scan with `--json` through its validation
-owner; preserve the failed log and use a new artifact destination. Under graph
+and scanned/skipped paths with the exit code. If the original log lacks JSON
+`errors` or scanned/skipped paths, even when a finding location is present,
+request the same production scan with `--json` through its validation owner;
+preserve the failed log and use a new artifact destination. Under graph
 dispatch, request a diagnostic validation unit rather than running an
 undispatched duplicate. Verify target selection with the production ignores and
 path filters separately from rule-fixture tests. Do not weaken strict mode or

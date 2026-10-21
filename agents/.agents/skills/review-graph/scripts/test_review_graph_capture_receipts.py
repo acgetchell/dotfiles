@@ -16,8 +16,10 @@ from test_capture_scope import _commit_all, _init_repo
 def test_large_audit_captures_persist_before_compact_receipts(tmp_path: Path) -> None:
     repository = tmp_path / "repository"
     _init_repo(repository)
-    for index in range(500):
-        (repository / f"source-{index:04}.py").write_text(f"value = {index}\n")
+    # Cross the serialized-size boundary without hundreds of extra Git traversals.
+    sources = [repository / f"source-{index:04}-{'capture-' * 9}.py" for index in range(160)]
+    for index, source in enumerate(sources):
+        source.write_text(f"value = {index}\n")
     _commit_all(repository)
     command = runtime_command(Path(capture_scope.__file__), "--repo", str(repository), "--mode", "baseline")
     dispatch = {"node_id": "audit-001", "repository_root": str(repository), "state_verification_command": shlex.join(command)}
@@ -43,7 +45,7 @@ def test_large_audit_captures_persist_before_compact_receipts(tmp_path: Path) ->
     with pytest.raises(ValueError, match="regular non-symlink file"):
         runtime._verify_audit_captures(dispatch, before, after)
     retained_bytes = before.read_bytes()
-    (repository / "source-0000.py").write_text("value = 'changed'\n")
+    sources[0].write_text("value = 'changed'\n")
     result = subprocess.run(shlex.split(observations["before"]["capture_command"]), capture_output=True, check=False, timeout=30)  # noqa: S603
     assert result.returncode == 2
     assert b"refusing to overwrite" in result.stderr

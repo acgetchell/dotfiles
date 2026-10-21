@@ -171,7 +171,7 @@ def _init_repo(repo: Path) -> None:
 
 def _commit_all(repo: Path) -> None:
     _git(repo, "add", ".")
-    _git(repo, "commit", "--quiet", "-m", "fixture")
+    _git(repo, "-c", "user.name=Review Graph Test", "-c", "user.email=review-graph@example.invalid", "commit", "--quiet", "-m", "fixture")
 
 
 def _capture(repo: Path, mode: str, *arguments: str) -> dict[str, object]:
@@ -515,7 +515,10 @@ def test_repository_root_preserves_trailing_space(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("change", ["tracked", "untracked", "filtered", "commit", "index", "unchecked-out"])
-def test_baseline_hashes_checked_out_submodule_state(tmp_path: Path, change: str) -> None:
+def test_baseline_hashes_checked_out_submodule_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str) -> None:
+    # Clones do not inherit the source repository's local author configuration.
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "empty-gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     nested = tmp_path / "nested"
     _init_repo(nested)
     nested_file = nested / "nested.txt"

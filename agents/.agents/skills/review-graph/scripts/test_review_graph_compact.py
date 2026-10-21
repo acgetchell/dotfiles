@@ -73,6 +73,7 @@ def test_source_packets_reserve_owned_text_in_mixed_repository(tmp_path: Path) -
         packet = record["source_packet"]
         assert isinstance(packet, dict)
         excerpts = packet["excerpts"]
+        assert {item["path"] for item in excerpts} == set(node.coverage)
         assert all(item["text"] for item in excerpts)
         assert sum(len(item["text"].encode()) for item in excerpts) <= 65536
         assert record["source_excerpt_status"] == "available"
