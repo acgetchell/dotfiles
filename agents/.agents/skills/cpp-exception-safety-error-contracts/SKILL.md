@@ -89,3 +89,5 @@ Use [references/review-checklist.md](references/review-checklist.md) when the ch
 ## Handoff
 
 Summarize reviewed failure channels and guarantees, `noexcept` conclusions, boundary translations, rollback evidence, focused tests, and any ownership, invariant, concurrency, or test-quality follow-up.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

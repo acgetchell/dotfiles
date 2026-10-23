@@ -24,6 +24,7 @@ from review_graph_git import covers_captured_worktree
 from review_graph_integrity import MAX_NATIVE_IDENTIFIER_LENGTH, digest_bytes, digest_json
 from review_graph_lifecycle import ReviewLifecycle, lifecycle_from_document
 from review_graph_provenance import audit_input_reference, metadata_transition_reference, review_scope_body
+from review_graph_results import EvaluationRejection, parse_json_object
 from review_graph_reuse import (
     AuditInputIdentity,
     AuditReuseTransition,
@@ -2475,6 +2476,8 @@ def graph_plan_digest(plan: GraphPlan) -> str:
         document.pop("independent_review_after_audits")
     if plan.review_lifecycle == ReviewLifecycle():
         document.pop("review_lifecycle")
+    elif not plan.review_lifecycle.interleaved_repair_epochs:
+        document["review_lifecycle"].pop("interleaved_repair_epochs")
     _drop_empty_plan_fields(
         document,
         (
@@ -2516,7 +2519,15 @@ def graph_plan_digest_matches(plan: GraphPlan, digest: str) -> bool:
         return True
     if not plan.audit_delta_reviews:
         legacy.pop("audit_delta_reviews")
-    return digest == digest_json(legacy)
+    if digest == digest_json(legacy):
+        return True
+    if "review_lifecycle" in legacy and not plan.review_lifecycle.interleaved_repair_epochs:
+        legacy["review_lifecycle"].pop("interleaved_repair_epochs")
+        if digest == digest_json(legacy):
+            return True
+        legacy["audit_delta_reviews"] = plan.audit_delta_reviews
+        return digest == digest_json(legacy)
+    return False
 
 
 def validate_isolation_root(isolation_root: str, repository_root: Path) -> None:
@@ -6149,10 +6160,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--repository-root", type=Path, help="trusted repository root used to recapture independent-review source")
     args = parser.parse_args(argv)
     try:
-        document = json.loads(args.input.read_text(encoding="utf-8"))
-        if not isinstance(document, Mapping):
-            msg = "input root must be a JSON object"
-            raise TypeError(msg)
+        document = parse_json_object(args.input.read_bytes())
         bundle_fields = {"lifecycle_input", "materialization_input", "plan", "planning_input", "schema_version"}
         if bundle_fields <= set(document):
             plan_document = document.get("plan")
@@ -6180,7 +6188,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             document, catalog_path=args.catalog, skill_roots=tuple(args.skill_root or (DEFAULT_SKILL_ROOT,)), repository_root=args.repository_root
         )
     except (ExecutableNotFoundError, OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError, ValueError, subprocess.SubprocessError) as error:
-        print(f"review_graph_plan: {format_exception_diagnostics(error)}", file=sys.stderr)
+        print(
+            json.dumps(
+                {
+                    "status": "rejected",
+                    "message": f"review_graph_plan: {format_exception_diagnostics(error)}",
+                    "rejection": EvaluationRejection.from_exception(error).as_dict(),
+                },
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
         return 2
     print(json.dumps(asdict(plan), indent=2, sort_keys=True))
     return 0 if plan.dispatch_allowed else 2

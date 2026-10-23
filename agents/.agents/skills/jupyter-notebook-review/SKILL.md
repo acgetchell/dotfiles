@@ -94,3 +94,5 @@ or portability.
 ## Output
 
 Lead with reproducibility or privacy blockers. Cite notebook cells by number and ID where possible. Report structural, state, input, artifact, and environment findings; references and focused skills loaded; whether outputs were cleared; validators run; execution status; and any unavailable dependencies or runtime limitations.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

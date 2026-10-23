@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from capture_scope import _scope_data
+from review_graph_results import EvaluationBoundaryError, RejectionKind
 from review_graph_reuse import source_snapshot
 
 
@@ -20,7 +21,7 @@ def verify_live_source(capture: dict[str, Any]) -> None:
         current = _scope_data(git, Path(expected.repository_root), expected.capture_mode, expected.base_ref, expected.requested_paths)
     except RuntimeError as error:
         msg = f"live source capture failed during external reconciliation; recapture the actual state: {error}"
-        raise ValueError(msg) from error
+        raise EvaluationBoundaryError(RejectionKind.STALE_CAPTURE, msg) from error
     if source_snapshot(current) != expected or current["captured_path_line_bounds"] != capture.get("captured_path_line_bounds"):
         msg = "source changed during external reconciliation; retain the attempts and recapture the actual state"
-        raise ValueError(msg)
+        raise EvaluationBoundaryError(RejectionKind.STALE_CAPTURE, msg)

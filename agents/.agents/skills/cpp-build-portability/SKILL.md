@@ -129,3 +129,5 @@ For each finding, name the affected compiler, library, platform, target, transla
 ## Handoff
 
 Summarize the declared and demonstrated matrix, CMake presets and vcpkg contract, headers and targets inspected, ODR/linkage and configuration checks, compiler/library evidence, `just` validators and results, unavailable matrix cells, joint work routed to project tooling or API/test specialists, files changed, and confirmation that no git state mutations were performed when true.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

@@ -108,3 +108,5 @@ Identify the report URL/artifact and commit, meaningful patch and existing gaps,
 tests or policy changes made, validation results, and remaining limitations.
 Include percentages only when the report supplies them. Explain skipped gaps
 without manufacturing tests to fill a template.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

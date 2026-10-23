@@ -233,9 +233,12 @@ def test_runtime_fatal_git_diagnostic_uses_stderr_and_preserves_prior_artifacts(
 
     result = capsys.readouterr()
     assert result.out == ""
-    assert "exit status 128: git ls-files" in result.err
-    assert "stdout:\npartial" in result.err
-    assert "stderr:\nfatal: fixture repository is unreadable" in result.err
+    diagnostic = json.loads(result.err)
+    assert diagnostic["rejection"]["kind"] == "unclassified-failure"
+    assert diagnostic["rejection"]["accepted"] is False
+    assert "exit status 128: git ls-files" in diagnostic["message"]
+    assert "stdout:\npartial" in diagnostic["message"]
+    assert "stderr:\nfatal: fixture repository is unreadable" in diagnostic["message"]
     assert not output_path.exists()
     assert {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()} == protected
 
@@ -258,8 +261,11 @@ def test_bootstrap_fatal_git_diagnostic_uses_stderr_and_preserves_prior_output(
 
     result = capsys.readouterr()
     assert result.out == ""
-    assert "exit status 128: git check-ignore" in result.err
-    assert "stderr:\nfatal: fixture repository is unreadable" in result.err
+    diagnostic = json.loads(result.err)
+    assert diagnostic["rejection"]["kind"] == "unclassified-failure"
+    assert diagnostic["rejection"]["accepted"] is False
+    assert "exit status 128: git check-ignore" in diagnostic["message"]
+    assert "stderr:\nfatal: fixture repository is unreadable" in diagnostic["message"]
     assert {path: path.read_bytes() for path in tmp_path.iterdir()} == protected
 
 

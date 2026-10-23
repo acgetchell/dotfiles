@@ -19,9 +19,9 @@ before loading references:
 
 ## Graph-Dispatched Mode
 
-Use graph mode for an actual graph dispatch or an explicit request to execute
-a graph validation unit. Mentioning `review-graph` alone does not select this mode. Follow the compact contract exactly: an incomplete actual
-dispatch is `blocked` and never falls back to standalone discovery.
+Graph mode requires an actual dispatch or explicit graph-unit request;
+mentioning `review-graph` alone does not select it. Follow the compact contract:
+an incomplete dispatch is `blocked`, never standalone discovery.
 
 Honor placement and the coalesced unit. Do not re-plan, split or broaden it,
 create another worker, or inspect implementation semantics. The coordinator
@@ -53,3 +53,5 @@ command failure; and `passed` when all requirements pass and a command ran.
 
 Standalone results additionally allow `reused` for exactly satisfied requirements
 without execution, and `not-applicable` for a zero-requirement, zero-command plan.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

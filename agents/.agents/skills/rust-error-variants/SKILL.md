@@ -176,3 +176,5 @@ Prefer tests that:
 - cover each new distinct failure path
 
 Avoid tests that only check `is_err()` for logic that depends on variant correctness.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

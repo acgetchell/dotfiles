@@ -120,3 +120,5 @@ For each finding, state the schedule or cancellation point, shared state and syn
 ## Handoff
 
 Summarize task/runtime contracts, Send/Sync conclusions, blocking and cancellation analysis, locks/channels/atomics, determinism, tests and validators, state-transition follow-up, files changed, and confirmation that no git state mutation occurred when true.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

@@ -91,3 +91,5 @@ Let `python-build-portability` choose the meaningful matrix. Own whether the res
 Use uncovered lines as prompts, not goals. Prioritize public behavior, error paths, parsers, state transitions, file/process effects, configuration branches, and historical bugs. Skip or justify exclusion of unreachable defensive code, impractical platform fallbacks, debug-only paths, and boilerplate dispatch.
 
 Use `# pragma: no cover` or branch exclusions sparingly and with a reason. Route report-driven gap discovery to `codecov-test-gaps`.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

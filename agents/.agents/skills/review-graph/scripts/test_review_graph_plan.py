@@ -1702,7 +1702,7 @@ def test_main_does_not_swallow_unexpected_failures(tmp_path: Path, monkeypatch: 
     input_path = tmp_path / "valid.json"
     input_path.write_text("{}", encoding="utf-8")
 
-    def raise_unexpected(_contents: str) -> object:
+    def raise_unexpected(_contents: object, **_decoder_options: object) -> object:
         message = "unexpected programmer failure"
         raise RuntimeError(message)
 

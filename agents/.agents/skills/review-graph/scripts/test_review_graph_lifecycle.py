@@ -39,7 +39,7 @@ def _history_document() -> dict[str, Any]:
 
 def test_parsed_history_is_detached_and_keeps_the_plan_identity() -> None:
     raw = _history_document()
-    expected = deepcopy(raw)
+    expected = {**deepcopy(raw), "interleaved_repair_epochs": []}
     lifecycle = lifecycle_from_document(raw)
     plan = replace(_sparse_plan(), review_lifecycle=lifecycle)
     original_digest = graph_plan_digest(plan)

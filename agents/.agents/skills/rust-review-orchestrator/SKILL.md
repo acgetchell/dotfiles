@@ -42,3 +42,5 @@ graph-routing mode.
 
 Otherwise read [standalone orchestration](references/standalone-orchestration.md)
 for scope routing, applicable language guidance, pass receipts, and final synthesis.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

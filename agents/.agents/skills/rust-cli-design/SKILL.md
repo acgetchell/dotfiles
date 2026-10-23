@@ -91,3 +91,5 @@ on the final source state even if it repeats those checks. Record the reason for
 overlap without counting it as independent evidence. Reuse valid evidence where
 the required validation contract permits it; overlap alone requires no approval
 or command-surface escalation.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

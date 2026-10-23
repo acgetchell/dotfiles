@@ -118,6 +118,7 @@ class ReviewLifecycle:
     comprehensive_restarts: tuple[ComprehensiveRestart, ...] = ()
     stop_reason: str | None = None
     run_control: RunControlBinding | None = None
+    interleaved_repair_epochs: tuple[int, ...] = ()
 
     def next_repair(self, ordinal: int) -> ReviewLifecycle:
         """Count one content-changing batch, including optional fixes and formatting."""
@@ -141,7 +142,8 @@ def lifecycle_from_document(raw: Any) -> ReviewLifecycle:
     if raw is None:
         return ReviewLifecycle()
     fields = set(ReviewLifecycle.__dataclass_fields__)
-    if not isinstance(raw, dict) or set(raw) not in (fields, fields - {"run_control"}):
+    optional = {"run_control", "interleaved_repair_epochs"}
+    if not isinstance(raw, dict) or not fields - optional <= set(raw) <= fields:
         msg = "review_lifecycle requires the complete lifecycle fields"
         raise ValueError(msg)
     budget, completed = raw["repair_budget"], raw["repairs_completed"]
@@ -164,4 +166,11 @@ def lifecycle_from_document(raw: Any) -> ReviewLifecycle:
         msg = "stop_reason must be null or substantive text"
         raise ValueError(msg)
     binding = RunControlBinding.from_document(raw["run_control"]) if raw.get("run_control") is not None else None
-    return ReviewLifecycle(budget, completed, parsed_extensions, parsed_restarts, reason, binding)
+    epochs = raw.get("interleaved_repair_epochs", ())
+    if not isinstance(epochs, (list, tuple)) or any(type(epoch) is not int or not 1 <= epoch <= completed for epoch in epochs):
+        msg = "interleaved repair history requires completed positive epoch ordinals"
+        raise ValueError(msg)
+    if tuple(epochs) != tuple(sorted(set(epochs))):
+        msg = "interleaved repair epoch history must be ordered and unique"
+        raise ValueError(msg)
+    return ReviewLifecycle(budget, completed, parsed_extensions, parsed_restarts, reason, binding, tuple(epochs))

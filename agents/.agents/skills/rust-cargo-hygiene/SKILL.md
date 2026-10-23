@@ -127,3 +127,5 @@ Check:
 - `exclude`/`include` are set when the published tarball needs trimming
 - `[package.metadata.docs.rs]` is configured when feature flags affect docs.rs builds
 - workspace members that should not be published explicitly opt out
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

@@ -820,6 +820,15 @@
         "post_repair_capture": {
           "type": "object"
         },
+        "interleaved_staging": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["repair_attribution", "staging_attribution"],
+          "properties": {
+            "repair_attribution": {"type": "string", "minLength": 1},
+            "staging_attribution": {"type": "string", "minLength": 1}
+          }
+        },
         "plan": {
           "type": "object"
         },

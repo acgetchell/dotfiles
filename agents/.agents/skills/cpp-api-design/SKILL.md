@@ -128,3 +128,5 @@ For each finding, show the caller expression or evolution step that fails, the a
 ## Handoff
 
 Summarize public surfaces and representative consumers inspected, source/behavior/ABI contracts considered, invalid uses prevented, compatibility changes, compile-time and runtime evidence, validators and results, remaining migration work, and confirmation that no git state mutations were performed when true.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

@@ -1,14 +1,15 @@
 """Content-bound capture identities and immutable audit reuse transitions."""
 
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field as dataclass_field
 from pathlib import PurePosixPath
-from typing import Any, override
+from typing import Any, Literal, override
 
 from research_repo_tools.evidence import sha256
 from review_graph_git_objects import GitPathIdentity, git_object_id, source_tree_id
 from review_graph_integrity import canonical_json
 from review_graph_read_provenance import verify_runtime_inputs
+from review_graph_results import EvaluationBoundaryError, RejectionKind
 
 SNAPSHOT_FORMAT = "review-graph-path-snapshot-v4"
 WORKTREE_SELECTION_ALGORITHM = "git-ls-files-cached-others-exclude-standard-v1"
@@ -235,6 +236,79 @@ class ExternalSourceTransition(ExternalMetadataTransition):
 
 
 @dataclass(frozen=True)
+class ObservedSourceTransition(ExternalMetadataTransition):
+    """Actual source-only endpoints already bound by a prior audit reuse proof."""
+
+    observed_source_only: Literal[True] = dataclass_field(default=True, init=False)
+
+    @override
+    def verify(self) -> None:
+        """Bridge saved source captures without inventing attribution or Git history."""
+        self.before.verify()
+        self.after.verify()
+        if (
+            self.before.capture_mode not in {"baseline", "worktree", "branch"}
+            or self.before.boundary != self.after.boundary
+            or self.before.captured_scope_paths != self.after.captured_scope_paths
+            or self.before.repository_selection_paths is None
+            or self.before.repository_selection_paths != self.after.repository_selection_paths
+        ):
+            msg = "observed source bridge requires unchanged Git, scope and proven selection"
+            raise EvaluationBoundaryError(RejectionKind.UNSUPPORTED_TRANSITION, msg)
+        before, after = dict(self.before.repository_path_fingerprints), dict(self.after.repository_path_fingerprints)
+        changed = {path for path in before.keys() | after.keys() if before.get(path) != after.get(path)}
+        if not changed or not changed <= set(self.before.captured_scope_paths):
+            msg = "observed source bridge requires changed content entirely inside the saved scope"
+            raise EvaluationBoundaryError(RejectionKind.UNSUPPORTED_TRANSITION, msg)
+
+
+@dataclass(frozen=True)
+class InterleavedRepairTransition(ExternalMetadataTransition):
+    """Two real captures around an attributed repair and interleaved staging."""
+
+    repair_epoch: int
+    repair_paths: tuple[str, ...]
+    repair_attribution: str
+    staging_attribution: str
+
+    @override
+    def verify(self) -> None:
+        """Prove the bounded endpoint delta without claiming an intermediate state."""
+        self.before.verify()
+        self.after.verify()
+        if type(self.repair_epoch) is not int or self.repair_epoch < 1:
+            msg = "interleaved repair requires a positive repair_epoch"
+            raise ValueError(msg)
+        _repair_attribution(self.repair_attribution)
+        _repair_attribution(self.staging_attribution)
+        stable = ("repository_root", "capture_mode", "head", "branch", "base_ref", "merge_base", "requested_paths", "captured_scope_paths")
+        if (
+            self.before.capture_mode not in {"baseline", "worktree", "branch"}
+            or any(getattr(self.before, field) != getattr(self.after, field) for field in stable)
+            or self.before.repository_selection_paths != self.after.repository_selection_paths
+            or self.before.repository_selection_paths is None
+        ):
+            msg = "interleaved repair requires unchanged HEAD, base, branch, capture mode, scope and proven selection"
+            raise EvaluationBoundaryError(RejectionKind.UNSUPPORTED_TRANSITION, msg)
+        if self.before.index_fingerprint == self.after.index_fingerprint:
+            msg = "interleaved repair requires an observed index change; use the ordinary repair continuation"
+            raise ValueError(msg)
+        before, after = dict(self.before.repository_path_fingerprints), dict(self.after.repository_path_fingerprints)
+        changed = tuple(sorted(path for path in before.keys() | after.keys() if before.get(path) != after.get(path)))
+        if not changed or changed != self.repair_paths or not set(changed) <= set(self.before.captured_scope_paths):
+            msg = "interleaved repair requires exact attributed repair_paths entirely inside the unchanged scope"
+            raise EvaluationBoundaryError(RejectionKind.UNSUPPORTED_TRANSITION, msg)
+        for path in changed:
+            if PurePosixPath(path).name == "AGENTS.md":
+                msg = "interleaved repair cannot reconcile changed repository instructions"
+                raise EvaluationBoundaryError(RejectionKind.UNSUPPORTED_TRANSITION, msg)
+            identities = [GitPathIdentity.parse(paths.get(path, "absent")) for paths in (before, after)]
+            if identities[0].mode not in {"100644", "100755"} or identities[0].mode != identities[1].mode:
+                msg = "interleaved repair cannot reconcile file type or mode changes"
+                raise EvaluationBoundaryError(RejectionKind.UNSUPPORTED_TRANSITION, msg)
+
+
+@dataclass(frozen=True)
 class AuthorizedGitContextTransition(ExternalMetadataTransition):
     """An authorized externally performed commit/rebase with identical source."""
 
@@ -296,6 +370,50 @@ def _external_source_text(raw: object) -> str:
     return raw
 
 
+def _repair_attribution(raw: object) -> str:
+    if not isinstance(raw, str) or not raw.strip():
+        msg = "interleaved repair requires explicit repair and maintainer staging attribution"
+        raise ValueError(msg)
+    return raw
+
+
+def _observed_source_transition(raw: dict[str, Any], before: ReviewSourceSnapshot, after: ReviewSourceSnapshot) -> ObservedSourceTransition:
+    if raw["observed_source_only"] is not True or any(
+        field in raw
+        for field in (
+            "repair_epoch",
+            "repair_paths",
+            "repair_attribution",
+            "staging_attribution",
+            "external_source_actor",
+            "external_source_attribution",
+            "commit_handoff",
+            "git_context_authorization",
+        )
+    ):
+        msg = "observed source bridge cannot invent or combine transition attribution"
+        raise ValueError(msg)
+    return ObservedSourceTransition(before, after)
+
+
+def _interleaved_transition(raw: dict[str, Any], before: ReviewSourceSnapshot, after: ReviewSourceSnapshot) -> InterleavedRepairTransition:
+    if any(field in raw for field in ("external_source_actor", "external_source_attribution", "commit_handoff", "git_context_authorization")):
+        msg = "interleaved repair cannot be combined with another transition attribution"
+        raise ValueError(msg)
+    paths = raw.get("repair_paths")
+    if not isinstance(paths, (tuple, list)) or any(not isinstance(path, str) for path in paths):
+        msg = "interleaved repair_paths must contain repository paths"
+        raise ValueError(msg)
+    return InterleavedRepairTransition(
+        before,
+        after,
+        raw["repair_epoch"],
+        tuple(paths),
+        _repair_attribution(raw.get("repair_attribution")),
+        _repair_attribution(raw.get("staging_attribution")),
+    )
+
+
 def metadata_transition(raw: dict[str, Any]) -> ExternalMetadataTransition:
     """Parse and verify an externally observed metadata transition."""
     if not isinstance(raw, dict) or any(not isinstance(raw.get(field), dict) for field in ("before", "after")):
@@ -303,7 +421,11 @@ def metadata_transition(raw: dict[str, Any]) -> ExternalMetadataTransition:
         raise ValueError(msg)
     before, after = source_snapshot(raw["before"]), source_snapshot(raw["after"])
     result: ExternalMetadataTransition
-    if "external_source_actor" in raw or "external_source_attribution" in raw:
+    if "observed_source_only" in raw:
+        result = _observed_source_transition(raw, before, after)
+    elif "repair_epoch" in raw:
+        result = _interleaved_transition(raw, before, after)
+    elif "external_source_actor" in raw or "external_source_attribution" in raw:
         if "commit_handoff" in raw or "git_context_authorization" in raw:
             msg = "external source attribution cannot authorize a Git transition"
             raise ValueError(msg)

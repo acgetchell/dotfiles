@@ -115,3 +115,5 @@ severity and confidence with `Delete`, `Simplify`, `Keep`, or `Split`, a source
 location, and rationale. Include applied changes, validation, and residual risks
 only when present. If no safe simplification exists, say so and identify the
 invariants that justify retaining the code.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

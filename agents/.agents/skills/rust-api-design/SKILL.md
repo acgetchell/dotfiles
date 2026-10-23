@@ -154,3 +154,5 @@ and the smallest coherent correction. Classify the disposition as one of:
 `keep-distinct`, `consolidate`, `make-private`, `canonicalize`, `re-export`, or
 `retain-adapter`. Distinguish confirmed contract defects from design preferences
 and avoid aesthetic churn.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

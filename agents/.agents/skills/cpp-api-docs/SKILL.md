@@ -100,3 +100,5 @@ Route example assertion and matrix quality to `cpp-test-quality`.
 Treat Doxygen, Sphinx/Breathe, or another configured generator as the renderer, not the source of truth. Check warnings, broken references, missing inputs, duplicate anchors, undocumented public members according to policy, stale navigation, and generated-file ownership.
 
 Do not hand-edit generated HTML, XML, tag files, or checked-in derived pages. Fix comments, configuration, templates, or source navigation and regenerate through the repository command.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

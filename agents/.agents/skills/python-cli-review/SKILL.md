@@ -81,3 +81,5 @@ Load `python-test-quality` when test artifacts changed or when evidence quality 
 ## Output
 
 Lead with user-visible correctness, data-loss, privacy, or compatibility blockers. For each finding, cite the file and line, explain the observable contract, and propose the smallest fix. Report commands run, effects avoided, and remaining external or platform limitations.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

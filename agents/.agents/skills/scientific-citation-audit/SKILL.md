@@ -47,3 +47,5 @@ editing. Do not load it for review-only work.
 When invoked directly without an exact parent result contract, read
 [`references/standalone-report.md`](references/standalone-report.md).
 Review-graph and documentation-orchestrator dispatches already own reporting.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

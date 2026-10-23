@@ -34,3 +34,5 @@ For a directly requested Python orchestration outside graph-routing mode, read
 [`references/standalone-workflow.md`](references/standalone-workflow.md)
 completely and follow its scope, routing, trace, validation, and reporting
 workflow.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

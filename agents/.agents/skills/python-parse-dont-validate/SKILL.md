@@ -85,3 +85,5 @@ Load `python-test-quality` when test artifacts or evidence design require review
 ## Output
 
 State the scope and PASS, NEEDS IMPROVEMENT, or FAIL. Order findings by severity and identify the invalid state, boundary that admits it, evidence discarded, proposed trusted representation, error contract, and focused validation needed.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

@@ -262,6 +262,14 @@
     "reviewLifecycle": {
       "additionalProperties": false,
       "properties": {
+        "interleaved_repair_epochs": {
+          "items": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
         "repair_budget": {
           "minimum": 0,
           "type": "integer"

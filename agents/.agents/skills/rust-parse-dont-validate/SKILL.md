@@ -119,3 +119,5 @@ Prefer exact error variants and fields over `is_err()`. Use property tests for b
 ## Finding Standard
 
 For each finding, name the invariant, bypass or discarded-proof path, representable invalid state, observable consequence, smallest boundary/type correction, compatibility cost, and regression evidence. Separate confirmed defects from optional modeling improvements.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

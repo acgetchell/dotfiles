@@ -112,3 +112,5 @@ When exports change, validate the intended public import paths and relevant
 feature boundaries with downstream-style evidence. Reuse an existing doctest or
 consumer check when it proves that contract. Document each scoped prelude's
 purpose; do not duplicate equivalent examples just to satisfy a report format.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

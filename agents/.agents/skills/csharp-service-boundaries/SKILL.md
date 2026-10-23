@@ -62,3 +62,5 @@ using synthetic signed tokens and scripted responses. Unit-test domain decisions
 separately. Run repository build/test commands and report which live interactions
 remain unverified. Do not add deployment, tenant changes, or external writes to an
 implementation task without the user's authorization.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

@@ -116,3 +116,5 @@ Keep ownership explicit and select only specialists required by the files and cl
 
 The presence of Markdown, an academic-sounding repository name, or ordinary source
 links does not by itself justify the scientific or academic specialists.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

@@ -97,3 +97,5 @@ Check console/plugin entry points, public imports, optional-feature failures, me
 For native components, check wheel tags, ABI/runtime requirements, shared-library discovery, build isolation, representation boundaries, and explicit unsupported-platform failures. Route native algorithm correctness to the owning language specialist.
 
 Exercise only the configurations needed to distinguish the risk. Use the established interpreter/environment selection rather than adding a second matrix runner, and record unavailable runtimes or platforms as evidence gaps.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

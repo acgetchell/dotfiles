@@ -129,3 +129,5 @@ Clarity must not degrade performance reasoning.
 ### Optional Improvements
 
 - Non-critical cleanup suggestions
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.
