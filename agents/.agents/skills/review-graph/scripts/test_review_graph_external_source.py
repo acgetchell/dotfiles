@@ -7,9 +7,10 @@ from typing import Any
 
 import pytest
 import review_graph_runtime as runtime
+import review_graph_source_change
 from capture_scope import _scope_data
 from test_review_graph_git import _accept
-from test_review_graph_runtime import _compile_repair_fixture_entry
+from test_review_graph_runtime import ROUTING_CATALOG, _compile_repair_fixture_entry, _mutation_with_audit_source
 from test_review_graph_transitions import _payload
 from test_review_graph_validation_handoff import _handoff
 
@@ -156,3 +157,57 @@ def test_external_source_requires_explicit_attribution_and_rejects_expanded_scop
     request["new_capture"] = _scope_data(git, repository, "baseline", None, ())
     with pytest.raises(ValueError, match="unchanged Git and review selection"):
         runtime.resume_after_external_source(request)
+
+
+def test_external_source_restores_reused_audit_from_explicit_catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    request, original_entry, _source = _mutation_with_audit_source(tmp_path)
+    advanced = runtime.advance_after_mutation(request)
+    assert advanced["reused_evidence_ids"] == [original_entry["dispatch"]["evidence_id"]]
+    catalog = tmp_path / "routing-catalog.json"
+    shutil.copyfile(ROUTING_CATALOG, catalog)
+    monkeypatch.setattr(runtime, "DEFAULT_ROUTING_CATALOG", tmp_path / "unavailable-default.json")
+    repository = Path(request["new_capture"]["repository_root"])
+    (repository / "tool.py").write_text("value = 42\n")
+    git = shutil.which("git")
+    assert git is not None
+    result = runtime.resume_after_external_source(
+        {
+            **json.loads(Path(advanced["lifecycle_input_path"]).read_bytes()),
+            "previous_capture": advanced["capture"],
+            "new_capture": _scope_data(git, repository, "baseline", None, ()),
+            "dispatches_path": advanced["dispatches_path"],
+            "journal_path": advanced["journal_path"],
+            "artifact_store": str(tmp_path / "external"),
+            "routing_catalog_path": str(catalog),
+            "external_source_actor": "maintainer",
+            "external_source_attribution": "Maintainer updated tool.py during review.",
+        }
+    )
+    replacement = [item for item in result["dispatch_set"]["dispatches"] if item["dispatch"].get("skill_id") == original_entry["dispatch"]["skill_id"]]
+    assert len(replacement) == 1
+    assert replacement[0]["dispatch"]["evidence_id"] != original_entry["dispatch"]["evidence_id"]
+    assert replacement[0]["node_id"] in result["recheck_node_ids"]
+
+
+def test_live_capture_race_uses_cli_diagnostic_without_publishing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    request, _validator, _repository, _entries = _external(tmp_path)
+    capture_error = "captured source changed while deriving path line bounds"
+
+    def race(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError(capture_error)
+
+    monkeypatch.setattr(review_graph_source_change, "_scope_data", race)
+    with pytest.raises(ValueError, match="recapture the actual state") as failure:
+        review_graph_source_change.verify_live_source(request["new_capture"])
+    assert isinstance(failure.value.__cause__, RuntimeError)
+    input_path = tmp_path / "request.json"
+    input_path.write_text(json.dumps(request))
+    output = tmp_path / "continuation.json"
+    assert runtime.main(["resume-after-external-source", "--input", str(input_path), "--output", str(output)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "recapture the actual state" in captured.err
+    assert capture_error in captured.err
+    assert "Traceback" not in captured.err
+    assert not output.exists()
+    assert not Path(request["artifact_store"]).exists()

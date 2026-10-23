@@ -5808,6 +5808,7 @@ def _resume_metadata(document: dict[str, Any], transition: ExternalMetadataTrans
             "repository_root": transition.after.repository_root,
             "authorization": first_entry["dispatch"]["authorization"],
             "state_verification_command": first_entry["dispatch"]["state_verification_command"],
+            "routing_catalog_path": str(document.get("routing_catalog_path", DEFAULT_ROUTING_CATALOG)),
             "sources": _continuation_synthesis_sources(entries),
         },
         preserved_entries=preserved,

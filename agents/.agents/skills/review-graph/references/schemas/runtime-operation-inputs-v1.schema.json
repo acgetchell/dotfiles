@@ -1789,6 +1789,10 @@
           "type": "string",
           "minLength": 1
         },
+        "routing_catalog_path": {
+          "type": "string",
+          "minLength": 1
+        },
         "plan": {
           "type": "object"
         },

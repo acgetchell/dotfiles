@@ -103,7 +103,7 @@ allowlist command covers reusable-workflow calls independently of zizmor's
 The published checker replaces `scripts/check_workflow_allowlist.py` as part of
 [dotfiles #105](https://github.com/acgetchell/dotfiles/issues/105). Generic YAML
 parsing and malformed-policy regressions live in the
-[upstream Actions tests](https://github.com/acgetchell/research-repo-tools/blob/v0.1.9/tests/dependencies/test_actions.py).
+[upstream Actions tests](https://github.com/acgetchell/research-repo-tools/blob/v0.2.3/tests/dependencies/test_actions.py).
 Dotfiles retains installed-package consumer tests for its actual workflows,
 unapproved action and reusable-call mutations with file/line diagnostics,
 committed policy authority, and recipe/CI wiring. The shared Dependabot workflow's

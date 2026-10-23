@@ -14,13 +14,13 @@ fail() { echo "linux-review: $*" >&2; exit 2; }
 architecture="$(uname -m)"
 case "$architecture" in x86_64|aarch64) ;; *) fail "Unsupported architecture $architecture; supported candidates: x86_64, aarch64." ;; esac
 libc="$(getconf GNU_LIBC_VERSION 2>/dev/null || true)"
-[[ "$libc" == 'glibc '* ]] || fail "glibc >= 2.28 required by the locked tool environment; musl/unknown libc is unverified."
+[[ "$libc" == 'glibc '* ]] || fail "glibc >= 2.34 required by the locked Semgrep wheel; musl/unknown libc is unverified."
 libc_version="${libc#glibc }"
 libc_major="${libc_version%%.*}"
 libc_minor="${libc_version#*.}"
 libc_minor="${libc_minor%%.*}"
 [[ "$libc_major" =~ ^[0-9]+$ && "$libc_minor" =~ ^[0-9]+$ ]] || fail "Unable to parse glibc version."
-(( libc_major > 2 || (libc_major == 2 && libc_minor >= 28) )) || fail "glibc $libc_version is too old; use an approved newer environment."
+(( libc_major > 2 || (libc_major == 2 && libc_minor >= 34) )) || fail "glibc $libc_version is too old; the locked Semgrep wheel requires >= 2.34."
 
 export DOTFILES_REVIEW_PREFIX="${DOTFILES_REVIEW_PREFIX:-$HOME/.local/share/dotfiles-review}"
 export DOTFILES_REVIEW_CACHE="${DOTFILES_REVIEW_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/dotfiles-review}"

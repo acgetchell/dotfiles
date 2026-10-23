@@ -174,26 +174,49 @@ def test_missing_path_does_not_add_current_directory(tmp_path: Path, monkeypatch
 
 
 @pytest.mark.parametrize("caller_limit_kib", [None, 32768])
-def test_executor_keeps_scanner_stack_finite_and_respects_caller_limit(linux_boundary: dict[str, str], caller_limit_kib: int | None) -> None:
+@pytest.mark.parametrize("custom_environment", [False, True])
+def test_executor_keeps_scanner_stack_finite_and_respects_caller_limit(
+    linux_boundary: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caller_limit_kib: int | None, *, custom_environment: bool
+) -> None:
     """Exercise the real pinned scanner's preexec policy inside the installer boundary."""
+    # Read the actual parent environment before the simulated installer replaces
+    # its prefix. Its fake uv deliberately does not provision a second scanner.
+    expected_environment = Path(os.environ.get("DOTFILES_SEMGREP_ENVIRONMENT", REPOSITORY / "tooling/semgrep/.venv"))
+    if custom_environment:
+        alias = tmp_path / "scanner environment"
+        alias.symlink_to(expected_environment, target_is_directory=True)
+        expected_environment = alias
+        monkeypatch.setenv("DOTFILES_SEMGREP_ENVIRONMENT", str(alias))
     setup = run_installer(linux_boundary)
     assert setup.returncode == 0, setup.stderr
     probe = (
-        "import json, resource; from semgrep.core_runner import setrlimits_preexec_fn; "
+        "import json, resource, sys; from semgrep.core_runner import setrlimits_preexec_fn; "
         "before = resource.getrlimit(resource.RLIMIT_STACK); setrlimits_preexec_fn(); "
-        "print(json.dumps({'before': before, 'after': resource.getrlimit(resource.RLIMIT_STACK), 'infinity': resource.RLIM_INFINITY}))"
+        "print(json.dumps({'before': before, 'after': resource.getrlimit(resource.RLIMIT_STACK), "
+        "'infinity': resource.RLIM_INFINITY, 'executable': sys.executable}))"
     )
-    scanner_python = REPOSITORY / "tooling/semgrep/.venv/bin/python"
+    scanner_python = Path(os.environ.get("DOTFILES_SEMGREP_ENVIRONMENT", REPOSITORY / "tooling/semgrep/.venv")) / "bin/python"
     argv = ["/bin/bash", str(REPOSITORY / "bin/linux-review.sh"), "exec", str(scanner_python), "-c", probe]
     if caller_limit_kib is not None:
         argv = ["/bin/bash", "-c", 'ulimit -HS -s "$1"; shift; exec "$@"', "scanner-stack-boundary", str(caller_limit_kib), *argv]
     result = subprocess.run(argv, env=linux_boundary, capture_output=True, text=True, check=False, timeout=30)  # noqa: S603 - fixed isolated boundary probe.
     assert result.returncode == 0, result.stderr
     limits = json.loads(result.stdout)
+    assert Path(limits["executable"]).parent.parent == expected_environment
     assert limits["before"][1] != limits["infinity"]
     assert 0 < limits["after"][0] <= limits["after"][1] <= 64 * 1024 * 1024
     if caller_limit_kib is not None:
         assert limits["before"][1] == limits["after"][1] == caller_limit_kib * 1024
+
+
+@pytest.mark.parametrize(("version", "supported"), [("2.28", False), ("2.33", False), ("2.34", True)])
+def test_installer_requires_the_locked_scanner_wheel_glibc(linux_boundary: dict[str, str], version: str, *, supported: bool) -> None:
+    linux_boundary["FAKE_LIBC"] = f"glibc {version}"
+    result = run_installer(linux_boundary)
+    assert (result.returncode == 0) is supported, result.stderr
+    if not supported:
+        assert "locked Semgrep wheel requires >= 2.34" in result.stderr
+        assert not Path(linux_boundary["DOWNLOAD_LOG"]).exists()
 
 
 def test_plugin_failure_is_retained_as_failed_setup(linux_boundary: dict[str, str]) -> None:

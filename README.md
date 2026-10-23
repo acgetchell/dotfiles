@@ -40,8 +40,8 @@ dotfiles/
 | Environment | Scope | Verification status |
 | --- | --- | --- |
 | macOS | Desktop dotfiles, Homebrew, Stow, full repository checks | Existing native CI; new Linux installer is separate |
-| Linux x86_64, glibc >= 2.28 | User-space review tools and full portable checks | Ubuntu 24.04 CI and Debian 13.6 cloud checks passed; other distributions unverified |
-| Linux aarch64, glibc >= 2.28 | Same provisioning candidate | Native validation unverified |
+| Linux x86_64, glibc >= 2.34 | User-space review tools and full portable checks | Ubuntu 24.04 CI and Debian 13.6 cloud checks passed; other distributions unverified |
+| Linux aarch64, glibc >= 2.34 | Same provisioning candidate | Native validation unverified |
 | Cara's cloud computer | Debian 13.6 x86_64 portable review environment | Setup, repeat setup, full checks, scripted smoke, and fresh restore verified; actual coordinator/worker review outstanding |
 | HPC | Site modules, scratch, authorized execution placement | Cluster configuration and native execution unverified |
 | Windows | Portable timing helper | Timing CI only; full tooling setup unsupported |

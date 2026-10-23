@@ -24,6 +24,37 @@ def test_ci_requires_full_python_inventory_and_shared_baseline() -> None:
     assert recipes["python-typecheck"]["body"] == [["uv run --locked --group dev research-repo-tools python typecheck"]]
 
 
+def test_scanner_guard_rejects_executable_in_stale_environment(tmp_path: Path) -> None:
+    """An executable alone must not authorize scanning against a stale lock."""
+    scanner_environment = Path(os.environ.get("DOTFILES_SEMGREP_ENVIRONMENT", REPOSITORY_ROOT / "tooling/semgrep/.venv"))
+    stale = tmp_path / "stale scanner"
+    uv = shutil.which("uv")
+    just = shutil.which("just")
+    assert uv is not None
+    assert just is not None
+    subprocess.run(  # noqa: S603 - real empty environment in a disposable fixture.
+        [uv, "venv", "--python", str(scanner_environment / "bin/python"), str(stale)], check=True, capture_output=True, timeout=30
+    )
+    scanner = stale / "bin/semgrep"
+    scanner.write_text("#!/bin/sh\nexit 0\n")
+    scanner.chmod(0o700)
+    before = sorted(str(path.relative_to(stale)) for path in stale.rglob("*"))
+    result = subprocess.run(  # noqa: S603 - actual recipe validates the isolated stale environment without synchronizing it.
+        [just, "_ensure-semgrep"],
+        cwd=REPOSITORY_ROOT,
+        env={**os.environ, "DOTFILES_SEMGREP_ENVIRONMENT": str(stale), "UV_OFFLINE": "1"},
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode != 0
+    assert "Run just python-sync" in result.stderr
+    assert scanner.read_text() == "#!/bin/sh\nexit 0\n"
+    # uv may create its synchronization lock even when --check installs nothing.
+    assert sorted(str(path.relative_to(stale)) for path in stale.rglob("*") if path != stale / ".lock") == before
+
+
 @pytest.mark.parametrize(
     ("content", "diagnostic"),
     [

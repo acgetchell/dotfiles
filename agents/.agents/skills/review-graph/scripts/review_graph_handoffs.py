@@ -1,5 +1,6 @@
 """Executable validator observations bound to the node's publication contract."""
 
+import re
 import shlex
 from pathlib import Path
 from typing import Any
@@ -7,12 +8,23 @@ from typing import Any
 from review_graph_session import runtime_command
 
 
+def _literal_words(command: str) -> list[str]:
+    """Accept shell literal pieces before shlex discards their quoting."""
+    # Single quotes preserve all bytes; double quotes must not expand variables
+    # or commands. Escaped operators are literal, but line continuations are not.
+    piece = r"""(?:[^\s'"\\<>|;&()$`*?\[\]{}~#]|'[^']*'|"(?:[^"\\$`]|\\[^\r\n])*"|\\[^\r\n])"""
+    if re.fullmatch(rf"[ \t]*{piece}+(?:[ \t]+{piece}+)*[ \t]*", command) is None:
+        msg = "capture must be a literal command without shell operators or expansions"
+        raise ValueError(msg)
+    return shlex.split(command)
+
+
 def _capture_words(dispatch: dict[str, Any]) -> list[str] | None:
     """Rebind only the frozen capture interface; reject ambiguous shell outputs."""
     prefix = runtime_command(Path(__file__).with_name("capture_scope.py"))
-    words = shlex.split(dispatch["state_verification_command"])
+    words = _literal_words(dispatch["state_verification_command"])
     if words[: len(prefix)] != prefix:
-        if any(word == "--output" or word.startswith("--output=") or any(symbol in word for symbol in "<>|;&") for word in words):
+        if any(word == "--output" or word.startswith("--output=") for word in words):
             msg = (
                 "custom capture command must emit full capture JSON on stdout without --output or shell operators; "
                 "correct state_verification_command before materialization"
@@ -27,9 +39,6 @@ def _capture_words(dispatch: dict[str, Any]) -> list[str] | None:
                 msg = "capture --output requires a path; correct state_verification_command before materialization"
                 raise ValueError(msg)
         elif not word.startswith("--output="):
-            if any(symbol in word for symbol in "<>|;&"):
-                msg = "framework capture must be a literal command without shell operators"
-                raise ValueError(msg)
             result.append(word)
     return result
 

@@ -6,7 +6,8 @@ Cloud and cluster verification remain separate, even when their OS versions matc
 
 ## Supported candidates and base tools
 
-The installer accepts Linux x86_64 or aarch64 with glibc >= 2.28. Ubuntu 24.04
+The installer accepts Linux x86_64 or aarch64 with glibc >= 2.34, as required by
+the locked Semgrep wheel. Ubuntu 24.04
 x86_64 is the CI target. Native evidence is recorded below for Ubuntu 24.04 CI
 and the Debian 13.6 x86_64 cloud executor. Other distributions and aarch64 remain
 unverified until their native checks pass. musl, older glibc, other architectures,

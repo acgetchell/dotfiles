@@ -9,7 +9,7 @@ import capture_scope
 import pytest
 import review_graph_runtime as runtime
 from review_graph_bootstrap import bootstrap_document
-from review_graph_handoffs import audit_observations
+from review_graph_handoffs import audit_observations, validation_observations
 from review_graph_plan import plan_from_document
 from review_graph_session import runtime_command
 from test_capture_scope import _commit_all, _init_repo
@@ -101,3 +101,32 @@ def test_invalid_custom_observation_can_be_corrected_before_materialization(tmp_
     request["state_verification_command"] = "custom-capture"
     result = runtime.materialize_dispatches(request)
     assert result["source_state"] == document["source_state"]
+
+
+@pytest.mark.parametrize("name", ["R&D", "review;copy", "quoted'path", "literal$(value)`name", "line\nbreak"])
+def test_framework_capture_preserves_quoted_literal_paths(tmp_path: Path, name: str) -> None:
+    repository = tmp_path / name
+    _init_repo(repository)
+    (repository / "source.py").write_text("value = 1\n")
+    _commit_all(repository)
+    command = runtime_command(Path(capture_scope.__file__), "--repo", str(repository), "--mode", "baseline")
+    observations = audit_observations({"node_id": "audit-001", "state_verification_command": shlex.join(command)}, tmp_path / "contract.json")
+    observation = observations["before"]
+    result = subprocess.run(shlex.split(observation["capture_command"]), check=True, capture_output=True, timeout=30)  # noqa: S603
+    capture = json.loads(Path(observation["capture_path"]).read_bytes())
+    assert capture["repository_root"] == str(repository.resolve())
+    assert json.loads(result.stdout)["capture_digest"] == runtime.digest_bytes(Path(observation["capture_path"]).read_bytes())
+
+
+@pytest.mark.parametrize("suffix", ["\ntrue", "\r\ntrue", " && true", "; true", " | cat", " > other.json", " $(true)", " `true`", ' "$HOME"', " # comment"])
+def test_capture_rejects_shell_syntax_before_observation_publication(tmp_path: Path, suffix: str) -> None:
+    with pytest.raises(ValueError, match="literal command"):
+        validation_observations({"node_id": "validation-001", "state_verification_command": "custom-capture" + suffix}, tmp_path / "contract.json")
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("argument", ["'R&D'", '"review;copy"', r"escaped\&path", "'literal$(value)'", "'quoted'\"'\"'path'"])
+def test_custom_capture_retains_literal_arguments(tmp_path: Path, argument: str) -> None:
+    command = "custom-capture " + argument
+    observations = validation_observations({"node_id": "validation-001", "state_verification_command": command}, tmp_path / "contract.json")
+    assert observations["before"]["capture_command"] == command + " > " + shlex.quote(str(tmp_path / "validation-001.before.capture.json"))
