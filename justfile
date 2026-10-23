@@ -13,7 +13,7 @@ python_primary_paths := "agents/.agents/skills scripts"
 review_contract_tests := "agents/.agents/skills/review-graph/scripts/test_review_graph_contracts.py"
 cargo_update_version := "22.1.1"
 cargo_version_pattern := '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?'
-dprint_version := "0.64.0"
+dprint_version := "0.64.3"
 just_version := "1.59.0"
 rumdl_version := "0.3.0"
 # Bootstrap without Python; pyproject.toml is the single uv pin authority.
