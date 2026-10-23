@@ -628,3 +628,22 @@ def test_coverage_reports_schema_and_provenance_before_corrected_publication(dis
     receipt = _publish(entry, payload)
     assert receipt["worker_payload_path"] == entry["worker_payload_path"]
     assert json.loads(Path(entry["worker_payload_path"]).read_bytes()) == payload
+
+
+@pytest.mark.parametrize("recipe_case", ["same-unit-duplicate", "other-unit-duplicate", "other-unit-missing"])
+def test_coverage_keeps_recipe_diagnostics_when_another_field_is_malformed(dispatch_set: dict[str, Any], recipe_case: str) -> None:
+    """A structural error must not hide independently checkable recipe defects."""
+    entry = next(item for item in dispatch_set["dispatches"] if item["dispatch"].get("mode") == "audit")
+    payload = _compact_audit_payload(entry)
+    owned = entry["dispatch"]["owned_paths"]
+    payload["coverage_units"] = [
+        {"unit_id": "malformed", "owned_paths": owned[:1], "dependency_paths": None, "dependency_uncertainty": "", "finding_indices": []},
+        {"unit_id": "well-formed", "owned_paths": owned[1:], "dependency_paths": ["justfile"], "dependency_uncertainty": "", "finding_indices": []},
+    ]
+    unit = payload["coverage_units"][0 if recipe_case == "same-unit-duplicate" else 1]
+    recipe = {"path": "missing.just" if recipe_case == "other-unit-missing" else "justfile", "recipes": ["check"]}
+    unit["recipe_dependencies"] = [recipe] if recipe_case == "other-unit-missing" else [recipe, dict(recipe)]
+    with pytest.raises(ValueError, match="dependency_paths") as failure:
+        _publish(entry, payload)
+    assert "recipe dependencies must uniquely name inspected dependency paths" in str(failure.value)
+    assert not Path(entry["worker_payload_path"]).exists()

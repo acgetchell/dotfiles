@@ -5766,8 +5766,19 @@ def _verify_continuation_instructions(plan: GraphPlan, entries: dict[str, dict[s
             raise ValueError(msg)
 
 
+def _metadata_proof_store(document: dict[str, Any], transition: ExternalMetadataTransition) -> Path:
+    """Reject overlapping continuation destinations before publishing any bytes."""
+    root = Path(document["artifact_store"]).resolve()
+    repository = Path(transition.after.repository_root).resolve()
+    if root.is_relative_to(repository) or repository.is_relative_to(root):
+        msg = "metadata continuation requires an external proof store that does not overlap the repository"
+        raise ValueError(msg)
+    return root
+
+
 def _resume_metadata(document: dict[str, Any], transition: ExternalMetadataTransition) -> dict[str, Any]:
     """Share publication machinery while retaining distinct transition contracts."""
+    root = _metadata_proof_store(document, transition)
     if transition.before.source_state != _current_metadata_state(document):
         msg = "external metadata previous capture differs from the current reviewed state"
         raise ValueError(msg)
@@ -5792,7 +5803,6 @@ def _resume_metadata(document: dict[str, Any], transition: ExternalMetadataTrans
         plan = replace(plan, captured_path_line_bounds=tuple(sorted(document["new_capture"]["captured_path_line_bounds"].items())))
     transitions = [*_records(document, "external_metadata_transitions"), asdict(transition)]
     continuation = json.loads(canonical_json({"plan": asdict(plan), "source_state": list(state), "external_metadata_transitions": transitions}))
-    root = Path(document["artifact_store"]).resolve()
     first_entry = next(iter(entries.values()), None)
     if first_entry is None:
         msg = "external metadata resume requires a materialized review graph"
@@ -9446,6 +9456,22 @@ def _prepare_validation_timing(document: dict[str, Any], args: argparse.Namespac
     return 0
 
 
+def _write_json_operation_result(args: argparse.Namespace, output_path: Path, output: dict[str, Any]) -> None:
+    """Write the result, retaining recovery paths after a completed source resume."""
+    output_text = json.dumps(output, indent=2, sort_keys=True) + "\n"
+    if args.operation in {"recover-validation-launch", "recover-validation-execution", "reconcile-validation-requirements", "replace-invalidated-audit"}:
+        _write_bytes_atomically_once(output_path, output_text.encode(), mode=0o644)
+        return
+    try:
+        _write_text_once(output_path, output_text)
+    except (OSError, ValueError) as error:
+        if args.operation != "resume-after-external-source":
+            raise
+        paths = {key: output[key] for key in ("lifecycle_input_path", "dispatches_path", "capture_path", "journal_path")}
+        msg = f"result file could not be written: {error}; continuation was published; resume using these retained paths: {canonical_json(paths)}"
+        raise ValueError(msg) from error
+
+
 def _run_operation(document: dict[str, Any], args: argparse.Namespace) -> int:  # noqa: C901, PLR0912, PLR0911
     if args.operation == "prepare-validation-timing":
         return _prepare_validation_timing(document, args)
@@ -9500,11 +9526,7 @@ def _run_operation(document: dict[str, Any], args: argparse.Namespace) -> int:  
         output_path = output_directory / f"next-ready.{generation:06d}.{identity}.json"
         output["output_generation"] = generation
         output["output_path"] = str(output_path)
-    output_text = json.dumps(output, indent=2, sort_keys=True) + "\n"
-    if args.operation in {"recover-validation-launch", "recover-validation-execution", "reconcile-validation-requirements", "replace-invalidated-audit"}:
-        _write_bytes_atomically_once(output_path, output_text.encode(), mode=0o644)
-    else:
-        _write_text_once(output_path, output_text)
+    _write_json_operation_result(args, output_path, output)
     _print_operation_result(args, output_path, output)
     return 2 if args.operation == "finalize-proof" and output["status"] != "complete" else 0
 

@@ -8,15 +8,28 @@ from typing import Any
 from review_graph_session import runtime_command
 
 
+def _literal_piece(piece: str) -> str:
+    """Remove shell quoting without evaluating expansions."""
+    if piece.startswith("'"):
+        return piece[1:-1]
+    if piece.startswith('"'):
+        return re.sub(r'\\(["\\$`])', r"\1", piece[1:-1])
+    if piece.startswith("\\"):
+        return piece[1:]
+    return piece
+
+
 def _literal_words(command: str) -> list[str]:
-    """Accept shell literal pieces before shlex discards their quoting."""
+    """Accept and decode literal shell pieces without evaluating the command."""
     # Single quotes preserve all bytes; double quotes must not expand variables
     # or commands. Escaped operators are literal, but line continuations are not.
-    piece = r"""(?:[^\s'"\\<>|;&()$`*?\[\]{}~#]|'[^']*'|"(?:[^"\\$`]|\\[^\r\n])*"|\\[^\r\n])"""
+    # Embedded tildes (for example HEAD~1) are literal; leading tildes and
+    # assignment-value boundaries remain excluded because shells expand them.
+    piece = r"""(?:[^\s'"\\<>|;&()$`*?\[\]{}~#]|(?<=[^\s=:])~|'[^']*'|"(?:[^"\\$`]|\\[^\r\n])*"|\\[^\r\n])"""
     if re.fullmatch(rf"[ \t]*{piece}+(?:[ \t]+{piece}+)*[ \t]*", command) is None:
         msg = "capture must be a literal command without shell operators or expansions"
         raise ValueError(msg)
-    return shlex.split(command)
+    return ["".join(_literal_piece(part.group()) for part in re.finditer(piece, word.group())) for word in re.finditer(rf"{piece}+", command)]
 
 
 def _capture_words(dispatch: dict[str, Any]) -> list[str] | None:

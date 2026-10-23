@@ -78,7 +78,7 @@ _ensure-uv:
 
 _ensure-semgrep:
     @test -x {{ quote(semgrep_bin / (if os() == "windows" { "semgrep.exe" } else { "semgrep" })) }} || { echo "Run just python-sync to restore the locked Semgrep environment." >&2; exit 1; }
-    @UV_PROJECT_ENVIRONMENT={{ quote(semgrep_environment) }} uv sync --locked --project tooling/semgrep --check || { echo "Run just python-sync to restore the locked Semgrep environment." >&2; exit 1; }
+    @env -u UV_PYTHON UV_PROJECT_ENVIRONMENT={{ quote(semgrep_environment) }} uv sync --locked --project tooling/semgrep --check || { echo "Run just python-sync to restore the locked Semgrep environment." >&2; exit 1; }
 
 action-lint: _ensure-actionlint
     uv run --locked --group dev research-repo-tools files run --include '.github/workflows/*.yml' --include '.github/workflows/*.yaml' -- actionlint
@@ -172,7 +172,7 @@ python-lint: python-check
 
 python-sync: _ensure-uv
     uv sync --locked --group dev
-    UV_PROJECT_ENVIRONMENT={{ quote(semgrep_environment) }} uv sync --locked --project tooling/semgrep
+    env -u UV_PYTHON UV_PROJECT_ENVIRONMENT={{ quote(semgrep_environment) }} uv sync --locked --project tooling/semgrep
 
 python-typecheck: _ensure-uv
     uv run --locked --group dev research-repo-tools python typecheck

@@ -18,7 +18,7 @@ No sibling checkout or unreleased code is needed.
 | Notebooks | Published inspection/advice/lint/cleanup/execution in the Jupyter skill; its consumer template prohibits dependency installs inside cells |
 | Reviews | Shared opt-in CodeRabbit wrapper defaults to verified `origin/main`; no review is sent merely by running CI |
 | Review-graph helpers | Direct public exact-byte hashing and subprocess APIs; graph serialization and immutable publication retain their protocol contracts |
-| Dependabot | SHA-pinned v0.1.7 reusable workflow; hosted rollout is tracked in [the rollout guide](../.github/DEPENDABOT.md) |
+| Dependabot | SHA-pinned v0.1.8 reusable workflow; hosted rollout is tracked in [the rollout guide](../.github/DEPENDABOT.md) |
 
 ## Python authority and upgrades
 
@@ -68,8 +68,10 @@ consumer templates and are never discovered or synchronized as projects.
 bin directory on PATH for shared scans and fixture tests. Linux provisioning
 keeps it in a separate `semgrep-venv` beneath `DOTFILES_REVIEW_PREFIX`, selected
 through `DOTFILES_SEMGREP_ENVIRONMENT`, without replacing the main environment.
-The Windows entry-point
-check selects the scanner project directly. `just security-osv` scans both locks.
+The Windows engine smoke selects the scanner project directly and requires one
+expected finding from a local rule and fixture, with no scanner errors. This
+configured check still needs native Windows evidence for the current changes.
+`just security-osv` scans both locks.
 The obsolete override-detection preflight has been removed. Each successful
 project update remains applied if a later project fails; inspect the diff and
 retry the same recipe after resolving the failure.
@@ -107,7 +109,7 @@ parsing and malformed-policy regressions live in the
 Dotfiles retains installed-package consumer tests for its actual workflows,
 unapproved action and reusable-call mutations with file/line diagnostics,
 committed policy authority, and recipe/CI wiring. The shared Dependabot workflow's
-v0.1.7 commit pin is independent of this Python package migration.
+v0.1.8 commit pin is independent of this Python package migration.
 
 Semgrep retains version-comment, locked-command, explicit checkout, bootstrap,
 portability, safe skill YAML loading, selective Python runtime settings, and

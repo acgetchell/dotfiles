@@ -14,9 +14,12 @@ unverified until their native checks pass. musl, older glibc, other architecture
 and Windows full setup fail with actionable diagnostics. macOS continues to use `just setup`.
 The [README support matrix](../README.md#platform-scope) records current scope.
 
-The host must provide Bash, Git, Zsh, and GNU Stow. Zsh is required by the native
-timing suite; Stow is required by isolated link integration tests. Missing tools
-fail checks rather than suppressing portable tests. Connected provisioning also
+The host must provide Bash, Git, Zsh, GNU Stow, and a native Rust toolchain
+(`rustc` >= 1.85, Cargo, and its native linker). Zsh is required by the native
+timing suite; Stow is required by isolated link integration tests. The Rust
+toolchain compiles the offline review fixtures in the full test suite. Setup
+and checks reject missing tools, unrecognized Rust versions, and Rust versions
+below 1.85 before launching that suite. Connected provisioning also
 needs curl, tar, unzip, sha256sum, getconf, standard Unix utilities, and HTTPS CA
 certificates. Load approved modules or ask the environment owner to supply base
 tools. The installer does not run sudo, install system packages, or install a
@@ -28,7 +31,10 @@ tools on PATH are reused, including site/module tools. Otherwise the installer
 downloads the pinned upstream release binary and verifies its published SHA-256
 checksum before installation. Locked `uv sync --locked --group dev` selects the
 repository Python from `.python-version`; a matching site Python can be selected
-with `UV_PYTHON`. No Rust compiler or Homebrew is required for these binaries.
+with `UV_PYTHON`. Scanner synchronization clears that root selector and uses
+`tooling/semgrep/.python-version` for its independent Python environment.
+Installing these release binaries does not compile Rust or require Homebrew;
+the full test suite still requires the host Rust toolchain described above.
 
 ## Connected provisioning
 
@@ -162,6 +168,9 @@ A passing connected probe does not prove the compute environment has API access.
 Each command creates a new private directory and prints its `environment.json`.
 It records source commit and checkout content digest, distribution, architecture,
 libc, Python, shell/tool identities, command outcome, and artifact references.
+The scanner inventory separately records its configured environment, actual
+Python executable/version, installed Semgrep version, and selector/pin matches;
+unavailable tools and mismatched versions cannot produce a successful report.
 Check/smoke launches use #89's execution-side timing helper, retaining exact argv,
 working directory, exit status, and elapsed seconds in `timing.jsonl`.
 The Linux/macOS smoke gives fixture validation a 30-second deadline. On timeout

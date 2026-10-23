@@ -44,7 +44,7 @@ dotfiles/
 | Linux aarch64, glibc >= 2.34 | Same provisioning candidate | Native validation unverified |
 | Cara's cloud computer | Debian 13.6 x86_64 portable review environment | Setup, repeat setup, full checks, scripted smoke, and fresh restore verified; actual coordinator/worker review outstanding |
 | HPC | Site modules, scratch, authorized execution placement | Cluster configuration and native execution unverified |
-| Windows | Portable timing helper | Timing CI only; full tooling setup unsupported |
+| Windows | Portable timing helper and isolated scanner engine smoke | Native timing CI; scanner engine smoke configured but native evidence pending; full tooling setup unsupported |
 
 Linux support covers development/review tooling. The macOS shell, Git dotfile,
 desktop preferences, and Homebrew setup have not been ported to Linux.

@@ -9,7 +9,7 @@ import capture_scope
 import pytest
 import review_graph_runtime as runtime
 from review_graph_bootstrap import bootstrap_document
-from review_graph_handoffs import audit_observations, validation_observations
+from review_graph_handoffs import _literal_words, audit_observations, validation_observations
 from review_graph_plan import plan_from_document
 from review_graph_session import runtime_command
 from test_capture_scope import _commit_all, _init_repo
@@ -130,3 +130,18 @@ def test_custom_capture_retains_literal_arguments(tmp_path: Path, argument: str)
     command = "custom-capture " + argument
     observations = validation_observations({"node_id": "validation-001", "state_verification_command": command}, tmp_path / "contract.json")
     assert observations["before"]["capture_command"] == command + " > " + shlex.quote(str(tmp_path / "validation-001.before.capture.json"))
+
+
+@pytest.mark.parametrize("argument", ["HEAD~1", "topic~2", r'"cash\$name"', r'"tick\`name"', r'"slash\\name"', r'"literal\q"', r'"slash\\\$name"'])
+def test_literal_argument_decoding_matches_native_shell(argument: str) -> None:
+    """Compare literal parsing with actual shell quote removal, not shlex itself."""
+    command = "printf '%s' " + argument
+    result = subprocess.run(["/bin/bash", "-c", command], check=True, capture_output=True, timeout=30)  # noqa: S603 - fixed literal-only fixture parameters.
+    assert _literal_words(command)[-1].encode() == result.stdout
+
+
+@pytest.mark.parametrize("argument", ["~", "~/source", "name=~/source", "name=one:~/source"])
+def test_capture_rejects_actual_tilde_expansion(tmp_path: Path, argument: str) -> None:
+    with pytest.raises(ValueError, match="literal command"):
+        validation_observations({"node_id": "validation-001", "state_verification_command": "custom-capture " + argument}, tmp_path / "contract.json")
+    assert list(tmp_path.iterdir()) == []

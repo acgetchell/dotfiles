@@ -211,3 +211,46 @@ def test_live_capture_race_uses_cli_diagnostic_without_publishing(tmp_path: Path
     assert "Traceback" not in captured.err
     assert not output.exists()
     assert not Path(request["artifact_store"]).exists()
+
+
+@pytest.mark.parametrize("placement", ["inside", "same", "ancestor", "alias"])
+def test_external_source_rejects_overlapping_store_before_writes(tmp_path: Path, placement: str) -> None:
+    """An invalid proof destination must not change any repository bytes."""
+    request, _validator, repository, _entries = _external(tmp_path)
+    if placement == "alias":
+        alias = tmp_path / "repository-alias"
+        alias.symlink_to(repository, target_is_directory=True)
+        store = alias / "proof"
+    else:
+        store = {"inside": repository / "proof", "same": repository, "ancestor": repository.parent}[placement]
+    request["artifact_store"] = str(store)
+    before = {str(path.relative_to(repository)): path.read_bytes() for path in repository.rglob("*") if path.is_file()}
+    with pytest.raises(ValueError, match="external proof store"):
+        runtime.resume_after_external_source(request)
+    after = {str(path.relative_to(repository)): path.read_bytes() for path in repository.rglob("*") if path.is_file()}
+    assert after == before
+    if placement in {"inside", "alias"}:
+        assert not store.exists()
+
+
+@pytest.mark.parametrize("conflict", ["existing", "missing-parent"])
+def test_external_source_result_failure_reports_retained_continuation(tmp_path: Path, capsys: pytest.CaptureFixture[str], conflict: str) -> None:
+    """Result-file failures retain a usable, explicitly reported continuation."""
+    request, _validator, _repository, _entries = _external(tmp_path)
+    input_path = tmp_path / "external-request.json"
+    input_path.write_text(json.dumps(request))
+    output = tmp_path / "existing.json" if conflict == "existing" else tmp_path / "missing" / "result.json"
+    if conflict == "existing":
+        output.write_text("preserve existing result\n")
+    assert runtime.main(["resume-after-external-source", "--input", str(input_path), "--output", str(output)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "continuation was published" in captured.err
+    store = Path(request["artifact_store"])
+    for name in ("lifecycle.json", "dispatches.json", "capture.json", "execution.jsonl"):
+        assert (store / name).is_file()
+        assert str(store / name) in captured.err
+    if conflict == "existing":
+        assert output.read_text() == "preserve existing result\n"
+    else:
+        assert not output.exists()

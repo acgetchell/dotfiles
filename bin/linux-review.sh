@@ -59,9 +59,17 @@ if [[ "$stack_hard_kib" == unlimited ]] || (( stack_hard_kib > stack_limit_kib )
   ulimit -H -s "$stack_limit_kib"
 fi
 
-for tool in git bash zsh stow; do
+for tool in git bash zsh stow rustc cargo; do
   command -v "$tool" >/dev/null || fail "Required tool '$tool' unavailable. Load a site module or ask the environment owner to provide it; no checks were skipped."
 done
+# The full suite compiles edition-2024 Rust fixtures, even though bootstrap
+# installs prebuilt tooling binaries. Check before downloading or running tests.
+rust_identity="$(rustc --version 2>/dev/null)" \
+  || fail "Rust >= 1.85 required for offline review fixtures. Load a compatible site toolchain."
+[[ "$rust_identity" =~ ^rustc\ ([0-9]+)\.([0-9]+)\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?([[:space:]]|$) ]] \
+  || fail "Rust >= 1.85 required for offline review fixtures. Load a compatible site toolchain."
+(( 10#${BASH_REMATCH[1]} > 1 || (10#${BASH_REMATCH[1]} == 1 && 10#${BASH_REMATCH[2]} >= 85) )) \
+  || fail "Rust >= 1.85 required for offline review fixtures. Load a compatible site toolchain."
 
 tool_version() {
   local version_pattern='[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?'
@@ -129,7 +137,7 @@ install_release rumdl "$version" "https://github.com/rvben/rumdl/releases/downlo
 
 if [[ "$mode" == setup ]]; then
   uv sync --locked --group dev
-  UV_PROJECT_ENVIRONMENT="$DOTFILES_SEMGREP_ENVIRONMENT" uv sync --locked --project tooling/semgrep
+  env -u UV_PYTHON UV_PROJECT_ENVIRONMENT="$DOTFILES_SEMGREP_ENVIRONMENT" uv sync --locked --project tooling/semgrep
   # The setup report includes the pinned plugin check for disconnected validation.
   uv run --locked --no-sync python scripts/linux_review.py setup
   echo "linux-review: setup complete. Run bin/linux-review.sh check in the same site/module environment."
@@ -138,7 +146,7 @@ fi
 export UV_OFFLINE=1 UV_NO_SYNC=1 UV_PYTHON_DOWNLOADS=never
 uv sync --locked --group dev --offline --no-python-downloads --check \
   || fail "Locked Python environment is unavailable or out of date. Rerun setup on a connected provisioning host."
-UV_PROJECT_ENVIRONMENT="$DOTFILES_SEMGREP_ENVIRONMENT" uv sync --locked --project tooling/semgrep --offline --no-python-downloads --check \
+env -u UV_PYTHON UV_PROJECT_ENVIRONMENT="$DOTFILES_SEMGREP_ENVIRONMENT" uv sync --locked --project tooling/semgrep --offline --no-python-downloads --check \
   || fail "Locked Semgrep environment is unavailable or out of date. Rerun setup on a connected provisioning host."
 case "$mode" in
   exec) [[ $# -gt 0 ]] || fail "exec requires a command."; exec "$@" ;;

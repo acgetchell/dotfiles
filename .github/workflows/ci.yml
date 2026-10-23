@@ -229,9 +229,9 @@ jobs:
       - name: Exercise native executor timing
         run: just test-validation-timing
 
-      - name: Exercise native Windows Semgrep entry point
+      - name: Exercise native Windows Semgrep engine
         if: runner.os == 'Windows'
         env:
           SEMGREP_SEND_METRICS: "off"
           OTEL_SDK_DISABLED: "true"
-        run: uv run --locked --project tooling/semgrep semgrep --disable-version-check --metrics off --version
+        run: uv run --locked --project tooling/semgrep python scripts/semgrep_smoke.py

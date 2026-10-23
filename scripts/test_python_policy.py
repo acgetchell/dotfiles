@@ -38,7 +38,20 @@ def test_scanner_guard_rejects_executable_in_stale_environment(tmp_path: Path) -
     scanner = stale / "bin/semgrep"
     scanner.write_text("#!/bin/sh\nexit 0\n")
     scanner.chmod(0o700)
-    before = sorted(str(path.relative_to(stale)) for path in stale.rglob("*"))
+
+    def snapshot() -> dict[str, tuple[str, bytes | str]]:
+        """Preserve object types, file bytes, and literal symlink targets."""
+        return {
+            str(path.relative_to(stale)): ("symlink", str(path.readlink()))
+            if path.is_symlink()
+            else ("file", path.read_bytes())
+            if path.is_file()
+            else ("directory", "")
+            for path in stale.rglob("*")
+            if path != stale / ".lock"
+        }
+
+    before = snapshot()
     result = subprocess.run(  # noqa: S603 - actual recipe validates the isolated stale environment without synchronizing it.
         [just, "_ensure-semgrep"],
         cwd=REPOSITORY_ROOT,
@@ -52,7 +65,62 @@ def test_scanner_guard_rejects_executable_in_stale_environment(tmp_path: Path) -
     assert "Run just python-sync" in result.stderr
     assert scanner.read_text() == "#!/bin/sh\nexit 0\n"
     # uv may create its synchronization lock even when --check installs nothing.
-    assert sorted(str(path.relative_to(stale)) for path in stale.rglob("*") if path != stale / ".lock") == before
+    assert snapshot() == before
+
+
+def test_scanner_guard_ignores_root_python_selector() -> None:
+    """The real locked scanner check works when the site selects root Python 3.15."""
+    just = shutil.which("just")
+    assert just is not None
+    result = subprocess.run(  # noqa: S603 - read-only locked check of the provisioned scanner environment.
+        [just, "_ensure-semgrep"],
+        cwd=REPOSITORY_ROOT,
+        env={**os.environ, "UV_PYTHON": sys.executable, "UV_OFFLINE": "1"},
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_python_sync_keeps_root_python_selector_out_of_scanner(tmp_path: Path) -> None:
+    """Execute the real recipe and observe selector scope at each uv boundary."""
+    just = shutil.which("just")
+    assert just is not None
+    log = tmp_path / "sync-environments.jsonl"
+    version = tomllib.loads((REPOSITORY_ROOT / "pyproject.toml").read_text())["tool"]["uv"]["required-version"].removeprefix("==")
+    launcher = tmp_path / "uv"
+    launcher.write_text(
+        f"#!{sys.executable}\nimport json, os, sys\nfrom pathlib import Path\n"
+        f"if sys.argv[1:] == ['--version']: print('uv {version}'); sys.exit(0)\n"
+        "record = {'argv': sys.argv[1:], 'python': os.environ.get('UV_PYTHON'), 'environment': os.environ.get('UV_PROJECT_ENVIRONMENT')}\n"
+        f"with Path({str(log)!r}).open('a') as output: output.write(json.dumps(record) + '\\n')\n",
+        encoding="utf-8",
+    )
+    launcher.chmod(0o755)
+    scanner_environment = tmp_path / "scanner environment"
+    result = subprocess.run(  # noqa: S603 - real recipe with a recording uv launcher; no packages are installed.
+        [just, "python-sync"],
+        cwd=REPOSITORY_ROOT,
+        env={
+            **os.environ,
+            "PATH": str(tmp_path) + os.pathsep + os.environ["PATH"],
+            "UV_PYTHON": sys.executable,
+            "DOTFILES_SEMGREP_ENVIRONMENT": str(scanner_environment),
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = [json.loads(line) for line in log.read_text().splitlines()]
+    assert len(calls) == 2
+    root, scanner = calls
+    assert root["argv"] == ["sync", "--locked", "--group", "dev"]
+    assert root["python"] == sys.executable
+    assert scanner == {"argv": ["sync", "--locked", "--project", "tooling/semgrep"], "python": None, "environment": str(scanner_environment)}
 
 
 @pytest.mark.parametrize(

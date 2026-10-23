@@ -74,30 +74,30 @@ def coverage_diagnostics(payload: dict[str, Any], owned_paths: tuple[str, ...]) 
         missing = sorted(set(nearby) - set(dependencies))
         if missing:
             errors.append("coverage units must account for every inspected nearby dependency using its recorded spelling; missing: " + ", ".join(missing))
-    return (*errors, *_recipe_diagnostics(units, dependencies))
+    return (*errors, *_recipe_diagnostics(units))
 
 
-def _recipe_diagnostics(units: list[dict[str, Any]], dependencies: list[Any] | None) -> tuple[str, ...]:
+def _recipe_diagnostics(units: list[dict[str, Any]]) -> tuple[str, ...]:
     errors: list[str] = []
     for unit in units:
         recipes = unit.get("recipe_dependencies", [])
         if not isinstance(recipes, list) or any(not isinstance(item, dict) or not isinstance(item.get("path"), str) for item in recipes):
             continue
-        if dependencies is not None and (
-            len({item["path"] for item in recipes}) != len(recipes) or any(item["path"] not in unit["dependency_paths"] for item in recipes)
-        ):
+        dependencies = unit.get("dependency_paths")
+        valid_dependencies = isinstance(dependencies, list) and all(isinstance(path, str) for path in dependencies)
+        if len({item["path"] for item in recipes}) != len(recipes) or (valid_dependencies and any(item["path"] not in dependencies for item in recipes)):
             errors.append("recipe dependencies must uniquely name inspected dependency paths")
     return tuple(errors)
 
 
 def validate_coverage_units(payload: dict[str, Any], owned_paths: tuple[str, ...]) -> None:
-    """Require a complete partition with explicit dependencies and finding ownership."""
+    """Check partition semantics after the caller validates the review payload schema."""
     if errors := coverage_diagnostics(payload, owned_paths):
         raise ValueError("; ".join(errors))
 
 
 def audit_coverage_units(payload: dict[str, Any], inputs: AuditInputIdentity) -> list[dict[str, Any]]:
-    """Derive one conservative unit without changing the original sealed payload."""
+    """Derive units from a schema-validated payload without changing its sealed bytes."""
     validate_coverage_units(payload, inputs.owned_paths)
     if payload.get("coverage_units"):
         return payload["coverage_units"]
