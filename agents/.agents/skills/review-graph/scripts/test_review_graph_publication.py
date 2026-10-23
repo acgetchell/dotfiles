@@ -606,3 +606,44 @@ def test_separate_hosted_evidence_and_required_unexecuted_matrix(tmp_path: Path,
     dispatch = {**entry["dispatch"], "before_state": bundle["source_state"], "after_state": bundle["source_state"], "synthesis_bundle": bundle}
     _content, metadata = runtime.compile_review({"dispatch": dispatch, "payload": payload})
     assert metadata["normalized_record"]["readiness_verdict"] == ("blocked" if unexecuted else "ready")
+
+
+@pytest.mark.parametrize("dependency", ["/external/unknown.md", "/repository/AGENTS.md"])
+def test_coverage_reports_schema_and_provenance_before_corrected_publication(dispatch_set: dict[str, Any], dependency: str) -> None:
+    entry = next(item for item in dispatch_set["dispatches"] if item["dispatch"].get("mode") == "audit")
+    payload = _compact_audit_payload(entry)
+    payload["nearby_contract_owners"].append(dependency)
+    payload["coverage_units"] = [
+        {"unit_id": "complete-audit", "owned_paths": entry["dispatch"]["owned_paths"], "dependency_paths": ["AGENTS.md"], "finding_indices": []}
+    ]
+    with pytest.raises(ValueError, match="dependency_uncertainty") as failure:
+        _publish(entry, payload)
+    diagnostic = str(failure.value)
+    assert "dependency_uncertainty" in diagnostic
+    assert dependency in diagnostic
+    assert "recorded spelling" in diagnostic
+    assert all(path in diagnostic for path in entry["dispatch"]["required_read_paths"])
+    assert not Path(entry["worker_payload_path"]).exists()
+    payload["coverage_units"][0].update(dependency_uncertainty="", dependency_paths=list(payload["nearby_contract_owners"]))
+    receipt = _publish(entry, payload)
+    assert receipt["worker_payload_path"] == entry["worker_payload_path"]
+    assert json.loads(Path(entry["worker_payload_path"]).read_bytes()) == payload
+
+
+@pytest.mark.parametrize("recipe_case", ["same-unit-duplicate", "other-unit-duplicate", "other-unit-missing"])
+def test_coverage_keeps_recipe_diagnostics_when_another_field_is_malformed(dispatch_set: dict[str, Any], recipe_case: str) -> None:
+    """A structural error must not hide independently checkable recipe defects."""
+    entry = next(item for item in dispatch_set["dispatches"] if item["dispatch"].get("mode") == "audit")
+    payload = _compact_audit_payload(entry)
+    owned = entry["dispatch"]["owned_paths"]
+    payload["coverage_units"] = [
+        {"unit_id": "malformed", "owned_paths": owned[:1], "dependency_paths": None, "dependency_uncertainty": "", "finding_indices": []},
+        {"unit_id": "well-formed", "owned_paths": owned[1:], "dependency_paths": ["justfile"], "dependency_uncertainty": "", "finding_indices": []},
+    ]
+    unit = payload["coverage_units"][0 if recipe_case == "same-unit-duplicate" else 1]
+    recipe = {"path": "missing.just" if recipe_case == "other-unit-missing" else "justfile", "recipes": ["check"]}
+    unit["recipe_dependencies"] = [recipe] if recipe_case == "other-unit-missing" else [recipe, dict(recipe)]
+    with pytest.raises(ValueError, match="dependency_paths") as failure:
+        _publish(entry, payload)
+    assert "recipe dependencies must uniquely name inspected dependency paths" in str(failure.value)
+    assert not Path(entry["worker_payload_path"]).exists()

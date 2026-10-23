@@ -1,0 +1,22 @@
+[project]
+name = "dotfiles-semgrep"
+version = "0.1.0"
+description = "Independent, pinned Semgrep environment"
+requires-python = ">=3.14,<3.15"
+dependencies = ["semgrep==1.182.1"]
+
+[tool.uv]
+package = false
+# The source distribution does not bundle Semgrep's native engine.
+no-build-package = ["semgrep"]
+override-dependencies = [
+  # Preserve the reviewed Windows dependency and patched MCP 1.x API.
+  "pywin32==312; sys_platform == 'win32'",
+  "mcp>=1.30.0,<2",
+  # GHSA-xcq7-p3pf-p88h: keep the patched OpenTelemetry release train together.
+  "opentelemetry-api>=1.45.1,<1.46",
+  "opentelemetry-sdk>=1.45.1,<1.46",
+  "opentelemetry-exporter-otlp-proto-http>=1.45.1,<1.46",
+  "opentelemetry-instrumentation-requests>=0.66b1,<0.67",
+  "opentelemetry-instrumentation-threading>=0.66b1,<0.67",
+]

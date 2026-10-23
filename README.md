@@ -40,11 +40,11 @@ dotfiles/
 | Environment | Scope | Verification status |
 | --- | --- | --- |
 | macOS | Desktop dotfiles, Homebrew, Stow, full repository checks | Existing native CI; new Linux installer is separate |
-| Linux x86_64, glibc >= 2.28 | User-space review tools and full portable checks | Ubuntu 24.04 CI and Debian 13.6 cloud checks passed; other distributions unverified |
-| Linux aarch64, glibc >= 2.28 | Same provisioning candidate | Native validation unverified |
+| Linux x86_64, glibc >= 2.34 | User-space review tools and full portable checks | Ubuntu 24.04 CI and Debian 13.6 cloud checks passed; other distributions unverified |
+| Linux aarch64, glibc >= 2.34 | Same provisioning candidate | Native validation unverified |
 | Cara's cloud computer | Debian 13.6 x86_64 portable review environment | Setup, repeat setup, full checks, scripted smoke, and fresh restore verified; actual coordinator/worker review outstanding |
 | HPC | Site modules, scratch, authorized execution placement | Cluster configuration and native execution unverified |
-| Windows | Portable timing helper | Timing CI only; full tooling setup unsupported |
+| Windows | Portable timing helper and isolated scanner engine smoke | Native timing CI; scanner engine smoke configured but native evidence pending; full tooling setup unsupported |
 
 Linux support covers development/review tooling. The macOS shell, Git dotfile,
 desktop preferences, and Homebrew setup have not been ported to Linux.
@@ -191,12 +191,11 @@ brew bundle dump --file=~/projects/dotfiles/Brewfile.local --force --describe
 `just brew-cleanup-preview` never passes Homebrew's destructive `--force` flag. Homebrew returns status 1 when the preview finds cleanup candidates; the recipe treats that documented result as a successful preview while preserving actual errors. `just brew-cleanup` asks for confirmation before passing `--force` and applying that cleanup.
 
 `just update` upgrades the Brewfile dependencies and reconciles uv, refreshes Python
-dependencies, then updates Cargo tools and managed security scanners. While Python
-resolver overrides are present, `just update-python-dependencies` retains exact direct
-pins and runs a project-aware `uv lock --upgrade` followed by environment synchronization.
-Without overrides, the shared updater first advances exact direct development-tool pins.
-See the [direct-pin update instructions](docs/shared-tooling.md#python-authority-and-upgrades)
-for deliberate Python tool upgrades while overrides remain necessary.
+dependencies, then updates Cargo tools and managed security scanners.
+`just update-python-dependencies` advances root development-tool pins and refreshes
+both the root and explicitly declared Semgrep project through the shared
+`deps update-python --all-projects` command. Each retains its own environment,
+constraints and security overrides. See the [update instructions](docs/shared-tooling.md#python-authority-and-upgrades).
 The locked `research-repo-tools` package supplies pin updates, uv preflight, and tool-pin
 reconciliation. Its exact pin lives in the included `tooling` group and changes only through
 an explicit package upgrade; ranges, markers, and other included-group constraints remain intact.
@@ -218,10 +217,14 @@ Updates stop on failure, but successful package-manager steps remain applied; re
 resolving the failure to finish synchronization and pin reconciliation.
 
 The same locked package owns the Semgrep fixture runner and CodeRabbit wrapper.
+`just python-sync` restores the root Python 3.15 tools and the independently
+locked Python 3.14 scanner in `tooling/semgrep`. Updates use
+`deps update-python --all-projects` with that scanner as the only declared
+additional project; notebook skill assets remain templates.
 `just semgrep-test` reads `[tool.research-repo-tools.semgrep]`; the repository keeps its
 rules and real fixtures while generic runner tests live upstream.
 The Jupyter review skill delegates notebook inspection, advice, validation, native
-Ruff/ty lint, cleanup, and execution to published v0.1.9 shared commands. It keeps
+Ruff/ty lint, cleanup, and execution to published v0.2.3 shared commands. It keeps
 only review policy and a tested consumer configuration template; generic notebook
 implementation and regression coverage live upstream. See the
 [shared notebook workflow](agents/.agents/skills/jupyter-notebook-review/references/shared-notebooks.md)
@@ -231,7 +234,7 @@ execution dependencies belong to each consumer's locked notebook environment.
 
 ### Shared tooling and Python upgrades
 
-Dotfiles adopts `research-repo-tools==0.1.9` for Python baseline inheritance,
+Dotfiles adopts `research-repo-tools==0.2.3` for Python baseline inheritance,
 tracked and nonignored file selection, notebook policy, workflow audits, dependency
 and secret scans, and managed scanner setup/cleanup. The
 [adoption map](docs/shared-tooling.md) records the command owners and scope.
@@ -242,7 +245,7 @@ as the sole allowlist. It remains part of `github-actions-check` and CI; actionl
 owns workflow syntax and zizmor owns SHA pinning. The reusable Dependabot approval
 workflow retains its separately reviewed commit pin.
 
-Python 3.15 is inherited from v0.1.9. Preview and apply future upgrades with the published version:
+Python 3.15 is inherited from v0.2.3. Preview and apply future upgrades with the published version:
 
 ```sh
 just shared-python-plan VERSION
@@ -259,7 +262,7 @@ Homebrew's unversioned `python` formula serves the host; uv selects repository P
 
 `just tools-sync` installs checksum-verified OSV/Gitleaks into the package-owned
 `~/.cache/research-repo-tools` store; `just tools-check` verifies them. `just security`
-scans the real `uv.lock`, full reachable Git history, and current files, writing redacted
+scans the root and scanner lockfiles, full reachable Git history, and current files, writing redacted
 reports under `target/security`. It requires online advisory access and runs in the
 required CI `verify` job. `just security-check` remains an alias. Run
 `just security-osv` or `just security-secrets` for either scan separately;

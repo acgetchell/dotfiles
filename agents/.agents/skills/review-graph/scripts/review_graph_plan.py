@@ -28,6 +28,7 @@ from review_graph_reuse import (
     AuditInputIdentity,
     AuditReuseTransition,
     ExternalMetadataTransition,
+    ExternalSourceTransition,
     ReviewSourceSnapshot,
     audit_inputs_document,
     metadata_states,
@@ -564,7 +565,11 @@ class FingerprintEvidence:
 
     def matches(self, observed: tuple[str, str, str]) -> bool:
         """Match an observed capture through an explicit content-equivalence proof."""
-        return observed in metadata_states(self.expected, self.metadata_transitions)
+        states = metadata_states(self.expected, self.metadata_transitions)
+        # Source edits end the old equivalence class. Historical accepted bytes
+        # retain their original proof; new execution must observe current content.
+        boundary = max((index + 1 for index, transition in enumerate(self.metadata_transitions) if isinstance(transition, ExternalSourceTransition)), default=0)
+        return observed in states[boundary:]
 
 
 @dataclass(frozen=True)

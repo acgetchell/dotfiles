@@ -207,6 +207,34 @@ class ExternalMetadataTransition:
 
 
 @dataclass(frozen=True)
+class ExternalSourceTransition(ExternalMetadataTransition):
+    """Attributed content edits within an existing review boundary, without agent repairs."""
+
+    external_source_actor: str
+    external_source_attribution: str
+
+    @override
+    def verify(self) -> None:
+        """Preserve Git, selection and scope while exposing actual content deltas."""
+        self.before.verify()
+        self.after.verify()
+        _external_source_text(self.external_source_actor)
+        _external_source_text(self.external_source_attribution)
+        stable = ("repository_root", "capture_mode", "head", "branch", "base_ref", "merge_base", "requested_paths", "captured_scope_paths", "index_fingerprint")
+        if (
+            any(getattr(self.before, field) != getattr(self.after, field) for field in stable)
+            or self.before.repository_selection_paths != self.after.repository_selection_paths
+        ):
+            msg = "external source continuation requires unchanged Git and review selection; report partial evidence when new scope requires replanning"
+            raise ValueError(msg)
+        before, after = dict(self.before.repository_path_fingerprints), dict(self.after.repository_path_fingerprints)
+        changed = {path for path in before.keys() | after.keys() if before.get(path) != after.get(path)}
+        if not changed or not changed <= set(self.before.captured_scope_paths):
+            msg = "external source continuation requires changed content entirely inside the captured scope"
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True)
 class AuthorizedGitContextTransition(ExternalMetadataTransition):
     """An authorized externally performed commit/rebase with identical source."""
 
@@ -261,6 +289,13 @@ class CommitHandoffTransition(ExternalMetadataTransition):
         verify_commit_transition(self)
 
 
+def _external_source_text(raw: object) -> str:
+    if not isinstance(raw, str) or not raw.strip():
+        msg = "external source changes require an actor and explicit maintainer attribution"
+        raise ValueError(msg)
+    return raw
+
+
 def metadata_transition(raw: dict[str, Any]) -> ExternalMetadataTransition:
     """Parse and verify an externally observed metadata transition."""
     if not isinstance(raw, dict) or any(not isinstance(raw.get(field), dict) for field in ("before", "after")):
@@ -268,7 +303,14 @@ def metadata_transition(raw: dict[str, Any]) -> ExternalMetadataTransition:
         raise ValueError(msg)
     before, after = source_snapshot(raw["before"]), source_snapshot(raw["after"])
     result: ExternalMetadataTransition
-    if "commit_handoff" in raw:
+    if "external_source_actor" in raw or "external_source_attribution" in raw:
+        if "commit_handoff" in raw or "git_context_authorization" in raw:
+            msg = "external source attribution cannot authorize a Git transition"
+            raise ValueError(msg)
+        result = ExternalSourceTransition(
+            before, after, _external_source_text(raw.get("external_source_actor")), _external_source_text(raw.get("external_source_attribution"))
+        )
+    elif "commit_handoff" in raw:
         result = CommitHandoffTransition(before, after, raw["commit_handoff"])
     elif "git_context_authorization" in raw:
         authorization = raw["git_context_authorization"]

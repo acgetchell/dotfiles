@@ -24,38 +24,103 @@ def test_ci_requires_full_python_inventory_and_shared_baseline() -> None:
     assert recipes["python-typecheck"]["body"] == [["uv run --locked --group dev research-repo-tools python typecheck"]]
 
 
-@pytest.mark.parametrize("overrides", [False, True])
-def test_python_updater_selects_override_preserving_resolution(tmp_path: Path, *, overrides: bool) -> None:
-    """The preflight selects project resolution without changing manifest/lock."""
-    content = "[tool.uv]\n" + ("override-dependencies = [\"pywin32==312; sys_platform == 'win32'\"]\n" if overrides else "")
-    manifest = tmp_path / "pyproject.toml"
-    manifest.write_text(content)
-    lock = tmp_path / "uv.lock"
-    lock.write_text("preserved lock\n")
-    result = subprocess.run(  # noqa: S603 - fixed local guard in an isolated consumer directory.
-        [sys.executable, str(REPOSITORY_ROOT / "scripts/python_update_preflight.py")], cwd=tmp_path, capture_output=True, text=True, check=False, timeout=30
+def test_scanner_guard_rejects_executable_in_stale_environment(tmp_path: Path) -> None:
+    """An executable alone must not authorize scanning against a stale lock."""
+    scanner_environment = Path(os.environ.get("DOTFILES_SEMGREP_ENVIRONMENT", REPOSITORY_ROOT / "tooling/semgrep/.venv"))
+    stale = tmp_path / "stale scanner"
+    uv = shutil.which("uv")
+    just = shutil.which("just")
+    assert uv is not None
+    assert just is not None
+    subprocess.run(  # noqa: S603 - real empty environment in a disposable fixture.
+        [uv, "venv", "--python", str(scanner_environment / "bin/python"), str(stale)], check=True, capture_output=True, timeout=30
     )
-    assert result.returncode == 0
-    assert result.stdout == ("project\n" if overrides else "shared\n")
-    assert result.stderr == ""
-    assert manifest.read_text() == content
-    assert lock.read_text() == "preserved lock\n"
-    recipe = inspect_justfile(REPOSITORY_ROOT).recipes["update-python-dependencies"]
-    commands = "\n".join(line[0] for line in recipe["body"] if line and isinstance(line[0], str))
-    assert commands.index("python_update_preflight.py") < commands.index("just _shared-deps update-python")
+    scanner = stale / "bin/semgrep"
+    scanner.write_text("#!/bin/sh\nexit 0\n")
+    scanner.chmod(0o700)
+
+    def snapshot() -> dict[str, tuple[str, bytes | str]]:
+        """Preserve object types, file bytes, and literal symlink targets."""
+        return {
+            str(path.relative_to(stale)): ("symlink", str(path.readlink()))
+            if path.is_symlink()
+            else ("file", path.read_bytes())
+            if path.is_file()
+            else ("directory", "")
+            for path in stale.rglob("*")
+            if path != stale / ".lock"
+        }
+
+    before = snapshot()
+    result = subprocess.run(  # noqa: S603 - actual recipe validates the isolated stale environment without synchronizing it.
+        [just, "_ensure-semgrep"],
+        cwd=REPOSITORY_ROOT,
+        env={**os.environ, "DOTFILES_SEMGREP_ENVIRONMENT": str(stale), "UV_OFFLINE": "1"},
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode != 0
+    assert "Run just python-sync" in result.stderr
+    assert scanner.read_text() == "#!/bin/sh\nexit 0\n"
+    # uv may create its synchronization lock even when --check installs nothing.
+    assert snapshot() == before
 
 
-@pytest.mark.parametrize("content", [None, "[tool.uv\n"])
-def test_python_updater_stops_on_unreadable_manifest(tmp_path: Path, content: str | None) -> None:
-    """A missing or invalid manifest must not select either update path."""
-    if content is not None:
-        (tmp_path / "pyproject.toml").write_text(content)
-    result = subprocess.run(  # noqa: S603 - fixed local preflight against disposable invalid input.
-        [sys.executable, str(REPOSITORY_ROOT / "scripts/python_update_preflight.py")], cwd=tmp_path, capture_output=True, text=True, check=False, timeout=30
+def test_scanner_guard_ignores_root_python_selector() -> None:
+    """The real locked scanner check works when the site selects root Python 3.15."""
+    just = shutil.which("just")
+    assert just is not None
+    result = subprocess.run(  # noqa: S603 - read-only locked check of the provisioned scanner environment.
+        [just, "_ensure-semgrep"],
+        cwd=REPOSITORY_ROOT,
+        env={**os.environ, "UV_PYTHON": sys.executable, "UV_OFFLINE": "1"},
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
-    assert result.returncode == 1
-    assert result.stdout == ""
-    assert "python-update-preflight:" in result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_python_sync_keeps_root_python_selector_out_of_scanner(tmp_path: Path) -> None:
+    """Execute the real recipe and observe selector scope at each uv boundary."""
+    just = shutil.which("just")
+    assert just is not None
+    log = tmp_path / "sync-environments.jsonl"
+    version = tomllib.loads((REPOSITORY_ROOT / "pyproject.toml").read_text())["tool"]["uv"]["required-version"].removeprefix("==")
+    launcher = tmp_path / "uv"
+    launcher.write_text(
+        f"#!{sys.executable}\nimport json, os, sys\nfrom pathlib import Path\n"
+        f"if sys.argv[1:] == ['--version']: print('uv {version}'); sys.exit(0)\n"
+        "record = {'argv': sys.argv[1:], 'python': os.environ.get('UV_PYTHON'), 'environment': os.environ.get('UV_PROJECT_ENVIRONMENT')}\n"
+        f"with Path({str(log)!r}).open('a') as output: output.write(json.dumps(record) + '\\n')\n",
+        encoding="utf-8",
+    )
+    launcher.chmod(0o755)
+    scanner_environment = tmp_path / "scanner environment"
+    result = subprocess.run(  # noqa: S603 - real recipe with a recording uv launcher; no packages are installed.
+        [just, "python-sync"],
+        cwd=REPOSITORY_ROOT,
+        env={
+            **os.environ,
+            "PATH": str(tmp_path) + os.pathsep + os.environ["PATH"],
+            "UV_PYTHON": sys.executable,
+            "DOTFILES_SEMGREP_ENVIRONMENT": str(scanner_environment),
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = [json.loads(line) for line in log.read_text().splitlines()]
+    assert len(calls) == 2
+    root, scanner = calls
+    assert root["argv"] == ["sync", "--locked", "--group", "dev"]
+    assert root["python"] == sys.executable
+    assert scanner == {"argv": ["sync", "--locked", "--project", "tooling/semgrep"], "python": None, "environment": str(scanner_environment)}
 
 
 @pytest.mark.parametrize(

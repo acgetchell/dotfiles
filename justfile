@@ -4,13 +4,16 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
 export UV_CACHE_DIR := env_var_or_default("UV_CACHE_DIR", ".uv-cache")
+semgrep_environment := env_var_or_default("DOTFILES_SEMGREP_ENVIRONMENT", justfile_directory() / "tooling/semgrep/.venv")
+semgrep_bin := semgrep_environment / (if os() == "windows" { "Scripts" } else { "bin" })
+export PATH := semgrep_bin + (if os() == "windows" { ";" } else { ":" }) + env_var("PATH")
 
 python_fixture_paths := "tests/semgrep"
 python_primary_paths := "agents/.agents/skills scripts"
 review_contract_tests := "agents/.agents/skills/review-graph/scripts/test_review_graph_contracts.py"
 cargo_update_version := "22.1.1"
 cargo_version_pattern := '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?'
-dprint_version := "0.64.0"
+dprint_version := "0.64.3"
 just_version := "1.59.0"
 rumdl_version := "0.3.0"
 # Bootstrap without Python; pyproject.toml is the single uv pin authority.
@@ -72,6 +75,10 @@ _ensure-uv:
         echo "   Install or upgrade Homebrew uv to {{ uv_version }}." >&2
         exit 1
     fi
+
+_ensure-semgrep:
+    @test -x {{ quote(semgrep_bin / (if os() == "windows" { "semgrep.exe" } else { "semgrep" })) }} || { echo "Run just python-sync to restore the locked Semgrep environment." >&2; exit 1; }
+    @env -u UV_PYTHON UV_PROJECT_ENVIRONMENT={{ quote(semgrep_environment) }} uv sync --locked --project tooling/semgrep --check || { echo "Run just python-sync to restore the locked Semgrep environment." >&2; exit 1; }
 
 action-lint: _ensure-actionlint
     uv run --locked --group dev research-repo-tools files run --include '.github/workflows/*.yml' --include '.github/workflows/*.yaml' -- actionlint
@@ -165,6 +172,7 @@ python-lint: python-check
 
 python-sync: _ensure-uv
     uv sync --locked --group dev
+    env -u UV_PYTHON UV_PROJECT_ENVIRONMENT={{ quote(semgrep_environment) }} uv sync --locked --project tooling/semgrep
 
 python-typecheck: _ensure-uv
     uv run --locked --group dev research-repo-tools python typecheck
@@ -200,7 +208,7 @@ rust-review-fixture baseline="fa7231d431db9d6207bed98be0e719d085a700bf": _ensure
     uv run --locked python agents/.agents/skills/rust-review-orchestrator/scripts/review_fixture.py --baseline {{ quote(baseline) }}
 
 # Shared inventory and fixture semantics; retain local TLS and reviewed suppressions.
-semgrep: _ensure-uv
+semgrep: _ensure-uv _ensure-semgrep
     #!/usr/bin/env bash
     set -euo pipefail
     scan_cache="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-semgrep.XXXXXX")"
@@ -212,7 +220,7 @@ semgrep: _ensure-uv
     if [[ -f /etc/ssl/cert.pem ]]; then export SSL_CERT_FILE=/etc/ssl/cert.pem; fi
     uv run --locked --group dev research-repo-tools files run --exclude 'tests/semgrep/**' --timeout 600 -- semgrep --disable-version-check --metrics off --error --strict --timeout 120 --config semgrep.yaml
 
-semgrep-test: _ensure-uv
+semgrep-test: _ensure-uv _ensure-semgrep
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ -f /etc/ssl/cert.pem ]]; then export SSL_CERT_FILE=/etc/ssl/cert.pem; fi
@@ -269,7 +277,7 @@ files +args: _ensure-uv
     uv run --locked --group dev research-repo-tools files "$@"
 
 security-osv: _ensure-uv
-    uv run --locked --group dev research-repo-tools security osv uv.lock
+    uv run --locked --group dev research-repo-tools security osv uv.lock tooling/semgrep/uv.lock
 
 security-secrets: _ensure-uv
     uv run --locked --group dev research-repo-tools security secrets
@@ -316,7 +324,7 @@ _shared-deps action: _ensure-brew
         echo "Homebrew-managed uv is unavailable at $uv_executable." >&2
         exit 1
     fi
-    PATH="$(dirname "$uv_executable"):$PATH" "$uv_executable" run --locked --no-config --only-group tooling --inexact research-repo-tools deps {{ quote(action) }}
+    PATH="$(dirname "$uv_executable"):$PATH" "$uv_executable" run --locked --no-config --only-group tooling --inexact research-repo-tools deps {{ quote(action) }} {{ if action == "update-python" { "--all-projects" } else { "" } }}
 
 # Update Homebrew, Python pins/environment, and all installed Cargo tools.
 update: update-dependencies update-cargo-tools
@@ -354,22 +362,7 @@ update-security-tools: _ensure-uv
 
 # Preserve project overrides, refresh the full lock, and synchronize dev.
 update-python-dependencies: _preflight-stable-uv
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    update_mode="$(uv run --locked python scripts/python_update_preflight.py)"
-    case "$update_mode" in
-        shared) just _shared-deps update-python ;;
-        project) echo "Project overrides present; retaining exact direct pins and refreshing transitive dependencies." ;;
-        *) echo "Unsupported Python update mode: $update_mode" >&2; exit 1 ;;
-    esac
-    uv_executable="$(brew --prefix uv)/bin/uv"
-    if [[ ! -x "$uv_executable" ]]; then
-        echo "Homebrew-managed uv is unavailable at $uv_executable." >&2
-        exit 1
-    fi
-    "$uv_executable" lock --upgrade
-    "$uv_executable" sync --locked --group dev
+    just _shared-deps update-python
 
 shell-check:
     bash -n bin/bootstrap.sh bin/linux-review.sh bin/macos-defaults.sh bin/resolve-just-version.sh bin/restow-agents.sh bin/verify.sh

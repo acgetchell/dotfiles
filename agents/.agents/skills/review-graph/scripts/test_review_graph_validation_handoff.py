@@ -99,8 +99,13 @@ def _handoff(  # noqa: PLR0913 - orthogonal fixture execution and contract contr
     instructions: bool = False,
     command: str | None = None,
     worktree: bool = False,
+    readme: bool = False,
+    repairs_completed: int = 0,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], str, Path, dict[str, Any]]:
     git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path, instructions=instructions)
+    if readme:
+        (repository / "README.md").write_text("# Fixture\n\n\nDescription.\n")
+        template["consulted_routers"].append("docs-review-orchestrator")
     if command is not None:
         template["validation_requirements"][0].update(commands=[command], canonical_recipe=None)
     commands = template["validation_requirements"][0]["commands"]
@@ -132,6 +137,7 @@ def _handoff(  # noqa: PLR0913 - orthogonal fixture execution and contract contr
         template["routing_overrides"] = [item for item in template["routing_overrides"] if captured.intersection(item["review_surface"])]
     _complete_structural_fixture_routing(template, list(source_snapshot(capture).captured_scope_paths))
     plan = plan_from_document(bootstrap_document(capture, template), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)
+    plan = replace(plan, review_lifecycle=replace(plan.review_lifecycle, repairs_completed=repairs_completed))
     lifecycle, entries, dispatches = _materialize(tmp_path, capture, plan)
     journal = tmp_path / "execution.jsonl"
     lifecycle.update(journal_path=str(journal), dispatches_path=str(dispatches))

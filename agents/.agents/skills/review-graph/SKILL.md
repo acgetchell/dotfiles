@@ -137,7 +137,8 @@ follow returned continuations. `next-ready --output-dir` creates immutable gener
 Reconcile accepted handoffs before expansion; only new triggers reroute. Use
 `advance-after-mutation` after authorized repairs to recapture, invalidate stale
 nodes, and materialize the replacement graph.
-For external branch creation or staging with unchanged content, use `resume-after-external-metadata`.
+For unchanged-content Git edits, use `resume-after-external-metadata`.
+External edits: [resume-after-external-source](references/state-transitions.md#external-source-edits).
 Declare semantic `git_dependencies` to preserve source-discovery audits; follow
 its continuation and [state transitions](references/state-transitions.md).
 Retain both Git captures and the user's index.

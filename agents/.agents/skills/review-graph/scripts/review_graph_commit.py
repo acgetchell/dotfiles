@@ -151,7 +151,9 @@ def verify_live_commit(previous: dict[str, Any], current: dict[str, Any]) -> str
         raise ValueError(msg)
     # Git's clean status can hide assume-unchanged/skip-worktree and filtered bytes.
     # Compare every committed blob and mode to the captured path identity.
-    if _committed_path_fingerprints(git, root, after.head) != dict(after.repository_path_fingerprints):
+    # Branch captures retain deletion tombstones; committed trees omit those paths.
+    present_paths = {path: identity for path, identity in after.repository_path_fingerprints if identity != "absent"}
+    if _committed_path_fingerprints(git, root, after.head) != present_paths:
         msg = "committed tree bytes or modes differ from the complete reviewed path identities"
         raise ValueError(msg)
     return before.head

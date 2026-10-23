@@ -14,13 +14,13 @@ fail() { echo "linux-review: $*" >&2; exit 2; }
 architecture="$(uname -m)"
 case "$architecture" in x86_64|aarch64) ;; *) fail "Unsupported architecture $architecture; supported candidates: x86_64, aarch64." ;; esac
 libc="$(getconf GNU_LIBC_VERSION 2>/dev/null || true)"
-[[ "$libc" == 'glibc '* ]] || fail "glibc >= 2.28 required by the locked tool environment; musl/unknown libc is unverified."
+[[ "$libc" == 'glibc '* ]] || fail "glibc >= 2.34 required by the locked Semgrep wheel; musl/unknown libc is unverified."
 libc_version="${libc#glibc }"
 libc_major="${libc_version%%.*}"
 libc_minor="${libc_version#*.}"
 libc_minor="${libc_minor%%.*}"
 [[ "$libc_major" =~ ^[0-9]+$ && "$libc_minor" =~ ^[0-9]+$ ]] || fail "Unable to parse glibc version."
-(( libc_major > 2 || (libc_major == 2 && libc_minor >= 28) )) || fail "glibc $libc_version is too old; use an approved newer environment."
+(( libc_major > 2 || (libc_major == 2 && libc_minor >= 34) )) || fail "glibc $libc_version is too old; the locked Semgrep wheel requires >= 2.34."
 
 export DOTFILES_REVIEW_PREFIX="${DOTFILES_REVIEW_PREFIX:-$HOME/.local/share/dotfiles-review}"
 export DOTFILES_REVIEW_CACHE="${DOTFILES_REVIEW_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/dotfiles-review}"
@@ -38,6 +38,7 @@ mkdir -p "$JUST_TEMPDIR"
 export PATH="$DOTFILES_REVIEW_PREFIX/bin:$PATH"
 export UV_CACHE_DIR="$DOTFILES_REVIEW_CACHE/uv"
 export UV_PROJECT_ENVIRONMENT="$DOTFILES_REVIEW_PREFIX/venv"
+export DOTFILES_SEMGREP_ENVIRONMENT="$DOTFILES_REVIEW_PREFIX/semgrep-venv"
 export UV_PYTHON_INSTALL_DIR="$DOTFILES_REVIEW_PREFIX/python"
 export TMPDIR="$DOTFILES_REVIEW_TMP"
 export XDG_CACHE_HOME="$DOTFILES_REVIEW_CACHE"
@@ -58,9 +59,17 @@ if [[ "$stack_hard_kib" == unlimited ]] || (( stack_hard_kib > stack_limit_kib )
   ulimit -H -s "$stack_limit_kib"
 fi
 
-for tool in git bash zsh stow; do
+for tool in git bash zsh stow rustc cargo; do
   command -v "$tool" >/dev/null || fail "Required tool '$tool' unavailable. Load a site module or ask the environment owner to provide it; no checks were skipped."
 done
+# The full suite compiles edition-2024 Rust fixtures, even though bootstrap
+# installs prebuilt tooling binaries. Check before downloading or running tests.
+rust_identity="$(rustc --version 2>/dev/null)" \
+  || fail "Rust >= 1.85 required for offline review fixtures. Load a compatible site toolchain."
+[[ "$rust_identity" =~ ^rustc\ ([0-9]+)\.([0-9]+)\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?([[:space:]]|$) ]] \
+  || fail "Rust >= 1.85 required for offline review fixtures. Load a compatible site toolchain."
+(( 10#${BASH_REMATCH[1]} > 1 || (10#${BASH_REMATCH[1]} == 1 && 10#${BASH_REMATCH[2]} >= 85) )) \
+  || fail "Rust >= 1.85 required for offline review fixtures. Load a compatible site toolchain."
 
 tool_version() {
   local version_pattern='[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?'
@@ -128,6 +137,7 @@ install_release rumdl "$version" "https://github.com/rvben/rumdl/releases/downlo
 
 if [[ "$mode" == setup ]]; then
   uv sync --locked --group dev
+  env -u UV_PYTHON UV_PROJECT_ENVIRONMENT="$DOTFILES_SEMGREP_ENVIRONMENT" uv sync --locked --project tooling/semgrep
   # The setup report includes the pinned plugin check for disconnected validation.
   uv run --locked --no-sync python scripts/linux_review.py setup
   echo "linux-review: setup complete. Run bin/linux-review.sh check in the same site/module environment."
@@ -136,6 +146,8 @@ fi
 export UV_OFFLINE=1 UV_NO_SYNC=1 UV_PYTHON_DOWNLOADS=never
 uv sync --locked --group dev --offline --no-python-downloads --check \
   || fail "Locked Python environment is unavailable or out of date. Rerun setup on a connected provisioning host."
+env -u UV_PYTHON UV_PROJECT_ENVIRONMENT="$DOTFILES_SEMGREP_ENVIRONMENT" uv sync --locked --project tooling/semgrep --offline --no-python-downloads --check \
+  || fail "Locked Semgrep environment is unavailable or out of date. Rerun setup on a connected provisioning host."
 case "$mode" in
   exec) [[ $# -gt 0 ]] || fail "exec requires a command."; exec "$@" ;;
   *) exec uv run --locked --no-sync --no-python-downloads python scripts/linux_review.py "$mode" "$@" ;;

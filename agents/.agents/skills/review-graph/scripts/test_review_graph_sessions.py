@@ -7,6 +7,7 @@ import subprocess
 import sys
 from dataclasses import asdict
 from pathlib import Path
+from typing import cast
 
 import pytest
 import review_graph_runtime as runtime
@@ -24,6 +25,8 @@ from test_review_graph_runtime import (
     _baseline_mutation_fixture,
     _compact_independent_payload,
     _compile_repair_fixture_entry,
+    _complete_structural_fixture_routing,
+    _json_plan,
     _publish_worker_bytes,
     _run_test_git,
     _worker_input_fixture,
@@ -369,3 +372,56 @@ def test_unavailable_validation_preserves_source_partition_and_delivery_stays_un
     assert report["validation"][0]["status"] == "pending-or-unavailable"
     assert len(report["hosted_ci"]) == 1
     assert report["hosted_ci"][0]["requirement_ids"] == ["native-ci"]
+
+
+@pytest.mark.parametrize("repair", ["tool-only", "dependencies", "python-selector"])
+def test_preplanned_direct_runner_captures_manifest_repairs_without_changing_runtime(tmp_path: Path, repair: str) -> None:
+    git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
+    manifest = repository / "pyproject.toml"
+    manifest.write_text('[project]\nname = "consumer"\nversion = "0.1.0"\nrequires-python = ">=3.15"\n[tool.ruff]\nsrc = ["src"]\n')
+    (repository / "uv.lock").write_text("version = 1\n")
+    (repository / ".python-version").write_text("3.15\n")
+    capture = _scope_data(git, repository, "baseline", None, ())
+
+    _complete_structural_fixture_routing(template, cast("list[str]", capture["captured_scope_paths"]))
+    reference = freeze_runtime(SKILL_ROOT, tmp_path / "runtime", repository=repository)
+    retained = Path(reference["path"]).read_bytes()
+    plan = plan_from_document(bootstrap_document(capture, template), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)
+    if repair == "python-selector":
+        (repository / ".python-version").write_text("3.16\n")
+        changed = [".python-version"]
+        template["validation_requirements"][0]["toolchain"] = "consumer Python 3.16; verification required"
+    else:
+        manifest.write_text(
+            manifest.read_text().replace('src = ["src"]', 'src = ["src", "scripts"]')
+            if repair == "tool-only"
+            else manifest.read_text().replace("[tool.ruff]", 'dependencies = ["example==2.0"]\n[tool.ruff]')
+        )
+        changed = ["pyproject.toml"]
+        if repair == "dependencies":
+            (repository / "uv.lock").write_text("version = 1\nrevision = 1\n")
+            changed.append("uv.lock")
+    frozen_capture = Path(reference["path"]).parent / "skills/review-graph/scripts/capture_scope.py"
+    output = tmp_path / "repair.capture.json"
+    result = _cli(frozen_capture, "--repo", str(repository), "--mode", "baseline", "--output", str(output))
+    assert json.loads(result.stdout)["capture_digest"] == runtime.digest_bytes(output.read_bytes())
+
+    advanced = runtime.advance_after_mutation(
+        {
+            "plan": _json_plan(plan),
+            "source_state": [capture[key] for key in ("scope_fingerprint", "captured_worktree_fingerprint", "repository_state_fingerprint")],
+            "previous_capture": capture,
+            "new_capture": json.loads(output.read_bytes()),
+            "planning_template": template,
+            "changed_paths": sorted(changed),
+            "authorization_before": "review-and-fix",
+            "authorization_after": "review-and-fix",
+            "repair_epoch": 1,
+            "artifact_store": str(tmp_path / "repair"),
+            "state_verification_command": shlex.join([sys.executable, str(frozen_capture), "--repo", str(repository), "--mode", "baseline"]),
+        }
+    )
+    assert advanced["new_plan"]["review_lifecycle"]["repairs_completed"] == 1
+    assert advanced["new_plan"]["coalesced_validation_units"]
+    assert Path(reference["path"]).read_bytes() == retained
+    assert verify_snapshot(reference).files

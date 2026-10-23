@@ -1761,6 +1761,65 @@
           "minLength": 1
         }
       }
+    },
+    "resume-after-external-source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_store",
+        "dispatches_path",
+        "journal_path",
+        "plan",
+        "source_state",
+        "previous_capture",
+        "new_capture",
+        "external_source_actor",
+        "external_source_attribution"
+      ],
+      "properties": {
+        "artifact_store": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dispatches_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "journal_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "routing_catalog_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "plan": {
+          "type": "object"
+        },
+        "source_state": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "previous_capture": {
+          "type": "object"
+        },
+        "new_capture": {
+          "type": "object"
+        },
+        "external_metadata_transitions": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "external_source_actor": {
+          "type": "string",
+          "minLength": 1
+        },
+        "external_source_attribution": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
     }
   }
 }

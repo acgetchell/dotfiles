@@ -1,6 +1,6 @@
 # Shared tooling adoption
 
-The exact published `research-repo-tools==0.1.9` package owns reusable mechanics.
+The exact published `research-repo-tools==0.2.3` package owns reusable mechanics.
 Dotfiles retains policy, machine provisioning, fixtures, and its skill protocols.
 No sibling checkout or unreleased code is needed.
 
@@ -11,14 +11,14 @@ No sibling checkout or unreleased code is needed.
 | File selection | Shared inventory and bounded batches for Python, Markdown, YAML, actionlint, and Semgrep |
 | Python lint/type policy | Complete configured Ruff and ty checks over tracked/nonignored `.py` and `.pyi`, including fixtures; fixers retain the narrower safe scope |
 | Workflow auditing | One locked Python zizmor pin and explicit persona; SHA pinning, offline local gate, required-online hosted audit, guarded SARIF upload; shared Actions allowlist command reads the committed settings |
-| Dependency/secret scanning | Managed OSV/Gitleaks, explicit root `uv.lock`, full reachable history and current files, redacted reports; required CI `verify` includes the gate |
+| Dependency/secret scanning | Managed OSV/Gitleaks, explicit root/scanner locks, full reachable history and current files, redacted reports; required CI `verify` includes the gate |
 | Scanner lifecycle | `tools-sync`, `tools-check`, `update-security-tools`, and preview-first `clean`; package-owned cache store |
-| Dependency/tool updates | Shared helpers with project-aware lock refresh for unsupported project overrides; Homebrew uv pin reconciliation; machine Cargo tools retain their existing owner |
+| Dependency/tool updates | Shared `deps update-python --all-projects` for the root and explicitly declared scanner; Homebrew uv pin reconciliation; machine Cargo tools retain their existing owner |
 | Semgrep fixtures | Shared assertion runner over repository rules, syntax mutation pairs, and count expectations that retain path filters; integration tests exercise real review-graph source/test paths |
 | Notebooks | Published inspection/advice/lint/cleanup/execution in the Jupyter skill; its consumer template prohibits dependency installs inside cells |
 | Reviews | Shared opt-in CodeRabbit wrapper defaults to verified `origin/main`; no review is sent merely by running CI |
 | Review-graph helpers | Direct public exact-byte hashing and subprocess APIs; graph serialization and immutable publication retain their protocol contracts |
-| Dependabot | SHA-pinned v0.1.7 reusable workflow; hosted rollout is tracked in [the rollout guide](../.github/DEPENDABOT.md) |
+| Dependabot | SHA-pinned v0.1.8 reusable workflow; hosted rollout is tracked in [the rollout guide](../.github/DEPENDABOT.md) |
 
 ## Python authority and upgrades
 
@@ -49,26 +49,32 @@ lint, and strict ty checks with the first failing batch stopping the command.
 `python-typecheck` uses the same shared owner. `python-fix` retains its narrower
 scope to preserve deliberately invalid Semgrep fixtures.
 
-Semgrep 1.180.0 pins `pywin32==311` on Windows, whose wheels stop at Python 3.14.
-The Windows-only uv override selects 312, which publishes cp315 wheels. Remove
-the override when Semgrep advances its dependency. Universal lock resolution
-checks package availability; native Windows execution remains a hosted check.
+Semgrep 1.182.1 has an independent Python 3.14 environment in `tooling/semgrep`.
+The root remains Python 3.15. The shared updater's root direct-pin resolution
+selected Semgrep 1.136.0; separating the scanner preserves its exact 1.182.1
+requirement while allowing root tools to advance. Its own manifest retains the
+Windows `pywin32==312` override and the patched `mcp>=1.30.0,<2` constraint.
+It also uses OpenTelemetry 1.45.1/0.66b1 for
+[GHSA-xcq7-p3pf-p88h](https://github.com/advisories/GHSA-xcq7-p3pf-p88h).
+Semgrep installs from wheels only because its source distribution lacks the native engine.
+The root retains the `rust-just==1.59.0` override, aligned with `just_version`.
 
-The shared package pins `rust-just==1.58.0`. A project override aligns the Python
-environment's Just with `just_version` in `justfile`, including commands launched
-by `uv run`. Keep both pins aligned when updating Just; CI checks the installed
-Python distribution and executable against the repository pin.
-
-The v0.1.9 direct-pin updater resolves through temporary PEP 723 metadata that
-does not copy these project overrides. It can consequently downgrade Semgrep even
-though the project lock resolves correctly. `update-python-dependencies` skips
-shared direct-pin resolution while overrides are present and runs `uv lock --upgrade`
-for a transitive refresh that retains direct pins and project overrides, then
-synchronizes the development environment. For a deliberate direct-pin change,
-use `uv add --dev 'PACKAGE==VERSION'`, review the manifest/lock diff, and run
-`just ci` plus `just security`. Remove the preflight
-fallback after upstream supports overrides; the shared package remains the direct-pin
-updater owner. `just update` continues through Cargo and security-tool updates.
+`just update-python-dependencies` selects Homebrew uv and invokes the published
+`deps update-python --all-projects` command. It updates root development pins,
+upgrades both locks and synchronizes their separate environments. Only
+`tooling/semgrep` is listed in `deps.python-projects`; notebook skill assets are
+consumer templates and are never discovered or synchronized as projects.
+`just python-sync` restores both locked environments. Just places the scanner's
+bin directory on PATH for shared scans and fixture tests. Linux provisioning
+keeps it in a separate `semgrep-venv` beneath `DOTFILES_REVIEW_PREFIX`, selected
+through `DOTFILES_SEMGREP_ENVIRONMENT`, without replacing the main environment.
+The Windows engine smoke selects the scanner project directly and requires one
+expected finding from a local rule and fixture, with no scanner errors. This
+configured check still needs native Windows evidence for the current changes.
+`just security-osv` scans both locks.
+The obsolete override-detection preflight has been removed. Each successful
+project update remains applied if a later project fails; inspect the diff and
+retry the same recipe after resolving the failure.
 
 Skill validation uses PyYAML's C safe loader when installed, with the Python
 safe loader as a supported fallback. Explicit Python 3.15 lazy imports defer
@@ -99,11 +105,11 @@ allowlist command covers reusable-workflow calls independently of zizmor's
 The published checker replaces `scripts/check_workflow_allowlist.py` as part of
 [dotfiles #105](https://github.com/acgetchell/dotfiles/issues/105). Generic YAML
 parsing and malformed-policy regressions live in the
-[upstream Actions tests](https://github.com/acgetchell/research-repo-tools/blob/v0.1.9/tests/dependencies/test_actions.py).
+[upstream Actions tests](https://github.com/acgetchell/research-repo-tools/blob/v0.2.3/tests/dependencies/test_actions.py).
 Dotfiles retains installed-package consumer tests for its actual workflows,
 unapproved action and reusable-call mutations with file/line diagnostics,
 committed policy authority, and recipe/CI wiring. The shared Dependabot workflow's
-v0.1.7 commit pin is independent of this Python package migration.
+v0.1.8 commit pin is independent of this Python package migration.
 
 Semgrep retains version-comment, locked-command, explicit checkout, bootstrap,
 portability, safe skill YAML loading, selective Python runtime settings, and
@@ -117,7 +123,7 @@ YAML forms and count assertions when a rule's path scope changes. Python 3.15
 fixtures cover unsafe C/Python loader selection and global lazy-import settings;
 the production-path matrix also checks imported aliases and test exclusions.
 
-OSV scans the root Python lockfile. The embedded zero-dependency Rust warmup
+OSV scans the root and independent scanner Python lockfiles. The embedded zero-dependency Rust warmup
 fixture is deliberate review input, not a shipped Cargo product. Root Cargo
 dependency upgrades, cargo-deny, Rust documentation snippet scans, scientific
 validators, coverage summaries, benchmark-publication tooling, changelog
@@ -125,10 +131,9 @@ generation, and release metadata commands have no corresponding consumer
 workflow here. Skill review benchmarks retain their domain-specific runners.
 
 The shared Semgrep `files run` and fixture runner are used in the normal gate.
-The per-input JSON/SARIF `semgrep scan` command is not substituted: it disables
-`nosemgrep`, conflicts with the reviewed Dependabot trigger exception, and
-requires every selected file to be scanned despite this repository's mixed
-language and path-specific rules. Dotfiles retains only scan policy and temporary
+The shared `semgrep scan` command is not substituted: its complete scan-coverage
+contract differs from this repository's mixed-language and path-specific rules.
+The existing native scan retains reviewed inline suppressions. Dotfiles retains only scan policy and temporary
 cache/TLS setup, not a second file inventory or fixture implementation.
 
 Full shared `setup` also installs user-wide Just and edits shell PATH. Dotfiles
@@ -152,3 +157,30 @@ network/scanner tier, also required inside the hosted `verify` job;
 `just security-secrets` for individual scans. The dedicated
 zizmor workflow tests authenticated online audits and upload permissions; a local
 offline pass does not establish those hosted results.
+
+## v0.2.3 adoption evidence
+
+The dependency is the published PyPI wheel recorded by URL and SHA-256 in
+`uv.lock`; no local wheel, editable sibling or source override is used.
+The scanner lock independently records Semgrep 1.182.1 and its dependencies.
+The upstream publication prerequisite is [research-repo-tools #124](https://github.com/acgetchell/research-repo-tools/issues/124).
+
+The locally exercised wheel identities are:
+
+| Package | Wheel | SHA-256 |
+| --- | --- | --- |
+| research-repo-tools 0.2.3 | `research_repo_tools-0.2.3-py3-none-any.whl` | `da5f0259027662e7706b7f2b8a38d8e1f1d8a5dce314e2c996177b2947514fc6` |
+| Semgrep 1.182.1 | macOS arm64, Python 3.10–3.14 | `89fe0afe240455800f806145f5679707892ea9bbd442a56eab1ea0b25a95f4c6` |
+
+Local adoption exercised `just update-python-dependencies` through the published
+all-projects updater, followed by locked scanner resolution at 1.182.1. The root
+uses Python 3.15.1 and the scanner Python 3.14.7. Semgrep scans and rule fixtures,
+Python lint/type checks, and both OSV lockfile scans plus Gitleaks passed on macOS.
+
+Dotfiles has no Python or Rust registry release pipeline. Validated release
+artifact promotion and registry-release instructions are therefore not applicable;
+this adoption does not add a release pipeline. Review evidence remains local for
+the review's duration. Required hosted checks remain the native repository CI
+matrix, Linux setup/check/smoke, timing/Windows entry point and security gates.
+A local pass does not establish those hosted results; record their exact commit,
+run and attempt in the adoption PR once it exists.

@@ -48,34 +48,56 @@ def coverage_reference(context: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def validate_coverage_units(payload: dict[str, Any], owned_paths: tuple[str, ...]) -> None:
-    """Require a complete partition with explicit dependencies and finding ownership."""
+def coverage_diagnostics(payload: dict[str, Any], owned_paths: tuple[str, ...]) -> tuple[str, ...]:
+    """Check independent partition facts even when another field is malformed."""
     units = payload.get("coverage_units", [])
-    if not units:
-        return
-    paths = [path for unit in units for path in unit["owned_paths"]]
-    identities = [unit["unit_id"] for unit in units]
-    findings = [ordinal for unit in units for ordinal in unit["finding_indices"]]
-    dependencies = {path for unit in units for path in unit["dependency_paths"]}
-    if len(identities) != len(set(identities)) or len(paths) != len(set(paths)) or set(paths) != set(owned_paths):
-        msg = "coverage units must uniquely partition every owned path"
-        raise ValueError(msg)
-    if sorted(findings) != list(range(1, len(payload["findings"]) + 1)):
-        msg = "coverage units must assign every finding exactly once using one-based indices"
-        raise ValueError(msg)
-    missing_dependencies = sorted(set(payload["nearby_contract_owners"]) - dependencies)
-    if missing_dependencies:
-        msg = "coverage units must account for every inspected nearby dependency; missing: " + ", ".join(missing_dependencies)
-        raise ValueError(msg)
+    if not isinstance(units, list) or not units or any(not isinstance(unit, dict) for unit in units):
+        return ()
+
+    def values(field: str, kind: type) -> list[Any] | None:
+        groups = [unit.get(field) for unit in units]
+        if any(not isinstance(group, list) or any(type(value) is not kind for value in group) for group in groups):
+            return None
+        return [value for group in groups for value in group]
+
+    errors: list[str] = []
+    paths, findings, dependencies = values("owned_paths", str), values("finding_indices", int), values("dependency_paths", str)
+    identities = [unit.get("unit_id") for unit in units]
+    if all(isinstance(identity, str) for identity in identities) and len(identities) != len(set(identities)):
+        errors.append("coverage units must have unique unit identities")
+    if paths is not None and (len(paths) != len(set(paths)) or set(paths) != set(owned_paths)):
+        errors.append("coverage units must uniquely partition every owned path")
+    if findings is not None and isinstance(payload.get("findings"), list) and sorted(findings) != list(range(1, len(payload["findings"]) + 1)):
+        errors.append("coverage units must assign every finding exactly once using one-based indices")
+    nearby = payload.get("nearby_contract_owners")
+    if dependencies is not None and isinstance(nearby, list) and all(isinstance(path, str) for path in nearby):
+        missing = sorted(set(nearby) - set(dependencies))
+        if missing:
+            errors.append("coverage units must account for every inspected nearby dependency using its recorded spelling; missing: " + ", ".join(missing))
+    return (*errors, *_recipe_diagnostics(units))
+
+
+def _recipe_diagnostics(units: list[dict[str, Any]]) -> tuple[str, ...]:
+    errors: list[str] = []
     for unit in units:
         recipes = unit.get("recipe_dependencies", [])
-        if len({item["path"] for item in recipes}) != len(recipes) or any(item["path"] not in unit["dependency_paths"] for item in recipes):
-            msg_0 = "recipe dependencies must uniquely name inspected dependency paths"
-            raise ValueError(msg_0)
+        if not isinstance(recipes, list) or any(not isinstance(item, dict) or not isinstance(item.get("path"), str) for item in recipes):
+            continue
+        dependencies = unit.get("dependency_paths")
+        valid_dependencies = isinstance(dependencies, list) and all(isinstance(path, str) for path in dependencies)
+        if len({item["path"] for item in recipes}) != len(recipes) or (valid_dependencies and any(item["path"] not in dependencies for item in recipes)):
+            errors.append("recipe dependencies must uniquely name inspected dependency paths")
+    return tuple(errors)
+
+
+def validate_coverage_units(payload: dict[str, Any], owned_paths: tuple[str, ...]) -> None:
+    """Check partition semantics after the caller validates the review payload schema."""
+    if errors := coverage_diagnostics(payload, owned_paths):
+        raise ValueError("; ".join(errors))
 
 
 def audit_coverage_units(payload: dict[str, Any], inputs: AuditInputIdentity) -> list[dict[str, Any]]:
-    """Derive one conservative unit without changing the original sealed payload."""
+    """Derive units from a schema-validated payload without changing its sealed bytes."""
     validate_coverage_units(payload, inputs.owned_paths)
     if payload.get("coverage_units"):
         return payload["coverage_units"]

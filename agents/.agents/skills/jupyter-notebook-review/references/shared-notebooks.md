@@ -1,13 +1,13 @@
 # Shared Notebook Workflow
 
 Use the consumer's named Just recipes when present. Published
-`research-repo-tools==0.1.9` supplies inspection, advice, validation, native lint,
+`research-repo-tools==0.2.3` supplies inspection, advice, validation, native lint,
 cleanup, and execution. Only the CLI and `research_repo_tools.cli.main` are
 supported notebook interfaces; do not import internal loaders or copy helpers.
 
 ## Locked Consumer Environment
 
-For an adopted consumer, declare `research-repo-tools[notebooks]==0.1.9` in its
+For an adopted consumer, declare `research-repo-tools[notebooks]==0.2.3` in its
 notebook dependency group at the same exact version as its tooling pin, with
 Python 3.15 or newer. Keep analysis dependencies in that group and Ruff 0.17.0 or newer and ty 0.0.86 or newer
 in its locked development environment. Preserve a deliberately adopted newer
@@ -27,7 +27,7 @@ uv run --locked --group notebook --group dev research-repo-tools notebooks lint 
 types, IDs, line/output/execution counts, and short source previews without
 printing stored outputs or metadata, executing cells, generating IDs, or writing
 source files. Previews expose source text; use `--no-preview` to omit it. Use
-`--json` for the [versioned inventory schema](https://github.com/acgetchell/research-repo-tools/blob/v0.1.9/docs/notebook-inspection.md).
+`--json` for the [versioned inventory schema](https://github.com/acgetchell/research-repo-tools/blob/v0.2.3/docs/notebook-inspection.md).
 
 Inspection tolerates older nbformat 4 notebooks and missing, invalid, or duplicate
 IDs, reporting repair problems while returning zero for a complete inventory.
@@ -42,14 +42,14 @@ If the consumer has not adopted the shared package, an isolated inspection can
 use the published base package without changing its manifest or environment:
 
 ```sh
-uv run --no-project --python 3.15 --with research-repo-tools==0.1.9 research-repo-tools --root "$PWD" notebooks inspect notebooks/example.ipynb
+uv run --no-project --python 3.15 --with research-repo-tools==0.2.3 research-repo-tools --root "$PWD" notebooks inspect notebooks/example.ipynb
 ```
 
 For isolated advice, include the notebook extra and Ruff. This reads policy from
 the consumer root; without configured policy, only descriptive-ID advice applies:
 
 ```sh
-uv run --no-project --python 3.15 --with 'research-repo-tools[notebooks]==0.1.9' --with ruff==0.17.0 research-repo-tools --root "$PWD" notebooks advise notebooks/example.ipynb
+uv run --no-project --python 3.15 --with 'research-repo-tools[notebooks]==0.2.3' --with ruff==0.17.0 research-repo-tools --root "$PWD" notebooks advise notebooks/example.ipynb
 ```
 
 These commands may download dependencies into uv's cache. Use the consumer's
@@ -93,7 +93,7 @@ runtime bounds, and `Popen` wait/communicate/termination lifecycles manually.
 Descriptive-ID warnings are heuristics. Keep stable descriptive IDs, and manually
 review positional `section-N` and `step-N` IDs in addition to the generated and
 positional patterns detected upstream. Never rename valid IDs automatically.
-See the [advisory contract and limits](https://github.com/acgetchell/research-repo-tools/blob/v0.1.9/docs/RUNNING_NOTEBOOKS.md#review-advisories).
+See the [advisory contract and limits](https://github.com/acgetchell/research-repo-tools/blob/v0.2.3/docs/RUNNING_NOTEBOOKS.md#review-advisories).
 
 ## Cleanup And Execution
 
@@ -109,7 +109,7 @@ metadata. There is no local cleanup implementation.
 
 Execution additionally requires the consumer's declared Python/uv toolchain and
 locked notebook environment. Follow its setup recipe and the
-[upstream environment contract](https://github.com/acgetchell/research-repo-tools/blob/v0.1.9/docs/RUNNING_NOTEBOOKS.md).
+[upstream environment contract](https://github.com/acgetchell/research-repo-tools/blob/v0.2.3/docs/RUNNING_NOTEBOOKS.md).
 Synchronize that environment before deliberate execution:
 
 ```sh
@@ -127,5 +127,5 @@ inspect its effects and cost before running it.
 Dotfiles retains integration checks for the published CLI and this skill's actual
 policy template. Generic inspection, ID heuristics, parser failures, native
 syntax, checker failures, and advisory regression coverage belong to upstream
-[`tests/notebooks`](https://github.com/acgetchell/research-repo-tools/tree/v0.1.9/tests/notebooks),
+[`tests/notebooks`](https://github.com/acgetchell/research-repo-tools/tree/v0.2.3/tests/notebooks),
 including the installed-consumer contracts in `public_notebook_consumer.py`.

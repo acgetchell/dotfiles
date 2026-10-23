@@ -398,5 +398,20 @@
     ],
     "node_id": "audit-001",
     "reason": "The accepted audit applied a different specialist checklist; journal invalidation retained."
+  },
+  "resume-after-external-source": {
+    "artifact_store": "/tmp/review-resume",
+    "dispatches_path": "/tmp/review/dispatches.json",
+    "journal_path": "/tmp/review/execution.jsonl",
+    "plan": {},
+    "source_state": [
+      "scope",
+      "worktree",
+      "repository"
+    ],
+    "previous_capture": {},
+    "new_capture": {},
+    "external_source_actor": "maintainer",
+    "external_source_attribution": "Maintainer explicitly confirmed authorship of the captured edit."
   }
 }

@@ -15,7 +15,7 @@ from review_graph_bootstrap import bootstrap_document
 from review_graph_commit import _unchanged_comparison, verify_live_commit
 from review_graph_integrity import digest_bytes
 from review_graph_plan import plan_from_document
-from review_graph_reuse import metadata_transition
+from review_graph_reuse import metadata_transition, source_snapshot
 from test_review_graph_runtime import (
     ROUTING_CATALOG,
     SKILL_ROOT,
@@ -551,6 +551,35 @@ def test_committed_symlink_identity_and_executable_mode(tmp_path: Path) -> None:
     after = _scope_data(git, repository, "baseline", None, ())
     assert verify_live_commit(before, after) == before["head"]
     assert before["repository_path_fingerprints"] == after["repository_path_fingerprints"]
+
+
+def test_committed_branch_deletion_preserves_absent_path_identity(tmp_path: Path) -> None:
+    git, repository, _template, initial, _plan = _baseline_mutation_fixture(tmp_path)
+    (repository / "tool.py").unlink()
+    before = _scope_data(git, repository, "branch", initial["head"], ())
+    _run_test_git(git, "-C", str(repository), "add", "-u")
+    _run_test_git(git, "-C", str(repository), "commit", "-m", "Reviewed deletion")
+    after = _scope_data(git, repository, "branch", initial["head"], ())
+
+    assert dict(source_snapshot(before).repository_path_fingerprints)["tool.py"] == "absent"
+    assert after["repository_path_fingerprints"] == before["repository_path_fingerprints"]
+    assert verify_live_commit(before, after) == before["head"]
+
+
+def test_missing_tracked_path_is_not_a_committed_deletion(tmp_path: Path) -> None:
+    git, repository, _template, initial, _plan = _baseline_mutation_fixture(tmp_path)
+    (repository / "state.rs").write_text("pub fn changed() {}\n")
+    before = _scope_data(git, repository, "branch", initial["head"], ())
+    _run_test_git(git, "-C", str(repository), "add", "state.rs")
+    _run_test_git(git, "-C", str(repository), "commit", "-m", "Reviewed state change")
+    _run_test_git(git, "-C", str(repository), "update-index", "--skip-worktree", "tool.py")
+    (repository / "tool.py").unlink()
+    after = _scope_data(git, repository, "branch", initial["head"], ())
+
+    assert dict(source_snapshot(after).repository_path_fingerprints)["tool.py"] == "absent"
+    assert not _run_git(git, repository, ("status", "--porcelain"))
+    with pytest.raises(ValueError, match="committed tree bytes or modes differ"):
+        verify_live_commit(before, after)
 
 
 @pytest.mark.parametrize("target", ["git diff -- tool.py", "git diff --cached HEAD -- tool.py", "git diff origin/main -- tool.py"])

@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import tomllib
 import zipfile
 from pathlib import Path
 
@@ -58,7 +59,7 @@ def linux_boundary(tmp_path: Path) -> dict[str, str]:
     binaries.mkdir()
     releases.mkdir()
     # GNU tar invokes gzip through PATH when reading compressed release archives.
-    for name in ("git", "bash", "tar", "gzip", "unzip", "sed", "head", "awk", "mkdir", "mktemp", "chmod", "cp", "mv", "rm", "dirname"):
+    for name in ("git", "bash", "env", "tar", "gzip", "unzip", "sed", "head", "awk", "mkdir", "mktemp", "chmod", "cp", "mv", "rm", "dirname"):
         tool = shutil.which(name)
         assert tool is not None
         (binaries / name).symlink_to(tool)
@@ -70,8 +71,16 @@ def linux_boundary(tmp_path: Path) -> dict[str, str]:
     checksum.chmod(0o700)
     executable(binaries / "uname", 'case "$1" in -s) echo Linux ;; -m) echo x86_64 ;; esac')
     executable(binaries / "getconf", 'echo "${FAKE_LIBC:-glibc 2.39}"')
-    for name in ("zsh", "stow"):
+    for name in ("zsh", "stow", "cargo"):
         executable(binaries / name, f"echo {name} fixture")
+    executable(binaries / "rustc", "echo 'rustc 1.85.0 (fixture)'")
+    scanner_bin = tmp_path / "install/semgrep-venv/bin"
+    scanner_bin.mkdir(parents=True)
+    scanner_project = tomllib.loads((REPOSITORY / "tooling/semgrep/pyproject.toml").read_text())["project"]
+    scanner_version = next(dependency.removeprefix("semgrep==") for dependency in scanner_project["dependencies"] if dependency.startswith("semgrep=="))
+    scanner_observation = {"python_executable": str(scanner_bin / "python"), "python_version": "3.14.9", "semgrep_version": scanner_version}
+    executable(scanner_bin / "python", f"printf '%s\\n' {shlex.quote(json.dumps(scanner_observation))}")
+    executable(scanner_bin / "semgrep", f"echo semgrep {scanner_version}")
     executable(
         binaries / "curl",
         '[[ "${BLOCK_NETWORK:-0}" != 1 ]] || exit 7\n'
@@ -87,6 +96,9 @@ def linux_boundary(tmp_path: Path) -> dict[str, str]:
         "uv-x86_64-unknown-linux-gnu/uv",
         f'if [[ "$1" == --version ]]; then echo uv {pins["uv"]}; else\n'
         'printf "%s\\n" "$*" >> "$CALL_LOG"\n'
+        'printf "%s|%s\\n" "${UV_PYTHON-UNSET}" "$*" >> "$PYTHON_LOG"\n'
+        'if [[ "$1" == sync && "$*" == *"--project tooling/semgrep"* ]]; then\n'
+        '[[ "$UV_PROJECT_ENVIRONMENT" == "$DOTFILES_REVIEW_PREFIX/semgrep-venv" ]] || exit 29\nfi\n'
         'if [[ "$1" == run ]]; then\nshift\nwhile [[ "$1" == --* ]]; do shift; done\n'
         'export PATH="$UV_PROJECT_ENVIRONMENT/bin:$PATH"\n'
         '[[ "$1" == python && "$2" == scripts/linux_review.py ]]\nshift\n'
@@ -114,6 +126,7 @@ def linux_boundary(tmp_path: Path) -> dict[str, str]:
         "RELEASES": str(releases),
         "DOWNLOAD_LOG": str(tmp_path / "downloads"),
         "CALL_LOG": str(tmp_path / "calls"),
+        "PYTHON_LOG": str(tmp_path / "python-selectors"),
     }
 
 
@@ -132,6 +145,7 @@ def test_fresh_setup_and_rerun_use_pins_custom_storage_and_no_shell_changes(linu
     assert {path.name for path in (Path(linux_boundary["DOTFILES_REVIEW_PREFIX"]) / "bin").iterdir()} == {"uv", "just", "dprint", "rumdl"}
     calls = Path(linux_boundary["CALL_LOG"]).read_text()
     assert calls.count("sync --locked --group dev") == 2
+    assert calls.count("sync --locked --project tooling/semgrep") == 2
     assert "run --locked --no-sync python scripts/linux_review.py setup" in calls
     assert "yaml-fmt-check" in calls
     reports = list(Path(linux_boundary["DOTFILES_REVIEW_ARTIFACTS"]).glob("setup-*/environment.json"))
@@ -154,6 +168,103 @@ def test_uv_environment_does_not_shadow_provisioned_tools(linux_boundary: dict[s
     assert "ci" in Path(linux_boundary["CALL_LOG"]).read_text().splitlines()
 
 
+def test_root_python_selector_does_not_reach_scanner_setup_or_check(linux_boundary: dict[str, str]) -> None:
+    """Site Python selection belongs to root tooling, not the older scanner project."""
+    root_python = "/site modules/python 3.15/bin/python"
+    linux_boundary["UV_PYTHON"] = root_python
+    for mode in ("setup", "check"):
+        result = run_installer(linux_boundary, mode)
+        assert result.returncode == 0, result.stderr
+    observations = [line.split("|", 1) for line in Path(linux_boundary["PYTHON_LOG"]).read_text().splitlines()]
+    scanner_calls = [(selector, command) for selector, command in observations if "--project tooling/semgrep" in command]
+    root_calls = [(selector, command) for selector, command in observations if "--project tooling/semgrep" not in command]
+    assert len(scanner_calls) == 2
+    assert any("--check" in command for _, command in scanner_calls)
+    assert all(selector == "UNSET" for selector, _ in scanner_calls)
+    assert root_calls
+    assert all(selector == root_python for selector, _ in root_calls)
+
+
+@pytest.mark.parametrize("tool", ["rustc", "cargo"])
+@pytest.mark.parametrize("mode", ["setup", "check"])
+def test_missing_rust_tool_fails_before_provisioning_or_checks(linux_boundary: dict[str, str], tool: str, mode: str) -> None:
+    """A complete setup must detect the native Rust fixture's prerequisites."""
+    if mode == "check":
+        setup = run_installer(linux_boundary)
+        assert setup.returncode == 0, setup.stderr
+    logs = [Path(linux_boundary[name]) for name in ("DOWNLOAD_LOG", "CALL_LOG")]
+    before = {path: path.read_bytes() if path.exists() else None for path in logs}
+    (Path(linux_boundary["PATH"]) / tool).unlink()
+    result = run_installer(linux_boundary, mode)
+    assert result.returncode == 2
+    assert f"Required tool '{tool}' unavailable" in result.stderr
+    assert "setup complete" not in result.stdout
+    assert {path: path.read_bytes() if path.exists() else None for path in logs} == before
+
+
+@pytest.mark.parametrize("tool", ["rustc", "cargo"])
+def test_direct_check_records_missing_rust_tool_without_launching_ci(linux_boundary: dict[str, str], tool: str) -> None:
+    setup = run_installer(linux_boundary)
+    assert setup.returncode == 0, setup.stderr
+    linux_boundary["JUST_TEMPDIR"] = str(Path(linux_boundary["DOTFILES_REVIEW_PREFIX"]) / "recipe-tmp")
+    linux_boundary["DOTFILES_SEMGREP_ENVIRONMENT"] = str(Path(linux_boundary["DOTFILES_REVIEW_PREFIX"]) / "semgrep-venv")
+    (Path(linux_boundary["PATH"]) / tool).unlink()
+    calls = Path(linux_boundary["CALL_LOG"])
+    before = calls.read_bytes()
+    result = subprocess.run(  # noqa: S603 - real launcher with isolated host tools and artifact storage.
+        [sys.executable, str(REPOSITORY / "scripts/linux_review.py"), "check"], env=linux_boundary, capture_output=True, text=True, check=False, timeout=30
+    )
+    assert result.returncode == 2
+    report_path = next(Path(linux_boundary["DOTFILES_REVIEW_ARTIFACTS"]).glob("check-*/environment.json"))
+    report = json.loads(report_path.read_text())
+    assert report["status"] == "unavailable"
+    assert tool in report["diagnostic"]
+    assert not (report_path.parent / "launch.json").exists()
+    assert calls.read_bytes() == before
+
+
+@pytest.mark.parametrize("mode", ["setup", "check", "direct-check"])
+@pytest.mark.parametrize(
+    ("identity", "compiler_exit", "supported"),
+    [
+        ("rustc 1.84.1 (old fixture)", 0, False),
+        ("rustc 1.85.0 (fixture)", 0, True),
+        ("rustc 1.85.0-beta.1 (fixture)", 0, True),
+        ("rustc 1.85.0-nightly (fixture)", 0, True),
+        ("rustc 1.84.0-nightly (old fixture)", 0, False),
+        ("rustc 2.0.0 (fixture)", 0, True),
+        ("rustc unknown", 0, False),
+        ("rustc 1.85.0oops", 0, False),
+        pytest.param("rustc 1.85.0 (fixture)", 7, False, id="failed_probe"),
+    ],
+)
+def test_rust_version_floor_is_checked_before_work(linux_boundary: dict[str, str], mode: str, identity: str, compiler_exit: int, *, supported: bool) -> None:
+    """Reject old/malformed compilers before downloads or the expensive suite."""
+    if mode != "setup":
+        setup = run_installer(linux_boundary)
+        assert setup.returncode == 0, setup.stderr
+    executable(Path(linux_boundary["PATH"]) / "rustc", f"echo {shlex.quote(identity)}\nexit {compiler_exit}")
+    logs = [Path(linux_boundary[name]) for name in ("DOWNLOAD_LOG", "CALL_LOG")]
+    before = {path: path.read_bytes() if path.exists() else None for path in logs}
+    linux_boundary["JUST_TEMPDIR"] = str(Path(linux_boundary["DOTFILES_REVIEW_PREFIX"]) / "recipe-tmp")
+    linux_boundary["DOTFILES_SEMGREP_ENVIRONMENT"] = str(Path(linux_boundary["DOTFILES_REVIEW_PREFIX"]) / "semgrep-venv")
+    argv = (
+        [sys.executable, str(REPOSITORY / "scripts/linux_review.py"), "check"]
+        if mode == "direct-check"
+        else ["/bin/bash", str(REPOSITORY / "bin/linux-review.sh"), mode]
+    )
+    result = subprocess.run(argv, env=linux_boundary, capture_output=True, text=True, check=False, timeout=30)  # noqa: S603 - isolated host boundary.
+    assert result.returncode == (0 if supported else 2), result.stderr
+    if not supported:
+        diagnostic = "rustc" if compiler_exit and mode == "direct-check" else "Rust >= 1.85"
+        assert diagnostic in result.stderr
+        assert {path: path.read_bytes() if path.exists() else None for path in logs} == before
+        if mode == "direct-check":
+            report_path = next(Path(linux_boundary["DOTFILES_REVIEW_ARTIFACTS"]).glob("check-*/environment.json"))
+            assert json.loads(report_path.read_text())["status"] == "unavailable"
+            assert not (report_path.parent / "launch.json").exists()
+
+
 @pytest.mark.parametrize("existing_path", [None, ""])
 def test_missing_path_does_not_add_current_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, existing_path: str | None) -> None:
     monkeypatch.chdir(tmp_path)
@@ -171,25 +282,61 @@ def test_missing_path_does_not_add_current_directory(tmp_path: Path, monkeypatch
 
 
 @pytest.mark.parametrize("caller_limit_kib", [None, 32768])
-def test_executor_keeps_scanner_stack_finite_and_respects_caller_limit(linux_boundary: dict[str, str], caller_limit_kib: int | None) -> None:
+@pytest.mark.parametrize("environment_spelling", ["default", "alias", "canonical-alias"])
+def test_executor_keeps_scanner_stack_finite_and_respects_caller_limit(
+    linux_boundary: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caller_limit_kib: int | None, environment_spelling: str
+) -> None:
     """Exercise the real pinned scanner's preexec policy inside the installer boundary."""
+    # Read the actual parent environment before the simulated installer replaces
+    # its prefix. Its fake uv deliberately does not provision a second scanner.
+    expected_environment = Path(os.environ.get("DOTFILES_SEMGREP_ENVIRONMENT", REPOSITORY / "tooling/semgrep/.venv"))
+    scanner_target = expected_environment
+    alias_target = None
+    if environment_spelling != "default":
+        alias = tmp_path / "scanner environment"
+        alias.symlink_to(expected_environment, target_is_directory=True)
+        alias_target = alias.readlink()
+        expected_environment = alias
+        monkeypatch.setenv("DOTFILES_SEMGREP_ENVIRONMENT", str(alias))
     setup = run_installer(linux_boundary)
     assert setup.returncode == 0, setup.stderr
+    executable_observation = "sys.executable"
+    if environment_spelling == "canonical-alias":
+        # Model macOS spelling on any POSIX host without resolving the venv's
+        # interpreter symlink out of the scanner environment itself.
+        executable_observation = "str(Path(sys.executable).parent.parent.resolve() / 'bin' / Path(sys.executable).name)"
     probe = (
-        "import json, resource; from semgrep.core_runner import setrlimits_preexec_fn; "
+        "import json, resource, sys; from pathlib import Path; from semgrep.core_runner import setrlimits_preexec_fn; "
         "before = resource.getrlimit(resource.RLIMIT_STACK); setrlimits_preexec_fn(); "
-        "print(json.dumps({'before': before, 'after': resource.getrlimit(resource.RLIMIT_STACK), 'infinity': resource.RLIM_INFINITY}))"
+        "print(json.dumps({'before': before, 'after': resource.getrlimit(resource.RLIMIT_STACK), "
+        f"'infinity': resource.RLIM_INFINITY, 'executable': {executable_observation}}}))"
     )
-    argv = ["/bin/bash", str(REPOSITORY / "bin/linux-review.sh"), "exec", sys.executable, "-c", probe]
+    scanner_python = Path(os.environ.get("DOTFILES_SEMGREP_ENVIRONMENT", REPOSITORY / "tooling/semgrep/.venv")) / "bin/python"
+    argv = ["/bin/bash", str(REPOSITORY / "bin/linux-review.sh"), "exec", str(scanner_python), "-c", probe]
     if caller_limit_kib is not None:
         argv = ["/bin/bash", "-c", 'ulimit -HS -s "$1"; shift; exec "$@"', "scanner-stack-boundary", str(caller_limit_kib), *argv]
     result = subprocess.run(argv, env=linux_boundary, capture_output=True, text=True, check=False, timeout=30)  # noqa: S603 - fixed isolated boundary probe.
     assert result.returncode == 0, result.stderr
     limits = json.loads(result.stdout)
+    assert Path(limits["executable"]).parent.parent.samefile(expected_environment)
+    if environment_spelling != "default":
+        assert expected_environment.is_symlink()
+        assert expected_environment.readlink() == alias_target
+        assert expected_environment.samefile(scanner_target)
     assert limits["before"][1] != limits["infinity"]
     assert 0 < limits["after"][0] <= limits["after"][1] <= 64 * 1024 * 1024
     if caller_limit_kib is not None:
         assert limits["before"][1] == limits["after"][1] == caller_limit_kib * 1024
+
+
+@pytest.mark.parametrize(("version", "supported"), [("2.28", False), ("2.33", False), ("2.34", True)])
+def test_installer_requires_the_locked_scanner_wheel_glibc(linux_boundary: dict[str, str], version: str, *, supported: bool) -> None:
+    linux_boundary["FAKE_LIBC"] = f"glibc {version}"
+    result = run_installer(linux_boundary)
+    assert (result.returncode == 0) is supported, result.stderr
+    if not supported:
+        assert "locked Semgrep wheel requires >= 2.34" in result.stderr
+        assert not Path(linux_boundary["DOWNLOAD_LOG"]).exists()
 
 
 def test_plugin_failure_is_retained_as_failed_setup(linux_boundary: dict[str, str]) -> None:
@@ -297,6 +444,64 @@ def test_inventory_excludes_environment_credentials(monkeypatch: pytest.MonkeyPa
     assert isinstance(source, dict)
     assert source["commit"] != "unavailable"
     assert source["content_digest"].startswith("sha256:")
+
+
+def test_inventory_identifies_the_independent_scanner_environment() -> None:
+    scanner = linux_review.inventory()["scanner"]
+    expected = Path(os.environ.get("DOTFILES_SEMGREP_ENVIRONMENT", REPOSITORY / "tooling/semgrep/.venv"))
+    assert Path(scanner["environment"]).samefile(expected)
+    assert scanner["python"]["executable"] is not None
+    assert Path(scanner["python"]["executable"]).parent.parent.samefile(expected)
+    assert scanner["python"]["identity"].startswith("Python 3.14.")
+    assert scanner["python"]["available"]
+    assert scanner["python"]["pin_matches"]
+    project = tomllib.loads((REPOSITORY / "tooling/semgrep/pyproject.toml").read_text())["project"]
+    expected_version = next(dependency.removeprefix("semgrep==") for dependency in project["dependencies"] if dependency.startswith("semgrep=="))
+    assert scanner["semgrep"]["identity"] == f"semgrep {expected_version}"
+    assert scanner["semgrep"]["available"]
+    assert scanner["semgrep"]["pin_matches"]
+    assert not Path(scanner["python"]["executable"]).parent.parent.samefile(Path(sys.executable).parent.parent)
+
+
+def test_scanner_inventory_marks_a_missing_environment_unavailable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DOTFILES_SEMGREP_ENVIRONMENT", str(tmp_path / "missing scanner"))
+    scanner = linux_review.inventory()["scanner"]
+    assert not scanner["python"]["available"]
+    assert not scanner["semgrep"]["available"]
+
+
+@pytest.mark.parametrize("observation", [None, [], "malformed", {"python_version": 314, "python_executable": None, "semgrep_version": 1182}])
+def test_scanner_inventory_rejects_malformed_probe_output(monkeypatch: pytest.MonkeyPatch, observation: object) -> None:
+    monkeypatch.setattr(linux_review, "command_output", lambda _argv: "not JSON" if observation == "malformed" else json.dumps(observation))
+    scanner = linux_review.scanner_inventory()
+    assert not scanner["python"]["available"]
+    assert not scanner["semgrep"]["available"]
+
+
+@pytest.mark.parametrize(("python_version", "semgrep_version", "missing"), [("3.13.9", "declared", "scanner Python"), ("3.14.9", "0.0.0", "Semgrep")])
+def test_direct_check_distinguishes_scanner_pin_mismatch_from_unavailability(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, python_version: str, semgrep_version: str, missing: str
+) -> None:
+    actual = linux_review.scanner_inventory()
+    observation = {
+        "python_executable": actual["python"]["executable"],
+        "python_version": python_version,
+        "semgrep_version": actual["semgrep"]["expected_version"] if semgrep_version == "declared" else semgrep_version,
+        "private_environment_field": "private-marker-must-not-be-recorded",
+    }
+    original = linux_review.command_output
+    scanner_python = str(Path(actual["environment"]) / "bin/python")
+    monkeypatch.setattr(linux_review, "command_output", lambda argv: json.dumps(observation) if argv[0] == scanner_python else original(argv))
+    monkeypatch.setenv("DOTFILES_REVIEW_ARTIFACTS", str(tmp_path / "artifacts"))
+    assert linux_review.main(["check"]) == 2
+    report_path = next((tmp_path / "artifacts").glob("check-*/environment.json"))
+    report = json.loads(report_path.read_text())
+    assert report["status"] == "unavailable"
+    assert missing in report["diagnostic"]
+    assert report["scanner"]["python"]["available"]
+    assert report["scanner"]["semgrep"]["available"]
+    assert not (report_path.parent / "launch.json").exists()
+    assert "private-marker" not in report_path.read_text()
 
 
 def test_empty_version_output_is_an_unavailable_tool(monkeypatch: pytest.MonkeyPatch) -> None:

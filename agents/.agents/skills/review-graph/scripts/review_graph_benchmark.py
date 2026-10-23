@@ -140,7 +140,7 @@ def benchmark_fixture(root: Path, *, scale: int = 1) -> dict[str, Any]:
         "source_state": state,
         "repository_root": str(root),
         "authorization": "review-only",
-        "state_verification_command": "synthetic fixture identity (no Git operations)",
+        "state_verification_command": "synthetic-fixture-identity",
         "concurrent_worker_limit": 4,
     }
 

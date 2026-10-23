@@ -1,11 +1,10 @@
 # Dependabot approval rollout
 
-Dotfiles calls the shared [v0.1.7 approval workflow](https://github.com/acgetchell/research-repo-tools/blob/0a02204d4a889dfc97f55286c008397ced05d6ad/.github/workflows/dependabot-approve.yml).
-The pinned commit contains shared-tools PR #54; its prerequisite pilot
+Dotfiles calls the shared [v0.1.8 approval workflow](https://github.com/acgetchell/research-repo-tools/blob/299c8decfc0c0b2091093ba6a99dd7db2d762dea/.github/workflows/dependabot-approve.yml).
+The initial rollout included shared-tools PR #54; its prerequisite pilot
 [PR #52](https://github.com/acgetchell/research-repo-tools/pull/52) merged on
 September 26, 2026. The Python tooling package's registry pin and this workflow's
 commit pin are updated independently.
-The approval workflow is unchanged between #54's merge and this release pin.
 
 ## Contract
 
@@ -23,14 +22,14 @@ belong to `.github/dependabot.yml`: patch, minor, major, grouped, and security
 updates are eligible. Python version-update PRs are temporarily paused with
 `open-pull-requests-limit: 0` while the hosted uv updater rejects Python 3.15.
 The Python security-update group remains configured, but shares that runtime
-limitation; the required OSV audit remains available. The published manual updater
-also loses project `override-dependencies` during isolated resolution and can
-downgrade Semgrep. `just update-python-dependencies` therefore skips that resolver
-while overrides are set and uses `uv lock --upgrade` for a project-aware transitive
-refresh. Update exact direct pins deliberately with
-`uv add --dev 'PACKAGE==VERSION'`. Review the manifest and lock diff, confirm
-Semgrep has not regressed, then run `just ci` and `just security`. Remove the
-preflight fallback after the shared updater preserves project overrides.
+limitation; the required OSV audit remains available. Manual Python updates use
+`just update-python-dependencies`, which selects Homebrew-managed uv and runs the
+published `deps update-python --all-projects` command. It updates root development
+pins, upgrades both locks, and synchronizes the root Python 3.15 and declared
+`tooling/semgrep` Python 3.14 environments separately. Semgrep's exact pin and
+scanner overrides belong to `tooling/semgrep/pyproject.toml`; the obsolete
+override-detection fallback has been removed. Review both manifests and locks,
+then run `just ci` and `just security`.
 Restore the uv limit to 10 after a hosted update resolves the committed 3.15
 lockfile successfully. GitHub Actions updates continue on Mondays with their
 seven-day cooldown and existing groups. CodeRabbit remains a separate required
