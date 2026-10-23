@@ -302,7 +302,11 @@ class InterleavedRepairTransition(ExternalMetadataTransition):
             if PurePosixPath(path).name == "AGENTS.md":
                 msg = "interleaved repair cannot reconcile changed repository instructions"
                 raise EvaluationBoundaryError(RejectionKind.UNSUPPORTED_TRANSITION, msg)
-            identities = [GitPathIdentity.parse(paths.get(path, "absent")) for paths in (before, after)]
+            raw_identities = tuple(paths.get(path, "absent") for paths in (before, after))
+            if any(not identity.startswith("git:") for identity in raw_identities):
+                msg = "interleaved repair requires native Git blob identities at both repair endpoints"
+                raise EvaluationBoundaryError(RejectionKind.UNSUPPORTED_TRANSITION, msg)
+            identities = [GitPathIdentity.parse(identity) for identity in raw_identities]
             if identities[0].mode not in {"100644", "100755"} or identities[0].mode != identities[1].mode:
                 msg = "interleaved repair cannot reconcile file type or mode changes"
                 raise EvaluationBoundaryError(RejectionKind.UNSUPPORTED_TRANSITION, msg)

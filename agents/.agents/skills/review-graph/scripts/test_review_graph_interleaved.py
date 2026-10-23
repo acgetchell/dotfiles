@@ -8,8 +8,11 @@ from typing import Any
 import pytest
 import review_graph_runtime as runtime
 from capture_scope import _scope_data
+from review_graph_results import EvaluationBoundaryError, RejectionKind
+from review_graph_reuse import metadata_transition, source_snapshot
+from review_graph_schema import SchemaValidationError, require_schema_definition
 from test_review_graph_repair_staging import _finish_repair, _staged_repair
-from test_review_graph_runtime import _run_test_git
+from test_review_graph_runtime import SCHEMA_ROOT, _run_test_git
 
 
 def _interleaved(tmp_path: Path, dependency: str = "source") -> tuple[str, Path, dict[str, Any], dict[str, Any], dict[Path, bytes]]:
@@ -138,3 +141,39 @@ def test_interleaved_repair_requires_complete_readable_history_before_publicatio
         runtime.advance_after_mutation(request)
     assert not Path(request["artifact_store"]).exists()
     assert all(path.read_bytes() == content for path, content in history.items())
+
+
+@pytest.mark.parametrize("endpoint", ["previous_capture", "new_capture"])
+@pytest.mark.parametrize("identity", ["absent", "submodule:" + "a" * 64, "git:sha1:160000:" + "b" * 40])
+def test_interleaved_repair_types_unsupported_endpoint_identities(tmp_path: Path, endpoint: str, identity: str) -> None:
+    _git, _repository, request, _audit, _history = _interleaved(tmp_path)
+    capture = request[endpoint]
+    capture["repository_path_fingerprints"]["state.rs"] = identity
+    capture["repository_state_fingerprint"] = source_snapshot(capture).computed_fingerprint()
+    with pytest.raises(EvaluationBoundaryError) as failure:
+        metadata_transition(
+            {
+                "before": request["previous_capture"],
+                "after": request["new_capture"],
+                "repair_epoch": request["repair_epoch"],
+                "repair_paths": request["changed_paths"],
+                **request["interleaved_staging"],
+            }
+        )
+    assert failure.value.kind is RejectionKind.UNSUPPORTED_TRANSITION
+
+
+@pytest.mark.parametrize("paths", [(), ("journal_path",), ("dispatches_path",), ("journal_path", "dispatches_path")])
+def test_mutation_schema_requires_paired_history_paths(paths: tuple[str, ...]) -> None:
+    request = json.loads((SCHEMA_ROOT.parent / "runtime-operation-examples-v1.json").read_bytes())["advance-after-mutation"]
+    for key in ("journal_path", "dispatches_path"):
+        request.pop(key, None)
+    request.update({key: f"history/{key}.json" for key in paths})
+    schema_path = SCHEMA_ROOT / "runtime-operation-inputs-v1.schema.json"
+    if len(paths) == 1:
+        missing = "dispatches_path" if paths[0] == "journal_path" else "journal_path"
+        with pytest.raises(SchemaValidationError) as failure:
+            require_schema_definition(request, schema_path, "advance-after-mutation")
+        assert [(item.path, item.code) for item in failure.value.diagnostics] == [(f"$.{missing}", "required")]
+    else:
+        require_schema_definition(request, schema_path, "advance-after-mutation")

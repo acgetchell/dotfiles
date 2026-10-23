@@ -783,6 +783,10 @@
     },
     "advance-after-mutation": {
       "additionalProperties": false,
+      "dependentRequired": {
+        "journal_path": ["dispatches_path"],
+        "dispatches_path": ["journal_path"]
+      },
       "properties": {
         "journal_path": {
           "type": "string",
