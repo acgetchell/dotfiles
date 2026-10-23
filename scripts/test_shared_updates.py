@@ -58,17 +58,13 @@ def test_shared_updater_reconciles_dotfiles_mapping(tmp_path: Path, monkeypatch:
 
 
 @pytest.mark.parametrize(
-    ("overrides", "failure"),
-    [(overrides, failure) for overrides in (False, True) for failure in (None, "check-uv", "python-preflight", "lock", "sync", "install-update")]
-    + [(False, "update-python")],
+    ("overrides", "failure"), [(overrides, failure) for overrides in (False, True) for failure in (None, "check-uv", "update-python", "install-update")]
 )
 def test_update_orders_managers_and_stops_after_failures(tmp_path: Path, *, overrides: bool, failure: str | None) -> None:
     checkout = tmp_path / "checkout"
     checkout.mkdir()
     shutil.copy2(REPOSITORY / "justfile", checkout)
     shutil.copy2(REPOSITORY / "pyproject.toml", checkout)
-    (checkout / "scripts").mkdir()
-    shutil.copy2(REPOSITORY / "scripts/python_update_preflight.py", checkout / "scripts")
     manifest = checkout / "pyproject.toml"
     uv_version = tomllib.loads(manifest.read_text())["tool"]["uv"]["required-version"].removeprefix("==")
     if not overrides:
@@ -94,10 +90,6 @@ elif name == "brew" and args == ["--prefix", "uv"]:
 else:
     with Path({str(log)!r}).open("a", encoding="utf-8") as stream:
         stream.write(json.dumps([name, *args]) + "\\n")
-    if name == "uv" and args == ["run", "--locked", "python", "scripts/python_update_preflight.py"]:
-        if {failure!r} == "python-preflight":
-            raise SystemExit(23)
-        raise SystemExit(subprocess.run([sys.executable, args[-1]], check=False).returncode)
     if {failure!r} is not None and {failure!r} in args:
         raise SystemExit(23)
     if name == "uv" and args[-2:] == ["deps", "update-uv"]:
@@ -113,18 +105,10 @@ else:
     result = subprocess.run([just, "update"], cwd=checkout, env=environment, check=False, capture_output=True, text=True, timeout=30)  # noqa: S603
     calls = [json.loads(line) for line in log.read_text().splitlines()]
     stages = [
-        "python-preflight"
-        if call == ["uv", "run", "--locked", "python", "scripts/python_update_preflight.py"]
-        else call[-1]
-        if "research-repo-tools" in call
-        else "brew"
-        if call[0] == "brew"
-        else call[1]
+        call[call.index("deps") + 1] if "deps" in call else call[-1] if "research-repo-tools" in call else "brew" if call[0] == "brew" else call[1]
         for call in calls
     ]
-    expected = ["check-uv", "brew", "update-uv", "check-uv", "python-preflight", "update-python", "lock", "sync", "install-update", "update-tools", "upgrade"]
-    if overrides:
-        expected.remove("update-python")
+    expected = ["check-uv", "brew", "update-uv", "check-uv", "update-python", "install-update", "update-tools", "upgrade"]
     if failure is not None:
         expected = expected[: expected.index(failure) + 1]
     assert (result.returncode == 0) == (failure is None), result.stderr
@@ -133,11 +117,11 @@ else:
     if "update-uv" in stages:
         expected_manifest = expected_manifest.replace(f'required-version = "=={uv_version}"', f'required-version = "=={upgraded_uv}"')
     assert manifest.read_text() == expected_manifest
-    if overrides:
-        assert "update-python" not in stages
-    if "lock" in stages:
-        assert ["uv", "lock", "--upgrade"] in calls
+    if "update-python" in stages:
+        call = next(call for call in calls if "update-python" in call)
+        assert call[-1] == "--all-projects"
+        assert "--only-group" in call
+        assert "tooling" in call
+        assert "--inexact" in call
     if "install-update" in stages:
         assert ["cargo", "install-update", "-a", "--locked"] in calls
-    if "sync" in stages:
-        assert ["uv", "sync", "--locked", "--group", "dev"] in calls

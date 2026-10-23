@@ -514,3 +514,38 @@ The index-only staging operation keeps its existing contract; use the immediatel
 preceding real capture and retain its chain when composing the two operations.
 Never synthesize a bridging capture, edit sealed artifacts, or undo a commit to
 make historical fingerprints appear current.
+
+## External source edits
+
+For a maintainer edit inside the existing captured scope, use
+`resume-after-external-source --input request.json --output result.json`.
+Start with the operation's schema/example. Supply the current plan, journal,
+dispatches, actual `previous_capture` and `new_capture`, a fresh external artifact
+store, `external_source_actor`, and `external_source_attribution` quoting or
+referencing the maintainer's confirmation. Do not infer authorship from Git or
+classify an agent repair as external. Wait for workers to become quiescent.
+
+The continuation preserves run control, repair count, repair budget and existing
+authorization, including when all agent repair batches have been used. It binds
+the actual changed path identities, checks the live source again before publication,
+and preserves original evidence files. Follow its returned lifecycle, dispatches,
+journal and capture. The existing serialized `external_metadata_transitions`
+chain also carries this explicitly typed source transition; the name is retained
+for saved-record compatibility.
+
+Only unchanged audit reads/dependencies and contracted validation inputs can be
+reused. README whitespace still invalidates its documentation owner and any
+content-sensitive check; semantic code changes invalidate their owning contracts.
+Unknown dependencies remain unproven. Independent review and synthesis recheck.
+The operation grants no additional agent repairs. Changed Git state, selection,
+new paths, or applicable instructions need separate reconciliation/replanning and
+are rejected by this bounded continuation.
+
+For routine delivery when reconciliation is unavailable, stop formal bookkeeping
+and report the completed work, exact capture/commit of each accepted result,
+external changes since that capture, and remaining affected or unverified checks.
+Use `report-delivery` when its current-capture requirements hold; otherwise give
+that partial report directly. Do not claim a complete final proof, manufacture
+matching captures, restart comprehensive review, or request another repair batch
+solely to describe work already done. A new agent repair still requires available
+budget and the existing repair authorization procedure.

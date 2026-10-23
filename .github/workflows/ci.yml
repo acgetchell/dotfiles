@@ -92,7 +92,7 @@ jobs:
           prune-cache: true
 
       - name: Sync Python tooling
-        run: uv sync --locked --group dev
+        run: just python-sync
 
       - name: Install Stow for integration tests
         run: brew install stow
@@ -234,4 +234,4 @@ jobs:
         env:
           SEMGREP_SEND_METRICS: "off"
           OTEL_SDK_DISABLED: "true"
-        run: uv run --locked --group dev semgrep --disable-version-check --metrics off --version
+        run: uv run --locked --project tooling/semgrep semgrep --disable-version-check --metrics off --version

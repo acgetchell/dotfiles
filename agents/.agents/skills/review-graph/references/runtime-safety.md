@@ -265,3 +265,26 @@ For unstarted adaptive nodes, `fallback-to-coordinator` takes lifecycle input pl
 `node_id`, `worker_created: false`, `reason`, `artifact_store`, and flags
 `--dispatches`, `--journal`, `--current-capture`. Follow returned paths; other
 dispatches/artifacts remain unchanged. Never rematerialize for one executor.
+
+## Capture output correction
+
+Recognized frozen `capture_scope.py` commands are normalized to one node-bound
+`--output` path per phase, replacing an older output option. Both audits and
+validators save full captures and compact receipts; workspace snapshots read
+the capture file, never receipt stdout. Custom commands must emit full capture
+JSON on stdout and may not contain `--output` or shell operators. An incompatible
+command fails materialization before publication or worker launch. Correct
+`state_verification_command` in the continuation request and retry materialization
+at the same destination; keep the plan, journal and completed checks intact.
+
+## Coverage correction preflight
+
+Coverage schema and independently checkable partition defects are reported
+together, including missing `dependency_uncertainty` and incomplete dependencies.
+Copy every inspected nearby path using its recorded spelling into the owning
+unit's `dependency_paths`, including absolute repository instructions and frozen
+skill/reference paths. A relative alias does not satisfy an absolute declaration.
+Unknown external paths remain unproven for reuse. Use the existing read-only
+`review-worker-payload-write` command once on the corrected bytes before the sole
+corrected publication; it does not consume a publication attempt or require
+reinspection. Preserve the same bounded publication policy.

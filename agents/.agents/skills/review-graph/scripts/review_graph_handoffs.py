@@ -7,11 +7,37 @@ from typing import Any
 from review_graph_session import runtime_command
 
 
-def audit_observations(dispatch: dict[str, Any], contract: Path) -> dict[str, Any]:
-    """Give framework captures immutable destinations without shell redirection."""
+def _capture_words(dispatch: dict[str, Any]) -> list[str] | None:
+    """Rebind only the frozen capture interface; reject ambiguous shell outputs."""
     prefix = runtime_command(Path(__file__).with_name("capture_scope.py"))
     words = shlex.split(dispatch["state_verification_command"])
     if words[: len(prefix)] != prefix:
+        if any(word == "--output" or word.startswith("--output=") or any(symbol in word for symbol in "<>|;&") for word in words):
+            msg = (
+                "custom capture command must emit full capture JSON on stdout without --output or shell operators; "
+                "correct state_verification_command before materialization"
+            )
+            raise ValueError(msg)
+        return None
+    result = list(prefix)
+    arguments = iter(words[len(prefix) :])
+    for word in arguments:
+        if word == "--output":
+            if next(arguments, None) is None:
+                msg = "capture --output requires a path; correct state_verification_command before materialization"
+                raise ValueError(msg)
+        elif not word.startswith("--output="):
+            if any(symbol in word for symbol in "<>|;&"):
+                msg = "framework capture must be a literal command without shell operators"
+                raise ValueError(msg)
+            result.append(word)
+    return result
+
+
+def audit_observations(dispatch: dict[str, Any], contract: Path) -> dict[str, Any]:
+    """Give framework captures immutable destinations without shell redirection."""
+    words = _capture_words(dispatch)
+    if words is None:
         return {}
     return {
         phase: {
@@ -26,6 +52,7 @@ def audit_observations(dispatch: dict[str, Any], contract: Path) -> dict[str, An
 
 def validation_observations(dispatch: dict[str, Any], contract: Path) -> dict[str, Any]:
     """Allocate fresh captures and workspace snapshots in this dispatch generation."""
+    durable = audit_observations(dispatch, contract)
     result = {}
     for phase in ("before", "after"):
         capture = contract.parent / f"{dispatch['node_id']}.{phase}.capture.json"
@@ -33,6 +60,7 @@ def validation_observations(dispatch: dict[str, Any], contract: Path) -> dict[st
         result[phase] = {
             "capture_path": str(capture),
             "capture_command": dispatch["state_verification_command"] + " > " + shlex.quote(str(capture)),
+            **durable.get(phase, {}),
             "workspace_path": str(workspace),
             "workspace_command": runtime_command(
                 Path(__file__).with_name("review_graph_runtime.py"),

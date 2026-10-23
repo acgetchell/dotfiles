@@ -87,6 +87,8 @@ def linux_boundary(tmp_path: Path) -> dict[str, str]:
         "uv-x86_64-unknown-linux-gnu/uv",
         f'if [[ "$1" == --version ]]; then echo uv {pins["uv"]}; else\n'
         'printf "%s\\n" "$*" >> "$CALL_LOG"\n'
+        'if [[ "$1" == sync && "$*" == *"--project tooling/semgrep"* ]]; then\n'
+        '[[ "$UV_PROJECT_ENVIRONMENT" == "$DOTFILES_REVIEW_PREFIX/semgrep-venv" ]] || exit 29\nfi\n'
         'if [[ "$1" == run ]]; then\nshift\nwhile [[ "$1" == --* ]]; do shift; done\n'
         'export PATH="$UV_PROJECT_ENVIRONMENT/bin:$PATH"\n'
         '[[ "$1" == python && "$2" == scripts/linux_review.py ]]\nshift\n'
@@ -132,6 +134,7 @@ def test_fresh_setup_and_rerun_use_pins_custom_storage_and_no_shell_changes(linu
     assert {path.name for path in (Path(linux_boundary["DOTFILES_REVIEW_PREFIX"]) / "bin").iterdir()} == {"uv", "just", "dprint", "rumdl"}
     calls = Path(linux_boundary["CALL_LOG"]).read_text()
     assert calls.count("sync --locked --group dev") == 2
+    assert calls.count("sync --locked --project tooling/semgrep") == 2
     assert "run --locked --no-sync python scripts/linux_review.py setup" in calls
     assert "yaml-fmt-check" in calls
     reports = list(Path(linux_boundary["DOTFILES_REVIEW_ARTIFACTS"]).glob("setup-*/environment.json"))
@@ -180,7 +183,8 @@ def test_executor_keeps_scanner_stack_finite_and_respects_caller_limit(linux_bou
         "before = resource.getrlimit(resource.RLIMIT_STACK); setrlimits_preexec_fn(); "
         "print(json.dumps({'before': before, 'after': resource.getrlimit(resource.RLIMIT_STACK), 'infinity': resource.RLIM_INFINITY}))"
     )
-    argv = ["/bin/bash", str(REPOSITORY / "bin/linux-review.sh"), "exec", sys.executable, "-c", probe]
+    scanner_python = REPOSITORY / "tooling/semgrep/.venv/bin/python"
+    argv = ["/bin/bash", str(REPOSITORY / "bin/linux-review.sh"), "exec", str(scanner_python), "-c", probe]
     if caller_limit_kib is not None:
         argv = ["/bin/bash", "-c", 'ulimit -HS -s "$1"; shift; exec "$@"', "scanner-stack-boundary", str(caller_limit_kib), *argv]
     result = subprocess.run(argv, env=linux_boundary, capture_output=True, text=True, check=False, timeout=30)  # noqa: S603 - fixed isolated boundary probe.

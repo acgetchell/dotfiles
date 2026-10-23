@@ -9,13 +9,8 @@ authors = [{ name = "Adam Getchell", email = "adam@adamgetchell.org" }]
 
 [tool.uv]
 package = false
-required-version = "==0.13.4"
-# Semgrep 1.180.0 pins pywin32 311, which has no cp315 wheels. Keep native
-# Windows resolution with 312 until Semgrep advances its Windows dependency.
+required-version = "==0.13.5"
 override-dependencies = [
-  "pywin32==312; sys_platform == 'win32'",
-  # Semgrep pins vulnerable MCP 1.29.0; retain the patched 1.x API until upstream updates.
-  "mcp>=1.30.0,<2",
   # research-repo-tools pins 1.58.0; keep uv-run tools aligned with justfile.
   "rust-just==1.59.0",
 ]
@@ -36,6 +31,10 @@ cargo_update_version = "cargo-update"
 dprint_version = "dprint"
 just_version = "just"
 rumdl_version = "rumdl"
+
+[tool.research-repo-tools.deps]
+# Notebook skill assets are consumer templates, not independent uv projects.
+python-projects = ["tooling/semgrep"]
 
 [tool.research-repo-tools.semgrep]
 config = "semgrep.yaml"
@@ -234,14 +233,13 @@ dev = [
   "nbformat==5.11.1",
   "PyYAML>=6.0",
   "pytest==9.1.1",
-  "ruff==0.17.0",
-  "semgrep==1.180.0",
-  "ty==0.0.87",
+  "ruff==0.17.2",
+  "ty==0.0.91",
   "yamllint==1.38.0",
-  "zizmor==1.30.1",
+  "zizmor==1.31.1",
 ]
 tooling = [
-    "research-repo-tools==0.1.9",
+    "research-repo-tools==0.2.3",
 ]
 
 [tool.uv.dependency-groups]

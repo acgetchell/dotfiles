@@ -41,6 +41,7 @@ from review_graph_coverage import (
     combined_findings,
     coverage_decision_report,
     coverage_decisions,
+    coverage_diagnostics,
     coverage_execution_view,
     reused_paths,
     validate_coverage_units,
@@ -149,6 +150,7 @@ from review_graph_reuse import (
     AuditReuseTransition,
     CommitHandoffTransition,
     ExternalMetadataTransition,
+    ExternalSourceTransition,
     ReuseInputError,
     metadata_states,
     metadata_transition,
@@ -156,8 +158,9 @@ from review_graph_reuse import (
     verify_reuse_inputs,
 )
 from review_graph_scheduling import select_execution_lanes
-from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
+from review_graph_schema import SchemaDiagnostic, SchemaValidationError, require_schema, require_schema_definition
 from review_graph_session import current_execution_context, runtime_command, verify_current_snapshot
+from review_graph_source_change import verify_live_source
 from review_graph_synthesis import synthesis_fields, validate_synthesis
 from review_graph_timing import timing_blocker, timing_documents, timing_prerequisite
 from review_graph_usage import digest as usage_digest, measure_call
@@ -997,8 +1000,15 @@ def _validate_review_coverage_partitions(dispatch: dict[str, Any], payload: dict
     if dispatch.get("mode") != "audit" or dispatch.get("coverage_reuse") is not None:
         msg = "coverage partitions apply only to complete fresh audits"
         raise ValueError(msg)
-    require_schema(payload, _REVIEW_PAYLOAD_SCHEMA)
-    validate_coverage_units(payload, _text_list(dispatch, "owned_paths"))
+    owned = _text_list(dispatch, "owned_paths")
+    try:
+        require_schema(payload, _REVIEW_PAYLOAD_SCHEMA)
+    except SchemaValidationError as error:
+        diagnostics = tuple(
+            SchemaDiagnostic("$.coverage_units", "coverage", message, "complete coverage partition") for message in coverage_diagnostics(payload, owned)
+        )
+        raise SchemaValidationError(error.schema_id, (*error.diagnostics, *diagnostics)) from error
+    validate_coverage_units(payload, owned)
 
 
 def _validate_audit_caveats(dispatch: dict[str, Any], payload: dict[str, Any]) -> None:
@@ -4004,6 +4014,8 @@ def _validate_worker_payload_bytes(contract_document: dict[str, Any], payload_by
             if contract == "compact-independent-review"
             else (_review_payload_schema(contract_document) if contract == "compact-review" else _VALIDATION_PAYLOAD_SCHEMA)
         )
+        if contract == "compact-review":
+            _validate_review_coverage_partitions(contract_document, payload)
         require_schema(payload, schema)
         bound = _publication_dispatch(contract_document)
         if bound is not None and (violations := isolation_violations(bound, payload)):
@@ -4013,7 +4025,6 @@ def _validate_worker_payload_bytes(contract_document: dict[str, Any], payload_by
                 msg = "structured independent publication requires its bound compiler preflight"
                 raise ValueError(msg)
         elif contract == "compact-review":
-            _validate_review_coverage_partitions(contract_document, payload)
             _validate_audit_caveats(contract_document, payload)
             blockers = _review_scope_coverage_blockers(contract_document, payload, status=_required_text(payload, "status"))
             if blockers:
@@ -5315,6 +5326,28 @@ def _metadata_evidence_blockers(document: dict[str, Any], records: Sequence[Evid
     return blockers
 
 
+def _external_source_node_reasons(
+    mode: str, predecessors: tuple[str, ...], record: dict[str, Any], transition: ExternalSourceTransition
+) -> list[dict[str, str]]:
+    """Require complete dependency proof before retaining a source judgment."""
+    if (
+        mode != "audit"
+        or predecessors
+        or any(record.get(key) for key in ("limitations", "scope_limitations", "unresolved_uncertainties"))
+        or any(unit.get("dependency_uncertainty") for unit in record.get("coverage_units", []))
+    ):
+        return [{"reason_code": "external-source-review", "reason": "Dependent review or incomplete dependency evidence requires a current judgment."}]
+    return metadata_audit_blockers(
+        {
+            **record,
+            "nearby_contract_owners": sorted(
+                {*record.get("nearby_contract_owners", []), *(path for unit in record.get("coverage_units", []) for path in unit["dependency_paths"])}
+            ),
+        },
+        transition,
+    )
+
+
 def _metadata_node_reasons(mode: str, predecessors: tuple[str, ...], record: EvidenceRecord, transition: ExternalMetadataTransition) -> list[dict[str, str]]:  # noqa: PLR0911 - separate variant-specific applicability gates.
     """Keep fresh review, execution, and synthesis policies separate from audit dependencies."""
     if isinstance(record, VerifiedValidationRecord):
@@ -5324,6 +5357,8 @@ def _metadata_node_reasons(mode: str, predecessors: tuple[str, ...], record: Evi
         return reasons
     if mode == "validation":
         return [{"reason_code": "validation-unverified", "reason": "Validation applicability requires a verified version 3 record from the evidence loader."}]
+    if isinstance(transition, ExternalSourceTransition):
+        return _external_source_node_reasons(mode, predecessors, record, transition)
     if isinstance(transition, CommitHandoffTransition):
         return commit_node_reasons(mode, record, transition)
     if mode in {"audit", "independent-review"} and (
@@ -5523,6 +5558,27 @@ def resume_after_external_metadata(document: dict[str, Any]) -> dict[str, Any]:
     return _resume_metadata(document, transition)
 
 
+def resume_after_external_source(document: dict[str, Any]) -> dict[str, Any]:
+    """Reconcile attributed external edits without granting or spending agent repairs."""
+    require_schema_definition(document, _RUNTIME_OPERATION_INPUT_SCHEMA, "resume-after-external-source")
+    _require_running_review(document)
+    transition = metadata_transition(
+        {
+            "before": document["previous_capture"],
+            "after": document["new_capture"],
+            "external_source_actor": document["external_source_actor"],
+            "external_source_attribution": document["external_source_attribution"],
+        }
+    )
+    verify_live_source(document["new_capture"])
+    plan = _graph_plan(document["plan"])
+    _events, statuses, _head = read_execution_journal(Path(document["journal_path"]), plan=plan, source_state=_state(document, "source_state"))
+    if "in-flight" in statuses.values():
+        msg = "external source reconciliation requires quiescent workers"
+        raise ValueError(msg)
+    return _resume_metadata(document, transition)
+
+
 def resume_after_authorized_commit(document: dict[str, Any]) -> dict[str, Any]:
     """Observe an explicitly authorized commit; this operation never mutates Git."""
     _require_running_review(document)
@@ -5689,6 +5745,27 @@ def _archive_metadata_validation_logs(
     return archives
 
 
+def _transition_kind(transition: ExternalMetadataTransition) -> str:
+    if isinstance(transition, ExternalSourceTransition):
+        return "external-source-change"
+    return "authorized-commit-handoff" if isinstance(transition, CommitHandoffTransition) else "observed-external-git-metadata"
+
+
+def _verify_continuation_instructions(plan: GraphPlan, entries: dict[str, dict[str, Any]], transition: ExternalMetadataTransition) -> None:
+    """Reject changed instruction contracts before any continuation is published."""
+    for node in plan.actual_worker_nodes:
+        dispatch = entries[node.node_id]["dispatch"]
+        current_instructions = _applicable_instruction_paths(Path(transition.after.repository_root), node.coverage, node.instruction_paths)
+        expected_instructions = _string_pairs(dispatch, "instruction_digests")
+        if (
+            tuple((path, _file_identity_digest(path)) for path in current_instructions) != expected_instructions
+            or _file_identity_digest(node.skill_path) != node.skill_digest
+            or any(_file_identity_digest(path) != digest for path, digest in node.reference_digests)
+        ):
+            msg = "external metadata resume requires unchanged applicable instructions, skills, and references"
+            raise ValueError(msg)
+
+
 def _resume_metadata(document: dict[str, Any], transition: ExternalMetadataTransition) -> dict[str, Any]:
     """Share publication machinery while retaining distinct transition contracts."""
     if transition.before.source_state != _current_metadata_state(document):
@@ -5702,17 +5779,7 @@ def _resume_metadata(document: dict[str, Any], transition: ExternalMetadataTrans
     by_node = {_record_document(record)["node_id"]: record for record in records}
     for context in plan.audit_delta_reviews:
         _verify_delta_context(context, entries[context["node_id"]]["dispatch"])
-    for node in plan.actual_worker_nodes:
-        dispatch = entries[node.node_id]["dispatch"]
-        current_instructions = _applicable_instruction_paths(Path(transition.after.repository_root), node.coverage, node.instruction_paths)
-        expected_instructions = _string_pairs(dispatch, "instruction_digests")
-        if (
-            tuple((path, _file_identity_digest(path)) for path in current_instructions) != expected_instructions
-            or _file_identity_digest(node.skill_path) != node.skill_digest
-            or any(_file_identity_digest(path) != digest for path, digest in node.reference_digests)
-        ):
-            msg = "external metadata resume requires unchanged applicable instructions, skills, and references"
-            raise ValueError(msg)
+    _verify_continuation_instructions(plan, entries, transition)
     if isinstance(transition, CommitHandoffTransition):
         plan, transition = _prepare_commit_handoff(document, plan, transition, lifecycle, sources=sources, records=by_node, entries=entries)
     decisions = _metadata_resume_decisions(plan, lifecycle, by_node, transition)
@@ -5721,6 +5788,8 @@ def _resume_metadata(document: dict[str, Any], transition: ExternalMetadataTrans
     plan = replace(plan, audit_delta_reviews=tuple(context for context in plan.audit_delta_reviews if context["node_id"] not in discarded_coverage))
     plan, restarted = _restart_reused_metadata_audits(plan, records, transition, Path(document.get("routing_catalog_path", DEFAULT_ROUTING_CATALOG)))
     decisions.extend(restarted)
+    if isinstance(transition, ExternalSourceTransition):
+        plan = replace(plan, captured_path_line_bounds=tuple(sorted(document["new_capture"]["captured_path_line_bounds"].items())))
     transitions = [*_records(document, "external_metadata_transitions"), asdict(transition)]
     continuation = json.loads(canonical_json({"plan": asdict(plan), "source_state": list(state), "external_metadata_transitions": transitions}))
     root = Path(document["artifact_store"]).resolve()
@@ -5728,6 +5797,8 @@ def _resume_metadata(document: dict[str, Any], transition: ExternalMetadataTrans
     if first_entry is None:
         msg = "external metadata resume requires a materialized review graph"
         raise ValueError(msg)
+    if isinstance(transition, ExternalSourceTransition):
+        verify_live_source(document["new_capture"])
     materialized = materialize_dispatches(
         {
             "plan": continuation["plan"],
@@ -5759,7 +5830,7 @@ def _resume_metadata(document: dict[str, Any], transition: ExternalMetadataTrans
             append_journal_event(paths["journal_path"], continuation, request)
     return {
         "status": "resumed",
-        "transition_kind": "authorized-commit-handoff" if isinstance(transition, CommitHandoffTransition) else "observed-external-git-metadata",
+        "transition_kind": _transition_kind(transition),
         "lifecycle_input": continuation,
         "dispatch_set": materialized,
         "original_source_state": list(state),
@@ -8666,6 +8737,9 @@ def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     mutation_parser = _runtime_subparser(subparsers, "advance-after-mutation", "recapture and replan one serialized repair epoch")
     mutation_parser.add_argument("--input", type=Path, required=True)
     mutation_parser.add_argument("--output", type=Path, required=True)
+    external_source_parser = _runtime_subparser(subparsers, "resume-after-external-source", "reconcile attributed source edits without spending agent repairs")
+    external_source_parser.add_argument("--input", type=Path, required=True)
+    external_source_parser.add_argument("--output", type=Path, required=True)
     handoff_parser = _runtime_subparser(subparsers, "reconcile-handoffs", "resolve covered handoffs and return new routing triggers")
     handoff_parser.add_argument("--input", type=Path, required=True)
     handoff_parser.add_argument("--output", type=Path, required=True)
@@ -9158,6 +9232,8 @@ def _json_operation_output(document: dict[str, Any], args: argparse.Namespace) -
         return advance_after_mutation(document)
     if args.operation == "resume-after-external-metadata":
         return resume_after_external_metadata(document)
+    if args.operation == "resume-after-external-source":
+        return resume_after_external_source(document)
     if args.operation == "resume-after-authorized-commit":
         return resume_after_authorized_commit(document)
     if args.operation == "reconcile-handoffs":

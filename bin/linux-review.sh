@@ -38,6 +38,7 @@ mkdir -p "$JUST_TEMPDIR"
 export PATH="$DOTFILES_REVIEW_PREFIX/bin:$PATH"
 export UV_CACHE_DIR="$DOTFILES_REVIEW_CACHE/uv"
 export UV_PROJECT_ENVIRONMENT="$DOTFILES_REVIEW_PREFIX/venv"
+export DOTFILES_SEMGREP_ENVIRONMENT="$DOTFILES_REVIEW_PREFIX/semgrep-venv"
 export UV_PYTHON_INSTALL_DIR="$DOTFILES_REVIEW_PREFIX/python"
 export TMPDIR="$DOTFILES_REVIEW_TMP"
 export XDG_CACHE_HOME="$DOTFILES_REVIEW_CACHE"
@@ -128,6 +129,7 @@ install_release rumdl "$version" "https://github.com/rvben/rumdl/releases/downlo
 
 if [[ "$mode" == setup ]]; then
   uv sync --locked --group dev
+  UV_PROJECT_ENVIRONMENT="$DOTFILES_SEMGREP_ENVIRONMENT" uv sync --locked --project tooling/semgrep
   # The setup report includes the pinned plugin check for disconnected validation.
   uv run --locked --no-sync python scripts/linux_review.py setup
   echo "linux-review: setup complete. Run bin/linux-review.sh check in the same site/module environment."
@@ -136,6 +138,8 @@ fi
 export UV_OFFLINE=1 UV_NO_SYNC=1 UV_PYTHON_DOWNLOADS=never
 uv sync --locked --group dev --offline --no-python-downloads --check \
   || fail "Locked Python environment is unavailable or out of date. Rerun setup on a connected provisioning host."
+UV_PROJECT_ENVIRONMENT="$DOTFILES_SEMGREP_ENVIRONMENT" uv sync --locked --project tooling/semgrep --offline --no-python-downloads --check \
+  || fail "Locked Semgrep environment is unavailable or out of date. Rerun setup on a connected provisioning host."
 case "$mode" in
   exec) [[ $# -gt 0 ]] || fail "exec requires a command."; exec "$@" ;;
   *) exec uv run --locked --no-sync --no-python-downloads python scripts/linux_review.py "$mode" "$@" ;;

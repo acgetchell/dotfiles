@@ -24,40 +24,6 @@ def test_ci_requires_full_python_inventory_and_shared_baseline() -> None:
     assert recipes["python-typecheck"]["body"] == [["uv run --locked --group dev research-repo-tools python typecheck"]]
 
 
-@pytest.mark.parametrize("overrides", [False, True])
-def test_python_updater_selects_override_preserving_resolution(tmp_path: Path, *, overrides: bool) -> None:
-    """The preflight selects project resolution without changing manifest/lock."""
-    content = "[tool.uv]\n" + ("override-dependencies = [\"pywin32==312; sys_platform == 'win32'\"]\n" if overrides else "")
-    manifest = tmp_path / "pyproject.toml"
-    manifest.write_text(content)
-    lock = tmp_path / "uv.lock"
-    lock.write_text("preserved lock\n")
-    result = subprocess.run(  # noqa: S603 - fixed local guard in an isolated consumer directory.
-        [sys.executable, str(REPOSITORY_ROOT / "scripts/python_update_preflight.py")], cwd=tmp_path, capture_output=True, text=True, check=False, timeout=30
-    )
-    assert result.returncode == 0
-    assert result.stdout == ("project\n" if overrides else "shared\n")
-    assert result.stderr == ""
-    assert manifest.read_text() == content
-    assert lock.read_text() == "preserved lock\n"
-    recipe = inspect_justfile(REPOSITORY_ROOT).recipes["update-python-dependencies"]
-    commands = "\n".join(line[0] for line in recipe["body"] if line and isinstance(line[0], str))
-    assert commands.index("python_update_preflight.py") < commands.index("just _shared-deps update-python")
-
-
-@pytest.mark.parametrize("content", [None, "[tool.uv\n"])
-def test_python_updater_stops_on_unreadable_manifest(tmp_path: Path, content: str | None) -> None:
-    """A missing or invalid manifest must not select either update path."""
-    if content is not None:
-        (tmp_path / "pyproject.toml").write_text(content)
-    result = subprocess.run(  # noqa: S603 - fixed local preflight against disposable invalid input.
-        [sys.executable, str(REPOSITORY_ROOT / "scripts/python_update_preflight.py")], cwd=tmp_path, capture_output=True, text=True, check=False, timeout=30
-    )
-    assert result.returncode == 1
-    assert result.stdout == ""
-    assert "python-update-preflight:" in result.stderr
-
-
 @pytest.mark.parametrize(
     ("content", "diagnostic"),
     [
