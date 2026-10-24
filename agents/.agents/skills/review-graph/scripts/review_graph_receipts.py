@@ -52,6 +52,56 @@ def _continuation_receipt(output: dict[str, Any]) -> dict[str, Any]:
     return receipt
 
 
+def launch_manifest(output: dict[str, Any]) -> dict[str, Any]:
+    """Project launch identities and continuations without nested dispatch contracts."""
+    requirements = {item["node_id"]: item for item in output.get("worker_requirements", [])}
+    return {
+        "schema_version": 1,
+        "nodes": [_launch_node(entry, requirements) for entry in output.get("ready_dispatches", output.get("dispatches", []))],
+        **_continuation_receipt(output),
+    }
+
+
+def _launch_node(entry: dict[str, Any], requirements: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Read canonical identity lazily for legacy flattened compact ready entries."""
+    dispatch = entry.get("dispatch")
+    if dispatch is None:
+        dispatch = json.loads(Path(entry["worker_input_path"]).read_bytes())["dispatch"]
+    return {
+        "node_id": entry["node_id"],
+        "skill_id": dispatch["skill_id"],
+        "skill_path": dispatch["skill_path"],
+        "execution_location": dispatch["execution_location"],
+        "execution_view": artifact_reference(Path(entry.get("worker_execution_path", entry["worker_input_path"]))),
+        **({"worker_requirement": requirements[entry["node_id"]]} if entry["node_id"] in requirements else {}),
+    }
+
+
+def _launch_receipt(output: dict[str, Any]) -> dict[str, Any]:
+    return {"launch_manifest": launch_manifest(output)} if "ready_dispatches" in output or "dispatches" in output else {}
+
+
+def _coverage_receipt(output: dict[str, Any]) -> dict[str, Any]:
+    if "coverage_reuse_decisions" not in output:
+        return {}
+    return {
+        "coverage_continuation": [
+            {
+                "node_id": item["node_id"],
+                "inherited_units": sum(unit["disposition"] == "reused" for unit in item["units"]),
+                "instruction_review_units": sum(unit["disposition"] == "instruction-review" for unit in item["units"]),
+                "recheck_units": sum(unit["disposition"] == "recheck" for unit in item["units"]),
+                "next_action": (
+                    "Read this node's execution view. Use only its bound coverage_reuse; preserve inherited findings, validation and handoffs. "
+                    "If coverage_reuse is absent, inspect all owned paths. Whole-audit and uncertain dependencies cannot be silently partitioned after review."
+                ),
+                **({"reason": item["reason"]} if "reason" in item else {}),
+            }
+            for item in output["coverage_reuse_decisions"]
+        ]
+    }
+
+
 def _validation_reconciliation_receipt(output: dict[str, Any]) -> dict[str, Any]:
     """Expose source rebinding without copying full execution and capture documents."""
     if reconciliation := output.get("validation_reconciliation"):
@@ -122,6 +172,8 @@ def stage_receipt(operation: str, output_path: Path, output: dict[str, Any]) -> 
         "outstanding_hosted_ci",
         "remaining_findings",
         "incomplete_node_ids",
+        "verification_followup",
+        "permitted_paths",
     ):
         if key in output:
             receipt[key] = output[key]
@@ -135,6 +187,8 @@ def stage_receipt(operation: str, output_path: Path, output: dict[str, Any]) -> 
         if key in output:
             receipt[key] = [dispatch_summary(entry) for entry in output[key]]
             receipt["node_count"] = len(output[key])
+    receipt.update(_launch_receipt(output))
+    receipt.update(_coverage_receipt(output))
     for key in ("artifact_path", "metadata_path", "worker_payload_path"):
         if key in output:
             receipt[key.removesuffix("_path")] = artifact_reference(Path(output[key]))

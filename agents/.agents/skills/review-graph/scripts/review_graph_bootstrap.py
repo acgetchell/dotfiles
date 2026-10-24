@@ -127,7 +127,7 @@ def _parser() -> argparse.ArgumentParser:
             "Every graph needs a repository validation requirement with baseline: true. "
             "This marks the repository check, not baseline review scope: a branch just ci unit uses "
             "baseline: true with requested_scope: branch. "
-            "For the branch just-ci preset, use --starter-config instead of --input. "
+            "For branch or baseline-release just-ci presets, use --starter-config instead of --input. "
             "Its artifact isolation root contains external cache/log output; requires_isolation=false "
             "keeps execution in the captured checkout. Starter mode runs read-only preflight before returning a dispatch command. "
             f"Starter choices: {STARTER_SCHEMA}; example: {STARTER_EXAMPLE}. "
@@ -137,7 +137,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--capture", type=Path, required=True, help="capture_scope.py JSON manifest")
     inputs = parser.add_mutually_exclusive_group(required=True)
     inputs.add_argument("--input", type=Path, help="compact routing and validation template")
-    inputs.add_argument("--starter-config", type=Path, help="explicit operator choices for the branch just-ci preset")
+    inputs.add_argument("--starter-config", type=Path, help="explicit operator choices; preset is branch (default) or baseline-release")
     parser.add_argument("--resume-from", type=Path, help="saved starter bundle; rerun only preflight with updated operator choices")
     parser.add_argument("--output", type=Path, required=True, help="immutable normalized planning document")
     parser.add_argument("--catalog", type=Path, default=DEFAULT_ROUTING_CATALOG)

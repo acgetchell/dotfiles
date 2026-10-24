@@ -1,7 +1,7 @@
 {
   "$id": "https://openai.com/codex/review-graph/bootstrap-starter-v1.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Branch just-ci Bootstrap Operator Choices v1",
+  "title": "Just-ci Bootstrap Operator Choices v1",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -11,6 +11,7 @@
     "execution_prerequisites"
   ],
   "properties": {
+    "preset": {"enum": ["branch", "baseline-release"], "default": "branch"},
     "schema_version": {"const": 1, "type": "integer"},
     "authorization": {"enum": ["review-only", "review-and-fix"]},
     "consulted_routers": {"$ref": "#/$defs/stringArray"},
@@ -23,6 +24,18 @@
     "elapsed_time_budget": {"type": "string", "minLength": 1},
     "artifact_root": {"type": "string", "minLength": 1},
     "ignored_outputs": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["path", "kind"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "kind": {"enum": ["build", "cache", "coverage", "log", "report", "test-result", "other"]}
+        }
+      }
+    },
+    "external_artifacts": {
+      "description": "Absolute output paths inside artifact_root, separate from repository-relative ignored_outputs. Declarations do not configure command outputs.",
       "type": "array",
       "items": {
         "type": "object", "additionalProperties": false,

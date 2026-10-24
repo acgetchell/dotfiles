@@ -83,6 +83,69 @@ def _audits(dispatches: dict[str, Any]) -> list[dict[str, Any]]:
     return [entry for entry in dispatches["dispatches"] if entry["dispatch"].get("mode") == "audit"]
 
 
+@pytest.mark.parametrize("active", [0, 3])
+def test_explicit_model_requirement_survives_scheduling_and_never_uses_coordinator(tmp_path: Path, capsys: pytest.CaptureFixture[str], active: int) -> None:
+    lifecycle, dispatches, paths = _fixture(tmp_path)
+    audit = _audits(dispatches)[0]
+    requirements = [{"node_id": audit["node_id"], "model": "gpt-6-astra", "reason": "The maintainer requested Astra for this judgment."}]
+    result = _run_schedule(tmp_path, paths, {**lifecycle, "worker_capacity": _capacity(active), "worker_requirements": requirements})
+    receipt = json.loads(capsys.readouterr().out)
+    assert result["coordinator_node_id"] != audit["node_id"]
+    assert (audit["node_id"] in result["worker_node_ids"]) == (active == 0)
+    continuation = json.loads(Path(result["schedule_input_path"]).read_bytes())
+    assert continuation["worker_requirements"] == requirements
+    assert "worker_requirements" not in json.loads(Path(result["lifecycle_input_path"]).read_bytes())
+    manifest = json.loads(Path(receipt["launch_manifest_reference"]["path"]).read_bytes())
+    if active == 0:
+        launch = next(node for node in manifest["nodes"] if node["node_id"] == audit["node_id"])
+        assert launch["worker_requirement"] == requirements[0]
+        assert launch["execution_location"] == "worker"
+    assert manifest["next_operation_inputs"]["schedule_input_path"] == result["schedule_input_path"]
+
+
+def test_model_requirement_blocks_exhausted_creation_fallback(tmp_path: Path) -> None:
+    lifecycle, dispatches, _paths = _fixture(tmp_path)
+    audit = _audits(dispatches)[0]
+    ready = next_ready_nodes({**lifecycle, "current_source_state": lifecycle["source_state"]}, journal_events=(), dispatch_set=dispatches)
+    result = select_execution_lanes(
+        {
+            "worker_capacity": _capacity(3),
+            "worker_requirements": [{"node_id": audit["node_id"], "model": "gpt-6-astra", "reason": "Explicit scientific model preference."}],
+            "creation_failure": {
+                "node_id": audit["node_id"],
+                "failure_kind": "unexpected",
+                "attempts": 1,
+                "reason": "Worker executor failed.",
+                "worker_created": False,
+            },
+        },
+        modes={node["node_id"]: node["mode"] for node in lifecycle["plan"]["actual_worker_nodes"]},
+        entries={entry["node_id"]: entry for entry in dispatches["dispatches"]},
+        ready=ready,
+    )
+    assert result["creation_failure_action"] == "fresh-worker-blocked"
+    assert audit["node_id"] != result["coordinator_node_id"]
+    assert result["creation_failure_blockers"]
+
+
+@pytest.mark.parametrize("active", [0, 3])
+def test_explicit_model_can_use_a_serial_validator_worker(tmp_path: Path, active: int) -> None:
+    _lifecycle, dispatches, _paths = _fixture(tmp_path)
+    entry = next(item for item in dispatches["dispatches"] if item["dispatch"]["mode"] == "validation")
+    node_id = entry["node_id"]
+    selected = select_execution_lanes(
+        {
+            "worker_capacity": _capacity(active),
+            "worker_requirements": [{"node_id": node_id, "model": "requested-model", "reason": "The operator explicitly selected this validator's model."}],
+        },
+        modes={node_id: "validation"},
+        entries={node_id: entry},
+        ready={"ready_node_ids": [node_id], "lifecycle": {"in_flight_node_ids": []}},
+    )
+    assert selected["coordinator_node_id"] is None
+    assert selected["worker_node_ids"] == ([node_id] if active == 0 else [])
+
+
 def test_known_full_capacity_schedules_coordinator_without_creation_and_preserves_evidence(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     lifecycle, dispatches, paths = _fixture(tmp_path)
     validation = next(entry for entry in dispatches["dispatches"] if entry["result_contract"] == "compact-validation")

@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 from capture_scope import _scope_data, captured_head_changes
 from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics, run_command_bytes
 from review_graph_control import issue_run_control
-from review_graph_coverage import coverage_reference
+from review_graph_coverage import coverage_reference, reused_dependency_paths, reused_paths
 from review_graph_executor import executor_permissions
 from review_graph_git import covers_captured_worktree
 from review_graph_integrity import MAX_NATIVE_IDENTIFIER_LENGTH, digest_bytes, digest_json
@@ -2982,8 +2982,21 @@ def _scope_provenance_blockers(scope: str, expectation: ReviewEvidenceExpectatio
         return ("compact review provenance requires an audit payload and bound input identity",)
     if payload.get("files_inspected") != list(inputs.inspected_paths) or payload.get("nearby_contract_owners") != list(inputs.nearby_contract_owners):
         return ("compact review provenance differs from its audit input identity",)
+    if inputs.inherited_paths and (
+        inputs.inherited_paths != reused_paths(expectation.coverage_reuse)
+        or inputs.inherited_dependency_paths != reused_dependency_paths(expectation.coverage_reuse)
+    ):
+        return ("inherited audit paths or dependencies differ from the compiler-bound coverage proof",)
     expected = review_scope_body(payload, mode=expectation.mode, audit_inputs=inputs, coverage_reuse=expectation.coverage_reuse, compact=True)
-    return () if scope == expected else ("native review provenance reference or summary differs from its bound metadata",)
+    prefixes = ("- Coverage reuse:", "- Coverage reuse reference:")
+    # Both historical inline coverage and compact references have their own
+    # exact verifier. Compare the rest of the provenance independently.
+    actual_lines = [line for line in scope.splitlines() if not line.startswith(prefixes)]
+    expected_lines = [line for line in expected.splitlines() if not line.startswith(prefixes)]
+    return (
+        *_coverage_reuse_native_blockers(scope, expectation.coverage_reuse),
+        *(("native review provenance reference or summary differs from its bound metadata",) if actual_lines != expected_lines else ()),
+    )
 
 
 def _ordinary_review_native_blockers(  # noqa: C901, PLR0912

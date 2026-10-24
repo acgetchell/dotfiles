@@ -16,6 +16,7 @@ import time
 import tomllib
 from collections import Counter
 from contextlib import nullcontext, suppress
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass, replace
 from io import BytesIO
 from pathlib import Path
@@ -44,6 +45,7 @@ from review_graph_coverage import (
     coverage_decisions,
     coverage_diagnostics,
     coverage_execution_view,
+    reused_dependency_paths,
     reused_paths,
     validate_coverage_units,
 )
@@ -143,7 +145,8 @@ from review_graph_preflight import inspect_executor_executables
 from review_graph_provenance import independent_scope_body, metadata_transition_reference, review_scope_body, worker_payload_reference
 from review_graph_read_provenance import MissingReadProvenanceError, bind_runtime_reads, normalized_read_provenance
 from review_graph_reads import source_read_operands
-from review_graph_receipts import stage_receipt
+from review_graph_receipts import artifact_reference, stage_receipt
+from review_graph_repair_followup import repair_origin, verify_followup_finding, verify_followup_origin
 from review_graph_requirement_delta import reassessment_candidates, reconcile_requirements, verify_reassessment_candidates
 from review_graph_results import EvaluationBoundaryError, EvaluationRejection, RejectionKind, parse_json_object
 from review_graph_reuse import (
@@ -969,6 +972,13 @@ def _compiled_audit_inputs(dispatch: dict[str, Any], payload: dict[str, Any]) ->
     if dispatch["mode"] not in {"audit", "independent-review"}:
         return None
     runtime_inputs, protocol_commands = bind_runtime_reads(dispatch, payload)
+    context = _reconciled_coverage(dispatch, payload)
+    inherited = reused_paths(context)
+    if inherited and context is not None:
+        proof = _coverage_proof(context)
+        _kind, original, _evidence, _content, _record = _load_evidence_source(proof, require_normalized=True)
+        if isinstance(original, ReviewEvidenceExpectation) and original.audit_input_identity is not None:
+            runtime_inputs = tuple(sorted(set(runtime_inputs) | set(original.audit_input_identity.runtime_inputs)))
     instruction_paths = _text_list(dispatch, "instruction_paths")
     instruction_digests = tuple((path, _file_identity_digest(path)) for path in instruction_paths)
     if "instruction_digests" in dispatch and instruction_digests != _string_pairs(dispatch, "instruction_digests"):
@@ -983,6 +993,8 @@ def _compiled_audit_inputs(dispatch: dict[str, Any], payload: dict[str, Any]) ->
         runtime_inputs,
         protocol_commands,
         tuple(sorted({path for command in payload.get("commands_executed", []) for path in source_read_operands(command) or ()})),
+        inherited,
+        reused_dependency_paths(context),
     )
 
 
@@ -1139,7 +1151,7 @@ def compile_review(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  #
     _text_list(payload, "nearby_contract_owners")
     audit_inputs = _compiled_audit_inputs(dispatch, payload)
     scope_body = review_scope_body(payload, mode=mode, audit_inputs=audit_inputs, coverage_reuse=coverage_reuse)
-    compact_scope = mode == "audit" and len(scope_body.encode()) > MAX_NATIVE_SECTION_BYTES
+    compact_scope = mode == "audit" and (bool(audit_inputs and audit_inputs.inherited_paths) or len(scope_body.encode()) > MAX_NATIVE_SECTION_BYTES)
     if compact_scope:
         require_schema(payload, _REVIEW_PAYLOAD_SCHEMA)
         scope_body = review_scope_body(payload, mode=mode, audit_inputs=audit_inputs, coverage_reuse=coverage_reuse, compact=True)
@@ -1874,6 +1886,8 @@ def _audit_input_identity(raw: object) -> AuditInputIdentity | None:
         _string_pairs(raw, "runtime_inputs") if "runtime_inputs" in raw else (),
         _string_tuple(raw, "protocol_commands") if "protocol_commands" in raw else (),
         _string_tuple(raw, "command_read_paths") if "command_read_paths" in raw else (),
+        _string_tuple(raw, "inherited_paths") if "inherited_paths" in raw else (),
+        _string_tuple(raw, "inherited_dependency_paths") if "inherited_dependency_paths" in raw else (),
     )
 
 
@@ -2962,7 +2976,26 @@ def _record_document(record: EvidenceRecord) -> dict[str, Any]:
     return record.to_document() if isinstance(record, VerifiedValidationRecord) else record
 
 
-def _load_evidence_source(  # noqa: C901, PLR0912, PLR0915
+_EVIDENCE_LOAD_STACK: ContextVar[tuple[str, ...]] = ContextVar("review_graph_evidence_load_stack", default=())
+
+
+def _load_evidence_source(
+    raw: dict[str, Any], *, require_normalized: bool = False
+) -> tuple[str, ReviewEvidenceExpectation | ValidationEvidenceExpectation, ReviewEvidence | ValidationEvidence, bytes, EvidenceRecord | None]:
+    """Replay acyclic inheritance without treating historical reports as fresh reads."""
+    path = str(Path(_required_text(raw, "metadata_path")).resolve())
+    stack = _EVIDENCE_LOAD_STACK.get()
+    if path in stack:
+        msg = f"cyclic audit evidence inheritance: {path}"
+        raise ValueError(msg)
+    token = _EVIDENCE_LOAD_STACK.set((*stack, path))
+    try:
+        return _load_evidence_source_once(raw, require_normalized=require_normalized)
+    finally:
+        _EVIDENCE_LOAD_STACK.reset(token)
+
+
+def _load_evidence_source_once(  # noqa: C901, PLR0912, PLR0915
     raw: dict[str, Any], *, require_normalized: bool = False
 ) -> tuple[str, ReviewEvidenceExpectation | ValidationEvidenceExpectation, ReviewEvidence | ValidationEvidence, bytes, EvidenceRecord | None]:
     metadata_path = Path(_required_text(raw, "metadata_path")).resolve()
@@ -4650,9 +4683,9 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
     return output
 
 
-def _epoch_scoped_plan(plan: GraphPlan, epoch: int) -> GraphPlan:
+def _epoch_scoped_plan(plan: GraphPlan, epoch: int, *, suffix: str = "") -> GraphPlan:
     """Give every executable identity a repair-epoch namespace."""
-    prefix = f"repair-epoch-{epoch:03d}-"
+    prefix = f"repair-epoch-{epoch:03d}{suffix}-"
     node_ids = {node.node_id: prefix + node.node_id for node in plan.actual_worker_nodes}
 
     def mapped(node_id: str | None) -> str | None:
@@ -5102,8 +5135,8 @@ def _verify_delta_context(context: dict[str, Any], dispatch: dict[str, Any]) -> 
     if not isinstance(expectation, ReviewEvidenceExpectation) or not isinstance(evidence, ReviewEvidence) or inputs is None or record is None:
         msg = "delta coverage requires compiler-bound audit input identities"
         raise ValueError(msg)
-    if expectation.coverage_reuse is not None or _audit_reuse_blocker(record, invalidated=False) is not None or _failed_validation_limits(record) is not None:
-        msg = "delta coverage origin must be a complete fresh audit without unresolved limitations"
+    if _audit_reuse_blocker(record, invalidated=False) is not None or _failed_validation_limits(record) is not None:
+        msg = "delta coverage origin must have complete verified coverage without unresolved limitations"
         raise ValueError(msg)
     if (origin.source_state, inputs.owned_paths, evidence.skill_id, evidence.skill_path, evidence.requirement_ids) != (
         expectation.source_state,
@@ -5147,8 +5180,6 @@ def _verify_delta_context(context: dict[str, Any], dispatch: dict[str, Any]) -> 
 def _blocked_coverage_reviews(record: dict[str, Any], candidate: GraphPlan) -> list[dict[str, Any]] | None:
     """Expose why a partition, or an audit without one, cannot support reuse."""
     blocker = _audit_reuse_blocker(record, invalidated=False)
-    if blocker is None and record.get("coverage_reuse"):
-        blocker = ("derived-coverage-origin", "A partial recheck cannot replace its original fresh partition proof.")
     if blocker is None:
         return None
     decision = {"disposition": "recheck", "reason_code": blocker[0], "reason": blocker[1]}
@@ -6105,6 +6136,46 @@ def _require_control_action_active(action: str, reason: str | None) -> None:
     raise ValueError(msg)
 
 
+def _begin_repair_result(  # noqa: PLR0913 - explicit source, journal and authority boundaries.
+    document: dict[str, Any],
+    *,
+    plan: GraphPlan,
+    entries: dict[str, dict[str, Any]],
+    capture: dict[str, Any],
+    events: tuple[dict[str, Any], ...],
+    active: list[str],
+) -> dict[str, Any] | None:
+    policy = plan.review_lifecycle
+    followup = document.get("verification_followup")
+    if followup is None and policy.repairs_completed >= policy.repair_budget:
+        return None
+    if active:
+        msg = "repair batch requires quiescent execution"
+        raise ValueError(msg)
+    _sources, records = _accepted_journal_sources(plan, _state(document, "source_state"), events, entries)
+    if followup is not None:
+        previous = verify_followup_origin({**document, "previous_capture": capture}, followup)
+        verify_followup_finding(previous, followup, [item for item in records if isinstance(item, dict)])
+        return {
+            "status": "repair-authorized",
+            "repair_epoch": policy.repairs_completed,
+            "verification_followup": followup,
+            "permitted_paths": previous["repair_epoch"]["changed_paths"],
+            "review_lifecycle": asdict(policy),
+        }
+    return {
+        "status": "repair-authorized",
+        "repair_epoch": policy.repairs_completed + 1,
+        "review_lifecycle": asdict(policy),
+        "validation_reconciliation": _validation_reconciliation(plan, records),
+        "next_action": (
+            "Inspect validation_reconciliation before repair replanning. Reconcile late requirements with "
+            "reconcile-validation-requirements on this source state; carry all resulting obligations into the repair template. "
+            "Only dispatch-bound coverage_reuse permits inherited judgments; missing coverage_reuse requires complete owned inspection."
+        ),
+    }
+
+
 def _review_control_locked(  # noqa: PLR0913
     document: dict[str, Any],
     args: argparse.Namespace,
@@ -6142,11 +6213,10 @@ def _review_control_locked(  # noqa: PLR0913
     if action != "stop" and source_snapshot(capture).source_state != _current_metadata_state(document):
         msg = "review control requires the current reviewed capture before authorizing more work"
         raise ValueError(msg)
-    if action == "begin-repair" and policy.repairs_completed < policy.repair_budget:
-        if active:
-            msg = "repair batch requires quiescent execution"
-            raise ValueError(msg)
-        result = {"status": "repair-authorized", "repair_epoch": policy.repairs_completed + 1, "review_lifecycle": asdict(policy)}
+    if (
+        action == "begin-repair"
+        and (result := _begin_repair_result(document, plan=plan, entries=entries, capture=capture, events=events, active=active)) is not None
+    ):
         if operation_output_path is not None:
             _write_review_control_output(operation_output_path, result)
         return result
@@ -6515,7 +6585,8 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
         raise ValueError(msg)
     if epoch == old_plan.review_lifecycle.repairs_completed + 1 and epoch > old_plan.review_lifecycle.repair_budget:
         return _exhausted_mutation(document, old_plan)
-    repair_lifecycle = old_plan.review_lifecycle.next_repair(epoch)
+    followup = document.get("verification_followup")
+    repair_lifecycle = old_plan.review_lifecycle if followup is not None else old_plan.review_lifecycle.next_repair(epoch)
     interleaved = _interleaved_repair_transition(document, old_plan)
     if interleaved is not None:
         repair_lifecycle = replace(repair_lifecycle, interleaved_repair_epochs=(*repair_lifecycle.interleaved_repair_epochs, epoch))
@@ -6523,6 +6594,12 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
     metadata = metadata_transition({"before": new_capture, "after": document["post_repair_capture"]}) if "post_repair_capture" in document else None
     captured_paths = _text_list(new_capture, "captured_scope_paths")
     sources = _mutation_evidence_sources(document, old_plan)
+    if followup is not None:
+        previous = verify_followup_origin(document, followup)
+        verify_followup_finding(previous, followup, [record for _source, record in sources.values()])
+        if epoch != repair_lifecycle.repairs_completed or interleaved is not None or not set(changed_paths) <= set(previous["repair_epoch"]["changed_paths"]):
+            msg = "verification follow-up must keep the same repair_epoch and already repaired paths; interleaved staging uses its separate continuation"
+            raise ValueError(msg)
     interleaved_history = _interleaved_repair_history(document, sources, interleaved) if interleaved is not None else None
     planning_input = bootstrap_document(new_capture, planning_template)
     if new_capture["capture_mode"] == "baseline" and not planning_input.get("change_target"):
@@ -6559,10 +6636,11 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
         reuse_document, old_plan, new_plan, planning_input, invalidated=invalidated, sources=sources, observed_metadata_transition=metadata
     )
     new_plan, coverage_reviews = _plan_delta_audits(reuse_document, old_plan, new_plan, sources)
-    new_plan = _epoch_scoped_plan(new_plan, epoch)
+    suffix = "-verification" if followup is not None else ""
+    new_plan = _epoch_scoped_plan(new_plan, epoch, suffix=suffix)
     new_plan = replace(new_plan, review_lifecycle=repair_lifecycle, audit_replacements=old_plan.audit_replacements)
     reused_ids = {item.evidence_id for item in new_plan.audit_reuse_transitions}
-    artifact_store = Path(_required_text(document, "artifact_store")).resolve() / f"repair-epoch-{epoch:03d}"
+    artifact_store = Path(_required_text(document, "artifact_store")).resolve() / f"repair-epoch-{epoch:03d}{suffix}"
     if interleaved is not None:
         verify_live_source(new_capture)
     dispatch_set = materialize_dispatches(
@@ -6589,7 +6667,7 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
     old_paths = set(_text_list(previous_capture, "captured_scope_paths"))
     newly_touched_paths = tuple(sorted(set(captured_paths) - old_paths))
     unaffected = tuple(node for node in old_plan.actual_worker_nodes if node.node_id not in invalidated)
-    fix_node_id = f"fix-epoch-{epoch:03d}"
+    fix_node_id = f"fix-epoch-{epoch:03d}{suffix}"
     result = {
         "authorization_transition": {"after": authorization_after, "before": authorization_before},
         "dispatch_set": dispatch_set,
@@ -6614,9 +6692,10 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
         "validation_reconciliation": _validation_reconciliation(
             new_plan, [record for _source, record in sources.values() if record["evidence_id"] in reused_ids]
         ),
-        "coverage_reuse_decisions": [{**item, "node_id": f"repair-epoch-{epoch:03d}-" + item["node_id"]} for item in coverage_reviews],
+        "coverage_reuse_decisions": [{**item, "node_id": f"repair-epoch-{epoch:03d}{suffix}-" + item["node_id"]} for item in coverage_reviews],
         "unaffected_node_ids": [node.node_id for node in unaffected],
         "repair_epoch": {
+            **({"verification_followup": followup} if followup is not None else {}),
             "changed_paths": list(changed_paths),
             "fix_nodes": [{"mode": "fix", "node_id": fix_node_id, "serialized": True}],
             "ordinal": epoch,
@@ -6631,8 +6710,12 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
         "status": "advanced",
     }
     if interleaved_history is not None:
-        return _retain_interleaved_repair(result, interleaved_history)
-    return _resume_after_repair_metadata(document, result, sources) if metadata is not None else result
+        result = _retain_interleaved_repair(result, interleaved_history)
+    elif metadata is not None:
+        result = _resume_after_repair_metadata(document, result, sources)
+    origin_path, origin_record = repair_origin(result)
+    _write_bytes_atomically_once(origin_path, (canonical_json(origin_record) + "\n").encode(), mode=0o400)
+    return result
 
 
 def _resume_after_repair_metadata(
@@ -7412,7 +7495,7 @@ def _schedule_ready_locked(document: dict[str, Any], args: argparse.Namespace) -
     lifecycle = {
         key: value
         for key, value in document.items()
-        if key not in {"artifact_store", "worker_capacity", "creation_failure", "reserved_node_ids", "preflight_blocked_nodes"}
+        if key not in {"artifact_store", "worker_capacity", "creation_failure", "reserved_node_ids", "preflight_blocked_nodes", "worker_requirements"}
     }
     paths = {
         "dispatches_path": str(store / "dispatches.json"),
@@ -7427,6 +7510,7 @@ def _schedule_ready_locked(document: dict[str, Any], args: argparse.Namespace) -
         "artifact_store": document["artifact_store"],
         "reserved_node_ids": selection["reserved_node_ids"],
         "preflight_blocked_nodes": selection["preflight_blocked_nodes"],
+        "worker_requirements": selection["worker_requirements"],
     }
     failure = selection["creation_failure"]
     if failure is not None and failure["node_id"] not in selected_ids:
@@ -8918,6 +9002,7 @@ def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     schedule_parser.add_argument("--current-capture", type=Path, required=True)
     schedule_parser.add_argument("--output", type=Path, required=True)
     schedule_parser.add_argument("--worker-capacity", type=Path, help="fresh aggregate capacity JSON; required when scheduling a bootstrap bundle")
+    schedule_parser.add_argument("--worker-requirements", type=Path, help="per-node worker/model requirements JSON array, retained in scheduling lineage")
     schedule_parser.add_argument("--artifact-store", type=Path, help="explicit scheduling artifact store override")
     journal_parser = _runtime_subparser(
         subparsers,
@@ -9575,6 +9660,14 @@ def _print_operation_result(args: argparse.Namespace, output_path: Path, output:
                 "required_fields": ["source", "concurrent_worker_limit", "active_workers"],
                 "instruction": "Write a fresh authoritative aggregate capacity observation before executing next_command. Recapture if source changed.",
             }
+    if (manifest := receipt.get("launch_manifest")) is not None:
+        manifest["next_operation_inputs"] = receipt.get("next_operation_inputs", {})
+        if receipt.get("next_command"):
+            manifest["next_command"] = receipt["next_command"]
+        if args.operation != "next-ready":
+            manifest_path = output_path.with_suffix(".launch.json")
+            _write_bytes_atomically_once(manifest_path, (canonical_json(manifest) + "\n").encode(), mode=0o444)
+            receipt["launch_manifest_reference"] = artifact_reference(manifest_path)
     print(canonical_json(output if args.full_output else receipt))
 
 
@@ -9675,6 +9768,8 @@ def _operation_input(document: dict[str, Any], args: argparse.Namespace) -> dict
             raise ValueError(msg)
         if args.worker_capacity is not None:
             operation_document["worker_capacity"] = _read_json_object(args.worker_capacity)
+        if args.worker_requirements is not None:
+            operation_document["worker_requirements"] = json.loads(args.worker_requirements.read_bytes())
         if args.artifact_store is not None:
             operation_document["artifact_store"] = str(args.artifact_store.resolve())
     require_schema_definition(operation_document, _RUNTIME_OPERATION_INPUT_SCHEMA, args.operation)

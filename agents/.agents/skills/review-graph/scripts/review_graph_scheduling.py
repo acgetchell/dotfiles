@@ -58,11 +58,29 @@ def _preflight_blocked_nodes(document: dict[str, Any], modes: dict[str, str], re
     return holds
 
 
+def _worker_requirements(document: dict[str, Any], entries: dict[str, dict[str, Any]]) -> list[dict[str, str]]:
+    """Keep explicit worker/model preferences out of the adaptive coordinator lane."""
+    requirements = cast("list[dict[str, str]]", document.get("worker_requirements", []))
+    ids = [item["node_id"] for item in requirements]
+    if len(ids) != len(set(ids)) or any(
+        item["node_id"] not in entries
+        or entries[item["node_id"]]["dispatch"]["execution_location"] != "worker"
+        or not item["reason"].strip()
+        or not item["model"].strip()
+        for item in requirements
+    ):
+        msg = "worker_requirements must uniquely name planned worker nodes with an explicit model and reason; set requirements before coordinator reservation"
+        raise ValueError(msg)
+    return requirements
+
+
 def select_execution_lanes(  # noqa: C901, PLR0912, PLR0915 - selection preserves reservations, capacity, freshness and serialization together.
     document: dict[str, Any], *, modes: dict[str, str], entries: dict[str, dict[str, Any]], ready: dict[str, Any]
 ) -> dict[str, Any]:
     """Reserve one adaptive coordinator lane and only available worker lanes."""
     ready_ids = ready["ready_node_ids"]
+    worker_requirements = _worker_requirements(document, entries)
+    required_workers = {item["node_id"] for item in worker_requirements}
     preflight_blocked = _preflight_blocked_nodes(document, modes, ready)
     held_ids = {item["node_id"] for item in preflight_blocked}
     in_flight = ready["lifecycle"]["in_flight_node_ids"]
@@ -89,7 +107,7 @@ def select_execution_lanes(  # noqa: C901, PLR0912, PLR0915 - selection preserve
     coordinator_busy = any(entries[node_id]["dispatch"]["execution_location"] == "coordinator" for node_id in (*in_flight, *reserved))
     serial_busy = any(modes[node_id] not in _PARALLEL_MODES for node_id in (*in_flight, *reserved))
     candidates = [node_id for node_id in ready_ids if node_id not in reserved and node_id not in held_ids]
-    fresh_required = {
+    fresh_required = required_workers | {
         node_id
         for node_id in candidates
         if any(unit["disposition"] == "instruction-review" for unit in entries[node_id]["dispatch"].get("coverage_reuse", {}).get("units", []))
@@ -98,8 +116,8 @@ def select_execution_lanes(  # noqa: C901, PLR0912, PLR0915 - selection preserve
     if failure is not None and failed_id in fresh_required and action == "coordinator-fallback":
         action = "fresh-worker-blocked"
         creation_blockers.append(
-            f"{failed_id} requires a fresh worker after creation failed: {failure['reason']}. "
-            "Automatic creation retries are exhausted or ineligible; coordinator fallback cannot reconcile instructions. "
+            f"{failed_id} requires a fresh worker or explicitly selected model after creation failed: {failure['reason']}. "
+            "Automatic creation retries are exhausted or ineligible; coordinator fallback cannot satisfy this requirement. "
             "Retain this continuation and report the blocked node. Resume only after an explicit executor-recovery decision "
             "with a new authoritative capacity observation; preserve the previous failure as lineage."
         )
@@ -128,7 +146,14 @@ def select_execution_lanes(  # noqa: C901, PLR0912, PLR0915 - selection preserve
         workers.extend(parallel[:free_workers])
         if not workers and coordinator_id is None and not in_flight and not reserved:
             serial = next(
-                (node_id for node_id in candidates if modes[node_id] != "independent-review" and node_id != failed_id and node_id not in fresh_required), None
+                (
+                    node_id
+                    for node_id in candidates
+                    if modes[node_id] != "independent-review"
+                    and node_id != failed_id
+                    and (node_id not in fresh_required or (free_workers > 0 and entries[node_id]["dispatch"]["execution_location"] == "worker"))
+                ),
+                None,
             )
             if serial is not None:
                 if entries[serial]["dispatch"]["execution_location"] == "coordinator" or capacity_state == "known-exhausted":
@@ -141,6 +166,7 @@ def select_execution_lanes(  # noqa: C901, PLR0912, PLR0915 - selection preserve
         "capacity_state": capacity_state,
         "coordinator_node_id": coordinator_id,
         "worker_node_ids": workers,
+        "worker_requirements": worker_requirements,
         "reserved_node_ids": reservations,
         "deferred_node_ids": [node_id for node_id in ready_ids if node_id not in selected],
         "preflight_blocked_nodes": preflight_blocked,

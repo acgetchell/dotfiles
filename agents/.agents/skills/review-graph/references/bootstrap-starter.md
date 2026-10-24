@@ -1,5 +1,9 @@
 # Branch Bootstrap Starter
 
+For whole-repository release readiness, use the
+[baseline-release preset](baseline-release.md), including instruction discovery,
+separate artifact declarations, compact launch manifests, and repair continuation.
+
 Use `review_graph_bootstrap.py --starter-config` for a branch review whose
 repository gate is `just ci` on a POSIX executor. It expands the
 [operator choices](bootstrap-starter-v1.json) into the complete public

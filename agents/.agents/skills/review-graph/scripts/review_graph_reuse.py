@@ -175,6 +175,8 @@ class AuditInputIdentity:
     runtime_inputs: tuple[tuple[str, str], ...] = ()
     protocol_commands: tuple[str, ...] = ()
     command_read_paths: tuple[str, ...] = ()
+    inherited_paths: tuple[str, ...] = ()
+    inherited_dependency_paths: tuple[str, ...] = ()
 
 
 def audit_inputs_document(inputs: AuditInputIdentity) -> dict[str, Any]:
@@ -182,7 +184,7 @@ def audit_inputs_document(inputs: AuditInputIdentity) -> dict[str, Any]:
     document = asdict(inputs)
     if not inputs.retained_inputs:
         document.pop("retained_inputs")
-    for field in ("runtime_inputs", "protocol_commands", "command_read_paths"):
+    for field in ("runtime_inputs", "protocol_commands", "command_read_paths", "inherited_paths", "inherited_dependency_paths"):
         if not getattr(inputs, field):
             document.pop(field)
     return document
@@ -496,7 +498,11 @@ def verify_reuse_inputs(  # noqa: C901 - fail-closed source, metadata, instructi
     if origin.source_state != transition.source_state or target.source_state != transition.target_state or boundary != target.boundary:
         msg = "audit reuse changes source identity, capture boundary, or Git state"
         raise ValueError(msg)
-    if not inputs.owned_paths or set(inputs.inspected_paths) != set(inputs.owned_paths):
+    if (
+        not inputs.owned_paths
+        or set(inputs.inspected_paths) | set(inputs.inherited_paths) != set(inputs.owned_paths)
+        or set(inputs.inspected_paths) & set(inputs.inherited_paths)
+    ):
         msg = "audit reuse requires complete inspection of the owned surface"
         raise ValueError(msg)
     root = PurePosixPath(origin.repository_root)
@@ -506,7 +512,7 @@ def verify_reuse_inputs(  # noqa: C901 - fail-closed source, metadata, instructi
         raise ValueError(msg)
     changed_instructions = {path for path in old_instructions.keys() | new_instructions.keys() if old_instructions.get(path) != new_instructions.get(path)}
     allowed_instructions = {str(root / path) for path in instruction_delta_paths}
-    paths = {*inputs.owned_paths, *inputs.inspected_paths, *inputs.nearby_contract_owners, *inputs.command_read_paths}
+    paths = {*inputs.owned_paths, *inputs.inspected_paths, *inputs.nearby_contract_owners, *inputs.command_read_paths, *inputs.inherited_dependency_paths}
     for binding in inputs.runtime_inputs:
         try:
             verify_runtime_inputs((binding,), origin.repository_root)
