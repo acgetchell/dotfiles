@@ -99,3 +99,5 @@ Check that release-facing scientific feature, validation, limitation, and compat
 ## Output
 
 Lead with unsupported or misleading scientific claims. Report authorities inspected, claim/evidence mismatches, convention and reproducibility gaps, generated artifacts deferred or refreshed, ecosystem and citation handoffs, validators run, and unavailable evidence.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

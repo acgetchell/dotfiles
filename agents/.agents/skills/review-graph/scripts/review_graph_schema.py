@@ -175,6 +175,12 @@ def _diagnose(  # noqa: C901, PLR0912, PLR0915
         if not isinstance(properties, dict):
             properties = {}
         required = schema.get("required", [])
+        dependencies = schema.get("dependentRequired", {})
+        if isinstance(required, list) and isinstance(dependencies, dict):
+            required = list(required)
+            for name, names in dependencies.items():
+                if name in value and isinstance(names, list):
+                    required.extend(dependency for dependency in names if dependency not in required)
         if isinstance(required, list):
             for name in required:
                 if isinstance(name, str) and name not in value:

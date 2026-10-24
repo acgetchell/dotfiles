@@ -105,3 +105,5 @@ Start with findings, ordered by correctness impact. For each finding include:
 
 If no change is needed, say whether the API is a true owned snapshot, detached
 handle, or rollback state and why borrowing would be worse.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

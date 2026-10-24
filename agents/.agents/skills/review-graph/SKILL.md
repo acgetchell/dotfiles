@@ -17,9 +17,8 @@ reporting; missing skill reads or CI inspection block completion.
 
 ## Profiles
 
-Routine delivery is the default; formal certification is explicit. Bootstrap
-freezes runtime/skills before planning; follow its retained commands. Read
-[run profiles](references/run-profiles.md) for recovery or certification details.
+Routine delivery is the default; formal certification is explicit. Bootstrap freezes runtime/skills before planning; follow its commands.
+Recovery/certification: [run profiles](references/run-profiles.md).
 
 - **Adaptive grouped** (default): run read-only nodes concurrently across worker
   and coordinator lanes; permit worker-failure fallback.
@@ -138,6 +137,7 @@ Reconcile accepted handoffs before expansion; only new triggers reroute. Use
 `advance-after-mutation` after authorized repairs to recapture, invalidate stale
 nodes, and materialize the replacement graph.
 For unchanged-content Git edits, use `resume-after-external-metadata`.
+Interleaved repair/staging: [attributed continuation](references/state-transitions.md#interleaved-repairs-and-staging).
 External edits: [resume-after-external-source](references/state-transitions.md#external-source-edits).
 Declare semantic `git_dependencies` to preserve source-discovery audits; follow
 its continuation and [state transitions](references/state-transitions.md).
@@ -164,3 +164,5 @@ Report stage costs as measured, estimated, or unavailable using
 [graph accounting](references/routing-experiment.md#account-for-the-whole-graph).
 Set external `REVIEW_GRAPH_USAGE_LEDGER` for runtime timings; preserve unknown
 counts and failed/unfinished attempts.
+
+Review outcomes: [typed contract](references/typed-results.md); read on rejection. Missing evidence stays blocked.

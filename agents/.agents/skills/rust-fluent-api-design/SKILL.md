@@ -122,3 +122,5 @@ When recommending changes, be specific about the API shape:
 - add tests that prove rejected terminal operations have no unwanted side effects
 
 Avoid broad rewrites. Prefer small, staged API improvements that preserve correctness and make the workflow easier to copy.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

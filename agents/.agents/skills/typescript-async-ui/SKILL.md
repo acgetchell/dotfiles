@@ -50,3 +50,5 @@ accessible states and user actions rather than component internals. Use MSW for 
 Exercise failed requests, aborts, response reordering, partial results, and account
 switches when affected. A visual-only edit does not require a new test framework.
 Run the repository's typecheck/build, lint, and relevant test commands.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

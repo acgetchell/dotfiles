@@ -318,8 +318,8 @@ Keep `changed_paths` equal to the S1→S2 content delta. The runtime verifies
 S1→S2 without index/HEAD/boundary changes, verifies S2→S3 as index-only, and
 independently recaptures S3 before publishing. It retains S2 as the repair plan's
 source identity, then composes the normal metadata continuation to S3. No capture
-is synthesized and no Git state is changed. Without the real saved S2, replan
-from S3; do not manufacture a bridge or alter the index.
+is synthesized and no Git state is changed. Without a saved S2, use the
+[interleaved continuation](#interleaved-repairs-and-staging) below.
 
 Follow the returned top-level continuation paths together. `capture` and
 `capture_path` identify S3; `new_source_state` remains the S2 plan identity and
@@ -331,6 +331,52 @@ Final `reuse_decisions`, `reused_evidence_ids`, and `node_decisions` account for
 staging: source-only judgments can survive, while Git-sensitive judgments and
 required validation are scheduled against S3. A content, mode, instruction,
 HEAD, branch, boundary, or live-state mismatch rejects the composition.
+
+## Interleaved Repairs And Staging
+
+When the maintainer stages files throughout an authorized repair batch and no
+final post-repair/pre-staging capture exists, use `advance-after-mutation` with
+the actual `previous_capture` and current `new_capture`. Keep the original plan,
+run control, repair epoch, authorization, journal, dispatches, and accepted
+sources, including failed checks. Supply the exact content delta in
+`changed_paths` and add:
+
+```json
+{
+  "interleaved_staging": {
+    "repair_attribution": "All changed_paths are agent edits within the already authorized repair batch.",
+    "staging_attribution": "The maintainer confirmed staging files while reviewing these repairs."
+  }
+}
+```
+
+Use actual session evidence for those attributions. Unknown or unrelated source
+edits cannot be labeled agent repairs. Omit `post_repair_capture`; never create
+an intermediate capture by substituting index fields. This bounded adapter
+requires unchanged HEAD, branch, base, capture mode, selected paths, file types,
+modes, and instructions. Staged scopes and scope expansion require separate
+reconciliation. On rejection, retain the evidence and report partial delivery
+with the unsupported delta; do not restart comprehensive review for bookkeeping.
+
+The runtime verifies the real content and index deltas separately, closes the
+existing repair epoch once, and plans directly against the current capture.
+Complete unchanged audit inputs may be reused; changed contracts, semantic Git
+dependencies, uncertain inputs, independent review, and validation require
+current evidence. It verifies live source before publication and preserves the
+actual index. `repair_transition_path` retains both actual captures, the old
+plan, execution history and original evidence references, including failures.
+Earlier ordinary repairs compose through their saved endpoint proof; unchanged
+audits do not restart solely because staging happened in a later repair epoch.
+
+Follow the compact receipt's typed `next_action` (`continue-review`, operation
+`next-ready`) with its argument-vector `command`; `next_command` remains the
+compatible direct form. `proof_limitations` explicitly records
+`missing-intermediate-capture`: endpoint proof cannot establish intermediate
+source/index contents or the order of edits and staging. Final verification is
+still required. The lifecycle retains the affected repair epochs, and both
+`report-delivery` and `finalize-proof` emit this limitation after later
+continuations. Routine delivery remains uncertified; include the limitation
+in its explanation even when final checks pass.
 
 ## External Staging Without A Content Repair
 

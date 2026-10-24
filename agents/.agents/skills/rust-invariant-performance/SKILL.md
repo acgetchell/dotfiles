@@ -118,3 +118,5 @@ table; specialization must follow a genuine domain algorithm boundary.
 Load `references/benchmark-evidence.md` for detailed evidence selection,
 before/after discipline, noise interpretation, and routine-versus-release command
 roles.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

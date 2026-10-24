@@ -90,3 +90,5 @@ Bind every occurrence and reviewer disposition while retaining failed history.
 Do not create subagents or recursively invoke `review-graph`.
 Do not request or load complete predecessor artifacts; the proof verifier owns
 their independent validation.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

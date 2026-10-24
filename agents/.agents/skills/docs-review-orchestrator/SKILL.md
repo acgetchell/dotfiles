@@ -36,3 +36,5 @@ mode, read
 [`references/standalone-workflow.md`](references/standalone-workflow.md)
 completely and follow its routing, trace, pass, validation, and reporting
 workflow.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

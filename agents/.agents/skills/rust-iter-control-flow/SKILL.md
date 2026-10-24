@@ -72,3 +72,5 @@ Use the parent result contract when dispatched. Otherwise report concrete
 findings with source locations, their effect on behavior, allocation,
 exhaustiveness, or capture, and relevant validation. Separate optional readability
 preferences from required corrections. A clean result needs no invented rewrite.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

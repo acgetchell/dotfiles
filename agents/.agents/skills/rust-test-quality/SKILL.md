@@ -118,3 +118,5 @@ Verify:
 ## Finding Standard
 
 For each finding, state what wrong implementation could still pass, the missing input/oracle/assertion/configuration, the smallest stronger test, and the command that demonstrates it.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

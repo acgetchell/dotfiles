@@ -129,3 +129,5 @@ Lead with unresolved P0/P1 findings. Include:
 - deferred work and residual risk
 - files changed when fixes were authorized
 - confirmation that no git state mutation occurred when true
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

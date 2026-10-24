@@ -87,3 +87,5 @@ Load `python-test-quality` when fixtures or evidence structure changed or is mat
 ## Output
 
 Lead with release/CI breakage, nondeterminism, unsafe execution, or data-loss risks. For each finding, name the input, transformation, consumer, failure consequence, and smallest fix. Report artifacts protected, commands validated, effects deliberately not executed, and remaining external limitations.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

@@ -140,3 +140,5 @@ the concrete misuse, breakage, or evolution cost, the compatibility class, and
 the smallest coherent correction. Separate demonstrated defects from optional
 design preferences. Report validation performed or reused, specialist handoffs,
 and meaningful limitations.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

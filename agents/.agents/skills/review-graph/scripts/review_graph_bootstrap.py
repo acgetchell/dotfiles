@@ -13,6 +13,7 @@ from typing import Any
 from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics
 from review_graph_plan import DEFAULT_ROUTING_CATALOG, DEFAULT_SKILL_ROOT, plan_from_document
 from review_graph_receipts import stage_receipt
+from review_graph_results import EvaluationRejection, parse_json_object
 from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
 from review_graph_session import bootstrap_frozen, runtime_command, verify_current_snapshot
 from review_graph_starter import STARTER_EXAMPLE, STARTER_SCHEMA, starter_metrics, starter_preflight, starter_template
@@ -105,11 +106,7 @@ def bootstrap_document(capture: dict[str, Any], template: dict[str, Any]) -> dic
 
 
 def _read_object(path: Path) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(value, dict):
-        msg = f"JSON root must be an object: {path}"
-        raise TypeError(msg)
-    return value
+    return parse_json_object(path.read_bytes())
 
 
 def _write_once(path: Path, value: object) -> None:
@@ -257,9 +254,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if dispatch_ready else 2
     except (ExecutableNotFoundError, KeyError, OSError, TypeError, ValueError, json.JSONDecodeError, subprocess.SubprocessError) as error:
         if isinstance(error, SchemaValidationError):
-            print(json.dumps(error.as_dict(), sort_keys=True), file=sys.stderr)
+            output = error.as_dict()
         else:
-            print(f"review_graph_bootstrap: {format_exception_diagnostics(error)}", file=sys.stderr)
+            output = {"status": "rejected", "message": f"review_graph_bootstrap: {format_exception_diagnostics(error)}"}
+        print(json.dumps({**output, "rejection": EvaluationRejection.from_exception(error).as_dict()}, sort_keys=True), file=sys.stderr)
         return 2
 
 

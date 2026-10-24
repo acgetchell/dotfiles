@@ -134,3 +134,5 @@ required evidence or routing is incomplete. Put exact reasons in
 references, predecessor coverage, routing closure, validation results, and
 cross-surface risks in their dedicated fields. A completed review and passing
 validators do not imply repository readiness.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

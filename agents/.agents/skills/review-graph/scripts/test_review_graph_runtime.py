@@ -4543,6 +4543,10 @@ def test_plan_digest_retains_nonempty_reuse_fields(tmp_path: Path) -> None:
     document.pop("validation_exclusions")
     document.pop("validation_requirement_bindings")
     assert plan.review_lifecycle.repairs_completed == 1
+    # Empty optional history was absent from saved plans before this field existed.
+    lifecycle = document["review_lifecycle"]
+    assert isinstance(lifecycle, dict)
+    assert lifecycle.pop("interleaved_repair_epochs") == []
     assert not plan.independent_review_after_audits
     document.pop("independent_review_after_audits")
     expected = "sha256:" + hashlib.sha256(json.dumps(document, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
@@ -4552,6 +4556,9 @@ def test_plan_digest_retains_nonempty_reuse_fields(tmp_path: Path) -> None:
     assert graph_plan_digest(plan) == expected
     assert graph_plan_digest(replace(plan, audit_reuse_transitions=())) != expected
     assert graph_plan_digest(replace(plan, reuse_source_snapshots=())) != expected
+    with_history = replace(plan, review_lifecycle=replace(plan.review_lifecycle, interleaved_repair_epochs=(1,)))
+    assert graph_plan_digest(with_history) != expected
+    assert not graph_plan_digest_matches(with_history, expected)
 
 
 def test_repair_explains_conservative_nonreuse_and_emits_continuation_files(tmp_path: Path) -> None:

@@ -122,3 +122,5 @@ that no git state mutation occurred when true. Include the ledger's
 source/build state, toolchain, target, features, instrumentation, and exact
 test selections, or explicitly confirm that the parent orchestrator recorded
 those fields.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

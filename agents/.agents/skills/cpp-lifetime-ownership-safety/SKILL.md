@@ -91,3 +91,5 @@ Do not file speculative findings that require an undocumented library invalidati
 ## Handoff
 
 Summarize changed files, fixed defects, validators and results, remaining lifetime assumptions, and confirmation that no git state mutations were performed when true.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

@@ -99,3 +99,5 @@ For each finding, name the shared state, conflicting operations, missing synchro
 ## Handoff
 
 Summarize concurrency surfaces inspected, defects fixed, synchronization assumptions, stress or sanitizer results, platform gaps, and confirmation that no git state mutations were performed when true.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

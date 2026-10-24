@@ -66,3 +66,5 @@ Run the relevant project tests and required repository checks. Report actual
 counts, failures, skipped tests, and external checks still needed. Separate unit,
 synthetic integration, real-provider, and live acceptance evidence. Inspect
 generated migration SQL before any database application.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

@@ -161,3 +161,5 @@ For each finding, include:
 - the smallest correct fix and the validation that would prove it
 
 Separate optional strengthening suggestions from correctness defects. When no actionable defect is found, state which contracts, adversarial regimes, and independent evidence were actually checked.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

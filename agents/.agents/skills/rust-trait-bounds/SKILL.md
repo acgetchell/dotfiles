@@ -121,3 +121,5 @@ Avoid:
 
 - relying only on internal unit tests that use overly capable types
 - adding compile-fail infrastructure for a small cleanup unless the project already supports it
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

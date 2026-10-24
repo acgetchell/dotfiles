@@ -148,3 +148,5 @@ For audits, order findings by the invalid state callers can create. Name the
 invariant, bypass path, observable consequence, smallest boundary/type change,
 compatibility cost, and regression evidence. Separate confirmed defects from
 optional type-design improvements.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

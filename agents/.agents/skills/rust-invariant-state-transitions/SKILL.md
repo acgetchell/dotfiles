@@ -110,3 +110,5 @@ Use snapshots only when they independently capture the full promised state. Pref
 ## Finding Standard
 
 For each finding, name the invariant, canonical owner, transition and failure point, observable invalid state, smallest atomic correction, and focused regression evidence. Distinguish a confirmed corruption path from an optional architectural simplification.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

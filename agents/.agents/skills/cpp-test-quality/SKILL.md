@@ -128,3 +128,5 @@ For each finding, state what incorrect implementation could still pass, the miss
 ## Handoff
 
 Summarize doctest scenarios and consumer contracts inspected and changed, risks covered, independent oracles, deterministic seeds, compile-pass or compile-fail evidence, the validation ledger, check results, and any justified overlap, remaining gaps, and confirmation that no git state mutations were performed when true.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

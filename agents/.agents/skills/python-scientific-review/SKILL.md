@@ -78,3 +78,5 @@ Flag obvious accidental quadratic work, repeated large copies, per-row dataframe
 ## Output
 
 Lead with mathematical, numerical, reproducibility, or interoperability blockers. For each finding, state the violated property, triggering input class, consequence, smallest correction, and independent evidence needed. Report assumptions, focused skills handed off, validation run, and unavailable datasets or platforms.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

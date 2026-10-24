@@ -61,3 +61,5 @@ When the user has supplied prose, treat that text as the author-owned source of 
 Before editing repository paper sources such as `papers/*.tex`, read local agent and documentation guidance for paper ownership. Preserve or add explicit author-facing markers such as `Author TODO` scaffolds instead of filling in prose. It is fine to maintain build rules, source-date helpers, generated figures, bibliography plumbing, accessibility descriptions marked as author TODOs, and reviewer-copy artifact checks.
 
 Do not add formal AI-use or authorship-provenance disclosure text unless the user explicitly asks for that specific venue/submission wording and supplies the factual basis.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

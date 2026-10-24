@@ -57,3 +57,5 @@ Test boundary values, malformed JSON/configuration, missing/null fields, invalid
 combinations, and attempts to bypass factories through serialization or mutation.
 Use the repository's test framework, usually xUnit for an existing xUnit project.
 Test observable rejection and preserved state, not private implementation methods.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

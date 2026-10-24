@@ -3,6 +3,19 @@
 This repository is public dotfiles. Keep committed changes non-secret,
 machine-portable, and scoped to reproducible defaults.
 
+## Correctness and Regression Tests
+
+- **Correctness is the acceptance criterion.** Passing tests alone do not
+  establish behavioral or scientific validity. When a legitimate regression
+  test fails, agents MUST correct the implementation while preserving the
+  original input and intended behavior. Never weaken assertions, substitute
+  easier fixtures, reduce coverage, skip the test, or replace expected success
+  with accepted failure merely to obtain a green run. Change a test's contract
+  only when independent evidence demonstrates that its mathematics, fixture,
+  or expectation is wrong; explain that evidence and preserve meaningful
+  regression coverage. Error handling and rollback are required safeguards,
+  not substitutes for supported successful behavior.
+
 ## Python And Skill Validation
 
 - Prefer `uv run` over bare `python3` for Python tooling in this repository.

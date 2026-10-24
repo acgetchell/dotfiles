@@ -81,3 +81,5 @@ Do not run a broad citation, scientific, or API pass solely because these valida
 ## Output
 
 Report the release identity, metadata authorities, files inspected, inconsistencies and deliberate differences, generated artifacts, specialist handoffs, validators, and unverified external release surfaces.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

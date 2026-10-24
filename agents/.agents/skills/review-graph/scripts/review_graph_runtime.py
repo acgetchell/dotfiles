@@ -36,6 +36,7 @@ from review_graph_commit import (
     verify_live_commit,
     verify_native_results,
 )
+from review_graph_continuation import MissingIntermediateCapture, NextReadyAction
 from review_graph_control import control_marker_paths, extend_run_control, read_control_file, require_run_control, run_control_lock, verify_run_control
 from review_graph_coverage import (
     combined_findings,
@@ -144,6 +145,7 @@ from review_graph_read_provenance import MissingReadProvenanceError, bind_runtim
 from review_graph_reads import source_read_operands
 from review_graph_receipts import stage_receipt
 from review_graph_requirement_delta import reassessment_candidates, reconcile_requirements, verify_reassessment_candidates
+from review_graph_results import EvaluationBoundaryError, EvaluationRejection, RejectionKind, parse_json_object
 from review_graph_reuse import (
     SNAPSHOT_FORMAT,
     AuditInputIdentity,
@@ -151,6 +153,7 @@ from review_graph_reuse import (
     CommitHandoffTransition,
     ExternalMetadataTransition,
     ExternalSourceTransition,
+    InterleavedRepairTransition,
     ReuseInputError,
     metadata_states,
     metadata_transition,
@@ -828,7 +831,7 @@ def _resolve_planned_validation_record(record: dict[str, Any]) -> dict[str, Any]
     if digest_bytes(content) != reference["digest"] or reference["digest"] != record["planned_validation_digest"]:
         msg = "planned validation identity sidecar digest mismatch"
         raise ValueError(msg)
-    identity = json.loads(content)
+    identity = parse_json_object(content)
     if not isinstance(identity, dict) or set(identity) != _PLANNED_VALIDATION_IDENTITY_KEYS:
         msg = "planned validation identity sidecar is incomplete"
         raise ValueError(msg)
@@ -2864,11 +2867,7 @@ def _graph_plan(raw: dict[str, Any]) -> GraphPlan:
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(value, dict):
-        msg = f"JSON root must be an object: {path}"
-        raise TypeError(msg)
-    return value
+    return parse_json_object(path.read_bytes())
 
 
 def _operation_document(document: dict[str, Any], operation: str) -> dict[str, Any]:
@@ -2899,14 +2898,14 @@ def _canonical_worker_payload(content: bytes, *, expectation: ReviewEvidenceExpe
         if len(references) != 1 or matches or bound_payload is None:
             msg = "compiled artifact must contain exactly one reference to its bound canonical worker payload"
             raise ValueError(msg)
-        if json.loads(references[0]) != worker_payload_reference(bound_payload):
+        if parse_json_object(references[0]) != worker_payload_reference(bound_payload):
             msg = "canonical worker payload reference differs from its bound metadata"
             raise ValueError(msg)
         return bound_payload
     if len(matches) != 1:
         msg = "compiled artifact must contain exactly one canonical worker payload"
         raise ValueError(msg)
-    payload = json.loads(matches[0])
+    payload = parse_json_object(matches[0])
     if not isinstance(payload, dict):
         msg = "canonical worker payload must be an object"
         raise TypeError(msg)
@@ -2919,7 +2918,7 @@ def _verify_independent_payload_binding(content: bytes, metadata: dict[str, Any]
     if metadata.get("payload_digest") != digest_bytes(canonical_json(payload).encode()):
         msg = "independent canonical payload digest differs from metadata"
         raise ValueError(msg)
-    if "worker_payload_path" in metadata and json.loads(Path(metadata["worker_payload_path"]).read_bytes()) != payload:
+    if "worker_payload_path" in metadata and parse_json_object(Path(metadata["worker_payload_path"]).read_bytes()) != payload:
         msg = "independent canonical payload differs from sealed worker bytes"
         raise ValueError(msg)
     native = render_independent_payload(
@@ -3014,7 +3013,7 @@ def _load_evidence_source(  # noqa: C901, PLR0912, PLR0915
         payload = _canonical_worker_payload(content)
         require_schema(payload, _VALIDATION_PAYLOAD_SCHEMA)
         if payload_bytes is not None:
-            submitted = json.loads(payload_bytes)
+            submitted = parse_json_object(payload_bytes)
             require_schema(submitted, _VALIDATION_PAYLOAD_SCHEMA)
             submitted_payload = ValidationPayload.from_raw(submitted)
             bind_validation_payload(submitted_payload, expectation.validation_unit)
@@ -3039,7 +3038,7 @@ def _load_evidence_source(  # noqa: C901, PLR0912, PLR0915
         if metadata.get("payload_digest") != digest_bytes(canonical_json(bound_payload).encode()):
             msg = "bound canonical worker payload digest differs from metadata"
             raise ValueError(msg)
-        if payload_bytes is not None and json.loads(payload_bytes) != bound_payload:
+        if payload_bytes is not None and parse_json_object(payload_bytes) != bound_payload:
             msg = "bound canonical worker payload differs from sealed worker bytes"
             raise ValueError(msg)
         _validate_review_coverage_partitions(
@@ -3194,7 +3193,7 @@ def _validation_output_relocation(
     content = _read_regular_file_no_follow(path)
     if digest_bytes(content) != digest:
         return None
-    original = json.loads(content)
+    original = parse_json_object(content)
     current = _planned_validation_identity(unit)
     if original.get("source_state") != list(origin.source_state) or current["source_state"] != list(target.source_state):
         return None
@@ -3807,6 +3806,8 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
     persistence_text += (
         " Source captures and other graph proof artifacts still belong under the workflow's authorized external temporary store; "
         "this payload restriction does not prohibit those writes."
+        " Missing inputs/evidence remain blocked, never empty success. On rejection, follow the typed recovery prerequisite and existing attempt limit; "
+        "retry only the affected evaluation after correction. Preserve findings and failed checks."
     )
     provenance_text = (
         " dispatch.provenance_examples contains illustrative fragments, not performed work: merge only actual reads/commands, "
@@ -3921,7 +3922,7 @@ def _publication_dispatch(contract: dict[str, Any]) -> dict[str, Any] | None:
     if digest_bytes(content) != reference["digest"]:
         msg = "compiler preflight worker input digest differs from its publication contract"
         raise ValueError(msg)
-    entry = json.loads(content)
+    entry = parse_json_object(content)
     dispatch = entry["dispatch"]
     if any(dispatch.get(key) != contract.get(key) for key in ("mode", "node_id", "owned_paths", "worker_payload_path", "coverage_reuse")):
         msg = "compiler preflight dispatch differs from its publication contract"
@@ -3936,7 +3937,7 @@ def _synthesis_publication_plan(dispatch: dict[str, Any]) -> dict[str, Any]:
     if digest_bytes(content) != reference["digest"]:
         msg = "synthesis publication plan digest differs from its bound dispatch"
         raise ValueError(msg)
-    return json.loads(content)
+    return parse_json_object(content)
 
 
 def _synthesis_publication_bundle(dispatch: dict[str, Any]) -> dict[str, Any]:
@@ -3986,7 +3987,7 @@ def _preflight_audit_payload(contract: dict[str, Any], payload: dict[str, Any]) 
         current_state = list(_current_metadata_state(dispatch))
         native, metadata = compiler({"dispatch": {**dispatch, "before_state": current_state, "after_state": current_state}, "payload": payload})
     except (ValueError, TypeError) as error:
-        if isinstance(error, MissingReadProvenanceError):
+        if isinstance(error, (MissingReadProvenanceError, EvaluationBoundaryError)):
             raise
         msg = f"{contract.get('mode')} compiler preflight failed before publication: {error}"
         raise ValueError(msg) from error
@@ -4005,16 +4006,15 @@ def _validate_worker_payload_bytes(contract_document: dict[str, Any], payload_by
     """Reject incomplete worker output before it can replace a persisted payload."""
     contract = _required_text(contract_document, "result_contract")
     if contract in {"compact-review", "compact-validation", "compact-independent-review"}:
-        payload = json.loads(payload_bytes)
-        if not isinstance(payload, dict):
-            msg = "compact worker payload root must be an object"
-            raise TypeError(msg)
+        payload = parse_json_object(payload_bytes)
         schema = (
             _INDEPENDENT_PAYLOAD_SCHEMA
             if contract == "compact-independent-review"
             else (_review_payload_schema(contract_document) if contract == "compact-review" else _VALIDATION_PAYLOAD_SCHEMA)
         )
         if contract == "compact-review":
+            # This boundary parses its schema before domain use and aggregates
+            # independent coverage diagnostics for the same correction attempt.
             _validate_review_coverage_partitions(contract_document, payload)
         require_schema(payload, schema)
         bound = _publication_dispatch(contract_document)
@@ -4023,13 +4023,13 @@ def _validate_worker_payload_bytes(contract_document: dict[str, Any], payload_by
         if contract == "compact-independent-review":
             if "compiler_preflight" not in contract_document:
                 msg = "structured independent publication requires its bound compiler preflight"
-                raise ValueError(msg)
+                raise EvaluationBoundaryError(RejectionKind.MISSING_EVIDENCE, msg)
         elif contract == "compact-review":
             _validate_audit_caveats(contract_document, payload)
             blockers = _review_scope_coverage_blockers(contract_document, payload, status=_required_text(payload, "status"))
             if blockers:
                 msg = "worker payload failed owned-scope validation: " + "; ".join(blockers)
-                raise ValueError(msg)
+                raise EvaluationBoundaryError(RejectionKind.MISSING_EVIDENCE, msg)
         else:
             blockers = tuple(
                 blocker
@@ -4716,7 +4716,9 @@ def _capture_path_fingerprints(capture: dict[str, Any], *, label: str) -> dict[s
     return {path: value for path, value in raw.items() if isinstance(value, str)}
 
 
-def _mutation_path_delta(document: dict[str, Any], previous: dict[str, Any], current: dict[str, Any]) -> tuple[str, ...]:
+def _mutation_path_delta(
+    document: dict[str, Any], previous: dict[str, Any], current: dict[str, Any], interleaved: InterleavedRepairTransition | None = None
+) -> tuple[str, ...]:
     previous_state = tuple(_required_text(previous, field) for field in ("scope_fingerprint", "captured_worktree_fingerprint", "repository_state_fingerprint"))
     if previous_state != _current_metadata_state(document):
         msg = "previous_capture must match the immediately prior plan source_state"
@@ -4730,8 +4732,8 @@ def _mutation_path_delta(document: dict[str, Any], previous: dict[str, Any], cur
     if any(re.fullmatch(r"[0-9a-f]{64}", value) is None for value in (old_index, new_index)):
         msg = "mutation captures require SHA-256 index_fingerprint identities"
         raise ValueError(msg)
-    if old_index != new_index:
-        msg = "repair epoch mutated the Git index"
+    if old_index != new_index and interleaved is None:
+        msg = "repair epoch mutated the Git index; for attributed interleaved maintainer staging, supply interleaved_staging with the two actual captures"
         raise ValueError(msg)
     before = _capture_path_fingerprints(previous, label="previous_capture")
     after = _capture_path_fingerprints(current, label="new_capture")
@@ -4749,6 +4751,9 @@ def _mutation_path_delta(document: dict[str, Any], previous: dict[str, Any], cur
 
 def _mutation_evidence_sources(document: dict[str, Any], plan: GraphPlan) -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
     """Verify historical evidence without relabeling it as final-state evidence."""
+    if ("journal_path" in document) != ("dispatches_path" in document):
+        msg = "repair history requires journal_path and dispatches_path together"
+        raise EvaluationBoundaryError(RejectionKind.MISSING_INPUT, msg)
     if document.get("journal_path") and document.get("dispatches_path"):
         state = _state(document, "source_state")
         events, statuses, _head = read_execution_journal(Path(document["journal_path"]), plan=plan, source_state=state)
@@ -5021,7 +5026,7 @@ def _coverage_proof(context: dict[str, Any]) -> dict[str, Any]:
     if digest_bytes(content) != _required_text(reference, "digest"):
         msg = "coverage proof digest differs from its bound execution view"
         raise ValueError(msg)
-    proof = json.loads(content)
+    proof = parse_json_object(content)
     if not isinstance(proof, dict) or "proof_reference" in proof:
         msg = "coverage proof artifact must contain a complete inline proof object"
         raise ValueError(msg)
@@ -5288,12 +5293,23 @@ def _verify_audit_metadata(payload: dict[str, Any], fingerprints: FingerprintEvi
 
 def _metadata_chain_from(document: dict[str, Any], state: tuple[str, str, str]) -> tuple[ExternalMetadataTransition, ...]:
     transitions = tuple(metadata_transition(item) for item in _records(document, "external_metadata_transitions"))
+    for reuse in _records(document.get("plan", {}), "audit_reuse_transitions"):
+        if _state(reuse, "source_state") == state:
+            inherited = tuple(metadata_transition(item) for item in _records(reuse, "metadata_transitions"))
+            tail = inherited[-1].after.source_state if inherited else state
+            for ordinal, transition in enumerate(transitions):
+                if transition.before.source_state == tail:
+                    return (*inherited, *transitions[ordinal:])
+                if transition.before.source_state == _state(reuse, "target_state"):
+                    snapshots = tuple(source_snapshot(item) for item in _records(document["plan"], "reuse_source_snapshots"))
+                    origin = inherited[-1].after if inherited else next((snapshot for snapshot in snapshots if snapshot.source_state == state), None)
+                    if origin is not None:
+                        bridge = metadata_transition({"before": asdict(origin), "after": asdict(transition.before), "observed_source_only": True})
+                        return (*inherited, bridge, *transitions[ordinal:])
+            return inherited
     for ordinal, transition in enumerate(transitions):
         if transition.before.source_state == state:
             return transitions[ordinal:]
-    for reuse in _records(document.get("plan", {}), "audit_reuse_transitions"):
-        if _state(reuse, "source_state") == state:
-            return tuple(metadata_transition(item) for item in _records(reuse, "metadata_transitions"))
     return ()
 
 
@@ -5894,7 +5910,7 @@ def _review_stop_reason(document: dict[str, Any], journal: Path | None = None) -
         return lifecycle.stop_reason
     superseded = _audit_replacement_marker(_graph_plan(document["plan"]))
     if superseded.exists() or superseded.is_symlink():
-        return "audit-plan-superseded: follow " + _required_text(json.loads(read_control_file(superseded)), "continuation_path")
+        return "audit-plan-superseded: follow " + _required_text(parse_json_object(read_control_file(superseded)), "continuation_path")
     return None
 
 
@@ -5904,14 +5920,14 @@ def _review_control_marker(lifecycle: ReviewLifecycle) -> Path | None:
     verify_run_control(binding, policy=asdict(lifecycle))
     for marker in control_marker_paths(binding):
         if marker.exists() or marker.is_symlink():
-            record = json.loads(read_control_file(marker))
+            record = parse_json_object(read_control_file(marker))
             if not isinstance(record, dict) or not isinstance(record.get("stop_reason"), str) or not record["stop_reason"].strip():
                 msg = "run control terminal marker requires a stopping reason"
                 raise ValueError(msg)
             return marker
     extension = Path(binding.generation.path).with_suffix(".extension.json")
     if extension.exists() or extension.is_symlink():
-        record = json.loads(read_control_file(extension))
+        record = parse_json_object(read_control_file(extension))
         if not isinstance(record, dict) or record.get("kind") != "budget-extension":
             msg = "run control extension marker requires its committed transition"
             raise ValueError(msg)
@@ -5967,11 +5983,11 @@ def _review_control_request_identity(document: dict[str, Any], args: argparse.Na
 
 def _replay_review_control(marker: Path, request_identity: str) -> dict[str, Any]:
     """Recover the original complete cancellation result without stopping twice."""
-    stopped = json.loads(read_control_file(marker))
+    stopped = parse_json_object(read_control_file(marker))
     if stopped.get("request_identity") != request_identity:
         msg = f"review stopped or control generation superseded: {stopped.get('stop_reason')}"
         raise ValueError(msg)
-    retained = json.loads(read_control_file(Path(_required_text(stopped, "result_path"))))
+    retained = parse_json_object(read_control_file(Path(_required_text(stopped, "result_path"))))
     result = retained.get("result")
     if (
         retained.get("schema_version") != 1
@@ -6050,7 +6066,7 @@ def _replayed_extension(
     extension_marker = Path(binding.generation.path).with_suffix(".extension.json")
     if not (extension_marker.exists() or extension_marker.is_symlink()):
         return None
-    transition = json.loads(read_control_file(extension_marker))
+    transition = parse_json_object(read_control_file(extension_marker))
     if not isinstance(transition, dict) or transition.get("request_identity") != request_identity:
         msg = "budget generation already extended; use the returned child lifecycle for another extension"
         raise ValueError(msg)
@@ -6068,7 +6084,7 @@ def _extension_base(policy: ReviewLifecycle, marker: Path | None) -> tuple[Revie
     """A stale plan cannot discard the exhausted generation's completed repair history."""
     if marker is None:
         return policy, None
-    terminal = json.loads(read_control_file(marker))
+    terminal = parse_json_object(read_control_file(marker))
     retained = _replay_review_control(marker, _required_text(terminal, "request_identity"))
     authoritative = lifecycle_from_document(retained["review_lifecycle"])
     if replace(policy, stop_reason=None) != replace(authoritative, stop_reason=None):
@@ -6369,7 +6385,103 @@ def _continuation_skill_roots(plan: GraphPlan) -> tuple[Path, ...]:
     return roots or (DEFAULT_SKILL_ROOT,)
 
 
-def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, PLR0915 - one ordered repair transaction.
+def _interleaved_repair_transition(document: dict[str, Any], plan: GraphPlan) -> InterleavedRepairTransition | None:
+    """Parse explicit endpoint attribution before allowing a mixed repair delta."""
+    if "interleaved_staging" not in document:
+        return None
+    require_schema_definition(document, _RUNTIME_OPERATION_INPUT_SCHEMA, "advance-after-mutation")
+    if "post_repair_capture" in document:
+        msg = "interleaved_staging and post_repair_capture are alternative continuations; supply only actual captures"
+        raise ValueError(msg)
+    transition = metadata_transition(
+        {
+            "before": document["previous_capture"],
+            "after": document["new_capture"],
+            "repair_epoch": document["repair_epoch"],
+            "repair_paths": sorted(_text_list(document, "changed_paths", required=True)),
+            **document["interleaved_staging"],
+        }
+    )
+    if not isinstance(transition, InterleavedRepairTransition):
+        msg = "interleaved repair attribution did not produce a repair transition"
+        raise TypeError(msg)
+    root = Path(transition.before.repository_root)
+    changed = set(transition.repair_paths)
+    protected = {
+        str(Path(path).relative_to(root))
+        for node in plan.actual_worker_nodes
+        for path in (node.skill_path, *node.instruction_paths, *node.static_references)
+        if Path(path).is_relative_to(root)
+    }
+    if changed.intersection(protected):
+        msg = "interleaved repair cannot reconcile changed skill, reference or instruction inputs"
+        raise ValueError(msg)
+    return transition
+
+
+def _interleaved_repair_history(
+    document: dict[str, Any], sources: dict[str, tuple[dict[str, Any], dict[str, Any]]], transition: InterleavedRepairTransition
+) -> bytes:
+    """Read and serialize all historical inputs before publishing a continuation."""
+    history = {
+        "transition": asdict(transition),
+        "previous_capture": document["previous_capture"],
+        "new_capture": document["new_capture"],
+        "previous_plan": document["plan"],
+        "previous_metadata_transitions": document.get("external_metadata_transitions", []),
+        "historical_evidence": [
+            {
+                "source": source,
+                "record": record,
+                "files": {
+                    key: {"path": source[key], "digest": digest_bytes(_read_regular_file_no_follow(Path(source[key])))}
+                    for key in ("artifact_path", "metadata_path")
+                },
+            }
+            for source, record in sources.values()
+        ],
+        "previous_execution": {
+            key: _read_regular_file_no_follow(Path(document[key])).decode() for key in ("journal_path", "dispatches_path") if key in document
+        },
+        "missing_intermediate_capture": True,
+    }
+    return (json.dumps(history, indent=2, sort_keys=True) + "\n").encode()
+
+
+def _retain_interleaved_repair(result: dict[str, Any], history: bytes) -> dict[str, Any]:
+    """Retain actual history and expose a small, directly executable continuation."""
+    store = Path(result["lifecycle_input_path"]).parent
+    history_path = store / "repair-transition.json"
+    _write_bytes_atomically_once(history_path, history, mode=0o444)
+    action = NextReadyAction(
+        tuple(
+            runtime_command(
+                Path(__file__),
+                "next-ready",
+                "--input",
+                result["lifecycle_input_path"],
+                "--dispatches",
+                result["dispatches_path"],
+                "--journal",
+                result["journal_path"],
+                "--current-capture",
+                result["capture_path"],
+                "--output-dir",
+                str(store / "ready"),
+            )
+        )
+    )
+    return {
+        **result,
+        "transition_kind": "interleaved-repair-and-staging",
+        "current_source_state": result["new_source_state"],
+        "repair_transition_path": str(history_path),
+        "next_action": asdict(action),
+        "next_command": action.command,
+    }
+
+
+def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, PLR0912, PLR0915 - one ordered repair transaction.
     """Close one repair epoch, recapture once, and emit a fresh final-state graph."""
     raw_plan = document.get("plan")
     previous_capture = document.get("previous_capture")
@@ -6404,10 +6516,14 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
     if epoch == old_plan.review_lifecycle.repairs_completed + 1 and epoch > old_plan.review_lifecycle.repair_budget:
         return _exhausted_mutation(document, old_plan)
     repair_lifecycle = old_plan.review_lifecycle.next_repair(epoch)
-    changed_paths = _mutation_path_delta(document, previous_capture, new_capture)
+    interleaved = _interleaved_repair_transition(document, old_plan)
+    if interleaved is not None:
+        repair_lifecycle = replace(repair_lifecycle, interleaved_repair_epochs=(*repair_lifecycle.interleaved_repair_epochs, epoch))
+    changed_paths = _mutation_path_delta(document, previous_capture, new_capture, interleaved)
     metadata = metadata_transition({"before": new_capture, "after": document["post_repair_capture"]}) if "post_repair_capture" in document else None
     captured_paths = _text_list(new_capture, "captured_scope_paths")
     sources = _mutation_evidence_sources(document, old_plan)
+    interleaved_history = _interleaved_repair_history(document, sources, interleaved) if interleaved is not None else None
     planning_input = bootstrap_document(new_capture, planning_template)
     if new_capture["capture_mode"] == "baseline" and not planning_input.get("change_target"):
         planning_input["concrete_change_target"] = bool(captured_head_changes("git", Path(new_capture["repository_root"]), new_capture))
@@ -6434,14 +6550,21 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
         msg = "recaptured repair epoch produced a blocked final-state plan: " + "; ".join(new_plan.blockers)
         raise ValueError(msg)
     invalidated = _mutation_invalidated_nodes(old_plan, new_plan, changed_paths, repository_root, sources)
-    new_plan, reuse_decisions = _carry_forward_audits(
-        document, old_plan, new_plan, planning_input, invalidated=invalidated, sources=sources, observed_metadata_transition=metadata
+    reuse_document = (
+        {**document, "external_metadata_transitions": [*document.get("external_metadata_transitions", []), asdict(interleaved)]}
+        if interleaved is not None
+        else document
     )
-    new_plan, coverage_reviews = _plan_delta_audits(document, old_plan, new_plan, sources)
+    new_plan, reuse_decisions = _carry_forward_audits(
+        reuse_document, old_plan, new_plan, planning_input, invalidated=invalidated, sources=sources, observed_metadata_transition=metadata
+    )
+    new_plan, coverage_reviews = _plan_delta_audits(reuse_document, old_plan, new_plan, sources)
     new_plan = _epoch_scoped_plan(new_plan, epoch)
     new_plan = replace(new_plan, review_lifecycle=repair_lifecycle, audit_replacements=old_plan.audit_replacements)
     reused_ids = {item.evidence_id for item in new_plan.audit_reuse_transitions}
     artifact_store = Path(_required_text(document, "artifact_store")).resolve() / f"repair-epoch-{epoch:03d}"
+    if interleaved is not None:
+        verify_live_source(new_capture)
     dispatch_set = materialize_dispatches(
         {
             "artifact_store": str(artifact_store),
@@ -6484,6 +6607,7 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
             if record["evidence_id"] in reused_ids
         ],
         "preservation_policy": "verified-unchanged-audit-inputs",
+        "proof_limitations": _proof_limitations(new_plan),
         "reused_evidence_ids": sorted(reused_ids),
         "reuse_decisions": sorted(reuse_decisions, key=lambda item: item["node_id"]),
         "audit_reuse_counts": {"retained": len(reused_ids), "scheduled_audits": sum(node.mode == "audit" for node in new_plan.actual_worker_nodes)},
@@ -6506,6 +6630,8 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
         ],
         "status": "advanced",
     }
+    if interleaved_history is not None:
+        return _retain_interleaved_repair(result, interleaved_history)
     return _resume_after_repair_metadata(document, result, sources) if metadata is not None else result
 
 
@@ -6636,7 +6762,7 @@ def _historical_validation_evidence(evidence: dict[str, str], plan: GraphPlan, n
             msg = "preserved validation recovery evidence changed"
             raise ValueError(msg)
         saved[filename] = content
-    lifecycle = json.loads(saved["lifecycle.json"])
+    lifecycle = parse_json_object(saved["lifecycle.json"])
     previous = _graph_plan(lifecycle["plan"])
     source_state = _state(lifecycle, "source_state")
     if _plan_digest(previous) != recovery["previous_plan_digest"] or source_state != tuple(recovery["source_state"]):
@@ -6877,7 +7003,7 @@ def _read_execution_journal_content(
         if not line.strip():
             msg = f"execution journal contains a blank record at line {line_number}"
             raise ValueError(msg)
-        value = json.loads(line)
+        value = parse_json_object(line)
         if not isinstance(value, dict):
             msg = f"execution journal record {line_number} must be an object"
             raise TypeError(msg)
@@ -7765,7 +7891,7 @@ def _replace_invalidated_audit_locked(document: dict[str, Any], args: argparse.N
     request_identity = digest_bytes(canonical_json(document).encode())
     marker = _audit_replacement_marker(plan)
     if marker.exists() or marker.is_symlink():
-        prior = json.loads(read_control_file(marker))
+        prior = parse_json_object(read_control_file(marker))
         if prior["request_identity"] != request_identity:
             msg = "audit plan already superseded; follow the replacement continuation"
             raise ValueError(msg)
@@ -7773,7 +7899,7 @@ def _replace_invalidated_audit_locked(document: dict[str, Any], args: argparse.N
         if digest_bytes(result_bytes) != prior["result_digest"]:
             msg = "audit replacement result changed"
             raise ValueError(msg)
-        return json.loads(result_bytes)
+        return parse_json_object(result_bytes)
     _require_running_review(document, args.journal)
     events, state, head = read_execution_journal(args.journal, plan=plan, source_state=source_state)
     entries = _dispatches_by_node(_read_json_object(args.dispatches), plan=plan, source_state=source_state)
@@ -8299,6 +8425,12 @@ def _delivery_validation_coverage(item: dict[str, Any], accepted: dict[str, Any]
     }
 
 
+def _proof_limitations(plan: GraphPlan) -> list[dict[str, Any]]:
+    """Keep endpoint proof limits visible through subsequent repair and report steps."""
+    epochs = plan.review_lifecycle.interleaved_repair_epochs
+    return [{**asdict(MissingIntermediateCapture()), "repair_epochs": list(epochs)}] if epochs else []
+
+
 def report_delivery(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, PLR0915 - preserve separate typed evidence, source and plan admission gates.
     """Report verified current evidence and outstanding work without certifying a proof."""
     plan = _graph_plan(document["plan"])
@@ -8381,6 +8513,7 @@ def report_delivery(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, 
         "status": "reported",
         "delivery_profile": "routine",
         "graph_proof_status": "not-certified",
+        "proof_limitations": _proof_limitations(plan),
         "review_lifecycle": asdict(plan.review_lifecycle),
         "repairs_completed": plan.review_lifecycle.repairs_completed,
         "current_source_state": list(_current_metadata_state(document)),
@@ -8621,6 +8754,7 @@ def finalize_proof(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, P
         "artifact_manifest": asdict(manifest),
         "blockers": list(blockers),
         "graph_proof_status": graph_proof_status,
+        "proof_limitations": _proof_limitations(plan),
         "validation_recoveries": list(plan.validation_recoveries),
         "audit_replacements": list(plan.audit_replacements),
         "handoff_reconciliation": handoff_reconciliation,
@@ -9038,7 +9172,7 @@ def _verify_audit_captures(dispatch: dict[str, Any], before: Path, after: Path) 
             msg = f"audit {phase} capture must use its dispatched artifact path"
             raise ValueError(msg)
         content = _read_regular_file_no_follow(path)
-        snapshot = source_snapshot(json.loads(content))
+        snapshot = source_snapshot(parse_json_object(content))
         snapshot.verify()
         expected = {
             "schema_version": 1,
@@ -9048,7 +9182,10 @@ def _verify_audit_captures(dispatch: dict[str, Any], before: Path, after: Path) 
             "captured_worktree_fingerprint": snapshot.captured_worktree_fingerprint,
             "repository_state_fingerprint": snapshot.repository_state_fingerprint,
         }
-        if snapshot.repository_root != dispatch["repository_root"] or json.loads(_read_regular_file_no_follow(Path(observation["receipt_path"]))) != expected:
+        if (
+            snapshot.repository_root != dispatch["repository_root"]
+            or parse_json_object(_read_regular_file_no_follow(Path(observation["receipt_path"]))) != expected
+        ):
             msg = f"audit {phase} capture receipt does not match its durable observation"
             raise ValueError(msg)
 
@@ -9106,10 +9243,7 @@ def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace)
         raise ValueError(msg)
 
     if contract in {"compact-review", "compact-validation"}:
-        payload = json.loads(payload_bytes)
-        if not isinstance(payload, dict):
-            msg = "compact worker payload root must be an object"
-            raise TypeError(msg)
+        payload = parse_json_object(payload_bytes)
         require_schema(payload, _review_payload_schema(dispatch) if contract == "compact-review" else _VALIDATION_PAYLOAD_SCHEMA)
         if dispatch.get("mode") == "synthesis":
             events, _lifecycle, _head = read_execution_journal(args.journal, plan=plan, source_state=source_state)
@@ -9119,7 +9253,7 @@ def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace)
         compiler_input = {"dispatch": dispatch, "payload": payload}
         content, metadata = compile_review(compiler_input) if contract == "compact-review" else compile_validation(compiler_input)
     elif contract == "compact-independent-review":
-        payload = json.loads(payload_bytes)
+        payload = parse_json_object(payload_bytes)
         require_schema(payload, _INDEPENDENT_PAYLOAD_SCHEMA)
         if (args.status is not None and args.status != payload.get("status")) or (
             args.limitation is not None and args.limitation != payload.get("limitations")
@@ -9286,7 +9420,7 @@ def _retain_provenance_rejection(document: dict[str, Any], content: bytes, error
     path = target.with_name(f"{document['node_id']}.provenance-rejected.{identity}.json")
     receipt = {
         "error": str(error),
-        "payload": json.loads(content),
+        "payload": parse_json_object(content),
         "payload_digest": digest_bytes(content),
         "recovery": (
             "Correct the missing declarations from actual reads before acceptance; one correction attempt is allowed. Declarations do not prove comprehension."
@@ -9333,7 +9467,7 @@ def _validation_owner_warnings(contract: dict[str, Any], payload_bytes: bytes) -
     skill_root = Path(dispatch["skill_path"]).parent.parent
     return [
         f"Validation owner {owner} differs from dispatch skill {dispatch['skill_id']}; verify the applied checklist. Shared validator owners are allowed."
-        for requirement in json.loads(payload_bytes).get("validation_requirements", [])
+        for requirement in parse_json_object(payload_bytes).get("validation_requirements", [])
         if (owner := requirement["owner"]) not in {dispatch["skill_id"], "review-validator"}
         and re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", owner)
         and (skill_root / owner / "SKILL.md").is_file()
@@ -9465,7 +9599,9 @@ def _write_json_operation_result(args: argparse.Namespace, output_path: Path, ou
     try:
         _write_text_once(output_path, output_text)
     except (OSError, ValueError) as error:
-        if args.operation != "resume-after-external-source":
+        if args.operation != "resume-after-external-source" and not (
+            args.operation == "advance-after-mutation" and output.get("transition_kind") == "interleaved-repair-and-staging"
+        ):
             raise
         paths = {key: output[key] for key in ("lifecycle_input_path", "dispatches_path", "capture_path", "journal_path")}
         msg = f"result file could not be written: {error}; continuation was published; resume using these retained paths: {canonical_json(paths)}"
@@ -9550,10 +9686,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _argument_parser().parse_args(argv)
     document: object = None
     try:
-        document = json.loads(args.input.read_text(encoding="utf-8"))
-        if not isinstance(document, dict):
-            msg = "input root must be an object"
-            raise TypeError(msg)
+        document = parse_json_object(args.input.read_bytes())
         operation_document = _operation_input(document, args)
         usage_ledger = os.environ.get("REVIEW_GRAPH_USAGE_LEDGER", "")
         if usage_ledger:
@@ -9586,10 +9719,25 @@ def main(argv: list[str] | None = None) -> int:
         elif isinstance(error, SchemaValidationError):
             attempt = document.get("handoff_attempt", 1) if isinstance(document, dict) else 1
             retry_allowed = isinstance(attempt, int) and not isinstance(attempt, bool) and attempt == 1
-            output = {**error.as_dict(), "handoff_attempt": attempt, "maximum_handoff_attempts": 2, "retry_allowed": retry_allowed}
+            output = {
+                **error.as_dict(),
+                "handoff_attempt": attempt,
+                "maximum_handoff_attempts": 2,
+                "retry_allowed": retry_allowed,
+                "rejection": EvaluationRejection.from_exception(error).as_dict(),
+            }
             print(canonical_json(output), file=sys.stderr)
         else:
-            print(f"review_graph_runtime: {format_exception_diagnostics(error)}", file=sys.stderr)
+            print(
+                canonical_json(
+                    {
+                        "status": "rejected",
+                        "message": f"review_graph_runtime: {format_exception_diagnostics(error)}",
+                        "rejection": EvaluationRejection.from_exception(error).as_dict(),
+                    }
+                ),
+                file=sys.stderr,
+            )
         return 2
 
 

@@ -140,3 +140,5 @@ Check:
 - examples cover at least one realistic use, not just a trivial constructor
 
 If doctest *test quality* is the primary concern, defer to `rust-test-quality`. This skill cares whether the example exists, demonstrates the API contract, and uses the right import surface.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

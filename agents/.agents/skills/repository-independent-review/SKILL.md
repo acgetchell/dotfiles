@@ -64,3 +64,5 @@ parser, error-branch, unexpected-exception, and test-boundary checks whenever
 they are present.
 
 Do not include a finding merely to make the result non-empty.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

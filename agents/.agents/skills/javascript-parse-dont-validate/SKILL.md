@@ -51,3 +51,5 @@ fields, boundary values, NaN/Infinity, coercion traps, and invalid combinations.
 Test the public parser and consumers' handling of rejection; do not merely snapshot
 a schema's internals. Use MSW for actual HTTP-to-parser behavior when relevant.
 Run typechecking separately: static and runtime validation prove different things.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

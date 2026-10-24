@@ -64,3 +64,5 @@ Run relevant tests, typecheck/build, and configured lint. Separate deterministic
 unit/UI evidence from browser and live-service acceptance. State unverified
 behavior explicitly. Do not add tests for reversible cosmetic edits unless a
 meaningful regression risk justifies them.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

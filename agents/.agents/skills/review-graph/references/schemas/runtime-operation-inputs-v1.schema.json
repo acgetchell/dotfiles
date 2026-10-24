@@ -783,6 +783,10 @@
     },
     "advance-after-mutation": {
       "additionalProperties": false,
+      "dependentRequired": {
+        "journal_path": ["dispatches_path"],
+        "dispatches_path": ["journal_path"]
+      },
       "properties": {
         "journal_path": {
           "type": "string",
@@ -819,6 +823,15 @@
         },
         "post_repair_capture": {
           "type": "object"
+        },
+        "interleaved_staging": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["repair_attribution", "staging_attribution"],
+          "properties": {
+            "repair_attribution": {"type": "string", "minLength": 1},
+            "staging_attribution": {"type": "string", "minLength": 1}
+          }
         },
         "plan": {
           "type": "object"

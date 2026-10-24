@@ -113,3 +113,5 @@ Remaining actionable findings mean `not-ready`; missing required evidence
 means `blocked`. Keep readiness separate from graph completion and validator success.
 
 Lead with unresolved P0/P1 findings. Include the readiness verdict, findings by severity, prior specialist outcomes and resolved contradictions, dependency/unsafe/deletion candidates, validators and exact results, supported configurations actually demonstrated, deferred work and residual risk, files changed, and confirmation that no git state mutation occurred when true.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

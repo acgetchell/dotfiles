@@ -99,3 +99,5 @@ For each finding, name the invariant, transition edge, observable invalid state,
 ## Handoff
 
 Summarize changed files, invariants checked, transition and failure paths covered, validators and results, deferred architectural opportunities, and confirmation that no git state mutations were performed when true.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

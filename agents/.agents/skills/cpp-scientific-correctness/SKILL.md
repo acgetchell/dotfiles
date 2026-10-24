@@ -90,3 +90,5 @@ For each finding, state the violated contract, input regime, observed or derivab
 ## Handoff
 
 Summarize scientific contracts reviewed, changed files, fixed defects, independent oracles used, seeds or fixtures relevant to reproduction, validator results, residual limits, and confirmation that no git state mutations were performed when true.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

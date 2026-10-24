@@ -142,3 +142,5 @@ For reviews, report each finding with the transformation and effect contract,
 its observable risk, the smallest clearer design, and validation evidence. For
 implementation work, summarize changed files, semantic decisions, validators,
 and any deliberately retained imperative code.
+
+Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.
