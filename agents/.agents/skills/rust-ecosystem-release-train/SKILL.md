@@ -8,6 +8,11 @@ description: "Coordinate dependent Rust crate releases, registry publication ord
 Coordinate a Rust crate release train while preserving each repository's
 ownership, scientific contracts, and publication safeguards.
 
+Use [issue-planning-to-release](../issue-planning-to-release/SKILL.md) for the shared
+scope, issue mapping, publication/adoption, validation-ownership, and authorization
+contract. This skill adds Rust-specific coordination; it does not redefine those
+policies.
+
 ## Load The Ecosystem Contract
 
 Select by release activity, without a repository allowlist or required profile.
@@ -24,36 +29,15 @@ dependency graph and release policy from the supplied manifests and registry.
 Exclude private or unpublished repositories from this public skill. Do not
 infer or expose their names, dependencies, issues, or release plans.
 
-## Authorization Boundary
-
-Release planning and readiness assessment are read-only by default. Inspect
-repository files, GitHub metadata, crates.io state, and official Rust sources,
-but do not stage, commit, push, tag, checkout, reset, stash, create, edit, move,
-close, or publish issues, milestones, dependency links, releases, repository
-content, or crates without explicit user authorization for that operation and scope.
-Explicit authorization for these mutating operations is required before execution,
-including all existing repo and publication mutations.
-
-Honor existing explicit authorization for the same action and scope. When
-additional authorization is needed, first preview the exact issues, milestones,
-dependency relationships, release records, repository edits, and publication
-steps intended for each repository. Authorization to plan or assess readiness
-does not authorize external or repository mutation, and publication requires
-explicit authorization even when the rest of the train is already approved.
-
 ## Enforce The Release Contract
 
 - For the maintained ecosystem, synchronize releases at intentional stable Rust boundaries; for other trains, honor their stated release/MSRV policy.
 - When the selected train's policy uses a stable Rust release as a public MSRV
   boundary, align each repository's manifest, pinned toolchain, Clippy MSRV,
   active documentation, and CI with that boundary before publishing its release.
-- Use crates.io versions for inter-repository dependencies. Never commit Git or
-  path dependencies as a substitute for an upstream release.
-- Distinguish **code merged** from **crate available downstream**. A downstream
-  release remains blocked until the required upstream version is published on
-  crates.io and can be resolved normally.
-- Permit development and isolated prepublication validation in parallel, but
-  publish in dependency order.
+- Apply the shared publication boundary to crates.io dependency resolution and
+  publish in dependency order. Development and isolated upstream package fixtures
+  may proceed in parallel within their authorized scope.
 - Do not hard-code current versions, milestones, pins, or Rust dates in this
   skill. Discover them from manifests, locks, GitHub, crates.io, and official
   Rust sources on every planning run.
@@ -73,12 +57,10 @@ Rust boundary. `delaunay` must consume the published `la-stack` release.
 
 ## Report The Train
 
-Report:
+Extend the shared issue-mapped release plan with:
 
 - the current Rust boundary and evidence source;
-- the publication DAG with exact planned versions discovered at runtime;
-- each repository's retained release gates and deferred issues;
+- the publication DAG with exact planned versions when established, and unresolved
+  version decisions otherwise;
 - tooling drift that must be reconciled, plus justified differences;
-- which crates are code-ready, published, or still blocked;
-- the next executable work item and the condition that unlocks the following
-  publication.
+- Rust-specific MSRV, native feature/platform, and crate-artifact release gates.

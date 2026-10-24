@@ -22,32 +22,23 @@ For every repository in the graph, inspect:
 
 After any release publication, perform post-publication package inspection and
 documentation/release verification for affected repositories with explicit evidence
-for each check before declaring a crate release-ready.
+for each check before declaring that release complete.
 
 Prefer repository files and native GitHub metadata over issue-body prose. Use
 official Rust release sources for schedules and final release notes.
 
 ## Build The Release Plan
 
-1. Identify or propose one release-capstone issue for each participating release.
-   Include a Rust-adoption issue only when the selected train's policy includes
-   that work; create either issue only after authorization.
-2. Treat a release milestone as a publication contract. Review every open item;
-   keep genuine release gates and move unrelated work rather than silently
-   delaying the train.
-3. Make each release capstone blocked by all retained local gates and by the
-   release capstone of each upstream crate it consumes.
-4. Make downstream integration work depend on the upstream **published-release
-   capstone**, not merely on the implementation issue that introduced an API.
-5. Work bottom-up. Before each publication, explicit authorization is required for
-   any mutation, including moving work items, adding dependency links, publishing
-   or closing issues, and updating any downstream Cargo or lockfile state. When
-   missing, emit reviewable proposals instead of applying direct changes.
-6. Work bottom-up. After each publication, update downstream Cargo
-   requirements/locks through the registry, then run downstream contract
-   validation; only execute those updates with explicit authorization.
-7. Keep the final ecosystem capstone open until the published crates resolve
-   without overrides and the complete downstream validation passes.
+Apply the [shared planning contract](../../issue-planning-to-release/SKILL.md)
+to each participating release, then add its Rust/MSRV and Cargo requirements.
+Include a Rust-adoption issue only when the selected train's policy includes that
+work. Repository release guides own the executable commands.
+
+For a requested end-to-end train, a separate ecosystem capstone may require all
+published crates to resolve and final downstream validation to pass. Its broader
+completion criterion must not become a downstream-adoption blocker on any
+upstream publication capstone. Plan shared Python tooling publication and later
+crate-repository adoption through the same ownership boundary.
 
 When the selected train's policy includes stable-Rust adoption, finish compatible
 feature and defect work, audit beta compatibility, and prepare release candidates
