@@ -28,6 +28,7 @@
             "action": {
               "const": "begin-repair"
             },
+            "verification_followup": {"$ref": "#/$defs/verificationFollowup"},
             "authorization": {
               "const": "review-and-fix"
             }
@@ -846,6 +847,7 @@
           "minimum": 1,
           "type": "integer"
         },
+        "verification_followup": {"$ref": "#/$defs/verificationFollowup"},
         "routing_catalog_path": {
           "minLength": 1,
           "type": "string"
@@ -967,10 +969,38 @@
     "prepare-validation-timing": {
       "$ref": "#/$defs/stdinWorkerPayloadContract"
     },
+    "verificationFollowup": {
+      "type": "object", "additionalProperties": false,
+      "required": ["previous_repair", "finding_evidence_id", "reason"],
+      "properties": {
+        "previous_repair": {
+          "type": "object", "additionalProperties": false,
+          "required": ["path", "digest"],
+          "properties": {
+            "path": {"type": "string", "minLength": 1},
+            "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+          }
+        },
+        "finding_evidence_id": {"type": "string", "minLength": 1},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    },
     "schedule-ready": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "worker_requirements": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["node_id", "model", "reason"],
+            "properties": {
+              "node_id": {"type": "string", "minLength": 1},
+              "model": {"type": "string", "minLength": 1},
+              "reason": {"type": "string", "minLength": 1}
+            }
+          }
+        },
         "plan": {
           "type": "object"
         },

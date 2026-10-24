@@ -36,7 +36,7 @@ instructions/references, and lazy schema/provenance access. Coordinator executio
 - Run `capture_scope.py` before routing and after each authorized repair batch.
 - Bootstrap capture and template with
   `review_graph_bootstrap.py`; follow its compact receipt and `next_command`.
-  Branch `just ci`: [starter](references/bootstrap-starter.md).
+  Starters: [branch just ci](references/bootstrap-starter.md), [baseline-release](references/baseline-release.md).
   Keep full proof artifacts on disk; use `--full-output` only for diagnosis.
 - Fix only when authorized and never mutate Git state.
 - Keep all proof artifacts outside the reviewed repository.

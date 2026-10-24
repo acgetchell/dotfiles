@@ -264,7 +264,10 @@ historical rechecked findings visible. Reconcile original validation needs and
 handoffs in the new payload. Validators still run for the new source. Omitted
 partitions, uncertain dependencies, changed instructions, or changed routing
 require fresh inspection. Legacy audits without partitions retain whole-audit
-reuse behavior; a delta audit is not itself a fresh partition origin.
+reuse behavior. A completed delta audit may become a later origin only through
+replay of its full compiler-bound inheritance chain. Its fresh reads stay distinct
+from inherited paths; the runtime preserves proved units and conservatively groups
+the rechecked surface, retaining findings and validation/handoff obligations.
 
 Metadata at `expectation.coverage_reuse` and the normalized record retain the same
 execution view and proof reference. Native Markdown binds that view by canonical

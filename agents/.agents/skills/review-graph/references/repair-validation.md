@@ -69,6 +69,36 @@ The final planned validators execute against the final capture, even if the
 same command passed as a supplemental diagnostic. Their evidence retains native
 platform and hosted-CI limitations normally.
 
+## One Verification Follow-Up
+
+A completed batch permits one final correction discovered by its affected review
+in an already repaired file. Before editing, call `review-control begin-repair`
+with `verification_followup` alongside the normal control input:
+
+```json
+{
+  "previous_repair": {"path": "/tmp/review-proof/repair-result.json", "digest": "sha256:<exact saved result digest>"},
+  "finding_evidence_id": "<accepted current review evidence ID>",
+  "reason": "Correct the confirmed defect found while verifying the repaired helper."
+}
+```
+
+The runtime binds the saved result to its immutable run-control repair origin,
+current plan/capture, and a current completed audit or independent-review finding.
+Inherited historical findings cannot authorize a follow-up. The control receipt
+returns the same `repair_epoch` and permitted repaired paths. Keep execution
+quiescent and honor any stop decision. After the correction, capture and use
+`advance-after-mutation` with the same `verification_followup`, ordinal, current
+lifecycle, evidence sources, and normal changed-path declaration. The runtime
+rechecks the boundary, retains prior attempts, and emits a distinct immutable
+verification continuation without incrementing `repairs_completed`.
+
+This allowance also applies at the final budgeted batch, before a budget-exhaustion
+stop has been recorded. It does not clear a stop, permit a second follow-up, expand
+the original repaired paths, or waive validators and affected source reviews.
+Expanded repairs use the next ordinary batch or an explicitly authorized budget
+extension. Interleaved staging uses its existing separate continuation.
+
 ## Final Validation And Reuse
 
 Successful early evidence stays in the same plan and final proof. Later audits

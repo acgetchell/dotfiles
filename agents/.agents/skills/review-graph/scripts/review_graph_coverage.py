@@ -101,6 +101,8 @@ def audit_coverage_units(payload: dict[str, Any], inputs: AuditInputIdentity) ->
     validate_coverage_units(payload, inputs.owned_paths)
     if payload.get("coverage_units"):
         return payload["coverage_units"]
+    if payload.get("coverage_reuse"):
+        return _continued_coverage_units(payload, inputs)
     return [
         {
             "unit_id": "whole-audit",
@@ -110,6 +112,65 @@ def audit_coverage_units(payload: dict[str, Any], inputs: AuditInputIdentity) ->
             "finding_indices": list(range(1, len(payload["findings"]) + 1)),
         }
     ]
+
+
+def _continued_coverage_units(payload: dict[str, Any], inputs: AuditInputIdentity) -> list[dict[str, Any]]:
+    """Retain proved partitions; conservatively group the freshly rechecked surface."""
+    context = payload["coverage_reuse"]
+    units: list[dict[str, Any]] = []
+    assigned: set[int] = set()
+    # The compiler has replayed this context and its original evidence. Keep
+    # inherited judgments separate from fresh reads; no worker claims new units.
+    for unit in effective_units(context):
+        if unit["disposition"] != "reused":
+            continue
+        original_ids = {context["original_findings"][index - 1]["finding_id"] for index in unit["finding_indices"]}
+        indices = [
+            index
+            for index, finding in enumerate(payload["findings"], start=1)
+            if any(item["evidence_id"] == context["evidence_id"] and item["finding_id"] in original_ids for item in finding.get("source_findings", []))
+        ]
+        assigned.update(indices)
+        units.append(
+            {
+                **{key: unit[key] for key in ("unit_id", "owned_paths", "dependency_paths", "dependency_uncertainty")},
+                **({"recipe_dependencies": unit["recipe_dependencies"]} if "recipe_dependencies" in unit else {}),
+                "finding_indices": indices,
+            }
+        )
+    rechecked = sorted(set(inputs.owned_paths) - {path for unit in units for path in unit["owned_paths"]})
+    remaining = sorted(set(range(1, len(payload["findings"]) + 1)) - assigned)
+    dependencies = sorted(set(inputs.nearby_contract_owners) | set(inputs.command_read_paths))
+    if rechecked:
+        units.append(
+            {
+                "unit_id": "rechecked:" + digest_json([rechecked, dependencies]),
+                "owned_paths": rechecked,
+                "dependency_paths": dependencies,
+                "dependency_uncertainty": "",
+                "finding_indices": remaining,
+            }
+        )
+    elif remaining:
+        # New findings outside a freshly inspected surface cannot inherit an
+        # independence claim. Collapse to a conservative complete audit unit.
+        return [
+            {
+                "unit_id": "whole-audit",
+                "owned_paths": list(inputs.owned_paths),
+                "dependency_paths": sorted({*dependencies, *(path for unit in units for path in unit["dependency_paths"])}),
+                "dependency_uncertainty": "Fresh findings did not have a separately inspected coverage unit.",
+                "finding_indices": list(range(1, len(payload["findings"]) + 1)),
+            }
+        ]
+    # Every new reader dependency applies to all retained judgments unless the
+    # original partition already assigned it; never silently discard a read.
+    declared = {path for unit in units for path in unit["dependency_paths"]}
+    unassigned = set(dependencies) - declared
+    for unit in units:
+        unit["dependency_paths"] = sorted(set(unit["dependency_paths"]) | unassigned)
+    validate_coverage_units({**payload, "coverage_units": units}, inputs.owned_paths)
+    return units
 
 
 def coverage_decisions(  # noqa: PLR0913 - shared provenance proof plus optional retained replay bytes.
@@ -194,6 +255,13 @@ def reused_paths(context: dict[str, Any] | None) -> tuple[str, ...]:
         if context is not None
         else ()
     )
+
+
+def reused_dependency_paths(context: dict[str, Any] | None) -> tuple[str, ...]:
+    """Keep inherited source dependencies separate from this worker's actual reads."""
+    if context is None:
+        return ()
+    return tuple(sorted({cast("str", path) for unit in effective_units(context) if unit["disposition"] == "reused" for path in unit["dependency_paths"]}))
 
 
 def combined_findings(payload: dict[str, Any], context: dict[str, Any] | None) -> list[dict[str, Any]]:
