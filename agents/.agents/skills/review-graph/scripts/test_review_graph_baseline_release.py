@@ -315,6 +315,18 @@ def test_baseline_release_template_rejects_partial_capture_and_misplaced_outputs
         starter_template(capture, choices)
 
 
+def _assert_verification_namespace(original: dict[str, Any], verification: dict[str, Any]) -> None:
+    assert verification["new_plan"]["review_lifecycle"]["repairs_completed"] == 1
+    original_node_ids = {node["node_id"] for node in original["new_plan"]["actual_worker_nodes"]}
+    verification_node_ids = {node["node_id"] for node in verification["new_plan"]["actual_worker_nodes"]}
+    assert verification_node_ids.isdisjoint(original_node_ids)
+    assert all(node_id.startswith("repair-epoch-001-verification-") for node_id in verification_node_ids)
+    assert {item["node_id"] for item in verification["coverage_reuse_decisions"]} <= verification_node_ids
+    assert {item["node_id"] for item in verification["new_plan"]["audit_delta_reviews"]} <= verification_node_ids
+    assert {unit["node_id"] for unit in verification["new_plan"]["coalesced_validation_units"]} <= verification_node_ids
+    assert all(node["node_id"] not in node["replaces_node_ids"] for node in verification["replacement_lineage"])
+
+
 def test_verification_followup_keeps_batch_and_rejects_repeated_or_expanded_work(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     request, result, _metrics = _repair(tmp_path, capsys)
     previous_path = tmp_path / "first-repair.json"
@@ -413,7 +425,7 @@ def test_verification_followup_keeps_batch_and_rejects_repeated_or_expanded_work
     with pytest.raises(ValueError, match="current completed review evidence"):
         runtime.advance_after_mutation(stale)
     second = runtime.advance_after_mutation(continuation)
-    assert second["new_plan"]["review_lifecycle"]["repairs_completed"] == 1
+    _assert_verification_namespace(result, second)
     scientific_recheck = next(item for item in second["dispatch_set"]["dispatches"] if item["dispatch"]["skill_id"] == "rust-scientific-correctness")
     assert runtime.reused_paths(scientific_recheck["dispatch"].get("coverage_reuse")) == ("untouched.rs",)
     assert second["repair_epoch"]["verification_followup"] == followup

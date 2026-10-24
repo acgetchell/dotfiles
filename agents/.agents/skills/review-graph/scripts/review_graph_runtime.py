@@ -4683,9 +4683,9 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
     return output
 
 
-def _epoch_scoped_plan(plan: GraphPlan, epoch: int) -> GraphPlan:
+def _epoch_scoped_plan(plan: GraphPlan, epoch: int, *, suffix: str = "") -> GraphPlan:
     """Give every executable identity a repair-epoch namespace."""
-    prefix = f"repair-epoch-{epoch:03d}-"
+    prefix = f"repair-epoch-{epoch:03d}{suffix}-"
     node_ids = {node.node_id: prefix + node.node_id for node in plan.actual_worker_nodes}
 
     def mapped(node_id: str | None) -> str | None:
@@ -6636,10 +6636,10 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
         reuse_document, old_plan, new_plan, planning_input, invalidated=invalidated, sources=sources, observed_metadata_transition=metadata
     )
     new_plan, coverage_reviews = _plan_delta_audits(reuse_document, old_plan, new_plan, sources)
-    new_plan = _epoch_scoped_plan(new_plan, epoch)
+    suffix = "-verification" if followup is not None else ""
+    new_plan = _epoch_scoped_plan(new_plan, epoch, suffix=suffix)
     new_plan = replace(new_plan, review_lifecycle=repair_lifecycle, audit_replacements=old_plan.audit_replacements)
     reused_ids = {item.evidence_id for item in new_plan.audit_reuse_transitions}
-    suffix = "-verification" if followup is not None else ""
     artifact_store = Path(_required_text(document, "artifact_store")).resolve() / f"repair-epoch-{epoch:03d}{suffix}"
     if interleaved is not None:
         verify_live_source(new_capture)
@@ -6692,7 +6692,7 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
         "validation_reconciliation": _validation_reconciliation(
             new_plan, [record for _source, record in sources.values() if record["evidence_id"] in reused_ids]
         ),
-        "coverage_reuse_decisions": [{**item, "node_id": f"repair-epoch-{epoch:03d}-" + item["node_id"]} for item in coverage_reviews],
+        "coverage_reuse_decisions": [{**item, "node_id": f"repair-epoch-{epoch:03d}{suffix}-" + item["node_id"]} for item in coverage_reviews],
         "unaffected_node_ids": [node.node_id for node in unaffected],
         "repair_epoch": {
             **({"verification_followup": followup} if followup is not None else {}),
