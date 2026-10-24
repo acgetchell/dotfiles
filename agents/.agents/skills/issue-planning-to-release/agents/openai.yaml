@@ -1,0 +1,4 @@
+interface:
+  display_name: "Issue Planning to Release"
+  short_description: "Plan bounded releases and downstream adoption"
+  default_prompt: "Use $issue-planning-to-release to group these issues into PRs and bounded releases with publication cutoffs, validation ownership, and separate consumer adoption."

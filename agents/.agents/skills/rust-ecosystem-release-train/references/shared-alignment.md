@@ -22,3 +22,7 @@ For each release train, compare and intentionally reconcile:
 Never bulk-copy configuration without checking the receiving repository's
 commands, features, platforms, artifacts, and failure contracts. Validate the
 shared contract locally and in the repository that owns each change.
+
+Apply the [shared planning contract](../../issue-planning-to-release/SKILL.md)
+when a change needs a new supplying package release. Keep upstream generic
+validation and publication separate from each consumer's later alignment work.

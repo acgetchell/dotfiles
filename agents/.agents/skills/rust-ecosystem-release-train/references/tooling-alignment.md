@@ -25,9 +25,9 @@ llvm-cov, machete, Clippy SARIF, dprint, git-cliff, Just, rumdl, SARIF formatter
 Taplo, typos, uv, and Zizmor. Preserve specialized pins such as Delaunay's
 profilers/paper tools or repository-specific security tools only where needed.
 
-When a pin moves, update every applicable repository deliberately, run the
-owning validators, and record exclusions. Do not assume the numerically largest
-pin is compatible everywhere.
+When a pin moves, plan each applicable repository's update and record exclusions.
+Execute updates and owning validators only within the authorized repository
+scope. Do not assume the numerically largest pin is compatible everywhere.
 
 ## GitHub Actions And Repository Automation
 

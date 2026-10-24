@@ -11,6 +11,12 @@ disagree with those records. Edit bodies only when the user requests text change
 Keep this activity scoped to issue metadata; it does not authorize code or Git
 mutations in an accompanying implementation task.
 
+For PR grouping, bounded release scope, publication cutoffs, and downstream
+adoption planning, use
+[issue-planning-to-release](../issue-planning-to-release/SKILL.md) for the shared
+planning contract, then return here for metadata operations. Ordinary dependency,
+label, milestone, or project-field edits do not require release planning.
+
 ## Inspect and Plan
 
 Identify the repository and exact issues. Read current bodies, metadata and
