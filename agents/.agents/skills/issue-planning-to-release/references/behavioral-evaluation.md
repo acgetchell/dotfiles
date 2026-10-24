@@ -77,3 +77,9 @@ failures/limitations, and any resulting correction. Link it from the implementat
 PR/CI evidence when that record exists. Do not turn an observed answer into policy
 or create parallel histories of release validation. Re-run only affected scenarios
 after a behavioral correction; structural checks remain separate evidence.
+
+For structural validation, run `just skill-check
+agents/.agents/skills/issue-planning-to-release` and the repository's final
+`just ci` aggregate (`just linux-check` in the provisioned Linux environment).
+The aggregate includes skill, Markdown, and YAML checks; skill metadata validation
+alone does not catch agent YAML formatting or lint failures.

@@ -74,6 +74,14 @@ seconds. They describe one existing run, not future savings, billing costs, or a
 per-validator breakdown. Unknown design, review, publication and adoption costs
 remained explicit.
 
+The retained record also includes the selected GitHub step names, numbers, and
+UTC start/end timestamps behind the public plan's setup and validation columns.
+They were added during PR #231 review from the same existing run/attempt, with
+the source endpoint and retention time recorded separately from the original
+evaluation. Setup and validation durations can therefore be recomputed without
+depending on the continued availability of GitHub's job records; other job steps
+are explicitly outside that retained subset.
+
 ## Controlled cases and changed evidence
 
 The fictional inventories supplied missing trackers and states that the current
@@ -94,11 +102,13 @@ versions, final evidence, and future success were not invented.
 
 ## Structural validation and limits
 
-Behavioral assessment is separate from metadata and Markdown validation. The
-required repository checks are `just skill-check
-agents/.agents/skills/issue-planning-to-release`, `just check-skills`, and
-`just markdown-check`. Local reference checks and Stow verification additionally
-check that the skill and its references are reachable.
+Behavioral assessment is separate from structural validation. The focused skill
+check is `just skill-check agents/.agents/skills/issue-planning-to-release`;
+final validation uses `just ci` (`just linux-check` in the provisioned Linux
+environment), which includes `just check-skills`, `just markdown-check`, and
+`just yaml-check`. Skill metadata validation alone does not establish that agent
+YAML passes formatting and lint checks. Local reference checks and Stow
+verification additionally check that the skill and its references are reachable.
 
 These are model-generated plans assessed by the implementing agent, not human
 consensus or a statistical benchmark. Both independent contexts used Astra and

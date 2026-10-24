@@ -98,6 +98,81 @@
         "html_url": "https://github.com/acgetchell/delaunay/actions/runs/40067665950/job/120824227079"
       }
     ],
+    "ci_step_evidence": {
+      "source_url": "https://api.github.com/repos/acgetchell/delaunay/actions/runs/40067665950/attempts/1/jobs?per_page=100",
+      "retained_at_utc": "2026-10-24T19:57:35+00:00",
+      "scope": "Selected steps supporting the public plan's Shared setup and validation columns; other steps are omitted. Job totals use the complete four-job inventory in ci_jobs. These existing run records were retained during PR #231 review; no new Delaunay CI was triggered to collect them.",
+      "jobs": [
+        {
+          "job_id": 120794203855,
+          "shared_setup": {
+            "number": 4,
+            "name": "Set up shared tooling",
+            "conclusion": "success",
+            "started_at": "2026-10-24T05:48:14Z",
+            "completed_at": "2026-10-24T06:27:09Z"
+          },
+          "validation": {
+            "number": 6,
+            "name": "Run CI checks",
+            "conclusion": "success",
+            "started_at": "2026-10-24T06:27:09Z",
+            "completed_at": "2026-10-24T08:10:42Z"
+          }
+        },
+        {
+          "job_id": 120794204050,
+          "shared_setup": {
+            "number": 4,
+            "name": "Set up shared tooling",
+            "conclusion": "success",
+            "started_at": "2026-10-24T05:48:09Z",
+            "completed_at": "2026-10-24T06:26:34Z"
+          },
+          "validation": {
+            "number": 6,
+            "name": "Run CI checks",
+            "conclusion": "success",
+            "started_at": "2026-10-24T06:26:34Z",
+            "completed_at": "2026-10-24T07:42:46Z"
+          }
+        },
+        {
+          "job_id": 120794204110,
+          "shared_setup": {
+            "number": 4,
+            "name": "Set up shared tooling",
+            "conclusion": "success",
+            "started_at": "2026-10-24T05:48:08Z",
+            "completed_at": "2026-10-24T06:14:41Z"
+          },
+          "validation": {
+            "number": 6,
+            "name": "Run CI checks",
+            "conclusion": "success",
+            "started_at": "2026-10-24T06:14:41Z",
+            "completed_at": "2026-10-24T07:12:08Z"
+          }
+        },
+        {
+          "job_id": 120824227079,
+          "shared_setup": {
+            "number": 3,
+            "name": "Set up declared tools without caches",
+            "conclusion": "success",
+            "started_at": "2026-10-24T08:19:49Z",
+            "completed_at": "2026-10-24T08:44:40Z"
+          },
+          "validation": {
+            "number": 4,
+            "name": "Verify clean default and all-feature Cargo packages",
+            "conclusion": "success",
+            "started_at": "2026-10-24T08:44:40Z",
+            "completed_at": "2026-10-24T08:45:28Z"
+          }
+        }
+      ]
+    },
     "ci_cost_arithmetic": {
       "aggregate_runner_seconds": 22675,
       "elapsed_seconds": 10652,
