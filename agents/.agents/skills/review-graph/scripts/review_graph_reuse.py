@@ -114,7 +114,11 @@ class ReviewSourceSnapshot:
         for _path, identity in self.repository_path_fingerprints:
             if identity == "absent" or re.fullmatch(r"submodule:[0-9a-f]{64}", identity):
                 continue
-            GitPathIdentity.parse(identity)
+            try:
+                GitPathIdentity.parse(identity)
+            except ValueError as error:
+                msg = "source snapshot contains an unsupported Git path identity"
+                raise EvaluationBoundaryError(RejectionKind.UNSUPPORTED_TRANSITION, msg) from error
 
 
 @dataclass(frozen=True)

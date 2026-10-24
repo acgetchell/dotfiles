@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 import review_graph_runtime as runtime
 from capture_scope import _scope_data
-from review_graph_results import EvaluationBoundaryError, RejectionKind
+from review_graph_results import EvaluationBoundaryError, EvaluationRejection, RecoveryKind, RejectionKind
 from review_graph_reuse import metadata_transition, source_snapshot
 from review_graph_schema import SchemaValidationError, require_schema_definition
 from test_review_graph_repair_staging import _finish_repair, _staged_repair
@@ -161,6 +161,23 @@ def test_interleaved_repair_types_unsupported_endpoint_identities(tmp_path: Path
             }
         )
     assert failure.value.kind is RejectionKind.UNSUPPORTED_TRANSITION
+
+
+@pytest.mark.parametrize("endpoint", ["previous_capture", "new_capture"])
+@pytest.mark.parametrize("identity", ["git:sha1:100644:bad", "git:sha256:100644:" + "a" * 40, "git:sha1:040000:" + "a" * 40])
+def test_interleaved_repair_types_malformed_snapshot_identities(tmp_path: Path, endpoint: str, identity: str) -> None:
+    _git, _repository, request, _audit, history = _interleaved(tmp_path)
+    capture = request[endpoint]
+    capture["repository_path_fingerprints"]["state.rs"] = identity
+    capture["repository_state_fingerprint"] = source_snapshot(capture).computed_fingerprint()
+    with pytest.raises(EvaluationBoundaryError) as failure:
+        runtime.advance_after_mutation(request)
+    assert failure.value.kind is RejectionKind.UNSUPPORTED_TRANSITION
+    assert type(failure.value.__cause__) is ValueError
+    assert "Git path identity" in str(failure.value.__cause__)
+    assert EvaluationRejection.from_exception(failure.value).as_dict()["recovery"]["kind"] is RecoveryKind.RECONCILE
+    assert not Path(request["artifact_store"]).exists()
+    assert all(path.read_bytes() == content for path, content in history.items())
 
 
 @pytest.mark.parametrize("paths", [(), ("journal_path",), ("dispatches_path",), ("journal_path", "dispatches_path")])
