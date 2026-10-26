@@ -62,6 +62,26 @@ Follow returned lifecycle/journal/dispatch paths. Source state and accepted
 audits/CI remain; synthesis inputs refresh. Wait for active workers before expansion.
 Details: [planning-contract.md](planning-contract.md#late-validation-expansion).
 
+A compiled blocked source audit may remain while independent late validators are
+added on unchanged source. Its dispatch, blocked status, reason, and sealed
+evidence remain intact; `retained_blocked_node_ids` makes that explicit. The
+runtime verifies blocked evidence as well as accepted evidence and carries its
+discovered obligations. New validators follow their own dependencies; dependent
+synthesis and final readiness still wait for the blocked audit. Active work,
+source mutation, uncompiled blocks, and other blocked node modes require their
+existing continuation/recovery paths. Expansion never promotes a blocker to
+success or authorizes source edits. After `begin-repair`, reconcile late
+requirements on the unchanged source before repair replanning; keep the returned
+lifecycle, journal, and dispatch set together.
+
+For uncertainty about an exact dependency version, reuse the managed toolchain
+environment resolved during preflight, including its `CARGO_HOME` and registry
+or vendor/source-replacement configuration. Searching only the ambient Cargo
+registry establishes a discovery limitation, not absence. Inspect the locked
+version there; if fetching or compilation is needed, plan that exact validation
+obligation within existing permissions. Retain the original blocked evidence
+until affected verification resolves the uncertainty.
+
 When accepted reviewers use the same requirement ID for distinct execution
 contracts, give the full additions unique planned IDs, such as
 `ubuntu-ci.audit-001` and `ubuntu-ci.audit-002`. Supply

@@ -88,6 +88,31 @@ def _capture_output(command: str, dispatch: dict[str, Any]) -> str | None:  # no
     return path if snapshot.repository_root == dispatch["repository_root"] and snapshot.source_state in states else None
 
 
+def _instruction_read(command: str, dispatch: dict[str, Any]) -> dict[str, str] | None:
+    """Recognize only this dispatch's verified, bounded full-text reader."""
+    context = dispatch.get("instruction_context")
+    words = shell_words(command)
+    if context is None or words is None:
+        return None
+    prefix = context["read_command"]
+    suffix = words[len(prefix) :]
+    if words[: len(prefix)] != prefix or len(suffix) != 4 or suffix[0] != "--path" or suffix[2] != "--chunk" or not suffix[3].isdecimal():
+        return None
+    if suffix[1] not in dispatch["instruction_paths"]:
+        return None
+    from review_graph_instructions import load_manifest, read_chunk  # noqa: PLC0415 - bounded reader uses this module's file identity helper.
+
+    reference = context["manifest"]
+    manifest_path = Path(reference["path"])
+    read_chunk(manifest_path, reference["digest"], suffix[1], int(suffix[3]))
+    manifest = load_manifest(manifest_path, reference["digest"])
+    record = next((item for item in manifest["files"] if item["path"] == suffix[1]), None)
+    if record is None:
+        msg = "instruction file is not in the bound manifest"
+        raise ValueError(msg)
+    return {reference["path"]: reference["digest"], record["snapshot_path"]: record["digest"], record["path"]: record["digest"]}
+
+
 def bind_runtime_reads(dispatch: dict[str, Any], payload: dict[str, Any]) -> tuple[tuple[tuple[str, str], ...], tuple[str, ...]]:
     """Only dispatch-owned resources and verified capture outputs can be bound."""
     require_instruction_reads(dispatch, payload)
@@ -107,6 +132,10 @@ def bind_runtime_reads(dispatch: dict[str, Any], payload: dict[str, Any]) -> tup
         if command in publications:
             protocol.append(command)
             reads.update(dispatch.get("protocol_input_paths", []))
+        elif (instruction_inputs := _instruction_read(command, dispatch)) is not None:
+            allowed.update(instruction_inputs)
+            reads.update(instruction_inputs)
+            protocol.append(command)
         elif (output := _capture_output(command, dispatch)) is not None:
             allowed[output] = file_identity(output)
             reads.add(output)

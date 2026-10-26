@@ -64,6 +64,7 @@ from review_graph_handoffs import audit_observations, validation_observations
 from review_graph_hosted import hosted_coverage
 from review_graph_independent import CHECK_LABELS, SCHEMA as _INDEPENDENT_PAYLOAD_SCHEMA, render_independent_payload
 from review_graph_instruction_delta import reconcile_instructions, retained_input_texts
+from review_graph_instructions import instruction_context, instruction_preflight, read_demand
 from review_graph_integrity import canonical_json, digest_bytes
 from review_graph_isolation import ISOLATION_INSTRUCTIONS, IsolationPublicationError, IsolationViolationError, forbidden_artifacts, isolation_violations
 from review_graph_lifecycle import ComprehensiveRestart, RepairBudgetExtension, ReviewLifecycle, lifecycle_from_document
@@ -4414,6 +4415,7 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         _queue_materialized_write(pending_writes, plan_path, plan_bytes, mode=0o444)
         synthesis_plan_reference = {"path": str(plan_path), "digest": digest_bytes(plan_bytes)}
     dispatches: list[dict[str, Any]] = []
+    instruction_contexts: dict[tuple[str, ...], dict[str, Any]] = {}
     isolation_entries = {
         node.node_id: (preserved_entries or {}).get(node.node_id)
         or {
@@ -4450,6 +4452,11 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         )
         worker_payload_review_command = runtime_command(Path(__file__), "review-worker-payload-write", "--input", str(worker_payload_contract_path))
         instruction_paths = _applicable_instruction_paths(repository_root_path.resolve(), node.coverage, node.instruction_paths)
+        if instruction_paths not in instruction_contexts:
+            context, instruction_writes = instruction_context(instruction_paths, artifact_store)
+            instruction_contexts[instruction_paths] = context
+            for path, content in instruction_writes.items():
+                _queue_materialized_write(pending_writes, path, content, mode=0o444)
         authorized_duplicates = tuple(sorted(set(raw_duplicate_authorizations.get(node.node_id, ()))))
         if node.mode == "validation" and authorized_duplicates:
             msg = f"duplicate command authorization applies only to review nodes: {node.node_id}"
@@ -4471,6 +4478,7 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             "handoff_destinations": handoff_destinations,
             "instruction_digests": [[path, _file_identity_digest(path)] for path in instruction_paths],
             "instruction_paths": list(instruction_paths),
+            "instruction_context": instruction_contexts[instruction_paths],
             "mode": node.mode,
             "selection_reason": "; ".join(node.selection_reasons) or f"planner selected {node.skill_id}",
             "node_id": node.node_id,
@@ -4652,7 +4660,16 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         _queue_materialized_write(pending_writes, Path(entry["worker_execution_path"]), execution_view_bytes(entry, worker_input_bytes), mode=0o444)
         dispatches.append(entry)
     output: dict[str, Any] = {"dispatches": dispatches, "plan_digest": _plan_digest(plan), "schema_version": 1, "source_state": list(source_state)}
+    instruction_demand = read_demand([entry["dispatch"]["instruction_paths"] for entry in dispatches])
+    output["instruction_preflight"] = instruction_preflight(instruction_demand)
     output["telemetry"] = {
+        "instruction_demand": instruction_demand,
+        "protocol_read_demand": read_demand(
+            [
+                sorted({entry["dispatch"]["skill_path"], *entry["dispatch"]["reference_paths"]} - set(entry["dispatch"]["instruction_paths"]))
+                for entry in dispatches
+            ]
+        ),
         "worker_input_bytes": sum(len((json.dumps(entry, indent=2, sort_keys=True) + "\n").encode()) for entry in dispatches),
         "worker_prompt_bytes": sum(len(entry["worker_prompt"].encode()) for entry in dispatches),
         "worker_execution_bytes": sum(len(execution_view_bytes(entry, (json.dumps(entry, indent=2, sort_keys=True) + "\n").encode())) for entry in dispatches),
@@ -7774,6 +7791,25 @@ def _expanded_validation_plan(
     return expanded
 
 
+def _require_validation_expansion_quiescent(
+    plan: GraphPlan, state: dict[str, str], sources: dict[str, dict[str, Any]], source_state: tuple[str, str, str]
+) -> None:
+    """Retain verified source uncertainties without admitting active or mutated work."""
+    if any(status in {"in-flight", "awaiting-replan"} for status in state.values()):
+        msg = "validation expansion requires quiescent execution without active or source-mutated nodes; preserve the current dispatches and journal"
+        raise ValueError(msg)
+    if any(state.get(node.node_id) == "blocked" and (node.mode != "audit" or node.node_id not in sources) for node in plan.actual_worker_nodes):
+        msg = "validation expansion can retain only compiled blocked source audits; recover other blocked nodes before expansion"
+        raise ValueError(msg)
+    for node_id, status in state.items():
+        if status != "blocked":
+            continue
+        _kind, _expectation, evidence, _content, _record = _load_evidence_source(sources[node_id], require_normalized=True)
+        if evidence.source_mutated or evidence.git_mutated or evidence.fingerprints.before != source_state or evidence.fingerprints.after != source_state:
+            msg = f"blocked audit expansion requires unchanged source observations: {node_id}"
+            raise ValueError(msg)
+
+
 def reconcile_validation_requirements(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
     """Inspect late requirements or publish a source-preserving plan revision."""
     _require_running_review(document, args.journal)
@@ -7784,7 +7820,7 @@ def reconcile_validation_requirements(document: dict[str, Any], args: argparse.N
         raise ValueError(msg)
     events, state, head = read_execution_journal(args.journal, plan=plan, source_state=source_state)
     entries = _dispatches_by_node(_read_json_object(args.dispatches), plan=plan, source_state=source_state)
-    sources, records = _accepted_journal_sources(plan, source_state, events, entries)
+    sources, records = _accepted_journal_sources(plan, source_state, events, entries, include_blocked=True)
     if blockers := _metadata_evidence_blockers(document, records):
         raise ValueError("; ".join(blockers))
     reconciliation = _validation_reconciliation(plan, records)
@@ -7793,9 +7829,7 @@ def reconcile_validation_requirements(document: dict[str, Any], args: argparse.N
         raise ValueError(msg)
     if not document.get("validation_requirements") and not document.get("validation_requirement_bindings") and not document.get("user_exclusions"):
         return {"schema_version": 1, "status": "requires-expansion" if reconciliation["blockers"] else "resolved", **reconciliation}
-    if any(status in {"in-flight", "blocked", "awaiting-replan"} for status in state.values()):
-        msg = "validation expansion requires quiescent execution without blocked or source-mutated nodes; preserve the current dispatches and journal"
-        raise ValueError(msg)
+    _require_validation_expansion_quiescent(plan, state, sources, source_state)
     first_entry = next(iter(entries.values()), None)
     if first_entry is None:
         msg = "validation expansion requires an existing dispatch"
@@ -7920,6 +7954,7 @@ def _publish_validation_continuation(  # noqa: PLR0913, PLR0917
         "continuation": continuation,
         "continuation_path": str(store / "continuation.json"),
         "retained_node_ids": sorted(retained),
+        "retained_blocked_node_ids": sorted(node_id for node_id in retained if state.get(node_id) == "blocked"),
         "superseded_synthesis_node_ids": [node.node_id for node in plan.actual_worker_nodes if node.mode == "synthesis"],
         "lineage": {"previous_plan_digest": _plan_digest(plan), "previous_journal_head": head, "previous_journal_path": str(args.journal.resolve())},
         "validation_reconciliation": _validation_reconciliation(expanded, records),

@@ -13,6 +13,7 @@ _EXECUTION_FIELDS = (
     "skill_path",
     "reference_paths",
     "instruction_paths",
+    "instruction_context",
     "required_read_paths",
     "provenance_examples",
     "repository_root",
@@ -60,6 +61,7 @@ def execution_view_bytes(entry: dict[str, Any], canonical_bytes: bytes) -> bytes
         "publish_command": dispatch["worker_payload_persistence"]["publish_command"],
         "instructions": (
             "Read skill/instructions and conditional references, then perform only this dispatched contract. Read the payload schema before publication. "
+            "Follow instruction_context.reload_policy after compaction or fresh-worker continuation; disk identities never attest a completed read. "
             "Publish semantic JSON through publish_command (stdin); the runtime assembles provenance, canonical evidence and receipts. "
             "Record actual reads/commands and truthful limitations. Command policy is authoritative; delegate validator-owned checks. "
             "Use handoff_destinations to choose an exact catalog_id for handoffs. "
