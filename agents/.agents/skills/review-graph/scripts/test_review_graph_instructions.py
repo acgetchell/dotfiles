@@ -9,10 +9,10 @@ from typing import Any
 
 import pytest
 import review_graph_runtime as runtime
-from review_graph_instructions import CHUNK_BYTES, instruction_context, read_chunk
+from review_graph_instructions import CHUNK_BYTES, instruction_context, read_chunk, read_demand
 from review_graph_integrity import digest_bytes
 from review_graph_plan import ReviewRequirement, ValidationRequirement, WorkerBudget, WorkerNode, plan_graph
-from review_graph_read_provenance import MissingReadProvenanceError
+from review_graph_read_provenance import MissingReadProvenanceError, bind_runtime_reads
 from review_graph_receipts import stage_receipt
 from test_review_graph_runtime import SKILL_ROOT
 from test_review_graph_transitions import _payload
@@ -234,3 +234,77 @@ def test_bounded_reader_is_lossless_and_rejects_changed_identities(tmp_path: Pat
     target.write_bytes(b"changed")
     with pytest.raises(ValueError, match=r"identity changed|digest mismatch"):
         read_chunk(Path(reference["path"]), reference["digest"], str(path), 0)
+
+
+@pytest.mark.parametrize("chunk", [1, -1])
+def test_out_of_range_instruction_read_can_be_published_as_blocked(tmp_path: Path, chunk: int) -> None:
+    result = runtime.materialize_dispatches(_fixture(tmp_path / "full", reduced=False))
+    entry = next(item for item in result["dispatches"] if item["dispatch"]["mode"] == "audit")
+    dispatch = {**entry["dispatch"], "before_state": result["source_state"], "after_state": result["source_state"]}
+    context = dispatch["instruction_context"]
+    path = str(tmp_path / "full" / "AGENTS.md")
+    command = shlex.join([*context["read_command"], "--path", path, "--chunk", str(chunk)])
+    payload = {
+        **_payload(dispatch["owned_paths"]),
+        "status": "blocked",
+        "limitations": ["Instruction read failed: the requested chunk is absent."],
+        "commands_executed": [command],
+    }
+    contract = json.loads(Path(entry["worker_payload_contract_path"]).read_bytes())
+    runtime.publish_worker_payload_bytes(contract, json.dumps(payload).encode())
+    assert json.loads(Path(entry["worker_payload_path"]).read_bytes()) == payload
+    _content, metadata = runtime.compile_review({"dispatch": dispatch, "payload": payload})
+    record = metadata["normalized_record"]
+    assert record["status"] == "blocked"
+    assert record["commands_executed"] == [command]
+    assert command not in record.get("protocol_commands", [])
+
+
+@pytest.mark.parametrize("chunk", [0, 1, -1])
+@pytest.mark.parametrize("target", ["manifest", "snapshot", "live"])
+@pytest.mark.parametrize("damage", ["bytes", "symlink"])
+def test_instruction_read_checks_all_identities_before_chunk_bounds(tmp_path: Path, chunk: int, target: str, damage: str) -> None:
+    path = tmp_path / "instructions.md"
+    path.write_text("Required guidance.\n")
+    context, writes = instruction_context((str(path),), tmp_path)
+    for destination, content in writes.items():
+        destination.write_bytes(content)
+    manifest_path = Path(context["manifest"]["path"])
+    manifest = json.loads(manifest_path.read_bytes())
+    damaged = {"manifest": manifest_path, "snapshot": Path(manifest["files"][0]["snapshot_path"]), "live": path}[target]
+    if damage == "bytes":
+        damaged.write_bytes(b"changed")
+    else:
+        destination = tmp_path / "replacement"
+        damaged.rename(destination)
+        damaged.symlink_to(destination)
+    command = shlex.join([*context["read_command"], "--path", str(path), "--chunk", str(chunk)])
+    dispatch = {"instruction_context": context, "instruction_paths": [str(path)], "repository_root": str(tmp_path / "source")}
+    with pytest.raises(ValueError, match=r"identity changed|digest mismatch|without symlinks"):
+        bind_runtime_reads(dispatch, {"status": "blocked", "commands_executed": [command]})
+
+
+@pytest.mark.parametrize("form", ["relative", "symlink"])
+def test_protocol_telemetry_accepts_noncanonical_paths_without_relaxing_instruction_reads(tmp_path: Path, form: str) -> None:
+    request = _fixture(tmp_path / "full", reduced=False)
+    node = next(item for item in request["plan"]["actual_worker_nodes"] if item["mode"] == "audit")
+    paths = [Path(node["skill_path"]), SKILL_ROOT / "review-graph" / "references" / "state-transitions.md"]
+    if form == "relative":
+        operands = [str(path.relative_to(Path.cwd())) for path in paths]
+    else:
+        alias = tmp_path / "skills"
+        alias.symlink_to(SKILL_ROOT, target_is_directory=True)
+        operands = [str(alias / path.relative_to(SKILL_ROOT)) for path in paths]
+    # Use one spelling of the approved root throughout; mixed aliases are
+    # independently rejected as ambiguous routing-catalog roots.
+    root = Path(operands[0]).parents[1]
+    for planned_node in request["plan"]["actual_worker_nodes"]:
+        planned_node["skill_path"] = str(root / Path(planned_node["skill_path"]).relative_to(SKILL_ROOT))
+    node["static_references"] = [operands[1]]
+    result = runtime.materialize_dispatches(request)
+    records = {item["path"]: item for item in result["telemetry"]["protocol_read_demand"]["files"]}
+    for operand, path in zip(operands, paths, strict=True):
+        assert records[operand]["bytes"] == len(path.read_bytes())
+        assert records[operand]["digest"] == digest_bytes(path.read_bytes())
+        with pytest.raises(ValueError, match="absolute regular file without symlinks"):
+            read_demand([[operand]])

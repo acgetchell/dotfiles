@@ -96,16 +96,24 @@ def _instruction_read(command: str, dispatch: dict[str, Any]) -> dict[str, str] 
         return None
     prefix = context["read_command"]
     suffix = words[len(prefix) :]
-    if words[: len(prefix)] != prefix or len(suffix) != 4 or suffix[0] != "--path" or suffix[2] != "--chunk" or not suffix[3].isdecimal():
+    if words[: len(prefix)] != prefix or len(suffix) != 4 or suffix[0] != "--path" or suffix[2] != "--chunk":
         return None
     if suffix[1] not in dispatch["instruction_paths"]:
         return None
-    from review_graph_instructions import load_manifest, read_chunk  # noqa: PLC0415 - bounded reader uses this module's file identity helper.
+    try:
+        chunk = int(suffix[3])
+    except ValueError:
+        return None
+    from review_graph_instructions import InstructionChunkOutOfRangeError, load_manifest, read_manifest_chunk  # noqa: PLC0415 - bounded reader uses this module's file identity helper.
 
     reference = context["manifest"]
     manifest_path = Path(reference["path"])
-    read_chunk(manifest_path, reference["digest"], suffix[1], int(suffix[3]))
     manifest = load_manifest(manifest_path, reference["digest"])
+    try:
+        read_manifest_chunk(manifest, suffix[1], chunk)
+    except InstructionChunkOutOfRangeError:
+        # A failed read remains an unclassified command in blocked evidence.
+        return None
     record = next((item for item in manifest["files"] if item["path"] == suffix[1]), None)
     if record is None:
         msg = "instruction file is not in the bound manifest"

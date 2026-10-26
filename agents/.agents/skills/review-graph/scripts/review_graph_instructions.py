@@ -22,6 +22,10 @@ RELOAD_POLICY = (
 )
 
 
+class InstructionChunkOutOfRangeError(ValueError):
+    """The instruction identities are valid but the requested chunk is absent."""
+
+
 def _content(path: str) -> bytes:
     identity = file_identity(path)
     content = Path(path).read_bytes()
@@ -76,7 +80,7 @@ def instruction_context(paths: tuple[str, ...], store: Path) -> tuple[dict[str, 
         "lines": sum(item["lines"] for item in files),
         "model_availability": "unknown",
         "read_command": runtime_command(Path(__file__), "--manifest", str(path), "--digest", digest),
-        "read_arguments": "Append --path <manifest file path> --chunk <zero-based index> for every chunk of every file.",
+        "read_arguments": "Append --path <original instruction path> --chunk <zero-based index> for every chunk of every file.",
         "reload_policy": RELOAD_POLICY,
     }, writes
 
@@ -92,25 +96,32 @@ def load_manifest(manifest_path: Path, digest: str) -> dict[str, Any]:
 
 def read_chunk(manifest_path: Path, digest: str, path: str, chunk: int) -> bytes:
     """Return exact text only after verifying the manifest, snapshot and live identity."""
-    manifest = load_manifest(manifest_path, digest)
+    return read_manifest_chunk(load_manifest(manifest_path, digest), path, chunk)
+
+
+def read_manifest_chunk(manifest: dict[str, Any], path: str, chunk: int) -> bytes:
+    """Read from a validated manifest, checking file identities before the chunk index."""
     record = next((item for item in manifest["files"] if item["path"] == path), None)
-    if record is None or not 0 <= chunk < len(record["chunks"]):
+    if record is None:
         msg = "instruction file or chunk is not in the bound manifest"
         raise ValueError(msg)
     snapshot = _content(record["snapshot_path"])
     if digest_bytes(snapshot) != record["digest"] or file_identity(path) != record["digest"]:
         msg = "required instruction identity changed; recapture and replan"
         raise ValueError(msg)
+    if not 0 <= chunk < len(record["chunks"]):
+        msg = "instruction chunk is not in the bound manifest"
+        raise InstructionChunkOutOfRangeError(msg)
     start, end = record["chunks"][chunk]
     return snapshot[start:end]
 
 
-def read_demand(path_sets: list[list[str]]) -> dict[str, Any]:
+def read_demand(path_sets: list[list[str]], *, strict: bool = True) -> dict[str, Any]:
     """Count bytes by path and consumer; these are planned reads, not token usage."""
     counts = Counter(path for paths in path_sets for path in set(paths))
     files: list[dict[str, Any]] = []
     for path, count in sorted(counts.items()):
-        content = _content(path)
+        content = _content(path) if strict else Path(path).read_bytes()
         files.append({"path": path, "digest": digest_bytes(content), "bytes": len(content), "lines": len(content.splitlines()), "planned_reads": count})
     sizes = {item["path"]: item["bytes"] for item in files}
     unique = sum(sizes.values())

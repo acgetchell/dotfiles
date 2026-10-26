@@ -4668,7 +4668,8 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             [
                 sorted({entry["dispatch"]["skill_path"], *entry["dispatch"]["reference_paths"]} - set(entry["dispatch"]["instruction_paths"]))
                 for entry in dispatches
-            ]
+            ],
+            strict=False,
         ),
         "worker_input_bytes": sum(len((json.dumps(entry, indent=2, sort_keys=True) + "\n").encode()) for entry in dispatches),
         "worker_prompt_bytes": sum(len(entry["worker_prompt"].encode()) for entry in dispatches),
