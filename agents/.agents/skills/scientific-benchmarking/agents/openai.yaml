@@ -1,0 +1,4 @@
+interface:
+  display_name: "Scientific Benchmarking"
+  short_description: "Design benchmarks and audit performance evidence"
+  default_prompt: "Use $scientific-benchmarking to audit benchmark ownership, timed boundaries, and evidence validity in the requested scope."

@@ -1,24 +1,29 @@
 # Delaunay Benchmark Commands
 
-Load this reference only for Delaunay benchmark execution, PR regression checks, release comparisons, or performance-document promotion. Confirm every command still exists in current repository guidance before running it.
+Load this reference only for Delaunay benchmark execution, PR regression checks,
+release comparisons, or performance-document promotion. Read the current
+repository's `benches/README.md`, `docs/dev/TUNING-PERFORMANCE.md`, and `justfile`
+before selecting commands. They own the targets, arguments and required gates.
 
 ## Routine and Focused Work
 
-- Use the documented correctness gate before performance evidence; historically this has been `just ci` for broad core changes.
-- Use `just perf-large-scale-smoke` as the broad construction-scale proxy when current guidance still defines it. Run it before and after the same change.
-- Dimension-specific debug recipes may diagnose one case but do not replace the broad proxy for a broad claim.
-- Use `just perf-no-regressions` for PR-ready local regression evidence when documented.
+- Keep correctness gates and untimed benchmark preflight distinct from sampling.
+- Select representative public API measurements for the claimed dimensions and
+  input families; internal diagnostics and large stress workloads remain opt-in.
+- Preserve repository-required checks within the authorized scope. A focused
+  diagnostic cannot establish a broad construction-performance claim.
 
 Treat small dimension-by-dimension movement as noise unless repeatable or material. A clear 3D or aggregate proxy regression should block a broad construction-performance claim.
 
 ## Release Evidence
 
-When the repository still defines these roles:
+Distinguish acquisition, saved-baseline comparison, retained-artifact rendering,
+and publication. Some aggregates measure before promoting; inspect dependencies
+before using a command for a report-only request. Comparisons require compatible
+source/harness/plan and environment evidence, not merely an existing baseline.
 
-- `just bench-latest`: curated release-signal Criterion suite
-- `just bench-save-last`, `just bench-latest-vs-last`, `just bench-compare <baseline>`: saved-baseline reports
-- `just performance-local`: isolated current-version versus published-release comparison
-- `just performance-github-assets`: compare stored release benchmark assets
-- `just performance-release`: promote a curated comparison into release documentation
-
-Do not use release comparison or documentation-promotion commands as routine commit checks. Repository benchmark documentation and current recipes override names or roles here.
+See the revision-bound
+[Delaunay example](../../scientific-benchmarking/references/repository-examples.md#delaunay-one-plan-separate-diagnostics-and-rendering)
+for the verified public API plan and separated command roles. Do not use release
+commands as routine commit checks or treat historical skill command lists as
+current repository authority.

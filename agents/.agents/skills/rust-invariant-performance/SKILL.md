@@ -32,6 +32,10 @@ Reject performance ideas that:
 
 Keep scientific validity under `rust-scientific-correctness`, coordinated mutation and rollback under `rust-invariant-state-transitions`, raw boundary modeling under `rust-parse-dont-validate`, typed failure taxonomy under `rust-error-variants`, build-matrix behavior under `rust-build-portability`, and durable regression strength under `rust-test-quality`. This skill owns cost, complexity, allocation, data movement, and benchmark evidence inside those contracts.
 
+For benchmark orchestration, duplicate-run removal, or retained-evidence design,
+use [scientific-benchmarking](../scientific-benchmarking/SKILL.md) within that
+scope. Ordinary hot-path work does not require a broader benchmark campaign.
+
 ## References
 
 Load the crate-specific reference only when working in that crate or when the
