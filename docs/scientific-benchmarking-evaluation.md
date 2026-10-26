@@ -11,7 +11,7 @@ execution or a performance measurement.
 
 | Case | Observed decision |
 | --- | --- |
-| A | Removed overlapping collection and collection from rendering; retained statistical repetitions, preflight, correctness tests and distinct baseline/current/release phases |
+| A | Removed overlapping memory collection jobs and stopped report rendering from collecting new samples; retained statistical repetitions, preflight, correctness tests and distinct baseline/current/release phases |
 | B | Selected the complete scratch run for rendering, preserved measurement provenance, and rejected missing-envelope fallback to older history |
 | C | Rejected ratios across different timed operations and environments; preserved history and proposed authorized common-harness remeasurement |
 | D | Rejected missing, duplicate, unexpected and truncated observations despite complete displayed rows; recognized the declared diagnostic as allowed |

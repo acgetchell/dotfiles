@@ -56,8 +56,8 @@ Inspected revision: `110b7e5fba4a38fb856ac4509e8b094ad19442af`.
   records required IDs, per-phase discovery, gates, toolchain/environment,
   compatibility and series mappings. The [native commands](https://github.com/acgetchell/la-stack/blob/110b7e5fba4a38fb856ac4509e8b094ad19442af/tooling/performance.just)
   run all comparison implementations in the baseline phase and filter to
-  `la_stack` in the current phase; exact workloads run in both. nalgebra/faer
-  series retain their baseline origin rather than being sampled again for each
+  `la_stack` in the current phase; exact workloads run in both. The `nalgebra` and
+  `faer` series retain their baseline origin rather than being sampled again for each
   view or labeled as current-phase data.
 - [Exact benchmarks](https://github.com/acgetchell/la-stack/blob/110b7e5fba4a38fb856ac4509e8b094ad19442af/benches/exact.rs)
   validate fixed inputs and the deterministic random corpus before registering
