@@ -12,7 +12,13 @@ import review_graph_runtime as runtime
 from review_graph_benchmark import benchmark_fixture
 from review_graph_independent import CHECK_LABELS, SCHEMA
 from review_graph_schema import require_schema
-from test_review_graph_runtime import _compact_audit_payload, _compact_independent_payload, _continuation_fixture, _execution_payload
+from test_review_graph_runtime import (
+    _compact_audit_payload,
+    _compact_independent_payload,
+    _compile_repair_fixture_entry,
+    _continuation_fixture,
+    _execution_payload,
+)
 from test_support_review_graph import _prepare_all_fixture_timing
 
 
@@ -187,17 +193,25 @@ def test_default_cli_receipt_binds_full_artifact_and_explicit_full_output(tmp_pa
     assert receipt["output_fields"] == sorted(json.loads(output.read_bytes()))
     assert receipt["node_count"] == len(document["plan"]["actual_worker_nodes"])
     assert len(stdout.encode()) < output.stat().st_size / 5
-    for entry in receipt["dispatches"]:
-        expected = {"node_id", "skill_id", "mode", "selection_reason", "result_contract", "execution_location", "worker_input"}
+    assert "dispatches" not in receipt
+    assert "launch_manifest" not in receipt
+    reference = receipt["launch_manifest_reference"]
+    manifest_bytes = Path(reference["path"]).read_bytes()
+    assert reference["digest"] == _digest(manifest_bytes)
+    manifest = json.loads(manifest_bytes)
+    assert manifest["next_operation_inputs"] == receipt["next_operation_inputs"]
+    assert len(manifest["nodes"]) == receipt["node_count"]
+    for entry in manifest["nodes"]:
+        expected = {"node_id", "skill_id", "skill_path", "mode", "result_contract", "execution_location", "execution_view"}
         if entry["result_contract"] == "compact-validation":
             expected.add("executor_requirements")
             expected.add("timing_prerequisite")
             assert entry["executor_requirements"] == {"sandbox_permissions": "use_default"}
         assert set(entry) == expected
-        canonical = json.loads(Path(json.loads(Path(entry["worker_input"]["path"]).read_bytes())["canonical_input"]["path"]).read_bytes())
-        for key in ("skill_id", "mode", "selection_reason"):
-            assert entry[key] == canonical["dispatch"][key][:240]
-        assert entry["worker_input"]["digest"] == _digest(Path(entry["worker_input"]["path"]).read_bytes())
+        canonical = json.loads(Path(json.loads(Path(entry["execution_view"]["path"]).read_bytes())["canonical_input"]["path"]).read_bytes())
+        for key in ("skill_id", "skill_path", "mode", "execution_location"):
+            assert entry[key] == canonical["dispatch"][key]
+        assert entry["execution_view"]["digest"] == _digest(Path(entry["execution_view"]["path"]).read_bytes())
     saved = output.read_bytes()
     assert runtime.main([*args, "--full-output"]) == 0
     assert json.loads(capsys.readouterr().out) == json.loads(saved)
@@ -224,15 +238,23 @@ def test_owner_warning_is_advisory_and_allows_shared_validators(materialized: di
     assert json.loads(Path(entry["worker_payload_path"]).read_bytes()) == payload
 
 
-@pytest.mark.parametrize("compact", [False, True])
-def test_validator_ready_compile_command_accepts_saved_observations(tmp_path: Path, capsys: pytest.CaptureFixture[str], compact: bool) -> None:
+@pytest.mark.parametrize(("operation", "compact"), [("next-ready", False), ("next-ready", True), ("schedule-ready", False)])
+def test_validator_ready_compile_command_accepts_saved_observations(tmp_path: Path, capsys: pytest.CaptureFixture[str], operation: str, compact: bool) -> None:
     lifecycle, dispatches, paths = _continuation_fixture(tmp_path)
     _prepare_all_fixture_timing(dispatches)
+    if operation == "schedule-ready":
+        for entry in dispatches["dispatches"]:
+            if entry["dispatch"]["mode"] == "audit":
+                _compile_repair_fixture_entry(entry, lifecycle, paths["journal"])
+        paths["input"].write_text(json.dumps({**lifecycle, "artifact_store": str(tmp_path / "schedules")}))
     output = tmp_path / "ready.json"
-    arguments = ["next-ready", *(arg for key, path in paths.items() for arg in ("--" + key, str(path))), "--output", str(output)]
+    arguments = [operation, *(arg for key, path in paths.items() for arg in ("--" + key, str(path))), "--output", str(output)]
     assert runtime.main([*arguments, *(["--compact"] if compact else [])]) == 0
     receipt = json.loads(capsys.readouterr().out)
-    ready = next(item for item in receipt["ready_dispatches"] if item["mode"] == "validation")
+    launches = (
+        json.loads(Path(receipt["launch_manifest_reference"]["path"]).read_bytes())["nodes"] if operation == "schedule-ready" else receipt["ready_dispatches"]
+    )
+    ready = next(item for item in launches if item["mode"] == "validation")
     entry = next(item for item in dispatches["dispatches"] if item["node_id"] == ready["node_id"])
     for phase in entry["dispatch"]["validation_observations"].values():
         Path(phase["capture_path"]).write_bytes(paths["current-capture"].read_bytes())

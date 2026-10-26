@@ -641,7 +641,7 @@ def test_bootstrap_binds_capture_and_validation_fingerprints_without_field_renam
     assert json.loads(capsys.readouterr().out) == bundle["plan"]
     assert main(receipt["next_command"][2:]) == 0
     materialized_receipt = json.loads(capsys.readouterr().out)
-    assert materialized_receipt["dispatches"]
+    assert json.loads(Path(materialized_receipt["launch_manifest_reference"]["path"]).read_bytes())["nodes"]
     assert Path(materialized_receipt["output"]["path"]).is_file()
 
 

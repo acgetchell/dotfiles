@@ -78,10 +78,11 @@ other Python outputs depend on the inspected recipe:
 ## Launch And Model Requirements
 
 Materialization and scheduling receipts return `launch_manifest_reference` for a
-small immutable JSON artifact. Its `nodes` contain node ID, exact leaf skill and
-path, execution-view path/digest, and execution location; continuation paths are
-alongside them. Read this manifest instead of extracting nested `ready_dispatches`
-from the complete result. Materialized nodes still need dependency-ready scheduling
+digest-bound immutable JSON artifact; default stdout omits inline launch inventories.
+Its `nodes` contain node ID, exact leaf skill and path, mode/result contract,
+execution-view path/digest, and execution location, plus applicable executor,
+timing, model, and validator compile requirements. Continuation paths are alongside
+them. Read this manifest to launch scheduled nodes. Materialized nodes still need dependency-ready scheduling
 before launch. Complete schemas and handoff catalogs stay behind the execution views.
 
 For an explicitly requested model, pass `schedule-ready --worker-requirements`

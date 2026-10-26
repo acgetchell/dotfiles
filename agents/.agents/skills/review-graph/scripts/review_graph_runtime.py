@@ -9610,7 +9610,8 @@ def _run_worker_payload_operation(document: dict[str, Any], args: argparse.Names
 def _print_operation_result(args: argparse.Namespace, output_path: Path, output: dict[str, Any]) -> None:
     receipt = stage_receipt(args.operation, output_path, output)
     if args.operation in {"schedule-ready", "next-ready"}:
-        for summary, entry in zip(receipt["ready_dispatches"], output["ready_dispatches"], strict=True):
+        summaries = receipt["launch_manifest"]["nodes"] if args.operation == "schedule-ready" else receipt["ready_dispatches"]
+        for summary, entry in zip(summaries, output["ready_dispatches"], strict=True):
             if observations := entry.get("dispatch", entry).get("validation_observations"):
                 summary["compile_command"] = runtime_command(
                     Path(__file__),
@@ -9668,6 +9669,8 @@ def _print_operation_result(args: argparse.Namespace, output_path: Path, output:
             manifest_path = output_path.with_suffix(".launch.json")
             _write_bytes_atomically_once(manifest_path, (canonical_json(manifest) + "\n").encode(), mode=0o444)
             receipt["launch_manifest_reference"] = artifact_reference(manifest_path)
+            if args.operation in {"materialize-dispatches", "schedule-ready"}:
+                del receipt["launch_manifest"]
     print(canonical_json(output if args.full_output else receipt))
 
 

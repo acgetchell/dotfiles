@@ -190,8 +190,13 @@ default. Read the named artifacts only when their contents are needed; the
 receipt does not replace any proof artifact. `--full-output` prints the complete
 operation result for diagnosis. Publication and journal commands retain their
 already compact transaction/event receipts. `materialize-dispatches` and
-`next-ready` return per-node contract/location and digest-bound `worker_input`
-references rather than embedding dispatch bodies. Full artifacts remain on disk.
+`schedule-ready` return counts, status/blockers, continuation paths, applicable
+next commands/prerequisites, and one `launch_manifest_reference`. Read that
+digest-bound immutable artifact for launch identities, execution-view references,
+executor/timing/model requirements, and scheduled validator compile commands.
+Their default stdout omits inline `dispatches`, `ready_dispatches`, and
+`launch_manifest.nodes`; full inventories remain in saved results and
+`--full-output`. `next-ready` retains its inline per-node handoffs.
 
 Planned-validation identities live once in read-only, content-addressed JSON
 sidecars. Workers receive `execution_identity_reference` (path and digest), a
