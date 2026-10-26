@@ -29,8 +29,11 @@ uv run --locked python scripts/review_graph_runtime.py schedule-ready \
   --output <schedule-result.json>
 ```
 
-The compact receipt supplies selected dispatch references, deferred IDs, pending
-reservations, capacity state, and one digest-bound continuation. Follow all
+The compact receipt supplies selected/deferred/reserved node counts, capacity
+state, blockers and waiting prerequisites, one `launch_manifest_reference`, and
+one digest-bound continuation. Read the immutable launch manifest for selected
+nodes and their execution requirements; full deferred and reservation inventories
+remain in the saved result and continuation. Follow all
 returned lifecycle/dispatch/journal/capture paths together. Its `schedule_input_path`
 carries pending reservations into the next scheduling request; remove only
 explicitly canceled reservations. Journal-bound started/accepted work drops out

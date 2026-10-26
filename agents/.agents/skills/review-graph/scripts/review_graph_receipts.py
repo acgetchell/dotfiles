@@ -71,14 +71,40 @@ def _launch_node(entry: dict[str, Any], requirements: dict[str, dict[str, Any]])
         "node_id": entry["node_id"],
         "skill_id": dispatch["skill_id"],
         "skill_path": dispatch["skill_path"],
+        "mode": dispatch["mode"],
+        "result_contract": entry["result_contract"],
         "execution_location": dispatch["execution_location"],
         "execution_view": artifact_reference(Path(entry.get("worker_execution_path", entry["worker_input_path"]))),
+        **{key: dispatch[key] for key in ("executor_requirements", "timing_prerequisite") if key in dispatch},
         **({"worker_requirement": requirements[entry["node_id"]]} if entry["node_id"] in requirements else {}),
     }
 
 
-def _launch_receipt(output: dict[str, Any]) -> dict[str, Any]:
-    return {"launch_manifest": launch_manifest(output)} if "ready_dispatches" in output or "dispatches" in output else {}
+def _launch_receipt(operation: str, output: dict[str, Any]) -> dict[str, Any]:
+    receipt: dict[str, Any] = {}
+    for key in ("dispatches", "ready_dispatches"):
+        if key in output:
+            if operation not in {"materialize-dispatches", "schedule-ready"}:
+                receipt[key] = [dispatch_summary(entry) for entry in output[key]]
+            receipt["node_count"] = len(output[key])
+    if receipt:
+        receipt["launch_manifest"] = launch_manifest(output)
+    return receipt
+
+
+def _lifecycle_receipt(operation: str, output: dict[str, Any]) -> dict[str, Any]:
+    if "lifecycle" not in output:
+        return {}
+    counts = {key.removesuffix("_node_ids"): len(value) for key, value in output["lifecycle"].items()}
+    counts.update(ready=len(output["ready_dispatches"]), waiting=len(output["waiting"]))
+    if operation == "schedule-ready":
+        counts.update({key: len(output[f"{key}_node_ids"]) for key in ("worker", "reserved", "deferred") if f"{key}_node_ids" in output})
+    return {
+        "node_counts": counts,
+        "waiting": output["waiting"],
+        **({"in_flight_node_ids": output["lifecycle"]["in_flight_node_ids"]} if operation != "schedule-ready" else {}),
+        "completion_order": "Compile published payloads for finished in-flight nodes before lowering worker occupancy or admitting repairs.",
+    }
 
 
 def _coverage_receipt(output: dict[str, Any]) -> dict[str, Any]:
@@ -144,9 +170,6 @@ def stage_receipt(operation: str, output_path: Path, output: dict[str, Any]) -> 
         "summary",
         "capacity_state",
         "coordinator_node_id",
-        "worker_node_ids",
-        "reserved_node_ids",
-        "deferred_node_ids",
         "preflight_blocked_nodes",
         "creation_failure_action",
         "retry_after_seconds",
@@ -183,22 +206,15 @@ def stage_receipt(operation: str, output_path: Path, output: dict[str, Any]) -> 
         receipt["dispatch_allowed"] = plan["dispatch_allowed"]
         receipt["blockers"] = plan.get("blockers", [])
         receipt["node_count"] = len(plan["actual_worker_nodes"])
-    for key in ("dispatches", "ready_dispatches"):
-        if key in output:
-            receipt[key] = [dispatch_summary(entry) for entry in output[key]]
-            receipt["node_count"] = len(output[key])
-    receipt.update(_launch_receipt(output))
+    if operation != "schedule-ready":
+        receipt.update({key: output[key] for key in ("worker_node_ids", "reserved_node_ids", "deferred_node_ids") if key in output})
+    receipt.update(_launch_receipt(operation, output))
     receipt.update(_coverage_receipt(output))
     for key in ("artifact_path", "metadata_path", "worker_payload_path"):
         if key in output:
             receipt[key.removesuffix("_path")] = artifact_reference(Path(output[key]))
     if "journal_event" in output:
         receipt["status"] = output["journal_event"]["status"]
-    if "lifecycle" in output:
-        receipt["node_counts"] = {key.removesuffix("_node_ids"): len(value) for key, value in output["lifecycle"].items()}
-        receipt["node_counts"].update(ready=len(output["ready_dispatches"]), waiting=len(output["waiting"]))
-        receipt["waiting"] = output["waiting"]
-        receipt["in_flight_node_ids"] = output["lifecycle"]["in_flight_node_ids"]
-        receipt["completion_order"] = "Compile published payloads for finished in-flight nodes before lowering worker occupancy or admitting repairs."
+    receipt.update(_lifecycle_receipt(operation, output))
     receipt.update(_continuation_receipt(output))
     return receipt
