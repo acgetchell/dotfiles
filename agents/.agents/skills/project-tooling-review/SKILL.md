@@ -50,6 +50,10 @@ Use the requested surface and scope to load only the references that apply:
 - [`references/delaunay.md`](references/delaunay.md) in the `delaunay` repository for its Semgrep fixture harness, notebook execution policy, and generated-asset
   ownership.
 
+For benchmark ownership, duplicate measurements, or scientific evidence design,
+coordinate with [scientific-benchmarking](../scientific-benchmarking/SKILL.md).
+Keep command/CI wiring here; this is not a required campaign for tooling edits.
+
 If multiple surfaces changed, review them in this order:
 
 1. Tool versions and installers, so commands use the intended tools.

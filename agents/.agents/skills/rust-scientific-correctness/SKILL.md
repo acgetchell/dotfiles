@@ -121,6 +121,10 @@ Verify that:
 
 Verify the prerequisites for comparable measurements, but defer benchmark execution, optimization, harness tuning, noise analysis, and speedup classification to `rust-invariant-performance`. If the scientific workload is invalid, its timing is not performance evidence.
 
+For measurement ownership, report-only reruns, and evidence compatibility,
+coordinate with [scientific-benchmarking](../scientific-benchmarking/SKILL.md)
+without expanding an algorithm review into an orchestration audit.
+
 ## Fixes
 
 When fixes are explicitly authorized, read
