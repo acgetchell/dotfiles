@@ -2,6 +2,7 @@
 
 import re
 import shlex
+from pathlib import Path
 
 _RG_FLAGS = frozenset(
     {
@@ -51,6 +52,40 @@ def shell_words(command: str) -> list[str] | None:
     except ValueError:
         return None
     return None if any(word and set(word) <= set(";&|<>()") for word in words) else words
+
+
+def path_only_inventory(command: str) -> bool:
+    """Recognize standalone filename discovery, never content readers or pipelines."""
+    words = shell_words(command)
+    if words is None or not words:
+        return False
+    name, args = Path(words[0]).name, words[1:]
+    if name == "ls":
+        return all(not arg.startswith("-") or arg == "--" or re.fullmatch(r"-[1aAdfFhilnopqstTuU]+", arg) for arg in args)
+    if name != "rg":
+        return False
+    files = False
+    options = True
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if options and arg == "--":
+            options = False
+        elif options and arg == "--files":
+            files = True
+        elif options and arg in {"-g", "--glob", "--iglob", "-t", "--type", "-T", "--type-not"}:
+            index += 1
+            if index == len(args):
+                return False
+        elif (
+            options
+            and arg.startswith("-")
+            and arg not in {"--hidden", "--no-ignore", "--no-config", "--null", "-0", "--sort=path", "--sortr=path"}
+            and not arg.startswith(("--glob=", "--iglob=", "--type=", "--type-not="))
+        ):
+            return False
+        index += 1
+    return files
 
 
 def _rg_arguments(args: list[str]) -> list[str] | None:
@@ -107,8 +142,8 @@ def source_read_operands(command: str) -> tuple[str, ...] | None:  # noqa: C901,
         if not args or re.fullmatch(r"\.[A-Za-z_][A-Za-z_0-9]*(?:\.[A-Za-z_][A-Za-z_0-9]*)*", args[0]) is None:
             return None
         operands = args[1:]
-    elif name in {"cat", "head", "tail", "wc", "ls"}:
-        flags = {"cat": {"-n", "-b", "-s"}, "head": set(), "tail": set(), "wc": {"-l", "-c", "-w", "-m"}, "ls": {"-l", "-a", "-la", "-al", "-d"}}[name]
+    elif name in {"cat", "head", "tail", "wc"}:
+        flags = {"cat": {"-n", "-b", "-s"}, "head": set(), "tail": set(), "wc": {"-l", "-c", "-w", "-m"}}[name]
         while args and args[0].startswith("-") and args[0] != "--":
             word = args.pop(0)
             if word in flags:

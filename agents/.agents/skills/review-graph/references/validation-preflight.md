@@ -103,6 +103,12 @@ authorized audits. The preflight report is not validation evidence and cannot
 make a failed or blocked attempt pass. Keep its report beside the immutable
 attempt and follow the runtime's continuation configuration after recovery.
 
+A native macOS Taplo `system-configuration` NULL-object panic can occur after
+successful managed-toolchain preflight. Follow the
+[diagnostic and approved retry procedure](../../review-validator/references/macos-taplo-sandbox.md):
+preserve the failed execution and classify infrastructure separately from TOML
+syntax. Preflight success grants no permission to retry outside the sandbox.
+
 For an unstarted grouped/mixed validator blocked by preflight, add
 `preflight_blocked_nodes: [{"node_id": "<validator node>", "reason": "<concrete preflight blocker>"}]`
 to `schedule-ready`. This holds execution without reserving a worker or taking

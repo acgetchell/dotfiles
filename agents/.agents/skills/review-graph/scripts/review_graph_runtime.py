@@ -4800,6 +4800,21 @@ def _mutation_path_delta(
     return changed
 
 
+def _unique_mutation_sources(sources: tuple[dict[str, Any], ...]) -> tuple[dict[str, Any], ...]:
+    """Merge path aliases without discarding explicit evidence-kind constraints."""
+    unique: dict[tuple[str, str], dict[str, Any]] = {}
+    for source in sources:
+        identity = tuple(str(Path(_required_text(source, key)).resolve()) for key in ("artifact_path", "metadata_path"))
+        key = (identity[0], identity[1])
+        previous = unique.get(key, {})
+        kinds = {item["kind"] for item in (previous, source) if item.get("kind") is not None}
+        if len(kinds) > 1:
+            msg = f"mutation sources contain contradictory kinds: {identity}"
+            raise ValueError(msg)
+        unique[key] = {"artifact_path": key[0], "metadata_path": key[1], **({"kind": next(iter(kinds), None)} if kinds else {})}
+    return tuple(unique.values())
+
+
 def _mutation_evidence_sources(document: dict[str, Any], plan: GraphPlan) -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
     """Verify historical evidence without relabeling it as final-state evidence."""
     if ("journal_path" in document) != ("dispatches_path" in document):
@@ -4813,12 +4828,11 @@ def _mutation_evidence_sources(document: dict[str, Any], plan: GraphPlan) -> dic
             raise ValueError(msg)
         entries = _dispatches_by_node(_read_json_object(Path(document["dispatches_path"])), plan=plan, source_state=state)
         accepted, _accepted_records = _accepted_journal_sources(plan, state, events, entries)
-        sources = {canonical_json(source): source for source in [*_records(document, "sources"), *accepted.values()]}
-        document = {**document, "sources": list(sources.values())}
+        document = {**document, "sources": [*_records(document, "sources"), *accepted.values()]}
     by_id = {node.node_id: node for node in plan.actual_worker_nodes}
     result: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
     reused_ids = {evidence_id for _, evidence_id in plan.exact_reused_review_evidence}
-    for source in _evidence_sources(document, plan, check_current_inputs=False):
+    for source in _unique_mutation_sources(_evidence_sources(document, plan, check_current_inputs=False)):
         loaded = _load_evidence_source(source, require_normalized=True)
         _kind, expectation, evidence, _content, normalized = loaded
         normalized = _record_document(normalized) if normalized is not None else None
@@ -8279,14 +8293,14 @@ def recover_validation_launch(document: dict[str, Any], args: argparse.Namespace
 
 
 def recover_validation_execution(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
-    """Retry one failed aggregate with recorded executor-denial evidence."""
+    """Retry one failed aggregate with recorded executor-restriction evidence."""
     return _recover_validation(document, args, checks_started=True)
 
 
 def _execution_failure_snapshots(
     document: dict[str, Any], entry: dict[str, Any], metadata: dict[str, Any], evidence: ValidationEvidence, normalized: dict[str, Any]
 ) -> dict[str, bytes]:
-    """Bind a permission diagnosis to the failed execution, log, and snapshots."""
+    """Bind an executor diagnosis to the failed execution, log, and snapshots."""
     unit = _validation_unit(entry["dispatch"]["validation_unit"])
     executions = normalized.get("executions", [])
     # A failed aggregate may contain passed subchecks. Separately successful
@@ -8296,8 +8310,17 @@ def _execution_failure_snapshots(
         raise ValueError(msg)
     failure = document["failure_evidence"]
     diagnostic = _required_text(failure, "diagnostic")
-    if not re.search(r"PermissionError: \[Errno (?:1|13)\]|Operation not permitted|Permission denied|EACCES|EPERM", diagnostic):
-        msg = "execution recovery requires a concrete executor permission-denial diagnostic"
+    taplo_panic = bool(
+        re.search(r"\b(?:darwin|macos)\b", unit.platform, re.IGNORECASE)
+        and re.search(r"\btaplo\b", unit.toolchain, re.IGNORECASE)
+        and "workspace-write" in unit.environment.casefold()
+        and executor_permissions(unit.features) == "use_default"
+        and re.search(
+            r"panicked at [^\n]*system-configuration-[0-9.]+/src/dynamic_store\.rs:\d+(?::\d+)?:?\s*\n?Attempted to create a NULL object\.", diagnostic
+        )
+    )
+    if not taplo_panic and not re.search(r"PermissionError: \[Errno (?:1|13)\]|Operation not permitted|Permission denied|EACCES|EPERM", diagnostic):
+        msg = "execution recovery requires a concrete executor permission-denial diagnostic or a bound macOS Taplo sandbox panic"
         raise ValueError(msg)
     log_path = _required_text(failure, "log_path")
     log = next((artifact for artifact in normalized["artifacts"] if artifact["path"] == log_path and artifact["kind"] == "log"), None)
@@ -8306,7 +8329,12 @@ def _execution_failure_snapshots(
         raise ValueError(msg)
     root = Path(entry["dispatch"]["repository_root"])
     log_bytes = _read_regular_file_no_follow(_workspace_path(log_path, root))
-    if digest_bytes(log_bytes) != log["artifact_digest"] or diagnostic.encode("utf-8") not in log_bytes or diagnostic not in executions[0]["evidence"]:
+    diagnostic_in_log = diagnostic.encode("utf-8") in log_bytes
+    if taplo_panic:
+        # The panic spans lines, but compiled execution evidence is one line.
+        # Normalize whitespace only for this signature; retain the raw byte digest.
+        diagnostic_in_log = " ".join(diagnostic.split()) in " ".join(log_bytes.decode("utf-8", errors="replace").split())
+    if digest_bytes(log_bytes) != log["artifact_digest"] or not diagnostic_in_log or diagnostic not in executions[0]["evidence"]:
         msg = "execution recovery diagnostic or log differs from compiled failure evidence"
         raise ValueError(msg)
     snapshots = {"failure.log": log_bytes}
@@ -9017,7 +9045,7 @@ def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     for operation, description in (
         ("replace-invalidated-audit", "replace an accepted audit invalidated for applying the wrong semantic checklist"),
         ("recover-validation-launch", "retry one proven unstarted validator after an executor remedy"),
-        ("recover-validation-execution", "retry one failed aggregate after a proven executor permission denial"),
+        ("recover-validation-execution", "retry one failed aggregate after a proven executor restriction"),
     ):
         recovery_parser = _runtime_subparser(subparsers, operation, description)
         recovery_parser.add_argument("--input", type=Path, required=True)

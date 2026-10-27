@@ -134,8 +134,12 @@ complete repository review.
 
 ## Isolation And Compact Readiness
 
-For `fresh_context: true`, compilation rejects a command ledger that names
+For `fresh_context: true`, publication and compilation reject content reads of
 another node's worker input, payload, compiled report, or evidence sidecar.
+Standalone filename inventories (`rg --files`, nonrecursive `ls`) may discover
+paths but cannot establish source inspection or evidence. See
+[publication recovery](publication-bindings.md) for the retained rejection and
+one clean-worker retry; forward exact ready-dispatch execution paths.
 
 Default CLI receipts include node IDs, result contracts, execution locations,
 and digest-bound `worker_input` references without embedding full dispatches.

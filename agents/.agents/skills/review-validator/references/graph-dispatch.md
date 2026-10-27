@@ -34,6 +34,7 @@ Missing fields mean `blocked`, not standalone discovery.
    emulation in `limitations`.
    For Git-dependent commands, read [dependency examples](git-dependencies.md) before execution.
    For failures, classify `failure_kind` as source, infrastructure, timeout or inconclusive.
+   macOS Taplo: [sandbox diagnostics](macos-taplo-sandbox.md).
 5. Run `validation_observations.after.capture_command`, then its
    `workspace_command`, before publication. Follow `worker_prompt`: serialize the complete
    payload once and stream it to `worker_payload_persistence.publish_command`,

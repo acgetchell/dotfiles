@@ -24,6 +24,23 @@ receipt replay. A second distinct isolation failure blocks that node. Accepted
 nodes, source/Git identities, validators, and the review's repair budget are not
 replayed or reset by this recovery.
 
+For this pre-publication rejection, retain the returned `rejected_payload` and
+receipt, stop the contaminated worker, and use `replacement_allowed` to decide
+whether to launch the one clean replacement. Forward the same node's exact
+`worker_execution_path` to a fresh worker without inherited turns or rejected
+conclusions. It performs its own reads and publishes through the same contract.
+Do not edit the rejected ledger, call `replace-invalidated-audit` for an
+unpublished attempt, or create a new graph to reset the replacement budget.
+
+Standalone `rg --files` and nonrecursive `ls` inventories may locate a dispatch
+without reading other nodes' conclusions. Keep these commands in
+`commands_executed`; filenames do not establish evidence or belong in
+`files_inspected`/`nearby_contract_owners` unless their content was actually read.
+Unknown flags, shell substitutions, compound commands, pipelines and actual
+content readers retain the conservative isolation check. Prefer the exact
+`self_dispatch_recovery` paths in the execution view; if missing, have the
+coordinator resend this node's entry instead of guessing schedule paths.
+
 ## Audit Coverage
 
 `payload_schema.optional_shapes.coverage_units` includes all required unit fields.

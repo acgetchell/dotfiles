@@ -58,6 +58,11 @@ def execution_view_bytes(entry: dict[str, Any], canonical_bytes: bytes) -> bytes
             key: schema[key] for key in ("path", "digest", "template", "completed_example", "required_fields", "optional_shapes") if key in schema
         },
         "canonical_input": {"path": entry["worker_input_path"], "digest": digest_bytes(canonical_bytes)},
+        "self_dispatch_recovery": {
+            "worker_execution_path": entry["worker_execution_path"],
+            "worker_input_path": entry["worker_input_path"],
+            "policy": "Use these exact paths; if missing, ask the coordinator to resend this node's ready_dispatches entry. Never infer schedule paths.",
+        },
         "publish_command": dispatch["worker_payload_persistence"]["publish_command"],
         "instructions": (
             "Read skill/instructions and conditional references, then perform only this dispatched contract. Read the payload schema before publication. "

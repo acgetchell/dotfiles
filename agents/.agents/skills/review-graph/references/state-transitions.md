@@ -121,7 +121,8 @@ History and continuation files publish atomically, with the continuation
 manifest last. An interrupted publication can retry the identical request
 without leaving partial final files or overwriting existing evidence.
 
-For an executor permission denial **after checks start**, use the separate
+For an executor permission denial or the bound macOS Taplo sandbox panic
+**after checks start**, use the separate
 `recover-validation-execution` operation with the same CLI file arguments.
 Its [input example](runtime-operation-examples-v1.json#/recover-validation-execution)
 requires `checks_started: true`, `failure_kind: executor-permission`, a concrete
@@ -142,8 +143,15 @@ remains failed evidence and cannot trigger an automatic retry loop.
 
 `failure_evidence` supplies the original `before_capture`, `after_capture`,
 `workspace_before`, and `workspace_after` file paths, the exact declared
-`log_path`, and a permission-denial `diagnostic` present in both the immutable
-execution evidence and log. The log must be a recorded `kind: log` file artifact
+`log_path`, and a `diagnostic` present in both the immutable execution evidence
+and log. Permission-denial diagnostics must match verbatim. The
+[macOS Taplo panic](../../review-validator/references/macos-taplo-sandbox.md)
+also requires the failed unit's bound macOS/Darwin platform, Taplo toolchain,
+`workspace-write` environment, and default executor permissions. Its full panic
+excerpt must appear on one line in execution evidence; only this signature
+allows whitespace normalization against the multiline log. Generic panic text
+or an unbound diagnostic cannot establish executor failure.
+The log must be a recorded `kind: log` file artifact
 with a content digest; directory-only or missing logs cannot prove this recovery.
 The runtime verifies log bytes, snapshot node/source bindings, artifact identities,
 and the compiled workspace audit. Approved cache/output changes are permitted;
