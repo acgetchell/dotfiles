@@ -40,6 +40,13 @@ explicitly canceled reservations. Journal-bound started/accepted work drops out
 automatically. Refresh capacity in a new request each time; the generated input
 omits the prior snapshot rather than assuming it remains current.
 
+Forward `ready_dispatches[].worker_execution_path` verbatim to each worker;
+compact launch manifests expose that same path as `execution_view.path`.
+Never construct a schedule-specific execution filename. The execution view's
+`self_dispatch_recovery` names its exact execution and canonical input paths.
+If either is missing, resend the node's saved ready entry and resolve that
+missing artifact; do not direct the worker to another node's contract.
+
 Instruction-reconciliation audits keep a fresh worker lane. They wait for
 capacity instead of receiving a coordinator waiver or repeating source reads.
 An unexpected creation failure or exhausted capacity retry returns

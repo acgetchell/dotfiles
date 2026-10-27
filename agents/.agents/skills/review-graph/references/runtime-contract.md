@@ -49,9 +49,10 @@ holds them. Preflight is not validation. At repair boundaries, follow
 [repair validation](repair-validation.md) to plan cheap checks before fanout.
 
 `materialize-dispatches` binds plan, source triple, repository root, authorization,
-state command, and external artifact store to exact dispatches. Send each
-immutable `worker_input_path` directly; never extract aggregate wrappers.
-`next-ready` verifies them and returns paths in `ready_dispatches`.
+state command, and external artifact store to exact dispatches. Forward
+`next-ready`'s `ready_dispatches[].worker_execution_path` verbatim; never invent
+schedule paths or extract aggregate wrappers. `self_dispatch_recovery` supplies
+canonical input paths.
 
 `schedule-ready` selects grouped/mixed coordinator and worker lanes; see
 [grouped scheduling](grouped-scheduling.md) for capacity, reservations, and continuation.

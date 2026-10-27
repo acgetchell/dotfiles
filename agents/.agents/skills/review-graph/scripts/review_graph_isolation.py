@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from review_graph_globs import path_globs_intersect
+from review_graph_reads import path_only_inventory
 
 _READ_COMMANDS = frozenset({"cat", "head", "tail", "wc", "ls", "nl", "bat", "less", "more", "rg", "grep", "sed", "awk", "jq", "find"})
 _VALUE_OPTIONS = frozenset({"-g", "--glob", "--iglob", "-t", "--type", "-T", "--type-not", "-A", "-B", "-C", "-m", "--max-count", "--encoding"})
@@ -17,6 +18,7 @@ ISOLATION_INSTRUCTIONS = (
     "Keep validator evidence delegated through planned-validation IDs and requirement-bound caveats. "
     "You may read your own dispatch/schema/publication contract, raw source, supplied shared source packets, and the exact inherited "
     "coverage references explicitly dispatched to this node. Predecessor IDs do not grant access to other evidence. "
+    "Standalone rg --files and nonrecursive ls may locate paths, but filenames are neither source inspection nor evidence. "
     "Record every actual read and command; an isolation failure requires a new clean worker for this node only."
 )
 
@@ -61,6 +63,8 @@ def isolation_violations(dispatch: dict[str, Any], payload: dict[str, Any]) -> t
     for read in (*payload.get("files_inspected", []), *payload.get("nearby_contract_owners", [])):
         violations.extend(f"{read} -> {path}" for path in artifacts if path_globs_intersect(selector(read), selector(path)))
     for command in payload.get("commands_executed", []):
+        if path_only_inventory(command):
+            continue
         operands = _command_operands(command, root)
         violations.extend(
             f"{command} -> {path}"

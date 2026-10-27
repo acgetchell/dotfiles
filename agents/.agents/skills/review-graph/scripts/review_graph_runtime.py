@@ -4800,6 +4800,21 @@ def _mutation_path_delta(
     return changed
 
 
+def _unique_mutation_sources(sources: tuple[dict[str, Any], ...]) -> tuple[dict[str, Any], ...]:
+    """Merge path aliases without discarding explicit evidence-kind constraints."""
+    unique: dict[tuple[str, str], dict[str, Any]] = {}
+    for source in sources:
+        identity = tuple(str(Path(_required_text(source, key)).resolve()) for key in ("artifact_path", "metadata_path"))
+        key = (identity[0], identity[1])
+        previous = unique.get(key, {})
+        kinds = {item["kind"] for item in (previous, source) if item.get("kind") is not None}
+        if len(kinds) > 1:
+            msg = f"mutation sources contain contradictory kinds: {identity}"
+            raise ValueError(msg)
+        unique[key] = {"artifact_path": key[0], "metadata_path": key[1], **({"kind": next(iter(kinds), None)} if kinds else {})}
+    return tuple(unique.values())
+
+
 def _mutation_evidence_sources(document: dict[str, Any], plan: GraphPlan) -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
     """Verify historical evidence without relabeling it as final-state evidence."""
     if ("journal_path" in document) != ("dispatches_path" in document):
@@ -4813,12 +4828,11 @@ def _mutation_evidence_sources(document: dict[str, Any], plan: GraphPlan) -> dic
             raise ValueError(msg)
         entries = _dispatches_by_node(_read_json_object(Path(document["dispatches_path"])), plan=plan, source_state=state)
         accepted, _accepted_records = _accepted_journal_sources(plan, state, events, entries)
-        sources = {canonical_json(source): source for source in [*_records(document, "sources"), *accepted.values()]}
-        document = {**document, "sources": list(sources.values())}
+        document = {**document, "sources": [*_records(document, "sources"), *accepted.values()]}
     by_id = {node.node_id: node for node in plan.actual_worker_nodes}
     result: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
     reused_ids = {evidence_id for _, evidence_id in plan.exact_reused_review_evidence}
-    for source in _evidence_sources(document, plan, check_current_inputs=False):
+    for source in _unique_mutation_sources(_evidence_sources(document, plan, check_current_inputs=False)):
         loaded = _load_evidence_source(source, require_normalized=True)
         _kind, expectation, evidence, _content, normalized = loaded
         normalized = _record_document(normalized) if normalized is not None else None

@@ -68,6 +68,9 @@ modeled boundary, and every unexecuted target cell. If supplied native CI
 evidence for the same source state conflicts with local or emulated evidence,
 preserve the native failure instead of reporting the matrix as passed.
 
+For a macOS Taplo `system-configuration` NULL-object panic, follow the
+[sandbox diagnostic and approved retry procedure](macos-taplo-sandbox.md).
+
 For strict Semgrep scans, a nonzero exit remains a failure even when the human
 summary reports `0 findings`. Separate findings from parser errors, timeouts,
 and skipped coverage. If the log lacks structured errors or scanned/skipped
