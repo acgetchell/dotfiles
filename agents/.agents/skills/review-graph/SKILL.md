@@ -104,8 +104,9 @@ to schedule cheap canonical checks before affected review fanout.
 
 ## Validate Once
 
-Before fanout, run `preflight-validation` for command policy, caches, hosted
-obligations and output paths; resolve blockers or retain blocked evidence.
+Before fanout, run `preflight-validation`; resolve blockers or retain blocked evidence.
+Inspect `instruction_preflight` before fanout; follow
+[instruction delivery](references/instruction-corpora.md) after context loss.
 
 Collect exact validation requirements from accepted compact payloads. Coalesce
 only identical source, command or recipe, working-directory, environment,

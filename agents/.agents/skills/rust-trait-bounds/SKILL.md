@@ -35,6 +35,13 @@ Ignore unrelated unchanged code unless needed to understand existing generic con
 
 Check that each bound is required by the implementation or by the public API contract.
 
+When necessity depends on upstream definitions, inspect the exact locked version
+using the preflight-resolved managed toolchain environment, including its
+`CARGO_HOME` and registry/vendor configuration. A miss in the default Cargo
+registry is a discovery limitation, not proof that the source is unavailable.
+Keep unresolved dependency uncertainty explicit and delegate any required fetch
+or compile checks through the planned validator.
+
 Flag:
 
 - bounds that are never used by the function, impl, or trait item
