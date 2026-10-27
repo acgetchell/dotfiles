@@ -33,6 +33,8 @@ from test_review_graph_runtime import ROUTING_CATALOG, SKILL_ROOT, _compile_repa
 from test_support_review_graph import _prepare_all_fixture_timing
 
 DENIAL = "PermissionError: [Errno 1] Operation not permitted"
+TAPLO_PANIC = "thread 'main' panicked at /build/registry/system-configuration-0.5.1/src/dynamic_store.rs:154:9:\nAttempted to create a NULL object."
+TAPLO_ENVIRONMENT = {"platform": "aarch64-apple-darwin", "toolchain": "Rust 1.99.1, Taplo 0.10.0", "environment": "native macOS workspace-write"}
 
 
 def _ready(lifecycle: dict[str, Any], args: Namespace) -> dict[str, Any]:
@@ -42,7 +44,9 @@ def _ready(lifecycle: dict[str, Any], args: Namespace) -> dict[str, Any]:
     return next_ready_nodes({**lifecycle, "current_source_state": lifecycle["source_state"]}, journal_events=events, dispatch_set=dispatch_set)
 
 
-def _compile_aggregate(lifecycle: dict[str, Any], args: Namespace, entry: dict[str, Any], directory: Path, *, permitted: bool) -> dict[str, str]:
+def _compile_aggregate(  # noqa: PLR0913 - preserve the exact modeled fault through execution and evidence compilation.
+    lifecycle: dict[str, Any], args: Namespace, entry: dict[str, Any], directory: Path, *, permitted: bool, diagnostic: str = DENIAL
+) -> dict[str, str]:
     """Run a deterministic executor fault model, then use the real compiler gates."""
     directory.mkdir()
     append_journal_event(args.journal, lifecycle, JournalEventRequest(entry["node_id"], "in-flight"))
@@ -82,10 +86,17 @@ def _compile_aggregate(lifecycle: dict[str, Any], args: Namespace, entry: dict[s
     log.write_bytes(output)
     after = capture_workspace_snapshot(entry["dispatch"])
     status = "passed" if run.returncode == 0 else "failed"
+    diagnostic = " ".join(diagnostic.split())
+    fault_evidence = f"socket.bind: {diagnostic}" if diagnostic == DENIAL else diagnostic
+    limitation = (
+        "The modeled executor denied socket binding after checks ran; build was not reached."
+        if diagnostic == DENIAL
+        else "The modeled executor failed after checks ran; build was not reached."
+    )
     payload = {
         "schema_version": 3,
         "status": status,
-        "limitations": [] if permitted else ["The modeled executor denied socket binding after checks ran; build was not reached."],
+        "limitations": [] if permitted else [limitation],
         "executions": [
             *preceding,
             {
@@ -95,7 +106,7 @@ def _compile_aggregate(lifecycle: dict[str, Any], args: Namespace, entry: dict[s
                 "result": status,
                 "exit_code": run.returncode,
                 "elapsed": f"{elapsed}s",
-                "evidence": "2 checks passed; build completed" if permitted else f"2 checks passed; socket.bind: {DENIAL}; build not reached",
+                "evidence": "2 checks passed; build completed" if permitted else f"2 checks passed; {fault_evidence}; build not reached",
                 "artifact_paths": [str(log)],
             },
         ],
@@ -135,7 +146,7 @@ def _compile_aggregate(lifecycle: dict[str, Any], args: Namespace, entry: dict[s
     )
     return {
         "log_path": str(log),
-        "diagnostic": DENIAL,
+        "diagnostic": diagnostic,
         "before_capture": str(args.current_capture),
         "after_capture": str(args.current_capture),
         "workspace_before": str(directory / "workspace-before.json"),
@@ -143,13 +154,16 @@ def _compile_aggregate(lifecycle: dict[str, Any], args: Namespace, entry: dict[s
     }
 
 
-def _fixture(tmp_path: Path, *, extra_command: bool = False, non_utf8_output: bool = False) -> tuple[dict[str, Any], Namespace, dict[str, Any], dict[str, Any]]:
+def _fixture(
+    tmp_path: Path, *, extra_command: bool = False, non_utf8_output: bool = False, diagnostic: str = DENIAL, unit_overrides: dict[str, Any] | None = None
+) -> tuple[dict[str, Any], Namespace, dict[str, Any], dict[str, Any]]:
     script = tmp_path / "aggregate.py"
+    fault = 'raise PermissionError(1, "Operation not permitted")' if diagnostic == DENIAL else f"print({diagnostic!r}, flush=True); raise SystemExit(101)"
     script.write_text(
         ('import sys\nsys.stdout.buffer.write(b"\\xff\\n")\n' if non_utf8_output else "")
         + 'import os\nassert 1 + 1 == 2\nassert len([1, 2]) == 2\nprint("2 checks passed", flush=True)\n'
         'if os.environ["FIXTURE_SOCKET_ACCESS"] != "permitted":\n'
-        '    raise PermissionError(1, "Operation not permitted")\nprint("build completed")\n'
+        f'    {fault}\nprint("build completed")\n'
     )
     planning = _sparse_plan_document()
     original = planning["validation_requirements"][0]
@@ -162,6 +176,7 @@ def _fixture(tmp_path: Path, *, extra_command: bool = False, non_utf8_output: bo
             "isolation_root": str(tmp_path),
             "working_directories": [str(tmp_path)] * (2 if extra_command else 1),
             "allowed_artifacts": [{"path": str(tmp_path / "ci.log"), "kind": "log", "repository_status": "outside-repository"}],
+            **(unit_overrides or {}),
         }
     )
     planning["pre_review_validation_requirement_ids"] = [original["requirement_id"], "aggregate"]
@@ -184,7 +199,7 @@ def _fixture(tmp_path: Path, *, extra_command: bool = False, non_utf8_output: bo
     successful = _ready(lifecycle, args)["ready_dispatches"][0]
     _compile_repair_fixture_entry(successful, lifecycle, args.journal)
     failed = _ready(lifecycle, args)["ready_dispatches"][0]
-    failure = _compile_aggregate(lifecycle, args, failed, tmp_path / "first-execution", permitted=False)
+    failure = _compile_aggregate(lifecycle, args, failed, tmp_path / "first-execution", permitted=False, diagnostic=diagnostic)
     request = {
         **lifecycle,
         "artifact_store": str(tmp_path / "recovery"),
@@ -293,6 +308,57 @@ def test_executed_permission_recovery_releases_early_gate_only_after_success(tmp
         ],
     )
     assert not reconciliation["blockers"]
+
+
+@pytest.mark.parametrize("platform", ["macOS", "aarch64-apple-darwin"])
+def test_taplo_panic_recovery_preserves_failed_evidence_until_retry_passes(tmp_path: Path, platform: str) -> None:
+    request, args, failed, successful = _fixture(tmp_path, diagnostic=TAPLO_PANIC, unit_overrides={**TAPLO_ENVIRONMENT, "platform": platform})
+    request.update(reason="The retained Taplo panic identifies the macOS sandbox failure.", remedy="Approve the same command outside workspace-write.")
+    originals = {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+    assert b"PermissionError" not in originals[Path(request["failure_evidence"]["log_path"])]
+    recovered = recover_validation_execution(request, args)
+    assert recovered["retained_node_ids"] == [successful["node_id"]]
+    assert all(path.read_bytes() == content for path, content in originals.items())
+    lifecycle, retry_args = _continuation(recovered)
+    recovery = lifecycle["plan"]["validation_recoveries"][0]
+    archived_log = next(Path(item["path"]) for item in recovery["preserved_files"] if item["path"].endswith("failure.log"))
+    original_log = originals[Path(request["failure_evidence"]["log_path"])]
+    assert archived_log.read_bytes() == original_log
+    retry = _ready(lifecycle, retry_args)["ready_dispatches"][0]
+    assert retry["node_id"] == failed["node_id"]
+    assert retry["dispatch"]["evidence_id"] != failed["dispatch"]["evidence_id"]
+    assert retry["dispatch"]["validation_unit"]["commands"] == failed["dispatch"]["validation_unit"]["commands"]
+    assert retry["dispatch"]["executor_requirements"] == {"sandbox_permissions": "require_escalated"}
+    _compile_aggregate(lifecycle, retry_args, retry, tmp_path / "taplo-retry", permitted=True, diagnostic=TAPLO_PANIC)
+    assert _ready(lifecycle, retry_args)["ready_node_ids"]
+    assert archived_log.read_bytes() == original_log
+
+
+@pytest.mark.parametrize("defect", ["platform", "toolchain", "sandbox", "already-escalated", "generic-panic", "log-tamper", "unrecorded-diagnostic"])
+def test_taplo_recovery_requires_bound_signature_and_executor_context(tmp_path: Path, defect: str) -> None:
+    context: dict[str, Any] = dict(TAPLO_ENVIRONMENT)
+    diagnostic = TAPLO_PANIC
+    if defect in {"platform", "toolchain"}:
+        context[defect] = "linux" if defect == "platform" else "unrelated tool"
+    elif defect == "sandbox":
+        context["environment"] = "native macOS unrestricted"
+    elif defect == "already-escalated":
+        context["features"] = ["executor-permissions=require_escalated"]
+    elif defect == "generic-panic":
+        diagnostic = TAPLO_PANIC.replace("system-configuration", "unrelated-crate")
+    request, args, _failed, _successful = _fixture(tmp_path, diagnostic=diagnostic, unit_overrides=context)
+    match = "permission-denial diagnostic"
+    if defect == "log-tamper":
+        Path(request["failure_evidence"]["log_path"]).write_text(TAPLO_PANIC)
+        match = "log differs"
+    elif defect == "unrecorded-diagnostic":
+        request["failure_evidence"]["diagnostic"] = " ".join(TAPLO_PANIC.replace(":154:", ":155:").split())
+        match = "log differs"
+    originals = {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+    with pytest.raises(ValueError, match=match):
+        recover_validation_execution(request, args)
+    assert not Path(request["artifact_store"]).exists()
+    assert all(path.read_bytes() == content for path, content in originals.items())
 
 
 @pytest.mark.parametrize(

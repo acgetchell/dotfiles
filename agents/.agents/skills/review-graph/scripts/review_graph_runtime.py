@@ -8293,14 +8293,14 @@ def recover_validation_launch(document: dict[str, Any], args: argparse.Namespace
 
 
 def recover_validation_execution(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
-    """Retry one failed aggregate with recorded executor-denial evidence."""
+    """Retry one failed aggregate with recorded executor-restriction evidence."""
     return _recover_validation(document, args, checks_started=True)
 
 
 def _execution_failure_snapshots(
     document: dict[str, Any], entry: dict[str, Any], metadata: dict[str, Any], evidence: ValidationEvidence, normalized: dict[str, Any]
 ) -> dict[str, bytes]:
-    """Bind a permission diagnosis to the failed execution, log, and snapshots."""
+    """Bind an executor diagnosis to the failed execution, log, and snapshots."""
     unit = _validation_unit(entry["dispatch"]["validation_unit"])
     executions = normalized.get("executions", [])
     # A failed aggregate may contain passed subchecks. Separately successful
@@ -8310,8 +8310,17 @@ def _execution_failure_snapshots(
         raise ValueError(msg)
     failure = document["failure_evidence"]
     diagnostic = _required_text(failure, "diagnostic")
-    if not re.search(r"PermissionError: \[Errno (?:1|13)\]|Operation not permitted|Permission denied|EACCES|EPERM", diagnostic):
-        msg = "execution recovery requires a concrete executor permission-denial diagnostic"
+    taplo_panic = bool(
+        re.search(r"\b(?:darwin|macos)\b", unit.platform, re.IGNORECASE)
+        and re.search(r"\btaplo\b", unit.toolchain, re.IGNORECASE)
+        and "workspace-write" in unit.environment.casefold()
+        and executor_permissions(unit.features) == "use_default"
+        and re.search(
+            r"panicked at [^\n]*system-configuration-[0-9.]+/src/dynamic_store\.rs:\d+(?::\d+)?:?\s*\n?Attempted to create a NULL object\.", diagnostic
+        )
+    )
+    if not taplo_panic and not re.search(r"PermissionError: \[Errno (?:1|13)\]|Operation not permitted|Permission denied|EACCES|EPERM", diagnostic):
+        msg = "execution recovery requires a concrete executor permission-denial diagnostic or a bound macOS Taplo sandbox panic"
         raise ValueError(msg)
     log_path = _required_text(failure, "log_path")
     log = next((artifact for artifact in normalized["artifacts"] if artifact["path"] == log_path and artifact["kind"] == "log"), None)
@@ -8320,7 +8329,12 @@ def _execution_failure_snapshots(
         raise ValueError(msg)
     root = Path(entry["dispatch"]["repository_root"])
     log_bytes = _read_regular_file_no_follow(_workspace_path(log_path, root))
-    if digest_bytes(log_bytes) != log["artifact_digest"] or diagnostic.encode("utf-8") not in log_bytes or diagnostic not in executions[0]["evidence"]:
+    diagnostic_in_log = diagnostic.encode("utf-8") in log_bytes
+    if taplo_panic:
+        # The panic spans lines, but compiled execution evidence is one line.
+        # Normalize whitespace only for this signature; retain the raw byte digest.
+        diagnostic_in_log = " ".join(diagnostic.split()) in " ".join(log_bytes.decode("utf-8", errors="replace").split())
+    if digest_bytes(log_bytes) != log["artifact_digest"] or not diagnostic_in_log or diagnostic not in executions[0]["evidence"]:
         msg = "execution recovery diagnostic or log differs from compiled failure evidence"
         raise ValueError(msg)
     snapshots = {"failure.log": log_bytes}
@@ -9031,7 +9045,7 @@ def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     for operation, description in (
         ("replace-invalidated-audit", "replace an accepted audit invalidated for applying the wrong semantic checklist"),
         ("recover-validation-launch", "retry one proven unstarted validator after an executor remedy"),
-        ("recover-validation-execution", "retry one failed aggregate after a proven executor permission denial"),
+        ("recover-validation-execution", "retry one failed aggregate after a proven executor restriction"),
     ):
         recovery_parser = _runtime_subparser(subparsers, operation, description)
         recovery_parser.add_argument("--input", type=Path, required=True)

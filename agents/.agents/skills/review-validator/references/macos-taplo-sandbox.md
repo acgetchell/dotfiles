@@ -34,6 +34,15 @@ For an executed non-mutating graph validator, publish the failed infrastructure
 result and use `recover-validation-execution` with the retained failure evidence
 and explicit permission change, as described in
 [execution recovery](../../review-graph/references/state-transitions.md).
+The failed unit must already bind a macOS/Darwin `platform`, a `toolchain` naming
+Taplo, a `workspace-write` `environment`, and `use_default` executor permissions.
+Use `failure_kind: executor-permission` in the recovery request; the failed
+validation payload remains `infrastructure`. In `failure_evidence.diagnostic`
+and the execution's `evidence`, retain the full panic excerpt from `panicked at`
+through `Attempted to create a NULL object.` on one line, replacing the log's
+line break with a space. Recovery recognizes this signature without denial text,
+compares the excerpt with the recorded log using whitespace normalization, and
+still verifies the raw log digest, source captures, and workspace audit.
 Do not reuse the failed attempt's receipt for the replacement. A formatter such
 as `just toml-fix` mutates source and belongs to the authorized serialized repair
 step, followed by recapture; it is not a non-mutating validation command.
