@@ -2,6 +2,7 @@
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -41,6 +42,33 @@ def test_capture_preserves_index_with_stale_stat_cache(tmp_path: Path, monkeypat
     capture = _scope_data(shutil.which("git") or "git", repo, mode, "HEAD" if mode == "branch" else None, ())
     assert capture["status"] == ["MM changed.txt"]
     assert capture["captured_scope_paths"] == (["changed.txt", "unchanged.txt"] if mode == "baseline" else ["changed.txt"])
+    assert _git(repo, "ls-files", "--stage") == staged_entries
+    assert (repo / ".git/index").read_bytes() == index
+
+
+@pytest.mark.parametrize("mode", ["baseline", "branch", "staged", "worktree"])
+@pytest.mark.parametrize("driver_kind", ["command", "textconv"])
+def test_capture_ignores_diff_drivers_that_hide_source_changes(tmp_path: Path, mode: str, driver_kind: str) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    source = repo / "source\t[*]\n.bin"
+    source.write_bytes(b"\x00before\xff\n")
+    _commit_all(repo)
+    source.write_bytes(b"\x00after\xff\n")
+    _git(repo, "add", "--", source.name)
+    marker = repo / ".git/driver-ran"
+    driver = repo / ".git/hide-diff.py"
+    driver.write_text(f"from pathlib import Path\nPath({str(marker)!r}).write_text('ran')\nprint('same')\n")
+    _git(repo, "config", f"diff.hide.{driver_kind}", shlex.join((sys.executable, str(driver))))
+    _git(repo, "config", "diff.hide.trustExitCode", "true")
+    (repo / ".git/info/attributes").write_text("*.bin diff=hide\n")
+    index = (repo / ".git/index").read_bytes()
+    staged_entries = _git(repo, "ls-files", "--stage")
+
+    capture = _scope_data(shutil.which("git") or "git", repo, mode, "HEAD" if mode == "branch" else None, (source.name,))
+
+    assert capture["captured_scope_paths"] == [source.name]
+    assert not marker.exists()
     assert _git(repo, "ls-files", "--stage") == staged_entries
     assert (repo / ".git/index").read_bytes() == index
 
