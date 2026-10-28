@@ -223,14 +223,18 @@ class ExternalSourceTransition(ExternalMetadataTransition):
     @override
     def verify(self) -> None:
         """Preserve Git, selection and scope while exposing actual content deltas."""
+        self._verify_source_change(preserve_index=True)
+
+    def _verify_source_change(self, *, preserve_index: bool) -> tuple[str, ...]:
         self.before.verify()
         self.after.verify()
         _external_source_text(self.external_source_actor)
         _external_source_text(self.external_source_attribution)
-        stable = ("repository_root", "capture_mode", "head", "branch", "base_ref", "merge_base", "requested_paths", "captured_scope_paths", "index_fingerprint")
+        stable = ("repository_root", "capture_mode", "head", "branch", "base_ref", "merge_base", "requested_paths", "captured_scope_paths")
         if (
             any(getattr(self.before, field) != getattr(self.after, field) for field in stable)
             or self.before.repository_selection_paths != self.after.repository_selection_paths
+            or (preserve_index and self.before.index_fingerprint != self.after.index_fingerprint)
         ):
             msg = "external source continuation requires unchanged Git and review selection; report partial evidence when new scope requires replanning"
             raise ValueError(msg)
@@ -239,6 +243,44 @@ class ExternalSourceTransition(ExternalMetadataTransition):
         if not changed or not changed <= set(self.before.captured_scope_paths):
             msg = "external source continuation requires changed content entirely inside the captured scope"
             raise ValueError(msg)
+        return tuple(sorted(changed))
+
+
+@dataclass(frozen=True)
+class StagedExternalSourceTransition(ExternalSourceTransition):
+    """Attributed maintainer edits and staging between two actual captures."""
+
+    external_staging_attribution: str
+
+    @override
+    def verify(self) -> None:
+        """Derive source and index deltas without inventing an intermediate state."""
+        changed = self._verify_source_change(preserve_index=False)
+        _external_source_text(self.external_staging_attribution)
+        if self.before.index_fingerprint == self.after.index_fingerprint:
+            msg = "external staging attribution requires an observed index change; use the source-only continuation"
+            raise ValueError(msg)
+        before, after = dict(self.before.repository_path_fingerprints), dict(self.after.repository_path_fingerprints)
+        if (
+            self.before.capture_mode not in {"baseline", "worktree", "branch"}
+            or self.before.repository_selection_paths is None
+            or before.keys() != after.keys()
+            or self.before.repository_symlink_paths != self.after.repository_symlink_paths
+        ):
+            msg = "staged external source continuation requires unchanged path inventory and proven non-staged selection"
+            raise EvaluationBoundaryError(RejectionKind.UNSUPPORTED_TRANSITION, msg)
+        for path in changed:
+            if PurePosixPath(path).name == "AGENTS.md":
+                msg = "staged external source continuation cannot reconcile changed repository instructions"
+                raise EvaluationBoundaryError(RejectionKind.UNSUPPORTED_TRANSITION, msg)
+            identities = (before[path], after[path])
+            if any(not identity.startswith("git:") for identity in identities):
+                msg = "staged external source continuation requires native Git blob identities at both endpoints"
+                raise EvaluationBoundaryError(RejectionKind.UNSUPPORTED_TRANSITION, msg)
+            old, new = (GitPathIdentity.parse(identity) for identity in identities)
+            if old.mode not in {"100644", "100755"} or old.mode != new.mode:
+                msg = "staged external source continuation cannot reconcile file type or mode changes"
+                raise EvaluationBoundaryError(RejectionKind.UNSUPPORTED_TRANSITION, msg)
 
 
 @dataclass(frozen=True)
@@ -397,6 +439,7 @@ def _observed_source_transition(raw: dict[str, Any], before: ReviewSourceSnapsho
             "staging_attribution",
             "external_source_actor",
             "external_source_attribution",
+            "external_staging_attribution",
             "commit_handoff",
             "git_context_authorization",
         )
@@ -407,7 +450,10 @@ def _observed_source_transition(raw: dict[str, Any], before: ReviewSourceSnapsho
 
 
 def _interleaved_transition(raw: dict[str, Any], before: ReviewSourceSnapshot, after: ReviewSourceSnapshot) -> InterleavedRepairTransition:
-    if any(field in raw for field in ("external_source_actor", "external_source_attribution", "commit_handoff", "git_context_authorization")):
+    if any(
+        field in raw
+        for field in ("external_source_actor", "external_source_attribution", "external_staging_attribution", "commit_handoff", "git_context_authorization")
+    ):
         msg = "interleaved repair cannot be combined with another transition attribution"
         raise ValueError(msg)
     paths = raw.get("repair_paths")
@@ -424,6 +470,17 @@ def _interleaved_transition(raw: dict[str, Any], before: ReviewSourceSnapshot, a
     )
 
 
+def _external_source_transition(raw: dict[str, Any], before: ReviewSourceSnapshot, after: ReviewSourceSnapshot) -> ExternalSourceTransition:
+    if any(field in raw for field in ("commit_handoff", "git_context_authorization", "repair_paths", "repair_attribution", "staging_attribution")):
+        msg = "external source attribution cannot authorize another Git or agent repair transition"
+        raise ValueError(msg)
+    actor = _external_source_text(raw.get("external_source_actor"))
+    attribution = _external_source_text(raw.get("external_source_attribution"))
+    if "external_staging_attribution" in raw:
+        return StagedExternalSourceTransition(before, after, actor, attribution, _external_source_text(raw["external_staging_attribution"]))
+    return ExternalSourceTransition(before, after, actor, attribution)
+
+
 def metadata_transition(raw: dict[str, Any]) -> ExternalMetadataTransition:
     """Parse and verify an externally observed metadata transition."""
     if not isinstance(raw, dict) or any(not isinstance(raw.get(field), dict) for field in ("before", "after")):
@@ -435,13 +492,8 @@ def metadata_transition(raw: dict[str, Any]) -> ExternalMetadataTransition:
         result = _observed_source_transition(raw, before, after)
     elif "repair_epoch" in raw:
         result = _interleaved_transition(raw, before, after)
-    elif "external_source_actor" in raw or "external_source_attribution" in raw:
-        if "commit_handoff" in raw or "git_context_authorization" in raw:
-            msg = "external source attribution cannot authorize a Git transition"
-            raise ValueError(msg)
-        result = ExternalSourceTransition(
-            before, after, _external_source_text(raw.get("external_source_actor")), _external_source_text(raw.get("external_source_attribution"))
-        )
+    elif any(field in raw for field in ("external_source_actor", "external_source_attribution", "external_staging_attribution")):
+        result = _external_source_transition(raw, before, after)
     elif "commit_handoff" in raw:
         result = CommitHandoffTransition(before, after, raw["commit_handoff"])
     elif "git_context_authorization" in raw:

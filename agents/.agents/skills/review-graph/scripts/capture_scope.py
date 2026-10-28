@@ -37,9 +37,19 @@ class _Digest(Protocol):
 
 
 def _run_git(git: str, repo: Path, arguments: Sequence[str]) -> bytes:
-    """Run one bounded, literal-pathspec Git command and return stdout bytes."""
-    result = run_command_bytes(git, ("--literal-pathspecs", "-C", os.fspath(repo), *arguments), check=False, timeout=_TIMEOUT_SECONDS)
-    if result.returncode != 0:
+    """Run a bounded Git observation without optional index-cache writes."""
+    is_diff = bool(arguments) and arguments[0] == "diff"
+    if is_diff:
+        arguments = ("diff", "--exit-code", "--no-ext-diff", "--no-textconv", *arguments[1:])
+    # status honors optional locks, but diff's automatic stat refresh needs its
+    # own override. Neither observation may rewrite the index being captured.
+    result = run_command_bytes(
+        git,
+        ("--no-optional-locks", "-c", "diff.autoRefreshIndex=false", "--literal-pathspecs", "-C", os.fspath(repo), *arguments),
+        check=False,
+        timeout=_TIMEOUT_SECONDS,
+    )
+    if result.returncode != 0 and not (is_diff and result.returncode == 1):
         command = " ".join(("git", *arguments))
         detail = result.stderr.decode(errors="replace").strip()
         message = f"{command} failed ({result.returncode}): {detail}"
@@ -63,6 +73,19 @@ def _decode(value: bytes) -> str:
 def _decode_zlist(value: bytes) -> list[str]:
     """Decode a NUL-delimited Git path or status list."""
     return [os.fsdecode(item) for item in value.split(b"\0") if item]
+
+
+def _decode_numstat_paths(value: bytes) -> list[str]:
+    """Decode --numstat -z --no-renames without splitting tabs in filenames."""
+    paths = []
+    for record in value.split(b"\0"):
+        if record:
+            fields = record.split(b"\t", 2)
+            if len(fields) != 3 or not fields[2]:
+                message = "invalid Git numstat path record"
+                raise RuntimeError(message)
+            paths.append(os.fsdecode(fields[2]))
+    return paths
 
 
 def _with_paths(arguments: Sequence[str], pathspecs: Sequence[str]) -> tuple[str, ...]:
@@ -379,16 +402,18 @@ def _scope_data(git: str, repo: Path, mode: str, base: str | None, pathspecs: Se
     if mode == "branch":
         base_ref = _resolve_base(git, repo, base)
         merge_base = _decode(_run_git(git, repo, ("merge-base", "HEAD", base_ref)))
-        path_arguments = _with_paths(("diff", "--name-only", "--no-renames", "-z", merge_base), pathspecs)
-        paths = _decode_zlist(_run_git(git, repo, path_arguments))
+        # numstat compares content even with index refresh and diff drivers off;
+        # name-only can retain stat-only changes on supported Git versions.
+        path_arguments = _with_paths(("diff", "--numstat", "--no-renames", "-z", merge_base), pathspecs)
+        paths = _decode_numstat_paths(_run_git(git, repo, path_arguments))
         paths.extend(selected_untracked)
     elif mode == "staged":
-        path_arguments = _with_paths(("diff", "--cached", "--name-only", "--no-renames", "-z", "HEAD"), pathspecs)
-        paths = _decode_zlist(_run_git(git, repo, path_arguments))
+        path_arguments = _with_paths(("diff", "--cached", "--numstat", "--no-renames", "-z", "HEAD"), pathspecs)
+        paths = _decode_numstat_paths(_run_git(git, repo, path_arguments))
         selected_untracked = []
     elif mode == "worktree":
-        path_arguments = _with_paths(("diff", "--name-only", "--no-renames", "-z", "HEAD"), pathspecs)
-        paths = _decode_zlist(_run_git(git, repo, path_arguments))
+        path_arguments = _with_paths(("diff", "--numstat", "--no-renames", "-z", "HEAD"), pathspecs)
+        paths = _decode_numstat_paths(_run_git(git, repo, path_arguments))
         paths.extend(selected_untracked)
     elif mode == "baseline":
         path_arguments = _with_paths(("ls-files", "-z"), pathspecs)
@@ -430,8 +455,8 @@ def _scope_data(git: str, repo: Path, mode: str, base: str | None, pathspecs: Se
         message = "captured source changed while deriving path line bounds"
         raise RuntimeError(message)
 
-    worktree_paths_arguments = _with_paths(("diff", "--name-only", "--no-renames", "-z", "HEAD"), pathspecs)
-    captured_worktree_paths = _decode_zlist(_run_git(git, repo, worktree_paths_arguments))
+    worktree_paths_arguments = _with_paths(("diff", "--numstat", "--no-renames", "-z", "HEAD"), pathspecs)
+    captured_worktree_paths = _decode_numstat_paths(_run_git(git, repo, worktree_paths_arguments))
     captured_worktree_paths.extend(_decode_zlist(_run_git(git, repo, untracked_arguments)))
     captured_worktree_fingerprint = _worktree_fingerprint(
         git=git,

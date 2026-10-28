@@ -1861,6 +1861,10 @@
         "external_source_attribution": {
           "type": "string",
           "minLength": 1
+        },
+        "external_staging_attribution": {
+          "type": "string",
+          "minLength": 1
         }
       }
     }

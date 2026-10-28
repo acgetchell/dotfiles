@@ -602,6 +602,32 @@ store, `external_source_actor`, and `external_source_attribution` quoting or
 referencing the maintainer's confirmation. Do not infer authorship from Git or
 classify an agent repair as external. Wait for workers to become quiescent.
 
+If the maintainer also staged work before the next real capture, add
+`external_staging_attribution` to the same request:
+
+```json
+{
+  "external_source_actor": "maintainer",
+  "external_source_attribution": "The maintainer confirmed updating uv.lock during review.",
+  "external_staging_attribution": "The maintainer also confirmed staging work as they reviewed."
+}
+```
+
+Use the actual confirmation for both fields, including one shared statement when
+it confirms both actions. The content attribution covers every changed source
+path; the staging attribution covers the index change. Ambiguous authorship or
+mixed agent/maintainer edits cannot use this adapter. With no index change, omit
+the staging field and use the ordinary external-source continuation.
+
+The composed continuation derives content changes from the complete path maps
+and the index change from its separate fingerprint. It retains only the two
+actual endpoint captures, their attributions, and the original evidence. There
+is no inferred intermediate capture or claim about edit/staging order or the
+index's intermediate contents. The observed index is never modified. Changed
+dependencies and semantic Git judgments require current review; contracted
+validation is preserved only when its source and Git inputs are independently
+proved unchanged. Old validation keeps its original observed state.
+
 The continuation preserves run control, repair count, repair budget and existing
 authorization, including when all agent repair batches have been used. It binds
 the actual changed path identities, checks the live source again before publication,
@@ -610,13 +636,22 @@ journal and capture. The existing serialized `external_metadata_transitions`
 chain also carries this explicitly typed source transition; the name is retained
 for saved-record compatibility.
 
+For remaining authorized repairs, use the returned lifecycle, dispatches,
+journal, and actual capture with `review-control action: begin-repair`, retaining
+the existing `review-and-fix` authorization. Follow its returned repair epoch and
+continue with `advance-after-mutation`. Reconciliation neither consumes a repair
+batch nor requires another budget grant while an authorized batch remains.
+
 Only unchanged audit reads/dependencies and contracted validation inputs can be
 reused. README whitespace still invalidates its documentation owner and any
 content-sensitive check; semantic code changes invalidate their owning contracts.
 Unknown dependencies remain unproven. Independent review and synthesis recheck.
-The operation grants no additional agent repairs. Changed Git state, selection,
-new paths, or applicable instructions need separate reconciliation/replanning and
-are rejected by this bounded continuation.
+The operation grants no additional agent repairs. The composed staging case
+requires unchanged HEAD, branch, base, scope, path inventory, file types/modes,
+applicable instructions, and captured selection. Staged-only scopes, unproven
+selection, new paths, and unsupported boundary changes require separate
+reconciliation/replanning and are rejected before publication. Index changes
+without explicit staging attribution remain rejected.
 
 For routine delivery when reconciliation is unavailable, stop formal bookkeeping
 and report the completed work, exact capture/commit of each accepted result,
