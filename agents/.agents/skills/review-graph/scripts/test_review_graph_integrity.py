@@ -81,7 +81,17 @@ def test_shared_git_runner_preserves_child_bytes_and_literal_path_arguments(tmp_
     result = capture_scope._run_git(str(git), tmp_path, ("probe", "--", "literal [*].py"))
 
     arguments, child_output = result.split(b"\n", 1)
-    assert json.loads(arguments) == ["--literal-pathspecs", "-C", str(tmp_path), "probe", "--", "literal [*].py"]
+    assert json.loads(arguments) == [
+        "--no-optional-locks",
+        "-c",
+        "diff.autoRefreshIndex=false",
+        "--literal-pathspecs",
+        "-C",
+        str(tmp_path),
+        "probe",
+        "--",
+        "literal [*].py",
+    ]
     assert child_output == output
 
 
