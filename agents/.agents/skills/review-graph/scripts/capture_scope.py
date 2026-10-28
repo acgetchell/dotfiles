@@ -37,9 +37,21 @@ class _Digest(Protocol):
 
 
 def _run_git(git: str, repo: Path, arguments: Sequence[str]) -> bytes:
-    """Run one bounded, literal-pathspec Git command and return stdout bytes."""
-    result = run_command_bytes(git, ("--literal-pathspecs", "-C", os.fspath(repo), *arguments), check=False, timeout=_TIMEOUT_SECONDS)
-    if result.returncode != 0:
+    """Run a bounded Git observation without optional index-cache writes."""
+    is_diff = bool(arguments) and arguments[0] == "diff"
+    if is_diff:
+        # Without refreshing the index, --exit-code makes --name-only compare
+        # content too, excluding files whose cached stat metadata alone differs.
+        arguments = ("diff", "--exit-code", *arguments[1:])
+    # status honors optional locks, but diff's automatic stat refresh needs its
+    # own override. Neither observation may rewrite the index being captured.
+    result = run_command_bytes(
+        git,
+        ("--no-optional-locks", "-c", "diff.autoRefreshIndex=false", "--literal-pathspecs", "-C", os.fspath(repo), *arguments),
+        check=False,
+        timeout=_TIMEOUT_SECONDS,
+    )
+    if result.returncode != 0 and not (is_diff and result.returncode == 1):
         command = " ".join(("git", *arguments))
         detail = result.stderr.decode(errors="replace").strip()
         message = f"{command} failed ({result.returncode}): {detail}"

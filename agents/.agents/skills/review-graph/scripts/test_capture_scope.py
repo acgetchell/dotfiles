@@ -1,6 +1,7 @@
 """Behavioral tests for the review-graph scope capture helper."""
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -17,6 +18,31 @@ from review_graph_integrity import digest_json
 from review_graph_reuse import source_snapshot
 
 _TIMEOUT_SECONDS = 30
+
+
+@pytest.mark.parametrize("mode", ["baseline", "branch", "staged", "worktree"])
+def test_capture_preserves_index_with_stale_stat_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
+    """Force Git's optional index refresh instead of relying on filesystem timing."""
+    monkeypatch.setenv("GIT_OPTIONAL_LOCKS", "1")
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    _git(repo, "config", "diff.autoRefreshIndex", "true")
+    changed, unchanged = repo / "changed.txt", repo / "unchanged.txt"
+    changed.write_text("committed\n")
+    unchanged.write_text("unchanged\n")
+    _commit_all(repo)
+    changed.write_text("staged\n")
+    _git(repo, "add", "changed.txt")
+    changed.write_text("unstaged\n")
+    metadata = unchanged.stat()
+    os.utime(unchanged, ns=(metadata.st_atime_ns, metadata.st_mtime_ns - 2_000_000_000))
+    index = (repo / ".git/index").read_bytes()
+    staged_entries = _git(repo, "ls-files", "--stage")
+    capture = _scope_data(shutil.which("git") or "git", repo, mode, "HEAD" if mode == "branch" else None, ())
+    assert capture["status"] == ["MM changed.txt"]
+    assert capture["captured_scope_paths"] == (["changed.txt", "unchanged.txt"] if mode == "baseline" else ["changed.txt"])
+    assert _git(repo, "ls-files", "--stage") == staged_entries
+    assert (repo / ".git/index").read_bytes() == index
 
 
 def test_selection_capture_preserves_union_across_staging_and_detects_ignore_changes(tmp_path: Path) -> None:
