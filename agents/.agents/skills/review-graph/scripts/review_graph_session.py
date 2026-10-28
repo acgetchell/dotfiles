@@ -2,7 +2,6 @@
 
 import argparse
 import hashlib
-import importlib.util
 import json
 import os
 import re
@@ -13,6 +12,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from review_graph_environment import ORIGIN_FILE, capture_python_origin, check_retained_origin, verify_helper_environment
 from review_graph_execution import CONTEXT_FILE, capture_execution_context, command_prefix, verify_execution_context
 
 _MANIFEST = "runtime-manifest.json"
@@ -187,6 +187,8 @@ def verify_snapshot(reference: object) -> RuntimeManifest:
         raise ValueError(msg)
     if (root / CONTEXT_FILE).is_file():
         verify_execution_context(json.loads((root / CONTEXT_FILE).read_bytes()))
+    if (root / ORIGIN_FILE).is_file():
+        verify_helper_environment(json.loads((root / ORIGIN_FILE).read_bytes()))
     return manifest
 
 
@@ -197,7 +199,9 @@ def _check_retained_context(destination: Path, execution_context: dict[str, obje
         raise ValueError(msg)
 
 
-def freeze_runtime(skill_root: Path, destination: Path, *, repository: Path, execution_context: dict[str, object] | None = None) -> dict[str, str]:
+def freeze_runtime(
+    skill_root: Path, destination: Path, *, repository: Path, execution_context: dict[str, object] | None = None, helper_version: str | None = None
+) -> dict[str, str]:
     """Atomically retain skills, routing, schemas, scripts and Python support code."""
     root, destination, repository = skill_root.resolve(), destination.absolute(), repository.resolve()
     if destination.resolve() != destination or destination.is_relative_to(repository) or repository.is_relative_to(destination):
@@ -208,19 +212,21 @@ def freeze_runtime(skill_root: Path, destination: Path, *, repository: Path, exe
         reference = _read_reference(reference_path)
         verify_snapshot(reference)
         _check_retained_context(destination, execution_context)
+        check_retained_origin(destination, helper_version)
         return reference.as_raw()
-    spec = importlib.util.find_spec("research_repo_tools")
-    if spec is None or spec.origin is None:
-        msg = "review runtime requires the installed research-repo-tools dependency"
+    if helper_version is not None and execution_context is not None:
+        msg = "isolated helper mode retains its interpreter directly; omit --python-runner"
         raise ValueError(msg)
-    dependency = Path(spec.origin).parent.resolve()
+    origin = capture_python_origin(repository, helper_version)
+    dependency = Path(origin["package"]).parent
     skills, support = _files(root), _files(dependency)
     content = {"skills/" + path: data for path, data in skills.items()}
     content.update({"skills/review-graph/scripts/research_repo_tools/" + path: data for path, data in support.items()})
+    content[ORIGIN_FILE] = (json.dumps(origin, sort_keys=True, indent=2) + "\n").encode()
     if execution_context is not None:
         content[CONTEXT_FILE] = (json.dumps(execution_context, sort_keys=True, indent=2) + "\n").encode()
     # A concurrent edit during acquisition must not produce a mixed snapshot.
-    if skills != _files(root) or support != _files(dependency):
+    if skills != _files(root) or support != _files(dependency) or origin != capture_python_origin(repository, helper_version):
         msg = "runtime resources changed during capture; retry startup"
         raise ValueError(msg)
     manifest = RuntimeManifest(_interpreter(), tuple(sorted((path, _digest(data)) for path, data in content.items())))
@@ -240,6 +246,7 @@ def freeze_runtime(skill_root: Path, destination: Path, *, repository: Path, exe
             saved = _read_reference(reference_path)
             verify_snapshot(saved)
             _check_retained_context(destination, execution_context)
+            check_retained_origin(destination, helper_version)
             return saved.as_raw()
     verify_snapshot(reference)
     return reference.as_raw()
@@ -287,6 +294,9 @@ def current_execution_context() -> dict[str, Any] | None:
 def runtime_command(script: Path, *arguments: str) -> list[str]:
     """Use the retained repository runner for exact graph helper arguments."""
     prefix = command_prefix(current_execution_context())
+    origin_path = _SCRIPT_ROOT.parents[2] / ORIGIN_FILE
+    if origin_path.is_file() and json.loads(origin_path.read_bytes())["helper_version"] is not None:
+        prefix.extend(("-E", "-s"))
     reference_path = _SCRIPT_ROOT.parents[2] / _REFERENCE
     if script.name == "run_timed.py" and reference_path.is_file():
         return [*prefix, str(Path(__file__).resolve()), "--reference", str(reference_path), "--script", "run_timed.py", "--", *arguments]
@@ -306,6 +316,7 @@ def _check_resumed_runner(reference: RuntimeReference, runner_path: Path | None)
 def bootstrap_frozen(args: argparse.Namespace, argv: list[str]) -> None:
     """Re-execute startup under the retained version; identical retries recover it."""
     if verify_current_snapshot() is not None:
+        check_retained_origin(_SCRIPT_ROOT.parents[2], args.helper_version)
         return
     roots = args.skill_root or [_SCRIPT_ROOT.parents[1]]
     if len(roots) != 1:
@@ -319,6 +330,7 @@ def bootstrap_frozen(args: argparse.Namespace, argv: list[str]) -> None:
     if saved.get("runtime_snapshot") is not None:
         reference = RuntimeReference.parse(saved["runtime_snapshot"])
         verify_snapshot(reference)
+        check_retained_origin(reference.path.parent, args.helper_version)
         _check_resumed_runner(reference, args.python_runner)
     else:
         capture = json.loads(args.capture.read_bytes())
@@ -328,7 +340,9 @@ def bootstrap_frozen(args: argparse.Namespace, argv: list[str]) -> None:
         repository = Path(_text(capture.get("repository_root"), "captured repository root"))
         context = capture_execution_context(json.loads(args.python_runner.read_bytes()), repository) if args.python_runner else None
         reference = RuntimeReference.parse(
-            freeze_runtime(roots[0], args.output.resolve().with_suffix(".runtime"), repository=repository, execution_context=context)
+            freeze_runtime(
+                roots[0], args.output.resolve().with_suffix(".runtime"), repository=repository, execution_context=context, helper_version=args.helper_version
+            )
         )
     frozen = reference.path.parent / "skills"
     catalog = args.catalog.resolve().relative_to(roots[0].resolve())
@@ -344,7 +358,8 @@ def bootstrap_frozen(args: argparse.Namespace, argv: list[str]) -> None:
     catalog_path = saved["materialization_input"]["routing_catalog_path"] if saved.get("runtime_snapshot") is not None else str(frozen / catalog)
     remapped.extend(("--skill-root", str(frozen), "--catalog", catalog_path))
     script = frozen / "review-graph/scripts/review_graph_bootstrap.py"
-    os.execv(sys.executable, [sys.executable, "-B", str(script), *remapped])  # noqa: S606 - pinned interpreter and verified snapshot script.
+    flags = [flag for enabled, flag in ((sys.flags.ignore_environment, "-E"), (sys.flags.no_user_site, "-s")) if enabled]
+    os.execv(sys.executable, [sys.executable, *flags, "-B", str(script), *remapped])  # noqa: S606 - pinned interpreter and verified snapshot script.
 
 
 def _check_absolute_reference(raw: str, skill_root: Path) -> None:

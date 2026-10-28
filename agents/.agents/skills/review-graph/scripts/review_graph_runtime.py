@@ -159,6 +159,7 @@ from review_graph_reuse import (
     ExternalSourceTransition,
     InterleavedRepairTransition,
     ReuseInputError,
+    StagedExternalSourceTransition,
     metadata_states,
     metadata_transition,
     source_snapshot,
@@ -5647,6 +5648,7 @@ def resume_after_external_source(document: dict[str, Any]) -> dict[str, Any]:
             "after": document["new_capture"],
             "external_source_actor": document["external_source_actor"],
             "external_source_attribution": document["external_source_attribution"],
+            **({"external_staging_attribution": document["external_staging_attribution"]} if "external_staging_attribution" in document else {}),
         }
     )
     verify_live_source(document["new_capture"])
@@ -5825,6 +5827,8 @@ def _archive_metadata_validation_logs(
 
 
 def _transition_kind(transition: ExternalMetadataTransition) -> str:
+    if isinstance(transition, StagedExternalSourceTransition):
+        return "staged-external-source-change"
     if isinstance(transition, ExternalSourceTransition):
         return "external-source-change"
     return "authorized-commit-handoff" if isinstance(transition, CommitHandoffTransition) else "observed-external-git-metadata"

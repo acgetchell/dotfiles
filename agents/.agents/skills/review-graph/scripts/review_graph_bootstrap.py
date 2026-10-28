@@ -143,6 +143,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--catalog", type=Path, default=DEFAULT_ROUTING_CATALOG)
     parser.add_argument("--skill-root", action="append", type=Path)
     parser.add_argument("--python-runner", type=Path, help="explicit Python argv/environment/lock policy, verified and frozen before planning")
+    parser.add_argument("--helper-version", help="require this packaged research-repo-tools version in a separate helper environment (Python -E -s)")
     parser.add_argument("--full-output", action="store_true", help="print the complete saved bundle instead of a compact receipt")
     parser.add_argument(
         "--delivery-profile",

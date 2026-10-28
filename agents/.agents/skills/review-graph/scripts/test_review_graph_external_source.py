@@ -16,15 +16,22 @@ from test_review_graph_validation_handoff import _handoff
 
 
 def _external(
-    tmp_path: Path, *, changed: str = "README.md", repairs_completed: int = 0, dependency: str | None = None
+    tmp_path: Path, *, changed: str = "README.md", repairs_completed: int = 0, dependency: str | None = None, git_dependency: str | None = None
 ) -> tuple[dict[str, Any], dict[str, Any], Path, dict[str, Any]]:
     lifecycle, validator, capture, git, repository, _metadata = _handoff(
-        tmp_path, dependencies=[], prefixes=["tool.py"], readme=True, repairs_completed=repairs_completed
+        tmp_path,
+        dependencies=[{"kind": "index", "reason": "The fixture validation depends on staged contents."}] if git_dependency == "index" else [],
+        prefixes=["tool.py"],
+        readme=True,
+        repairs_completed=repairs_completed,
     )
     entries = json.loads(Path(lifecycle["dispatches_path"]).read_bytes())
     for entry in entries["dispatches"]:
         if entry["dispatch"]["mode"] == "audit":
             payload = _payload(entry["dispatch"]["owned_paths"], dispatch=entry["dispatch"])
+            if git_dependency is not None and "tool.py" in payload["files_inspected"]:
+                command = "git --no-pager diff --cached -- tool.py"
+                payload.update(commands_executed=[command], git_dependencies=[{"kind": git_dependency, "command": command, "reason": "Fixture Git input."}])
             if dependency is not None and "tool.py" in payload["files_inspected"]:
                 payload["coverage_units"] = [
                     {
