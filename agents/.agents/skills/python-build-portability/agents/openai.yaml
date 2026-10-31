@@ -2,3 +2,6 @@ interface:
   display_name: "Python Build Portability"
   short_description: "Audit Python builds and installed consumers"
   default_prompt: "Use $python-build-portability to audit this Python package across builds, installed imports, entry points, and supported platforms."
+
+policy:
+  allow_implicit_invocation: true

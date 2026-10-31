@@ -24,7 +24,7 @@ from test_review_graph_runtime import (
 from test_review_graph_transitions import _materialize, _payload
 
 
-def _proof_fixture(
+def _proof_fixture(  # noqa: PLR0915 - complete partitioned audit and repair fixture.
     tmp_path: Path, *, validation_change: str | None = None, stage_after_repair: bool = False, unrelated_paths: int = 1
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Use fresh real proof files; expand the inventory only for the size contract."""
@@ -36,6 +36,14 @@ def _proof_fixture(
     (repository / "AGENTS.md").write_text("# Instructions\n\nInspect test contracts.\n")
     for index in range(unrelated_paths):
         (repository / f"unrelated_{index:03d}.txt").write_text("Unrelated captured input.\n")
+    template["captured_path_dispositions"].append(
+        {
+            "paths": [f"unrelated_{index:03d}.txt" for index in range(unrelated_paths)],
+            "disposition": "historical",
+            "reason": "Inactive inventory records used only to measure proof transport",
+            "catalog_ids": [],
+        }
+    )
     _run_test_git(git, "-C", str(repository), "add", ".")
     _run_test_git(git, "-C", str(repository), "commit", "-m", "fixed coverage fixture")
     template["consulted_routers"].append("docs-review-orchestrator")

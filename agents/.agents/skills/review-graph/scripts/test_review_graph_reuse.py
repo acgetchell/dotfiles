@@ -26,7 +26,7 @@ from test_review_graph_runtime import (
 from test_review_graph_transitions import _materialize, _payload, _synthesis_payload
 
 
-def _audit_request(tmp_path: Path, *, large: bool = False, caveat: str = "facts") -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:  # noqa: C901 - explicit fixture policy variants.
+def _audit_request(tmp_path: Path, *, large: bool = False, caveat: str = "facts") -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:  # noqa: C901, PLR0915 - complete partitioned audit with explicit policy variants.
     """Capture an actual repository and preserve a fresh, partitioned audit."""
     git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
     owned = ["LICENSE", "tool.py"]
@@ -36,8 +36,18 @@ def _audit_request(tmp_path: Path, *, large: bool = False, caveat: str = "facts"
             (repository / path).write_text("value = 1\n")
         for index in range(153):
             (repository / f"context_{index:03d}_captured_repository_dependency_manifest.txt").write_text("stable context\n")
+        template["captured_path_dispositions"].append(
+            {
+                "paths": [f"context_{index:03d}_captured_repository_dependency_manifest.txt" for index in range(153)],
+                "disposition": "historical",
+                "reason": "Inactive context records used only to measure bounded proof transport",
+                "catalog_ids": [],
+            }
+        )
         _run_test_git(git, "-C", str(repository), "add", ".")
         _run_test_git(git, "-C", str(repository), "commit", "-m", "whole repository fixture")
+    else:
+        template["captured_path_dispositions"][0]["paths"].remove("LICENSE")
     catalog = "python.scientific" if large else "python.cli"
     if caveat == "native-unavailable":
         template["validation_requirements"].append(

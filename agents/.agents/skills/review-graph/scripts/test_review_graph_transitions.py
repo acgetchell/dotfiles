@@ -428,6 +428,7 @@ def test_external_staging_between_dispatch_and_compile_completes_without_rollbac
     assert _scope_data(git, repository, "baseline", None, ())["index_fingerprint"] == request["new_capture"]["index_fingerprint"]
     template = _sparse_plan_document()
     template["consulted_routers"] = ["review-graph", "rust-review-orchestrator", "python-review-orchestrator"]
+    template["captured_path_dispositions"] = plan.captured_path_inventory["dispositions"]
     for override in template["routing_overrides"]:
         override["review_surface"] = ["state.rs"]
     template["validation_requirements"][0]["working_directories"] = [str(repository)]

@@ -12,7 +12,7 @@ from typing import Any
 
 from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics
 from review_graph_plan import DEFAULT_ROUTING_CATALOG, DEFAULT_SKILL_ROOT, plan_from_document
-from review_graph_receipts import stage_receipt
+from review_graph_receipts import artifact_reference, stage_receipt
 from review_graph_results import EvaluationRejection, parse_json_object
 from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
 from review_graph_session import bootstrap_frozen, runtime_command, verify_current_snapshot
@@ -168,6 +168,19 @@ def _starter_preflight(output: dict[str, Any], choices: dict[str, Any], args: ar
     return report
 
 
+def _path_inventory_reference(output: dict[str, Any], output_path: Path) -> None:
+    """Expose the complete inventory through a bounded, digest-bound receipt."""
+    if inventory := output["plan"].get("captured_path_inventory"):
+        path = output_path.with_suffix(".path-inventory.json")
+        _write_once(path, inventory)
+        output["captured_path_inventory_reference"] = {
+            **artifact_reference(path),
+            "captured_path_count": inventory["captured_path_count"],
+            "unassigned_path_count": len(inventory["unassigned_captured_paths"]),
+            "unassessed_path_count": len(inventory["unassessed_captured_paths"]),
+        }
+
+
 def main(argv: list[str] | None = None) -> int:
     """Normalize, validate, plan, and persist one deterministic bootstrap result."""
     args = _parser().parse_args(argv)
@@ -225,6 +238,7 @@ def main(argv: list[str] | None = None) -> int:
             output["runtime_snapshot"] = reference
         preflight = _starter_preflight(output, choices, args) if choices is not None else None
         dispatch_ready = plan.dispatch_allowed and (preflight is None or preflight["status"] == "ready")
+        _path_inventory_reference(output, args.output)
         _write_once(args.output, output)
         receipt = stage_receipt("bootstrap", args.output, output)
         receipt["validation_reuse_prerequisite"] = output["validation_reuse_prerequisite"]
@@ -292,6 +306,7 @@ def _resume_starter(capture: dict[str, Any], choices: dict[str, Any], args: argp
     report = _starter_preflight(output, choices, args)
     output["starter_metrics"].update(protocol_operations=["preflight-validation"], protocol_operation_count=1)
     ready = output["plan"]["dispatch_allowed"] and report["status"] == "ready"
+    _path_inventory_reference(output, args.output)
     _write_once(args.output, output)
     receipt = stage_receipt("bootstrap", args.output, output)
     receipt.update(

@@ -77,6 +77,7 @@ def starter_template(capture: dict[str, Any], choices: dict[str, Any]) -> dict[s
             else {"change_target": shlex.join(["git", "diff", capture["merge_base"], "--", *capture["captured_scope_paths"]])}
         ),
         "routing_overrides": choices.get("routing_overrides", []),
+        "captured_path_dispositions": choices.get("captured_path_dispositions", []),
         "validation_requirements": [
             {
                 "requirement_id": "repository-ci",
@@ -168,9 +169,16 @@ def prepare_release(capture: dict[str, Any], artifact_root: Path) -> tuple[dict[
     catalog = load_routing_catalog(DEFAULT_ROUTING_CATALOG, skill_roots=(DEFAULT_SKILL_ROOT,))
     return choices, {
         "instruction_paths": sorted(discovered),
-        "instruction_policy": "Root instructions are global; nested instructions are discovered per owned path at dispatch materialization.",
+        "instruction_policy": (
+            "Root instructions are global; nested instructions are discovered per owned or declared dependency path at materialization. "
+            "Inspect these instructions for transitive references and declare required instruction_paths explicitly."
+        ),
         "routing_projection": build_routing_projection(catalog, consulted_routers=choices["consulted_routers"], captured_paths=capture["captured_scope_paths"]),
-        "coverage_policy": "Request independent contract coverage_units during the initial audit when justified; whole-audit dependencies remain conservative.",
+        "coverage_policy": (
+            "Candidate matches do not assign ownership. Bootstrap reports captured_path_inventory and blocks whole-repository fanout until every "
+            "unassigned path has an explicit assessment. Extend leaf review_surface for owned contracts; use captured_path_dispositions for "
+            "dependencies, historical/archive files, or explicit user exclusions. Request independent contract coverage_units when justified."
+        ),
     }
 
 
@@ -209,7 +217,8 @@ def main(argv: list[str] | None = None) -> int:
                     "model_tokens": None,
                     "provider_cost": None,
                     "next_action": (
-                        "Inspect routing candidates, supply semantic routing_overrides, confirm authorization, outputs and executor prerequisites, "
+                        "Inspect routing candidates and unmatched_captured_paths, supply semantic routing_overrides and captured_path_dispositions, "
+                        "confirm authorization, outputs and executor prerequisites, "
                         "then bootstrap --starter-config."
                     ),
                 },

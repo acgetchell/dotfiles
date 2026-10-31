@@ -69,6 +69,7 @@ from review_graph_integrity import canonical_json, digest_bytes
 from review_graph_isolation import ISOLATION_INSTRUCTIONS, IsolationPublicationError, IsolationViolationError, forbidden_artifacts, isolation_violations
 from review_graph_lifecycle import ComprehensiveRestart, RepairBudgetExtension, ReviewLifecycle, lifecycle_from_document
 from review_graph_metrics import projected_waves, source_demand
+from review_graph_path_inventory import dependency_paths
 from review_graph_phases import pending_validation_barrier, phase_accounting, require_validation_barrier, validate_validation_barrier
 from review_graph_plan import (
     _COMPACT_ROUTING_OVERRIDE_FIELDS,
@@ -2845,6 +2846,7 @@ def _graph_plan(raw: dict[str, Any]) -> GraphPlan:
         routing_completion_blockers=_string_tuple(raw, "routing_completion_blockers"),
         dispatch_allowed=_required_bool(raw, "dispatch_allowed"),
         blockers=_string_tuple(raw, "blockers"),
+        captured_path_inventory=dict(raw.get("captured_path_inventory", {})),
         audit_reuse_transitions=tuple(
             AuditReuseTransition(
                 evidence_id=_required_text(item, "evidence_id"),
@@ -3512,10 +3514,13 @@ def _verified_reused_sources(plan: GraphPlan, source_state: tuple[str, str, str]
         if source_state not in snapshots:
             msg = "audit reuse lacks a source snapshot for current source_state"
             raise ValueError(msg)
+        missing = _missing_context_reads(plan, evidence.requirement_ids, inputs, Path(snapshots[source_state].repository_root))
         explicit = tuple(path for decision in plan.routing_decisions if decision.evidence_id == evidence.evidence_id for path in decision.instruction_paths)
-        paths = _applicable_instruction_paths(Path(snapshots[source_state].repository_root), inputs.owned_paths, explicit)
-        if tuple((path, _file_identity_digest(path)) for path in paths) != transition.instruction_digests:
-            msg = "audit reuse instructions changed; recapture and replan"
+        paths = _applicable_instruction_paths(
+            Path(snapshots[source_state].repository_root), (*inputs.owned_paths, *_required_context_paths(plan, evidence.requirement_ids)), explicit
+        )
+        if missing or tuple((path, _file_identity_digest(path)) for path in paths) != transition.instruction_digests:
+            msg = "audit reuse instructions changed or required context reads are missing; recapture and replan"
             raise ValueError(msg)
         if _file_identity_digest(evidence.skill_path) != evidence.skill_digest or any(
             _file_identity_digest(path) != digest for path, digest in evidence.reference_digests
@@ -3603,6 +3608,25 @@ def _schema_reference(path: Path, *, validation_reassessment: bool = False) -> d
         shapes = ("coverage_units", "instruction_reconciliations", *(("validation_reassessments",) if validation_reassessment else ()))
         reference["optional_shapes"] = {name: _required_schema_shape(raw["properties"][name]) for name in shapes}
     return reference
+
+
+def _required_context_paths(plan: GraphPlan, requirement_ids: tuple[str, ...]) -> tuple[str, ...]:
+    return dependency_paths(
+        plan.captured_path_inventory, {decision.catalog_id for decision in plan.routing_decisions if decision.requirement_id in requirement_ids}
+    )
+
+
+def _missing_context_reads(plan: GraphPlan, requirement_ids: tuple[str, ...], inputs: AuditInputIdentity, root: Path) -> tuple[str, ...]:
+    observed = {
+        root / path
+        for path in (
+            *inputs.nearby_contract_owners,
+            *inputs.command_read_paths,
+            *inputs.inherited_dependency_paths,
+            *(path for path, _ in inputs.instruction_digests),
+        )
+    }
+    return tuple(path for path in _required_context_paths(plan, requirement_ids) if root / path not in observed)
 
 
 def _applicable_instruction_paths(repository_root: Path, owned_paths: tuple[str, ...], declared: tuple[str, ...]) -> tuple[str, ...]:
@@ -4318,6 +4342,13 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         msg = f"artifact_store is not a directory: {artifact_store}"
         raise ValueError(msg)
     pending_writes: dict[Path, tuple[bytes, int]] = {}
+    path_inventory_reference = None
+    if plan.captured_path_inventory:
+        inventory_bytes = canonical_json(plan.captured_path_inventory).encode()
+        inventory_digest = digest_bytes(inventory_bytes)
+        inventory_path = artifact_store / f"captured-path-inventory-{inventory_digest.removeprefix('sha256:')}.json"
+        _queue_materialized_write(pending_writes, inventory_path, inventory_bytes, mode=0o444)
+        path_inventory_reference = {"path": str(inventory_path), "digest": inventory_digest}
     inspection_profile = document.get("inspection_profile", "shared-read-only")
     if inspection_profile not in {"independent-source", "shared-read-only"}:
         msg = "inspection_profile must be independent-source or shared-read-only"
@@ -4452,7 +4483,8 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             Path(__file__), "persist-worker-payload", "--input", str(worker_payload_contract_path), "--payload-stdin"
         )
         worker_payload_review_command = runtime_command(Path(__file__), "review-worker-payload-write", "--input", str(worker_payload_contract_path))
-        instruction_paths = _applicable_instruction_paths(repository_root_path.resolve(), node.coverage, node.instruction_paths)
+        context_paths = _required_context_paths(plan, node.requirement_ids) if node.mode == "audit" else ()
+        instruction_paths = _applicable_instruction_paths(repository_root_path.resolve(), (*node.coverage, *context_paths), node.instruction_paths)
         if instruction_paths not in instruction_contexts:
             context, instruction_writes = instruction_context(instruction_paths, artifact_store)
             instruction_contexts[instruction_paths] = context
@@ -4506,6 +4538,8 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             common["execution_context"] = execution_context
         if (snapshot_reference := verify_current_snapshot()) is not None:
             common["runtime_snapshot"] = snapshot_reference
+        if node.mode == "synthesis" and path_inventory_reference is not None:
+            common["captured_path_inventory_reference"] = path_inventory_reference
         if node.mode in {"audit", "independent-review"}:
             if observations := audit_observations(common, worker_payload_contract_path):
                 common["audit_observations"] = observations
@@ -4611,9 +4645,21 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
                 ]
                 common["synthesis_examples"] = _synthesis_examples(common)
         if node.mode in {"audit", "independent-review"} and common["owned_paths"]:
-            common["required_read_paths"] = sorted({node.skill_path, *instruction_paths, *node.static_references})
+            if context := common.get("coverage_reuse"):
+                inherited_context = {
+                    repository_root_path / path for unit in context["units"] if unit["disposition"] == "reused" for path in unit["dependency_paths"]
+                }
+                pending_context = {
+                    repository_root_path / path for unit in context["units"] if unit["disposition"] != "reused" for path in unit["dependency_paths"]
+                }
+                context_paths = tuple(path for path in context_paths if repository_root_path / path not in inherited_context - pending_context)
+            common["required_read_paths"] = sorted(
+                {node.skill_path, *instruction_paths, *node.static_references, *(str(repository_root_path / path) for path in context_paths)}
+            )
             common["provenance_examples"] = _worker_provenance_examples(common, line_bounds)
-            runtime_paths = {*common["required_read_paths"], str(common["payload_schema"]["path"])}
+            # Source context retains captured path types and source-read provenance;
+            # it is not a planner-owned runtime file (and may be a symlink/gitlink).
+            runtime_paths = {node.skill_path, *instruction_paths, *node.static_references, str(common["payload_schema"]["path"])}
             if shared := common.get("shared_inspection_evidence"):
                 runtime_paths.add(shared["source_packet_path"])
             common["runtime_input_digests"] = [
@@ -4661,6 +4707,8 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         _queue_materialized_write(pending_writes, Path(entry["worker_execution_path"]), execution_view_bytes(entry, worker_input_bytes), mode=0o444)
         dispatches.append(entry)
     output: dict[str, Any] = {"dispatches": dispatches, "plan_digest": _plan_digest(plan), "schema_version": 1, "source_state": list(source_state)}
+    if path_inventory_reference is not None:
+        output["captured_path_inventory_reference"] = path_inventory_reference
     instruction_demand = read_demand([entry["dispatch"]["instruction_paths"] for entry in dispatches])
     output["instruction_preflight"] = instruction_preflight(instruction_demand)
     output["telemetry"] = {
@@ -5013,7 +5061,12 @@ def _carry_forward_audits(  # noqa: C901, PLR0912, PLR0913, PLR0915 - preserve p
             decision(node_id, "routing-identity-changed", "No unique unchanged audit leaf owns the same requirements and inputs.")
             continue
         candidate = candidates[0]
-        instructions = _applicable_instruction_paths(root, candidate.coverage, candidate.instruction_paths)
+        if missing := _missing_context_reads(candidate_plan, candidate.requirement_ids, inputs, root):
+            decision(node_id, "required-context-changed", "New required context lacks accepted read evidence: " + ", ".join(missing))
+            continue
+        instructions = _applicable_instruction_paths(
+            root, (*candidate.coverage, *_required_context_paths(candidate_plan, candidate.requirement_ids)), candidate.instruction_paths
+        )
         transition = AuditReuseTransition(
             evidence_id=evidence.evidence_id,
             source_state=expectation.source_state,
@@ -5262,7 +5315,13 @@ def _plan_delta_audits(  # noqa: C901 - keep source and validation eligibility g
                 inputs.owned_paths,
             ):
                 continue
-            instructions = _applicable_instruction_paths(Path(target.repository_root), node.coverage, node.instruction_paths)
+            if _missing_context_reads(candidate, node.requirement_ids, inputs, Path(target.repository_root)):
+                # Newly declared context has no proven unit partition; inspect it
+                # before accepting any inherited judgments for this leaf.
+                continue
+            instructions = _applicable_instruction_paths(
+                Path(target.repository_root), (*node.coverage, *_required_context_paths(candidate, node.requirement_ids)), node.instruction_paths
+            )
             transition = AuditReuseTransition(
                 evidence.evidence_id,
                 origin.source_state,
@@ -5838,7 +5897,9 @@ def _verify_continuation_instructions(plan: GraphPlan, entries: dict[str, dict[s
     """Reject changed instruction contracts before any continuation is published."""
     for node in plan.actual_worker_nodes:
         dispatch = entries[node.node_id]["dispatch"]
-        current_instructions = _applicable_instruction_paths(Path(transition.after.repository_root), node.coverage, node.instruction_paths)
+        current_instructions = _applicable_instruction_paths(
+            Path(transition.after.repository_root), (*node.coverage, *_required_context_paths(plan, node.requirement_ids)), node.instruction_paths
+        )
         expected_instructions = _string_pairs(dispatch, "instruction_digests")
         if (
             tuple((path, _file_identity_digest(path)) for path in current_instructions) != expected_instructions

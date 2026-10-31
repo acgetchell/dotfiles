@@ -7,6 +7,11 @@ description: "Coordinate Rust reviews spanning multiple contracts; use a focused
 
 Coordinate focused Rust review skills without copying their content. Select skills individually, run them in logical groups, validate each affected contract, and finish with lean production synthesis.
 
+Always include `rust-style-hygiene` for reviewed Rust code, including private
+implementation changes and code examples. In graph-routing mode, return it as
+selected without executing it. Record it as not applicable only when the scope
+contains no Rust code or examples.
+
 Do not treat selecting a group as permission to load every skill listed in it. Load only skills whose trigger matches the scoped change and record explicit skips when a maintainer could reasonably expect a pass.
 
 ## Ground Rules

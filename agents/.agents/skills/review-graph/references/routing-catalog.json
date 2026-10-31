@@ -12,7 +12,7 @@
       "target_kind": "leaf",
       "default_priority": "supporting-quality",
       "synthesis_dependency": "repository-synthesis",
-      "path_patterns": ["justfile", "Makefile", ".github/workflows/**", "Brewfile", "**/pyproject.toml", "**/uv.lock", "**/Cargo.toml", "**/Cargo.lock", "CMakeLists.txt", "tooling/**/*.toml", "docs/**", "**/clippy.toml", "**/.clippy.toml", "**/semgrep.yml", "**/semgrep.yaml", "**/.semgrep.yml", "**/.semgrep.yaml", "**/.semgrepignore", "**/semgrep/**", "**/.semgrep/**"],
+      "path_patterns": ["**/justfile", "**/*.just", "Makefile", ".github/workflows/**", ".github/actions/**", ".github/settings/**", ".github/dependabot.yml", ".github/dependabot.yaml", ".config/nextest.toml", "**/.python-version", "**/.gitignore", "**/dprint.json", "**/dprint.jsonc", "**/ty.toml", "**/typos.toml", "Brewfile", "**/pyproject.toml", "**/uv.lock", "**/Cargo.toml", "**/Cargo.lock", "CMakeLists.txt", "tooling/**/*.toml", "docs/**", "**/clippy.toml", "**/.clippy.toml", "**/semgrep.yml", "**/semgrep.yaml", "**/.semgrep.yml", "**/.semgrep.yaml", "**/.semgrepignore", "**/semgrep/**", "**/.semgrep/**"],
       "semantic_triggers": ["Repository commands, CI, tool versions, validation configuration, Clippy/Semgrep usefulness or coverage, or maintainer workflow are in scope."]
     },
     {
@@ -68,7 +68,7 @@
       "target_kind": "router",
       "default_priority": "required-routing-synthesis",
       "synthesis_dependency": null,
-      "path_patterns": ["README.md", "AGENTS.md", "CONTRIBUTING.md", "SECURITY.md", "CITATION.cff", "REFERENCES.md", "BIBLIOGRAPHY.md", "CITATIONS.md", "docs/**"],
+      "path_patterns": ["**/README.md", "**/AGENTS.md", "**/CONTRIBUTING.md", "**/SECURITY.md", "**/CODE_OF_CONDUCT.md", "CITATION.cff", "REFERENCES.md", "BIBLIOGRAPHY.md", "CITATIONS.md", "docs/**"],
       "semantic_triggers": ["Active documentation, API docs, scientific claims, citations, publication material, or release-readiness coverage are in scope."]
     },
     {
@@ -690,7 +690,7 @@
       "target_kind": "leaf",
       "default_priority": "required-routing-synthesis",
       "synthesis_dependency": "repository-synthesis",
-      "path_patterns": ["README.md", "AGENTS.md", "CONTRIBUTING.md", "SECURITY.md", "REFERENCES.md", "BIBLIOGRAPHY.md", "CITATIONS.md", "docs/**"],
+      "path_patterns": ["**/README.md", "**/AGENTS.md", "**/CONTRIBUTING.md", "**/SECURITY.md", "**/CODE_OF_CONDUCT.md", "REFERENCES.md", "BIBLIOGRAPHY.md", "CITATIONS.md", "docs/**"],
       "semantic_triggers": ["Active docs, navigation, operations, architecture, policies, release guidance, generated ownership, or cross-document consistency are material."]
     },
     {

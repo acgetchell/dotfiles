@@ -71,6 +71,16 @@ beyond path matches. Only unmatched, untriggered omissions become
 `not-applicable`. Mandatory classifier surfaces, independent review, synthesis,
 and package-build safeguards retain their existing requirements.
 
+Whole-repository `baseline`/`release-readiness` scopes also require captured-path
+accounting independently of specialist closure. `captured_path_inventory` compares
+captured paths with selected/exactly reused leaf `review_surface` ownership; other
+node modes and context reads cannot fill that gap. Unassigned paths require
+`captured_path_dispositions` or expanded leaf ownership before dispatch. The
+[baseline path assessment](baseline-release.md#assess-captured-paths) defines the
+dependency, historical/archive, and user-excluded choices and receipt sidecar.
+Restricted captures retain their explicit scope; whole-repository accounting does
+not turn a branch review into a baseline audit.
+
 Selected leaves require a concrete scope, evidence, reason, priority, owners,
 references, validators, and synthesis dependency. Convert every selected leaf
 to a required review commitment. Convert a selected independent target to an

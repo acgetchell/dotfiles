@@ -80,6 +80,10 @@
     "routing_overrides": {
       "description": "Optional planning-input-v1 routingOverride objects, validated after capture binding.",
       "type": "array", "items": {"type": "object"}
+    },
+    "captured_path_dispositions": {
+      "description": "Explicit non-owned path assessments; validated against planning-input-v1 and actual selected audit coverage after capture binding.",
+      "type": "array", "items": {"type": "object"}
     }
   },
   "$defs": {

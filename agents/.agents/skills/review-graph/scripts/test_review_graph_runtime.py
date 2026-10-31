@@ -689,6 +689,16 @@ def _baseline_mutation_fixture(tmp_path: Path, *, instructions: bool = False) ->
     _run_test_git(git, "-C", str(repository), "add", ".")
     _run_test_git(git, "-C", str(repository), "commit", "-m", "initial")
     template = _sparse_plan_document()
+    # These literal placeholders have no active license/configuration semantics;
+    # retain them as unowned transport history for mutation and provenance tests.
+    template["captured_path_dispositions"] = [
+        {
+            "paths": ["LICENSE", "cliff.toml", ".codecov.yml"],
+            "disposition": "historical",
+            "reason": "Inactive mutation transport placeholders",
+            "catalog_ids": [],
+        }
+    ]
     template["consulted_routers"] = ["review-graph", "rust-review-orchestrator", "python-review-orchestrator"]
     if instructions:
         template["consulted_routers"].append("docs-review-orchestrator")
@@ -4511,11 +4521,38 @@ def test_validation_requirement_bindings_preserve_legacy_plan_digests() -> None:
 
 def test_graph_plan_preserves_legacy_positional_constructor_tail() -> None:
     """New recovery and origin fields must not shift optional positional arguments."""
-    plan = _sparse_plan()
-    additions = {"validation_requirement_bindings", "audit_replacements"}
+    plan = replace(_sparse_plan(), captured_path_inventory={})
+    additions = {"validation_requirement_bindings", "audit_replacements", "captured_path_inventory"}
     legacy_fields = [item.name for item in fields(GraphPlan) if item.name not in additions]
     assert GraphPlan(*(getattr(plan, name) for name in legacy_fields)) == plan
     assert all(item.kw_only for item in fields(GraphPlan) if item.name in additions)
+    inventory = _sparse_plan().captured_path_inventory
+    assert GraphPlan(*(getattr(plan, name) for name in legacy_fields), captured_path_inventory=inventory) == replace(plan, captured_path_inventory=inventory)
+
+
+def test_path_inventory_preserves_legacy_plan_digests() -> None:
+    plan = replace(_sparse_plan(), captured_path_inventory={})
+    legacy = _json_plan(plan)
+    for name in (
+        "captured_path_inventory",
+        "independent_review_after_audits",
+        "commit_handoffs",
+        "pre_review_validation_nodes",
+        "validation_recoveries",
+        "audit_replacements",
+        "validation_exclusions",
+        "validation_requirement_bindings",
+    ):
+        legacy.pop(name)
+    if plan.review_lifecycle == ReviewLifecycle():
+        legacy.pop("review_lifecycle")
+    restored = _graph_plan(legacy)
+    assert restored.captured_path_inventory == {}
+    legacy_digest = "sha256:" + hashlib.sha256(json.dumps(legacy, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    assert graph_plan_digest_matches(restored, legacy_digest)
+    populated = replace(restored, captured_path_inventory=_sparse_plan().captured_path_inventory)
+    assert not graph_plan_digest_matches(populated, legacy_digest)
+    assert graph_plan_digest(_graph_plan(_json_plan(populated))) == graph_plan_digest(populated)
 
 
 def test_validation_requirement_bindings_reject_ambiguous_persisted_origins() -> None:

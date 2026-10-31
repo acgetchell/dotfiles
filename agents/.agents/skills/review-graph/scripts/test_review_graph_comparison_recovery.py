@@ -31,6 +31,16 @@ def test_updated_runtime_advances_large_frozen_baseline_without_reauditing_uncha
     )
     originals = {Path(audit[key]): Path(audit[key]).read_bytes() for key in ("artifact_path", "metadata_path")}
     (repository / "extra.txt").write_text("new untracked source obligation\n")
+    bundle["planning_input"]["routing_overrides"].append(
+        {
+            "catalog_id": "repo.tooling",
+            "disposition": "selected",
+            "reason": "The scripted repair introduces a repository input contract outside the unchanged Python CLI",
+            "applicability_evidence": ["extra.txt is a new untracked repository input"],
+            "review_surface": ["extra.txt"],
+            "owners": ["tooling"],
+        }
+    )
     capture = _scope_data(git, repository, "baseline", None, ())
     captured_paths = source_snapshot(capture).captured_scope_paths
     assert len(shlex.join(captured_paths)) > 4096

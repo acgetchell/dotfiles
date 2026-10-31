@@ -40,7 +40,7 @@ Classify effects rather than routing only by extension:
 | Snapshot, clone/cache, canonical owner, handle provenance, lifetime-bound view or transaction shape | `rust-borrowed-view-audit` |
 | Formula, numerical/geometry/topology behavior, tolerance, exactness, stochastic semantics, scientific claim | `rust-scientific-correctness` |
 | Async, threads, locks, channels, atomics, Send/Sync, blocking, scheduling, cancellation | `rust-concurrency-async` |
-| Naming, imports, or path clarity | `rust-style-hygiene` |
+| Every review containing Rust code or examples: naming, imports, and path clarity | `rust-style-hygiene` |
 | Iterator/loop/closure/pattern/exhaustiveness or control-flow allocation | `rust-iter-control-flow` |
 | Deletion, deduplication, redundant helper/test/API, accidental complexity | `rust-simplification-review` |
 | Hot path, allocation, data movement, complexity, benchmarked optimization | `rust-invariant-performance` |
