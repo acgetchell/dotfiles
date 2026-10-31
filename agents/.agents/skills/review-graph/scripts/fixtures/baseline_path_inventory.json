@@ -1,0 +1,35 @@
+{
+  "tooling": {
+    ".github/actions/setup-just/action.yml": "name: Set up just\nruns:\n  using: composite\n  steps: []\n",
+    ".github/settings/actions-selected.json": "{\"github_owned_allowed\": true}\n",
+    ".github/dependabot.yml": "version: 2\nupdates: []\n",
+    ".config/nextest.toml": "[profile.ci]\nretries = 2\n",
+    ".python-version": "3.15\n",
+    ".gitignore": ".cache/\n",
+    "just/helpers.just": "check:\n    true\n",
+    "justfile": "import 'just/helpers.just'\nci: check\n",
+    "dprint.json": "{\"plugins\": []}\n",
+    "ty.toml": "[environment]\npython-version = '3.15'\n",
+    "typos.toml": "[default]\ncheck-filename = true\n"
+  },
+  "documentation": {
+    "AGENTS.md": "# Review instructions\n\nRead instructions/review-rules.txt before reviewing this repository.\n",
+    "CODE_OF_CONDUCT.md": "# Code of conduct\n\nReport conduct concerns to the maintainers.\n",
+    "tooling/README.md": "# Tooling\n\nRun just ci.\n",
+    "tooling/python/README.md": "# Python tooling\n\nUse the root Python version pin.\n",
+    "context-only/AGENTS.md": "# Context instructions\n\nInspect the target list when using this directory as context.\n"
+  },
+  "semantic_owner": {
+    "build.policy": "The release gate must run all checks.\n"
+  },
+  "dependency": {
+    "instructions/review-rules.txt": "Inspect imported command recipes and their output contracts.\n",
+    "context-only/release-context.txt": "The tooling contract uses this retained release target list as context.\n"
+  },
+  "historical": {
+    "history/old-release.txt": "Superseded release notes; no active commands refer to this file.\n"
+  },
+  "archive": {
+    "archive/retired-contract.txt": "Archived retired package contract; not an active support promise.\n"
+  }
+}

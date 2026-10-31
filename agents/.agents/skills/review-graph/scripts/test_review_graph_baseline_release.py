@@ -74,6 +74,11 @@ def _setup(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> tuple[str, Pat
             "owners": ["rust"],
         }
     )
+    next(item for item in choices["routing_overrides"] if item["catalog_id"] == "docs.repository")["review_surface"].append("nested/readme.txt")
+    choices["captured_path_dispositions"] = [
+        {"paths": ["LICENSE", ".codecov.yml"], "disposition": "historical", "reason": "Inactive mutation transport placeholders", "catalog_ids": []},
+        {"paths": ["cliff.toml"], "disposition": "dependency", "reason": "Scientific fixture's inherited dependency", "catalog_ids": ["rust.scientific"]},
+    ]
     choices_path.write_text(json.dumps(choices))
     bootstrap = tmp_path / "bootstrap.json"
     assert bootstrap_main(["--capture", str(capture_path), "--starter-config", str(choices_path), "--output", str(bootstrap)]) == 0
@@ -108,6 +113,10 @@ def _initial_audits(tmp_path: Path, bundle: dict[str, Any], dispatches: dict[str
         protocol = [entry[key] for key in ("worker_input_path", "worker_execution_path", "worker_payload_contract_path")]
         dependencies = sorted({*dispatch["required_read_paths"], *protocol})
         scientific = dispatch["skill_id"] == "rust-scientific-correctness"
+        if scientific:
+            # The required context read belongs only to untouched.rs's contract;
+            # preserve the fixture's independently inspected source partition.
+            dependencies.remove(str(Path(dispatch["repository_root"]) / "cliff.toml"))
         validation = dispatch["command_policy"]["planned_validation_units"][0]
         payload = {
             **_compact_audit_payload(entry),

@@ -188,6 +188,7 @@ def stage_receipt(operation: str, output_path: Path, output: dict[str, Any]) -> 
         "cancel_node_ids",
         "runtime_snapshot",
         "instruction_preflight",
+        "captured_path_inventory_reference",
         "retained_blocked_node_ids",
         "delivery_profile",
         "repairs_completed",

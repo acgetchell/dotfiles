@@ -1,6 +1,6 @@
 ---
 name: python-build-portability
-description: "Audit Python package builds, installed consumers, and supported runtime or platform configurations."
+description: "Review Python builds, installed consumers, and platform-sensitive runtime code, scripts, tests, and CI, including Windows compatibility."
 ---
 
 # Python Build Portability
@@ -53,11 +53,15 @@ changes or explicit platform branches.
 1. Identify the declared Python, operating-system, architecture, dependency, and artifact matrix.
 2. Check the repository lockfile with its established tool (`uv lock --check` for uv); do not silently refresh it during an audit.
 3. Ensure environment, lint, and type-check target settings agree with `requires-python` and the supported source surface.
-4. Map changed files to build, install, import, entry-point, optional-feature, platform, or native-extension risks.
-5. Select the smallest relevant lint and type checks through repository recipes, respecting parent-owned validation commands.
+4. Map changed files to build, install, import, entry-point, optional-feature, platform, or native-extension risks. Trace the affected contract through unchanged helpers and fixtures that the actual workflow executes; a clean diff in those helpers is not portability evidence.
+5. Select the smallest relevant lint and type checks through repository recipes, respecting parent-owned validation commands. When Windows is supported and the configured checker supports platform targeting, check affected source and tests for Windows as well as the local host; record this as static evidence, not a native run.
 6. Produce the wheel and sdist with the established build frontend when artifact semantics changed (`uv build` for uv projects).
 7. Inspect artifacts, install the wheel into an isolated environment outside the checkout using the established environment tooling, and exercise the affected public consumer.
 8. Report proven configurations separately from declared but untested support.
+
+For native CI failures, preserve the regression contract and follow
+[native failure diagnosis](references/windows-boundaries.md#native-failure-diagnosis)
+for evidence gathering and focused validation on the affected platform.
 
 Lint and type checks are source/configuration evidence; neither substitutes for building and installing the distribution.
 

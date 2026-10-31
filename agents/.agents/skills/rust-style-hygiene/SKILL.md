@@ -1,14 +1,15 @@
 ---
 name: rust-style-hygiene
-description: "Review Rust naming and imports when a style or readability audit is requested or the changed code obscures meaning."
+description: "Review Rust naming and imports as a standard Rust review pass or for focused style and readability work."
 ---
 
 # rust-style-hygiene
 
 Enforce idiomatic Rust naming, import usage, and path clarity.
 
-Use this lens for requested style/readability work or naming that obscures a
-contract. Incidental Rust edits do not require a separate style pass. Keep optional
+Use this lens in every orchestrated Rust review that contains Rust code or
+examples, as well as for focused style/readability work. Apply repository import
+and naming conventions to private implementation changes too. Keep optional
 preferences distinct from correctness or production-readiness blockers.
 
 ## Scope
@@ -25,9 +26,8 @@ Ignore unrelated, unchanged files.
 
 Default mode:
 
-- Audit newly added or modified Rust code when style, readability, or naming work
-  is requested, or when naming or imports obscure meaning. Incidental Rust edits
-  do not require a separate style audit.
+- Audit naming, imports, and path clarity in newly added or modified Rust code,
+  including private implementation changes and code examples.
 - Ignore unrelated unchanged files.
 
 Whole-repo baseline mode:

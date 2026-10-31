@@ -17,6 +17,16 @@ def _repair(tmp_path: Path, comparison: str = "commit") -> dict[str, Any]:
     git, repository, template, before, plan = _baseline_mutation_fixture(tmp_path)
     (repository / "tool.py").write_text("value = 2\n")
     (repository / "new.txt").write_text("new untracked input\n")
+    template["routing_overrides"].append(
+        {
+            "catalog_id": "repo.tooling",
+            "disposition": "selected",
+            "reason": "The repair adds a repository input contract outside the Python implementation",
+            "applicability_evidence": ["new.txt is a new repository input"],
+            "review_surface": ["new.txt"],
+            "owners": ["tooling"],
+        }
+    )
     (repository / "LICENSE").unlink()
     base = before["head"] if comparison == "commit" else "HEAD"
     if comparison == "omitted":

@@ -31,6 +31,9 @@ def test_symlink_target_change_must_recheck_source_read(tmp_path: Path, absolute
     dependency.write_text('version = "1"\n')
     link = repository / "context.toml"
     link.symlink_to(dependency)
+    template["captured_path_dispositions"].append(
+        {"paths": ["context.toml"], "disposition": "dependency", "reason": "External configuration context for the CLI", "catalog_ids": ["python.cli"]}
+    )
     capture = _scope_data(git, repository, "baseline", None, ())
     _complete_structural_fixture_routing(template, cast("list[str]", capture["captured_scope_paths"]))
     plan = plan_from_document(bootstrap_document(capture, template), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)

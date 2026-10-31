@@ -15,6 +15,7 @@ _EXECUTION_FIELDS = (
     "instruction_paths",
     "instruction_context",
     "required_read_paths",
+    "captured_path_inventory_reference",
     "provenance_examples",
     "repository_root",
     "authorization",
@@ -118,6 +119,9 @@ def execution_view_bytes(entry: dict[str, Any], canonical_bytes: bytes) -> bytes
         )
     else:
         view["instructions"] += (
+            "When supplied, read captured_path_inventory_reference and retain dependency, historical/archive and user-excluded dispositions "
+            "in the coverage assessment. "
+            "These assessments do not establish owned audit coverage. "
             " Use the hashed synthesis bundle and accepted predecessor IDs. Report readiness separately from proof and local validation. "
             "One diagnostic-guided schema retry and one consolidated semantic correction are permitted; another failure blocks the node."
         )

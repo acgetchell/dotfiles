@@ -81,12 +81,13 @@ Keep purely synchronous state atomicity in `rust-invariant-state-transitions`.
 
 ### 6. Implementation Lenses
 
-- Use `rust-style-hygiene` only for naming, import organization, and path clarity.
+- Always use `rust-style-hygiene` for naming, import organization, and path clarity in the reviewed Rust code, including private implementation changes and code examples.
 - Use `rust-iter-control-flow` only for material iterator, closure, loop, pattern-matching, exhaustiveness, or allocation-through-control-flow questions.
 - Use `rust-simplification-review` only when deletion, deduplication, redundant helpers/tests, public-surface reduction, or substantial simplification is plausible or requested.
 - Use `rust-invariant-performance` only for demonstrated or plausible hot paths, allocation/data movement, complexity, benchmark-guided optimization, or performance-sensitive invariants.
 
-Do not load implementation lenses merely because a Rust source file changed.
+The style pass is standard for Rust code. Select the other implementation lenses
+only when their specific concerns apply.
 
 ### 7. Validation and Test Quality
 

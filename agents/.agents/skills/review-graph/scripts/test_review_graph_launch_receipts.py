@@ -13,7 +13,7 @@ from test_review_graph_sessions import _cli
 
 def _large_bootstrap(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
     """Capture a mixed repository and route every matched leaf through the real CLI."""
-    git, repository, _template, _capture, _plan = _baseline_mutation_fixture(tmp_path, instructions=True)
+    git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path, instructions=True)
     for name, content in {
         "kernel.cpp": "double square(double value) { return value * value; }\n",
         "include/kernel.hpp": "double square(double value);\n",
@@ -54,6 +54,7 @@ def _large_bootstrap(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
     choices.update(
         authorization="review-only",
         ignored_outputs=[],
+        captured_path_dispositions=template["captured_path_dispositions"],
         command_policy={"disposition": "allowed", "reason": "Scripted CLI transport fixture; the gate is not executed."},
         execution_prerequisites={"executables": ["env"], "native_available": True, "reason": "POSIX transport fixture."},
         routing_overrides=[

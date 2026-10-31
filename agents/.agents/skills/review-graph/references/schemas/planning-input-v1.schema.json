@@ -58,6 +58,21 @@
     "captured_paths": {
       "$ref": "#/$defs/stringArray"
     },
+    "captured_path_dispositions": {
+      "description": "Assess files outside audit ownership in a whole-repository baseline. Dependency catalog_ids identify selected or exactly reused audit leaves that must prove context reads without claiming owned coverage.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["paths", "disposition", "reason", "catalog_ids"],
+        "properties": {
+          "paths": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "disposition": {"enum": ["dependency", "historical", "archive", "user-excluded"]},
+          "reason": {"type": "string", "minLength": 1},
+          "catalog_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    },
     "captured_scope_paths": {
       "$ref": "#/$defs/stringArray"
     },

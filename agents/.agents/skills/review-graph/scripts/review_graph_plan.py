@@ -23,6 +23,7 @@ from review_graph_executor import executor_permissions
 from review_graph_git import covers_captured_worktree
 from review_graph_integrity import MAX_NATIVE_IDENTIFIER_LENGTH, digest_bytes, digest_json
 from review_graph_lifecycle import ReviewLifecycle, lifecycle_from_document
+from review_graph_path_inventory import captured_path_inventory
 from review_graph_provenance import audit_input_reference, metadata_transition_reference, review_scope_body
 from review_graph_results import EvaluationRejection, parse_json_object
 from review_graph_reuse import (
@@ -542,6 +543,7 @@ class GraphPlan:
     routing_completion_blockers: tuple[str, ...]
     dispatch_allowed: bool
     blockers: tuple[str, ...]
+    captured_path_inventory: dict[str, Any] = field(default_factory=dict, kw_only=True)
     audit_reuse_transitions: tuple[AuditReuseTransition, ...] = ()
     reuse_source_snapshots: tuple[ReviewSourceSnapshot, ...] = ()
     validation_exclusions: tuple[ValidationExclusion, ...] = ()
@@ -1494,8 +1496,18 @@ def classify_repository_paths(paths: Sequence[str], *, release_readiness: bool =
                 ".semgrep.yml",
                 ".semgrep.yaml",
                 ".semgrepignore",
+                ".python-version",
+                ".gitignore",
+                "dprint.json",
+                "dprint.jsonc",
+                "ty.toml",
+                "typos.toml",
+                "review-validation-contracts.json",
             }
             or (path.startswith("tooling/") and path.endswith(".toml"))
+            or path.startswith((".github/actions/", ".github/settings/"))
+            or path in {".github/dependabot.yml", ".github/dependabot.yaml", ".config/nextest.toml"}
+            or path.endswith(".just")
             or any(part in {"semgrep", ".semgrep"} for part in PurePosixPath(path).parts[:-1])
         ):
             add("tooling", path, "shared dependency, command, or static-analysis configuration and fixtures")
@@ -1512,6 +1524,7 @@ def classify_repository_paths(paths: Sequence[str], *, release_readiness: bool =
             "AGENTS.md",
             "CONTRIBUTING.md",
             "SECURITY.md",
+            "CODE_OF_CONDUCT.md",
             "CITATION.cff",
             "REFERENCES.md",
             "BIBLIOGRAPHY.md",
@@ -1740,6 +1753,9 @@ def build_routing_projection(catalog: Sequence[RoutingCatalogEntry], *, consulte
         "classifier_signals": {key: list(value) for key, value in classifier_signals.items()},
         "consulted_routers": list(consulted),
         "entries": entries,
+        "unmatched_captured_paths": sorted(
+            set(normalized_paths) - {path for entry in entries if entry["target_kind"] == "leaf" for path in entry["matched_paths"]}
+        ),
         "schema_version": 1,
     }
     projection["projection_digest"] = digest_json(projection)
@@ -2260,6 +2276,7 @@ def plan_graph(  # noqa: C901, PLR0913, PLR0915
     independent_review_after_audits: bool = False,
     captured_path_line_bounds: tuple[tuple[str, int], ...] = (),
     routing_decisions: tuple[RoutingDecision, ...] = (),
+    path_inventory: dict[str, Any] | None = None,
     pre_review_validation_requirement_ids: tuple[str, ...] = (),
     review_lifecycle: ReviewLifecycle | None = None,
     control_root: Path | None = None,
@@ -2393,6 +2410,7 @@ def plan_graph(  # noqa: C901, PLR0913, PLR0915
         routing_completion_blockers=routing_assessment.completion_blocking_catalog_ids if routing_assessment is not None else (),
         dispatch_allowed=routing_assessment.feasible if routing_assessment is not None else True,
         blockers=routing_assessment.blockers if routing_assessment is not None else (),
+        captured_path_inventory=path_inventory or {},
         pre_review_validation_nodes=early,
         review_lifecycle=review_lifecycle or ReviewLifecycle(),
         independent_review_after_audits=independent_review_after_audits,
@@ -2481,6 +2499,7 @@ def graph_plan_digest(plan: GraphPlan) -> str:
     _drop_empty_plan_fields(
         document,
         (
+            "captured_path_inventory",
             "commit_handoffs",
             "pre_review_validation_nodes",
             "validation_recoveries",
@@ -2507,6 +2526,7 @@ def graph_plan_digest_matches(plan: GraphPlan, digest: str) -> bool:
     _drop_empty_plan_fields(
         legacy,
         (
+            "captured_path_inventory",
             "commit_handoffs",
             "pre_review_validation_nodes",
             "validation_recoveries",
@@ -5944,6 +5964,7 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0913, PLR0915
     routing_assessment: RoutingLedgerAssessment | None = None
     routing_catalog: tuple[RoutingCatalogEntry, ...] = ()
     routing_decisions: tuple[RoutingDecision, ...] = ()
+    path_inventory: dict[str, Any] = {}
     if exhaustive_routing:
         routing_catalog = load_routing_catalog(catalog_path, skill_roots=skill_roots)
         consulted_routers = _tuple_field(document, "consulted_routers")
@@ -6030,6 +6051,27 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0913, PLR0915
             )
             if not classifier.feasible:
                 routing_metadata_blockers.extend(classifier.blockers)
+            if document.get("capture_mode", scope_mode) in {"baseline", "release-readiness"} and not document.get("requested_paths"):
+                leaf_ids = {entry.catalog_id for entry in routing_catalog if entry.target_kind == "leaf"}
+                path_inventory = captured_path_inventory(
+                    captured_paths,
+                    {
+                        decision.catalog_id: decision.review_surface
+                        for decision in routing_decisions
+                        if decision.catalog_id in leaf_ids and decision.disposition in {"selected", "exact-evidence-reused"}
+                    },
+                    {
+                        decision.catalog_id
+                        for decision in routing_decisions
+                        if decision.catalog_id in leaf_ids and decision.disposition in {"selected", "exact-evidence-reused"}
+                    },
+                    document.get("captured_path_dispositions", []),
+                )
+                if unassessed := path_inventory["unassessed_captured_paths"]:
+                    routing_metadata_blockers.append(
+                        f"whole-repository path assessment required for {len(unassessed)} unassigned captured paths; "
+                        "extend owning leaf review_surface or supply captured_path_dispositions (see captured_path_inventory)"
+                    )
         else:
             routing_metadata_blockers.append("exhaustive routing requires captured_paths for classifier comparison")
         if routing_metadata_blockers:
@@ -6157,6 +6199,7 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0913, PLR0915
         validator_skill_path=str(_resolve_checked_skill_path("$SKILLS_ROOT/review-validator/SKILL.md", "review-validator", skill_roots)),
         captured_path_line_bounds=captured_path_line_bounds,
         routing_decisions=routing_decisions,
+        path_inventory=path_inventory,
         pre_review_validation_requirement_ids=_tuple_field(document, "pre_review_validation_requirement_ids"),
         review_lifecycle=lifecycle if document.get("review_lifecycle") is not None else None,
         control_root=control_root,

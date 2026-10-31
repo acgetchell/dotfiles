@@ -22,9 +22,12 @@ uv run --locked python "$SKILLS_ROOT/review-graph/scripts/review_graph_starter.p
 ```
 
 Read the returned discovery artifact. It lists root and applicable nested
-`AGENTS.md` paths, classifier-selected routers, and the catalog projection.
+`AGENTS.md` paths, classifier-selected routers, and the catalog projection, including
+`unmatched_captured_paths` outside every consulted leaf's candidate patterns.
 Root instructions become global; materialization discovers nested instructions
-only for each leaf's owned paths. Restricted `--path` captures are rejected.
+for each leaf's owned and declared dependency paths. Inspect these instructions
+for transitive required files and declare them in global or leaf `instruction_paths`;
+discovery does not infer references from prose. Restricted `--path` captures are rejected.
 Discovery does not select semantic specialist dispositions or infer permission.
 
 Edit `operator.json` with the authorized mode, actual environment/toolchain and
@@ -47,6 +50,56 @@ preflight before returning a materialization command. Follow that command and it
 scheduler continuation. Neither preparation nor bootstrap runs the gate or starts
 workers. Preflight blockers remain saved; use the returned preflight retry command
 for executor-only corrections. Planning changes require a new immutable output.
+
+## Assess Captured Paths
+
+Whole-repository baseline planning separately compares captured files with selected
+or exactly reused leaf audit surfaces. Routers, validators, independent review,
+synthesis, instruction reads and other context do not establish owned coverage.
+The compact bootstrap receipt exposes `captured_path_inventory_reference`, its
+digest and captured/unassigned/unassessed counts, even when dispatch is blocked.
+Read that sidecar before fanout. It contains the complete
+`unassigned_captured_paths`, `unassessed_captured_paths`, and recorded dispositions.
+Candidate matches are discovery hints; the inventory uses actual semantic routing
+decisions. Zero unresolved specialist candidates can still leave unassessed files.
+
+For each unassessed path, either extend an applicable leaf's `review_surface` with
+the material contract, or add a reasoned `captured_path_dispositions` entry to the
+operator choices (or general planning input):
+
+```json
+[
+  {
+    "paths": ["config/release-policy.txt"],
+    "disposition": "dependency",
+    "reason": "Context for the selected tooling audit's release command contract",
+    "catalog_ids": ["repo.tooling"]
+  },
+  {
+    "paths": ["archive/retired-platform.txt"],
+    "disposition": "archive",
+    "reason": "Inspected as retained history; no current support promise or active references",
+    "catalog_ids": []
+  }
+]
+```
+
+`dependency` requires selected or exactly reused audit catalog IDs; dispatch makes
+these required context reads without claiming them as owned. Record actual reads and their unit
+dependencies in the normal evidence. Verified inherited dependencies need not be
+read again solely because of this declaration when only unrelated units need recheck.
+Newly declared context without prior read evidence requires a fresh leaf review.
+`historical` and `archive` require explicit classification; directory names alone
+do not justify either. `user-excluded` requires an actual user scope exclusion,
+retained as a report limitation. These three dispositions use empty `catalog_ids`.
+Do not classify an active material contract as context or history to clear the gate.
+
+Every path must be captured, unique across dispositions, and outside audit ownership.
+Remove a disposition when adding that path to owned scope. Bootstrap blocks until
+`unassessed_captured_paths` is empty; non-owned assessed paths remain visible in
+`unassigned_captured_paths`. This checks accounting, not the truth of semantic
+judgments or the completeness of instruction/dependency inspection. New source
+states and changed routing require reassessment and a new immutable plan.
 
 ## Repository Effects And External Artifacts
 

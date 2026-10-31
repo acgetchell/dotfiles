@@ -28,6 +28,14 @@ def _frozen_run(
     if large_scope:
         for index in range(200):
             (repository / f"long_baseline_document_name_{index:04d}.txt").write_text("unchanged baseline evidence\n")
+        template["captured_path_dispositions"].append(
+            {
+                "paths": [f"long_baseline_document_name_{index:04d}.txt" for index in range(200)],
+                "disposition": "historical",
+                "reason": "Inactive text records retained to exercise large inventory transport",
+                "catalog_ids": [],
+            }
+        )
         _run_test_git(git, "-C", str(repository), "add", ".")
         _run_test_git(git, "-C", str(repository), "commit", "-m", "large baseline")
         capture = _scope_data(git, repository, "baseline", None, ())
@@ -68,6 +76,16 @@ def _frozen_run(
     )
     if input_selection:
         (repository / "enumerate.sh").write_text('git -C "$1" ls-files --cached --others --exclude-standard -z\n')
+        template["routing_overrides"].append(
+            {
+                "catalog_id": "repo.tooling",
+                "disposition": "selected",
+                "reason": "The fixture's validator invokes this repository input-selection script",
+                "applicability_evidence": ["enumerate.sh selects the gate's inputs"],
+                "review_surface": ["enumerate.sh"],
+                "owners": ["tooling"],
+            }
+        )
         requirement.update(commands=[shlex.join(["sh", str(repository / "enumerate.sh"), str(repository)]) + " > " + shlex.quote(str(log))])
         capture = _scope_data(git, repository, "baseline", None, ())
         snapshot = source_snapshot(capture)
@@ -314,6 +332,16 @@ def test_frozen_audit_repair_reuse_and_range_read_commit_continuation(tmp_path: 
     original = Path(audit["artifact_path"]).read_bytes()
     (repository / "state.rs").write_text("pub fn state() { let value = 2; }\n")
     (repository / "extra.txt").write_text("repair-added boundary fixture\n")
+    bundle["planning_input"]["routing_overrides"].append(
+        {
+            "catalog_id": "repo.tooling",
+            "disposition": "selected",
+            "reason": "The scripted repair introduces a repository input contract outside the unchanged Python CLI",
+            "applicability_evidence": ["extra.txt is a new untracked repository input"],
+            "review_surface": ["extra.txt"],
+            "owners": ["tooling"],
+        }
+    )
     current = _scope_data(git, repository, "baseline", None, ())
     request = {
         **bundle["lifecycle_input"],
