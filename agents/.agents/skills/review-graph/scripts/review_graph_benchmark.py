@@ -212,7 +212,7 @@ def _payload(entry: dict[str, Any], ordinal: int) -> dict[str, Any]:
 
 def _read_worker_sources(entries: list[dict[str, Any]], repository: Path) -> dict[str, int]:
     reads: list[str] = []
-    source_bytes = packet_bytes = 0
+    source_bytes = packet_bytes = navigation_read_bytes = 0
     for entry in entries:
         dispatch = entry["dispatch"]
         if dispatch.get("mode") not in {"audit", "independent-review"}:
@@ -225,7 +225,9 @@ def _read_worker_sources(entries: list[dict[str, Any]], repository: Path) -> dic
                 msg = "source packet digest mismatch"
                 raise ValueError(msg)
             packet_bytes += len(content)
-            packet = {item["path"]: item for item in json.loads(content)["excerpts"]}
+            document = json.loads(content)
+            navigation_read_bytes += document.get("budget", {}).get("navigation_bytes", 0)
+            packet = {item["path"]: item for item in document["excerpts"]}
         for path in dispatch["owned_paths"]:
             excerpt = packet.get(path)
             if excerpt and excerpt["complete"] and digest_bytes(excerpt["text"].encode()) == excerpt["content_digest"]:
@@ -238,6 +240,7 @@ def _read_worker_sources(entries: list[dict[str, Any]], repository: Path) -> dic
         "repeated_source_file_reads": len(reads) - len(set(reads)),
         "source_bytes_read": source_bytes,
         "packet_bytes_read": packet_bytes,
+        "navigation_bytes_read": navigation_read_bytes,
     }
 
 

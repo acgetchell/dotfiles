@@ -119,7 +119,23 @@ def _rg_arguments(args: list[str]) -> list[str] | None:
     return args[index:] if index < len(args) else None
 
 
-def source_read_operands(command: str) -> tuple[str, ...] | None:  # noqa: C901, PLR0912, PLR0911 - finite command grammars fail closed.
+def source_read_operands(command: str) -> tuple[str, ...] | None:
+    """Classify an exact execution, including newline-separated independent reads.
+
+    Each physical line must independently parse as a supported reader. Quoted
+    newlines, continuations, shell control flow and mixed protocol commands fail
+    closed. The original execution remains one immutable ledger entry.
+    """
+    lines = [line for line in command.split("\n") if line.strip()]
+    if not lines:
+        return None
+    operands = [_single_source_read_operands(line) for line in lines]
+    if any(item is None for item in operands):
+        return None
+    return tuple(path for item in operands if item is not None for path in item)
+
+
+def _single_source_read_operands(command: str) -> tuple[str, ...] | None:  # noqa: C901, PLR0912, PLR0911 - finite command grammars fail closed.
     """Return explicit operands only for supported, read-only command forms."""
     words = shell_words(command)
     if words is None or len(words) < 2:

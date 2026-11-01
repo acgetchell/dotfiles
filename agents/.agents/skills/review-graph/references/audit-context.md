@@ -31,6 +31,24 @@ using owned and context paths. They are illustrative, never evidence of performe
 work. Merge actual reads and commands, covering every owned path; replace the
 illustrative `origin/main` with the captured base. Keep each Git invocation in a
 separate `commands_executed` entry, and copy its exact text into the declaration.
+Each actual shell execution needs its exact text, including newlines, in one
+`commands_executed` entry. For independent read-only commands executed together,
+retain a newline-separated entry, for example
+`"sed -n '350,696p' docs/dev/testing.md\nsed -n '1,260p' docs/dev/tooling_adoption.md"`.
+The runtime recognizes a list only when every physical line is a supported
+bounded reader with explicit file operands. Shell control flow, pipelines,
+substitution, Python, prose, and mixed read/protocol executions remain
+unclassified. Never split a past execution into invented individual executions.
+Run Git and framework operations separately when authoring new executions.
+
+Publication and compilation expose `reuse_eligibility`: reason counts and
+bounded samples identify unclassified entries and unbound external reads before
+acceptance. The linked write-review artifact or compiled metadata retains every
+exact blocker. This advisory does not reject truthful audit evidence and does
+not prove reuse: changed dependencies, uncertain coverage, and later source
+comparisons still control the actual decision. Keep immutable ledgers; diagnostics
+are not permission to replace unknown commands with inferred provenance.
+
 Plain `git diff`, optionally with `HEAD`, `--cached`/`--staged`, and
 `-- relative/path`, supports `source-discovery` when judgments depend only on
 captured source reads. Other revision diffs, such as `git diff origin/main`, use

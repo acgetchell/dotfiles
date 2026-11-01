@@ -158,6 +158,7 @@ def stage_receipt(operation: str, output_path: Path, output: dict[str, Any]) -> 
     }
     for key in (
         "status",
+        "reuse_eligibility",
         "blockers",
         "plan_digest",
         "source_state",

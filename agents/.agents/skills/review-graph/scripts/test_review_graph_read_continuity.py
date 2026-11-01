@@ -99,6 +99,31 @@ def test_numeric_sed_selection_is_a_bounded_reader(program: str) -> None:
     assert source_read_operands(f"sed -n {program} 'source file.py'") == ("source file.py",)
 
 
+def test_independent_multiline_read_execution_preserves_all_operands() -> None:
+    command = "sed -n '350,696p' docs/dev/testing.md\nsed -n '1,260p' docs/dev/tooling_adoption.md\nrg -n 'pub fn' src/lib.rs\ncat 'other source.rs'\n"
+    assert source_read_operands(command) == ("docs/dev/testing.md", "docs/dev/tooling_adoption.md", "src/lib.rs", "other source.rs")
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat tool.py\npython inspect.py",
+        "cat tool.py\ngit diff HEAD",
+        "cat tool.py\nRead the nearby contracts",
+        "cat tool.py &&\ncat other.py",
+        "cat tool.py;\ncat other.py",
+        "cat tool.py |\ncat other.py",
+        "cat tool.py\\\ncat other.py",
+        "cat 'tool.py\nother.py'",
+        "cat tool.py\n$(cat other.py)",
+        "cat tool.py\ncat other.py > output",
+        "cat tool.py\nif true; then cat other.py; fi",
+    ],
+)
+def test_multiline_classification_rejects_unknown_or_dependent_commands(command: str) -> None:
+    assert source_read_operands(command) is None
+
+
 @pytest.mark.parametrize(
     "command",
     [

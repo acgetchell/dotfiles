@@ -50,6 +50,7 @@ from review_graph_coverage import (
     validate_coverage_units,
 )
 from review_graph_doi import captured_doi_inputs, captured_software_inputs, inspect_canonical_recheck
+from review_graph_eligibility import compact_eligibility, reuse_eligibility
 from review_graph_executor import executor_permissions, remedied_features
 from review_graph_git import (
     audit_git_context,
@@ -170,6 +171,7 @@ from review_graph_scheduling import select_execution_lanes
 from review_graph_schema import SchemaDiagnostic, SchemaValidationError, require_schema, require_schema_definition
 from review_graph_session import current_execution_context, runtime_command, verify_current_snapshot
 from review_graph_source_change import verify_live_source
+from review_graph_source_index import navigation_bytes, source_excerpt
 from review_graph_synthesis import synthesis_fields, validate_synthesis
 from review_graph_timing import timing_blocker, timing_documents, timing_prerequisite
 from review_graph_usage import digest as usage_digest, measure_call
@@ -1307,6 +1309,8 @@ def compile_review(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  #
         "artifact_digest": evidence.raw_result_digest,
         "normalized_record": _review_normalized_record(payload, expectation, evidence),
     }
+    if mode == "audit":
+        metadata["reuse_eligibility"] = reuse_eligibility(metadata["normalized_record"], dispatch.get("repository_root", "."))
     if mode == "synthesis" and any({"software_doi_resolution", "scholarly_doi_resolution"} & item.keys() for item in payload["validation_reconciliation"]):
         # Retain the evidence needed to reverify resolutions when loading this artifact.
         metadata["synthesis_bundle"] = dispatch.get("synthesis_bundle")
@@ -3708,9 +3712,9 @@ def _inspection_groups(plan: GraphPlan, source_state: tuple[str, str, str], arti
             # Reserve a fair share for every remaining owned path. Broad context
             # cannot consume a narrower specialist group's source budget.
             limit = min(16384, remaining_bytes // (len(paths) - index))
-            excerpt = content[:limit].decode("utf-8", errors="ignore")
-            remaining_bytes -= len(content[:limit])
-            excerpts.append({"path": path, "content_digest": digest_bytes(content), "text": excerpt, "complete": excerpt.encode() == content})
+            excerpt, used = source_excerpt(path, content, limit)
+            remaining_bytes -= used
+            excerpts.append({"path": path, "content_digest": digest_bytes(content), **excerpt})
             observations.append(
                 {
                     "byte_count": len(content),
@@ -3734,7 +3738,20 @@ def _inspection_groups(plan: GraphPlan, source_state: tuple[str, str, str], arti
             "reuse_policy": "trusted read-only observations may be reused; semantic findings and payloads remain node-specific",
             "source_state": list(source_state),
             "source_excerpt_status": "available" if any(item["text"] for item in excerpts) else "empty-read-owned-files",
-            "source_packet": {"source_state": list(source_state), "scope": "structural source only; no reviewer conclusions", "excerpts": excerpts},
+            "source_packet": {
+                "source_state": list(source_state),
+                "scope": "structural source only; no reviewer conclusions",
+                "navigation_policy": (
+                    "Lexical declaration pointers are not exhaustive inspection evidence. Read omitted declarations and bodies directly from the bound "
+                    "path and line spans; complete:false excerpts require all missing source. Each leaf and independent review retains its own judgment."
+                ),
+                "budget": {
+                    "limit_bytes": 65536,
+                    "excerpt_text_bytes": sum(len(str(item["text"]).encode()) for item in excerpts),
+                    "navigation_bytes": sum(navigation_bytes(cast("dict[str, Any]", item["navigation"])) for item in excerpts if "navigation" in item),
+                },
+                "excerpts": excerpts,
+            },
         }
         for node_id in node_ids:
             output[node_id] = record
@@ -3758,6 +3775,7 @@ def _worker_provenance_examples(dispatch: dict[str, Any], captured_paths: Iterab
     return {
         "owned_read": {"files_inspected": [owned], "commands_executed": [shlex.join(["cat", "--", owned])]},
         "context_read": {"nearby_contract_owners": [context], "commands_executed": [shlex.join(["cat", "--", context])]},
+        "combined_reads": {"commands_executed": [shlex.join(["sed", "-n", "1,80p", owned]) + "\n" + shlex.join(["cat", "--", context])]},
         "required_reads": {
             "files_inspected": required_owned,
             "nearby_contract_owners": required_context,
@@ -4054,6 +4072,7 @@ def _preflight_audit_payload(contract: dict[str, Any], payload: dict[str, Any]) 
     sections, _blockers = _native_section_bodies(native.decode(), headings)
     return {
         "result_byte_count": len(native),
+        **({"reuse_eligibility": metadata["reuse_eligibility"]} if "reuse_eligibility" in metadata else {}),
         "result_limit": MAX_NATIVE_RESULT_BYTES,
         "section_byte_counts": {heading.removeprefix("## "): len(body.encode()) for heading, body in (sections or {}).items()},
         "section_limit": MAX_NATIVE_SECTION_BYTES,
@@ -4135,12 +4154,14 @@ def review_worker_payload_write(contract_document: dict[str, Any], payload_bytes
         candidate_path = str(candidate)
         identity_record["candidate_path"] = candidate_path
         write_targets.insert(0, candidate_path)
+    eligibility = preflight.pop("reuse_eligibility", None) if preflight is not None else None
     review: dict[str, Any] = {
         "approval_identity": digest_bytes(canonical_json(identity_record).encode()),
         "artifact_write_targets": write_targets,
         "decision": "valid-bound-artifact-write",
         **identity_record,
         **({"native_size_preflight": preflight} if preflight is not None else {}),
+        **({"reuse_eligibility": eligibility} if eligibility is not None else {}),
     }
     if result_contract == "compact-review" and contract_document.get("mode") == "audit" and payload is not None:
         owned_paths = _text_list(contract_document, "owned_paths", required=True)
@@ -4214,6 +4235,7 @@ def _worker_payload_receipt(
         "schema_version": 1,
         "status": "published",
         "warnings": _validation_owner_warnings(contract_document, payload_bytes),
+        **({"reuse_eligibility": compact_eligibility(artifact_write_review["reuse_eligibility"])} if "reuse_eligibility" in artifact_write_review else {}),
         "approval_identity": artifact_write_review["approval_identity"],
         "worker_payload_byte_count": len(payload_bytes),
         "worker_payload_digest": digest_bytes(payload_bytes),
@@ -4661,7 +4683,7 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             # it is not a planner-owned runtime file (and may be a symlink/gitlink).
             runtime_paths = {node.skill_path, *instruction_paths, *node.static_references, str(common["payload_schema"]["path"])}
             if shared := common.get("shared_inspection_evidence"):
-                runtime_paths.add(shared["source_packet_path"])
+                runtime_paths.update((shared["source_packet_path"], shared["artifact_path"]))
             common["runtime_input_digests"] = [
                 [path, digest_bytes(pending_writes[Path(path)][0]) if Path(path) in pending_writes else _file_identity_digest(path)]
                 for path in sorted(runtime_paths)
@@ -9483,7 +9505,7 @@ def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace)
     metadata_path = Path(_required_text(entry, "metadata_path")).resolve()
     worker_payload_digest = digest_bytes(payload_bytes)
     sealed_payload_path = payload_path.with_name(f"{payload_path.stem}.{worker_payload_digest.removeprefix('sha256:')}.sealed{payload_path.suffix}")
-    metadata = {
+    metadata: dict[str, Any] = {
         **metadata,
         "worker_payload_byte_count": len(payload_bytes),
         "worker_payload_digest": worker_payload_digest,
@@ -9550,6 +9572,7 @@ def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace)
                     "node_id": args.node_id,
                     "schema_version": 1,
                     "worker_payload_path": str(sealed_payload_path),
+                    **({"reuse_eligibility": compact_eligibility(metadata["reuse_eligibility"])} if "reuse_eligibility" in metadata else {}),
                 }
                 result_bytes = (json.dumps(result, indent=2, sort_keys=True) + "\n").encode()
                 if _write_bytes_atomically_once(operation_output_path, result_bytes, mode=0o444):
@@ -9709,6 +9732,7 @@ def _worker_payload_cli_output(receipt: dict[str, Any], *, full_output: bool) ->
         "approval_identity",
         "artifact_write_review_reference",
         "warnings",
+        "reuse_eligibility",
     )
     return receipt if full_output else {key: receipt[key] for key in fields if key in receipt}
 

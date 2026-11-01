@@ -516,6 +516,9 @@ def validate_entry(
 
     status = AuditStatus.OK if not problems else AuditStatus.MISMATCH
     message = "metadata matches local entry" if not problems else "; ".join(problems)
+    if not problems and (resolved_author_score is None or metadata.year is None):
+        status = AuditStatus.INSUFFICIENT_CONTEXT
+        message = "resolved metadata lacks usable authors or publication year; manual verification required"
     return DoiResult(
         doi=entry.doi.value,
         line=entry.line,

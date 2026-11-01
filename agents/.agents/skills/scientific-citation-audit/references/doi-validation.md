@@ -18,6 +18,11 @@ The script extracts DOI labels from Markdown, queries DOI content negotiation
 for CSL JSON metadata, and compares the resolved title with the surrounding
 bibliography entry. Use `--json` for machine-readable output.
 
+Ordinary bibliography entries require usable resolved authors and a publication
+year before the checker reports `OK`. Missing either yields
+`INSUFFICIENT_CONTEXT` and exit status 1 for manual verification. Any definite
+metadata contradiction still takes precedence as `MISMATCH`.
+
 Publication years prefer `published-print`, `published`, `published-online`, then
 `issued`. JSON retains all these date fields and deposit/index dates in
 `date_provenance`; deposit/index/update dates never supply the publication year.

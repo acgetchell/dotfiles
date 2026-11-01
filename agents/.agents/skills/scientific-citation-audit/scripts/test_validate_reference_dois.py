@@ -187,6 +187,50 @@ def test_validation_accepts_matching_title_author_and_year() -> None:
     assert result.status == MODULE.AuditStatus.OK
 
 
+@pytest.mark.parametrize("missing_fields", [("author",), ("issued",), ("author", "issued")])
+def test_incomplete_scholarly_metadata_requires_manual_verification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], missing_fields: tuple[str, ...]
+) -> None:
+    path = tmp_path / "REFERENCES.md"
+    path.write_text("Shewchuk. Robust predicates. (1997). DOI: https://doi.org/10.1234/test\n", encoding="utf-8")
+    raw = metadata("Robust predicates")
+    for field in missing_fields:
+        del raw[field]
+    original = MODULE.validate_entries
+    monkeypatch.setattr(MODULE, "validate_entries", lambda entries, timeout, score, **kwargs: original(entries, timeout, score, lambda *_: raw, **kwargs))
+
+    assert MODULE.run([str(path), "--json"]) == 1
+    output = capsys.readouterr()
+    assert output.err == ""
+    result = json.loads(output.out)[0]
+    assert result["status"] == "INSUFFICIENT_CONTEXT"
+    assert result["resolved_title"] == "Robust predicates"
+    assert result["resolved_authors"] == ([] if "author" in missing_fields else ["Shewchuk"])
+    assert result["resolved_year"] == (None if "issued" in missing_fields else "1997")
+    assert result["mismatched_fields"] == []
+    assert "manual verification" in result["message"]
+
+
+@pytest.mark.parametrize(
+    ("missing_field", "mismatch", "value", "expected_field"),
+    [
+        ("issued", "author", [{"family": "Wrong"}], "authors"),
+        ("author", "issued", {"date-parts": [[1900]]}, "year"),
+        ("author", "title", "Unrelated geometry", "title"),
+    ],
+)
+def test_incomplete_scholarly_metadata_preserves_known_mismatches(missing_field: str, mismatch: str, value: object, expected_field: str) -> None:
+    raw = metadata("Robust predicates")
+    del raw[missing_field]
+    raw[mismatch] = value
+    entry = MODULE.extract_entries("Shewchuk. Robust predicates. (1997). DOI: https://doi.org/10.1234/test")[0]
+
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: raw)
+
+    assert result.status == MODULE.AuditStatus.MISMATCH
+    assert result.mismatched_fields == (expected_field,)
+
+
 def test_validation_reports_malformed_fetcher_response() -> None:
     """Malformed resolver data should produce a failed audit result."""
     entry = MODULE.DoiEntry(doi=MODULE.Doi.parse("10.1007/PL00009321"), line=1, entry="- Fixture entry.")
