@@ -30,6 +30,11 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
 
 STOPWORDS = {"a", "an", "and", "are", "as", "by", "for", "from", "in", "into", "is", "it", "of", "on", "or", "the", "to", "using", "with"}
+_CONTRIBUTOR_ROLE = re.compile(
+    r"\b(?:translated|edited|compiled|illustrated|adapted|annotated|revised|translation|foreword|introduction|preface)\W+by\b"
+    r"|\(\s*(?:translators?|editors?|compilers?|illustrators?|trans\.?|eds?\.?)\s*\)",
+    re.IGNORECASE,
+)
 
 
 class AuditStatus(StrEnum):
@@ -454,6 +459,9 @@ def author_score(author_names: Iterable[str], entry: str, title: str) -> float |
         # A title fragment inside a longer local title does not identify where
         # the authors end. Retain initials and author-date punctuation.
         if not author_text.endswith((".", ")")):
+            return None
+        # Mixed author/contributor prefixes need manual role attribution.
+        if _CONTRIBUTOR_ROLE.search(author_text):
             return None
         normalized_authors = f" {identity_text(author_text)} "
         return sum(f" {name} " in normalized_authors for name in names) / len(names)

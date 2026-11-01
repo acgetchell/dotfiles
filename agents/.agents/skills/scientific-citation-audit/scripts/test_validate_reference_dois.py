@@ -290,6 +290,52 @@ def test_title_equal_to_surname_keeps_author_and_title_occurrences_separate(auth
     assert result.author_score == (1.0 if author == "Li" else 0.0)
 
 
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        "Wrong. Translated by Li.",
+        "Translated by Li.",
+        "Wrong. **TRANSLATED BY** Li.",
+        "Wrong. Edited by Li.",
+        "Wrong. Li (translator).",
+        "Wrong. Li (ed.).",
+        "Li. Translated by Jones.",
+    ],
+)
+def test_contributor_roles_do_not_supply_author_evidence(prefix: str) -> None:
+    entry = MODULE.DoiEntry(MODULE.Doi.parse("10.1234/test"), 1, f"{prefix} Robust predicates. 1997.")
+
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: metadata("Robust predicates", family="Li"))
+
+    assert result.status == MODULE.AuditStatus.INSUFFICIENT_CONTEXT
+    assert result.author_score is None
+    assert result.title_score == 1.0
+    assert result.resolved_year == "1997"
+    assert result.mismatched_fields == ()
+    assert "manual verification" in result.message
+
+
+@pytest.mark.parametrize("author", ["Li", "Editor"])
+def test_contributor_words_outside_role_markers_do_not_hide_matching_authors(author: str) -> None:
+    title = "Translated by the sea"
+    entry = MODULE.DoiEntry(MODULE.Doi.parse("10.1234/test"), 1, f"{author}. {title}. 1997.")
+
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: metadata(title, family=author))
+
+    assert result.status == MODULE.AuditStatus.OK
+    assert result.author_score == 1.0
+
+
+def test_contributor_ambiguity_preserves_a_definite_year_mismatch() -> None:
+    entry = MODULE.DoiEntry(MODULE.Doi.parse("10.1234/test"), 1, "Wrong. Translated by Li. Robust predicates. 1900.")
+
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: metadata("Robust predicates", family="Li"))
+
+    assert result.status == MODULE.AuditStatus.MISMATCH
+    assert result.mismatched_fields == ("year",)
+    assert result.author_score is None
+
+
 @pytest.mark.parametrize(("local_year", "status"), [("", "INSUFFICIENT_CONTEXT"), ("(1997).", "OK"), ("(1900).", "MISMATCH")])
 def test_scholarly_year_comparison_distinguishes_absence_from_conflict(local_year: str, status: str) -> None:
     entry = MODULE.extract_entries(f"Shewchuk. Robust predicates. {local_year} DOI: https://doi.org/10.1234/test")[0]
