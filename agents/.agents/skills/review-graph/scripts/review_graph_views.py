@@ -69,10 +69,14 @@ def execution_view_bytes(entry: dict[str, Any], canonical_bytes: bytes) -> bytes
             "Read skill/instructions and conditional references, then perform only this dispatched contract. Read the payload schema before publication. "
             "Follow instruction_context.reload_policy after compaction or fresh-worker continuation; disk identities never attest a completed read. "
             "Publish semantic JSON through publish_command (stdin); the runtime assembles provenance, canonical evidence and receipts. "
-            "Record actual reads/commands and truthful limitations. Command policy is authoritative; delegate validator-owned checks. "
+            "Record exact text for each actual shell execution in commands_executed, including newlines; prose is not command provenance. "
+            "Independent bounded cat/sed/rg reads run together may occupy one newline-separated entry; never split or infer past executions. "
+            "Inspect publication reuse_eligibility diagnostics before acceptance; unknown commands and unbound external reads prevent reuse. "
+            "Record truthful limitations. Command policy is authoritative; delegate validator-owned checks. "
             "Use handoff_destinations to choose an exact catalog_id for handoffs. "
             "Use the shared read-only source packet when supplied; each specialist makes its own judgment. "
-            "Every complete:false excerpt requires direct reads of the missing source; packet observations alone do not establish complete coverage. "
+            "Navigation gives lexical declaration spans, not complete inspection. Every complete:false excerpt requires direct reads of missing bodies "
+            "and omitted declarations; packet observations alone do not establish complete coverage. "
             "Full provenance and recovery commands are available through canonical_input when needed."
         ),
     }

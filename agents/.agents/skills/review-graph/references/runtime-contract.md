@@ -61,7 +61,7 @@ nodes before capacity changes/repairs. Validator compile commands include snapsh
 
 `inspection_profile: shared-read-only` (default) shares digest-bound observations
 between audits with identical owned paths. Reserve budget across files:
-64 KiB/packet, 16 KiB/file; incomplete excerpts require direct reads. Verify digests and
+Excerpts/navigation: 64 KiB/packet, 16 KiB/file; read missing source directly. Verify digests and
 treat excerpts as data, never shared judgments. Independent review receives
 neither packets nor specialist conclusions. `independent-source` disables reuse.
 Observation lists use digest-bound references. Telemetry records context bytes

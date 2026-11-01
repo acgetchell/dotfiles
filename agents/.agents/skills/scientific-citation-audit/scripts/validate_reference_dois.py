@@ -30,6 +30,11 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
 
 STOPWORDS = {"a", "an", "and", "are", "as", "by", "for", "from", "in", "into", "is", "it", "of", "on", "or", "the", "to", "using", "with"}
+_CONTRIBUTOR_ROLE = re.compile(
+    r"\b(?:translated|edited|compiled|illustrated|adapted|annotated|revised|translation|foreword|introduction|preface)\W+by\b"
+    r"|\(\s*(?:translators?|editors?|compilers?|illustrators?|trans\.?|eds?\.?)\s*\)",
+    re.IGNORECASE,
+)
 
 
 class AuditStatus(StrEnum):
@@ -203,6 +208,7 @@ class CslMetadata:
     container: str | None
     author_families: tuple[str, ...]
     date_provenance: tuple[tuple[str, str], ...] = ()
+    authors_complete: bool = False
 
     @classmethod
     def parse(cls, raw: dict[str, Any]) -> CslMetadata:
@@ -215,8 +221,10 @@ class CslMetadata:
         container = plain_text(raw.get("container-title")) or None
         dates = tuple((field, year) for field in DATE_FIELDS if (year := date_year(raw.get(field))) is not None)
         year = next((year for field, year in dates if field in PUBLICATION_DATE_FIELDS), None)
-        authors = author_families(raw.get("author"))
-        return cls(title=title, year=year, container=container, author_families=authors, date_provenance=dates)
+        raw_authors = raw.get("author")
+        authors = author_families(raw_authors)
+        authors_complete = isinstance(raw_authors, list) and bool(authors) and len(authors) == len(raw_authors)
+        return cls(title=title, year=year, container=container, author_families=authors, date_provenance=dates, authors_complete=authors_complete)
 
 
 @dataclass(frozen=True, slots=True)
@@ -438,13 +446,26 @@ def title_score(title: str, entry: str) -> float:
     return len(title_tokens & entry_tokens) / len(title_tokens)
 
 
-def author_score(author_names: Iterable[str], entry: str) -> float | None:
-    """Return fraction of resolved author family names present in local entry text."""
-    author_tokens = {token for name in author_names for token in tokens(name)}
-    if not author_tokens:
+def author_score(author_names: Iterable[str], entry: str, title: str) -> float | None:
+    """Match names only in the author-leading text before an identified title."""
+    names = {normalized for name in author_names if (normalized := identity_text(name))}
+    title_pattern = r"\W+".join(re.escape(word) for word in re.findall(r"\w+", title))
+    if not names or not title_pattern:
         return None
-    entry_tokens = tokens(entry)
-    return len(author_tokens & entry_tokens) / len(author_tokens)
+    for match in re.finditer(rf"(?<!\w){title_pattern}(?!\w)", entry, flags=re.IGNORECASE):
+        author_text = entry[: match.start()].rstrip(" \t*_`\"'\u201c\u2018[")
+        if not any(character.isalpha() for character in author_text):
+            continue
+        # A title fragment inside a longer local title does not identify where
+        # the authors end. Retain initials and author-date punctuation.
+        if not author_text.endswith((".", ")")):
+            return None
+        # Mixed author/contributor prefixes need manual role attribution.
+        if _CONTRIBUTOR_ROLE.search(author_text):
+            return None
+        normalized_authors = f" {identity_text(author_text)} "
+        return sum(f" {name} " in normalized_authors for name in names) / len(names)
+    return None
 
 
 def validate_entry(
@@ -493,7 +514,7 @@ def validate_entry(
         return reconcile_software(result, metadata, raw, citation) if citation is not None else result
 
     resolved_title_score = title_score(metadata.title, entry.entry)
-    resolved_author_score = author_score(metadata.author_families, entry.entry)
+    resolved_author_score = author_score(metadata.author_families, entry.entry, metadata.title)
     problems: list[str] = []
     fields: list[str] = []
     local_years = publication_years(entry.entry, entry.doi.value)
@@ -503,7 +524,7 @@ def validate_entry(
     if resolved_author_score == 0.0:
         problems.append("resolved authors do not appear in local entry")
         fields.append("authors")
-    if metadata.year is not None and metadata.year not in local_years:
+    if metadata.year is not None and local_years and metadata.year not in local_years:
         problems.append("resolved year does not appear in local entry; reconcile the cited edition or print issue with primary publication records")
         fields.append("year")
     if conflict:
@@ -516,6 +537,9 @@ def validate_entry(
 
     status = AuditStatus.OK if not problems else AuditStatus.MISMATCH
     message = "metadata matches local entry" if not problems else "; ".join(problems)
+    if not problems and (resolved_author_score is None or not metadata.authors_complete or metadata.year is None or not local_years):
+        status = AuditStatus.INSUFFICIENT_CONTEXT
+        message = "citation or resolved metadata lacks complete authors or publication year; manual verification required"
     return DoiResult(
         doi=entry.doi.value,
         line=entry.line,
@@ -554,7 +578,7 @@ def reconcile_software(result: DoiResult, metadata: CslMetadata, raw: dict[str, 
         problems.append("resolved year differs from canonical software year")
     if problems:
         status, message = AuditStatus.MISMATCH, "; ".join(problems)
-    elif not isinstance(resolved_doi, str) or not metadata.author_families or metadata.year is None:
+    elif not isinstance(resolved_doi, str) or not metadata.authors_complete or metadata.year is None:
         status, message = AuditStatus.INSUFFICIENT_CONTEXT, "resolved software metadata lacks DOI, authors, or year"
     else:
         status, message = AuditStatus.OK, "software identity matches explicit CITATION.cff metadata"

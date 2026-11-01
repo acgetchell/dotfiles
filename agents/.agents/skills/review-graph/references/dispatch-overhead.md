@@ -154,6 +154,16 @@ workers receive raw source only. No actual model review,
 validator commands, or synthesis runs in this protocol benchmark; no semantic
 recall or model latency is inferred from seeded transcripts.
 
+Shared packets divide their existing 64 KiB budget (at most 16 KiB/file) between
+excerpt text and compact navigation JSON. Incomplete Rust excerpts include
+lexical function/type declaration windows with line spans, truncation flags,
+and omitted-candidate counts. These pointers are non-exhaustive: read omitted
+bodies and declarations directly. Packet `budget` and benchmark
+`navigation_bytes_read` separate navigation from excerpt and fallback source
+read bytes. Total serialized packet bytes also include path identities and
+transport framing. These byte counts do not establish review quality, model
+latency, or token savings.
+
 ## Fail-Fast Validation And Worker Provenance (#116, #117)
 
 The 2026-10-05 local measurement used macOS arm64, Python 3.14.7, uv 0.12.23,

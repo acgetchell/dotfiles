@@ -77,7 +77,10 @@ def test_incomplete_context_cannot_become_a_negative(case: dict[str, Any], scope
     assert len(report["uncertain"]) == len(packet["catalog"])
 
 
-@pytest.mark.parametrize("value", [True, "0.9", -0.01, 1.01, float("nan"), float("inf")])
+@pytest.mark.parametrize(
+    "value",
+    [True, "0.9", -0.01, 1.01, pytest.param(-(10**400), id="negative-overflow"), pytest.param(10**400, id="positive-overflow"), float("nan"), float("inf")],
+)
 def test_invalid_probabilities_are_rejected(value: object) -> None:
     with pytest.raises(ValueError, match="probability"):
         experiment._validate_response({"model": experiment.MODEL, "answers": {"a": {"type": "noul", "noul": value}}}, {"a"})
@@ -174,6 +177,47 @@ def test_service_failure_retains_attempt_without_raw_error(packet: dict[str, Any
     report = summarize([ledger])
     assert report["groups"][0]["failed"] == 1
     assert report["groups"][0]["unknown_cost_attempts"] == 1
+
+
+@pytest.mark.parametrize("probability", [-(10**400), 10**400], ids=["negative-overflow", "positive-overflow"])
+def test_overflowing_probability_publishes_failure_without_retry(
+    case: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, probability: int
+) -> None:
+    monkeypatch.setenv("TYPESAFE_API_KEY", "fixture-key")
+    calls = []
+
+    class Opener:
+        def open(self, request: Request, **_kwargs: object) -> Response:
+            assert isinstance(request.data, bytes)
+            body = json.loads(request.data)
+            calls.append(body)
+            answers = {key: {"type": "noul", "noul": 0.9} for key in body["questions"]}
+            answers[next(iter(answers))]["noul"] = probability
+            return Response({"model": experiment.MODEL, "answers": answers, "usage": {"input_tokens": 1000}})
+
+    monkeypatch.setattr(experiment, "build_opener", lambda *_: Opener())
+    output = tmp_path / "invalid-probability"
+    summary = experiment.run_case(case, output, live=True, policy={"max_retries": 1})
+
+    assert summary["status"] == "failed"
+    assert len(calls) == 1
+    assert sorted(path.name for path in output.glob("attempt-*.json")) == ["attempt-000.json"]
+    attempt = read_json(output / "attempt-000.json")
+    result = read_json(output / "result.json")
+    for record in (attempt, result):
+        assert record["status"] == "failed"
+        assert record["error"] == "invalid-response"
+        assert record["probabilities"] == {}
+        assert record["usage"]["input_tokens"] == 1000
+    assert result["retries"] == 0
+    assert result["attempt_ids"] == [attempt["attempt_id"]]
+    comparison = read_json(output / "comparison.json")
+    assert comparison["selected_catalog_ids"] == []
+    assert set(comparison["uncertain"]) == set(calls[0]["questions"])
+    group = comparison["accounting"]["groups"][0]
+    assert group["attempts"] == group["failed"] == 1
+    assert group["unfinished"] == 0
+    assert group["input_tokens_known"] == 1000
 
 
 def test_dry_run_needs_no_key_and_preserves_artifacts(case: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

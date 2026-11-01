@@ -193,7 +193,8 @@ def _validate_response(value: object, ids: set[str]) -> tuple[str, dict[str, flo
             msg = "response has an invalid answer type"
             raise ValueError(msg)
         probability = answer.get("noul")
-        if type(probability) not in {float, int} or not math.isfinite(probability) or not 0 <= probability <= 1:
+        # Check the interval before converting arbitrary JSON integers to float.
+        if type(probability) not in {float, int} or not 0 <= probability <= 1:
             msg = "response has an invalid probability"
             raise ValueError(msg)
         probabilities[key] = float(probability)

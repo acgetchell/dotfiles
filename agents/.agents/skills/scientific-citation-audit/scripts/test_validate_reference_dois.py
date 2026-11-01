@@ -187,6 +187,195 @@ def test_validation_accepts_matching_title_author_and_year() -> None:
     assert result.status == MODULE.AuditStatus.OK
 
 
+@pytest.mark.parametrize("missing_fields", [("author",), ("issued",), ("author", "issued")])
+def test_incomplete_scholarly_metadata_requires_manual_verification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], missing_fields: tuple[str, ...]
+) -> None:
+    path = tmp_path / "REFERENCES.md"
+    path.write_text("Shewchuk. Robust predicates. (1997). DOI: https://doi.org/10.1234/test\n", encoding="utf-8")
+    raw = metadata("Robust predicates")
+    for field in missing_fields:
+        del raw[field]
+    original = MODULE.validate_entries
+    monkeypatch.setattr(MODULE, "validate_entries", lambda entries, timeout, score, **kwargs: original(entries, timeout, score, lambda *_: raw, **kwargs))
+
+    assert MODULE.run([str(path), "--json"]) == 1
+    output = capsys.readouterr()
+    assert output.err == ""
+    result = json.loads(output.out)[0]
+    assert result["status"] == "INSUFFICIENT_CONTEXT"
+    assert result["resolved_title"] == "Robust predicates"
+    assert result["resolved_authors"] == ([] if "author" in missing_fields else ["Shewchuk"])
+    assert result["resolved_year"] == (None if "issued" in missing_fields else "1997")
+    assert result["mismatched_fields"] == []
+    assert "manual verification" in result["message"]
+
+
+@pytest.mark.parametrize(
+    ("missing_field", "mismatch", "value", "expected_field"),
+    [
+        ("issued", "author", [{"family": "Wrong"}], "authors"),
+        ("author", "issued", {"date-parts": [[1900]]}, "year"),
+        ("author", "title", "Unrelated geometry", "title"),
+    ],
+)
+def test_incomplete_scholarly_metadata_preserves_known_mismatches(missing_field: str, mismatch: str, value: object, expected_field: str) -> None:
+    raw = metadata("Robust predicates")
+    del raw[missing_field]
+    raw[mismatch] = value
+    entry = MODULE.extract_entries("Shewchuk. Robust predicates. (1997). DOI: https://doi.org/10.1234/test")[0]
+
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: raw)
+
+    assert result.status == MODULE.AuditStatus.MISMATCH
+    assert result.mismatched_fields == (expected_field,)
+
+
+@pytest.mark.parametrize(
+    ("resolved_author", "local_author", "matches"),
+    [("Li", "Li", True), ("Wu", "Wu", True), ("Ng", "Ng", True), ("Li", "Liu", False), ("Van Loan", "Loan", False), ("García", "GARCÍA", True)],
+)
+def test_scholarly_authors_match_complete_names_without_title_token_filters(resolved_author: str, local_author: str, matches: bool) -> None:
+    entry = MODULE.extract_entries(f"{local_author}. Robust predicates. (1997). DOI: https://doi.org/10.1234/test")[0]
+
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: metadata("Robust predicates", family=resolved_author))
+
+    assert result.status == (MODULE.AuditStatus.OK if matches else MODULE.AuditStatus.MISMATCH)
+    assert result.author_score == (1.0 if matches else 0.0)
+    assert result.mismatched_fields == (() if matches else ("authors",))
+
+
+@pytest.mark.parametrize("local_author", ["Wrong", "Li"])
+@pytest.mark.parametrize("citation", ["{author}. {title}. (1997).", "{author}, J. R. (1997). *{title}*.", "J. R. {author}. {title}. 1997."])
+def test_title_surname_is_not_author_evidence(local_author: str, citation: str) -> None:
+    title = "Li distribution and robust predicates"
+    entry = MODULE.DoiEntry(MODULE.Doi.parse("10.1234/test"), 1, citation.format(author=local_author, title=title))
+
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: metadata(title, family="Li"))
+
+    assert result.title_score == 1.0
+    assert result.author_score == (1.0 if local_author == "Li" else 0.0)
+    assert result.status == (MODULE.AuditStatus.OK if local_author == "Li" else MODULE.AuditStatus.MISMATCH)
+    assert result.mismatched_fields == (() if local_author == "Li" else ("authors",))
+
+
+@pytest.mark.parametrize("citation", ["Li distribution and robust predicates. 1997.", "Wrong. Li distribution with robust predicates. 1997."])
+def test_missing_or_unidentified_author_context_requires_manual_verification(citation: str) -> None:
+    entry = MODULE.DoiEntry(MODULE.Doi.parse("10.1234/test"), 1, citation)
+
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: metadata("Li distribution and robust predicates", family="Li"))
+
+    assert result.status == MODULE.AuditStatus.INSUFFICIENT_CONTEXT
+    assert result.author_score is None
+    assert result.mismatched_fields == ()
+
+
+def test_partial_title_match_does_not_extend_author_evidence_into_title() -> None:
+    entry = MODULE.DoiEntry(MODULE.Doi.parse("10.1234/test"), 1, "Wrong. Li robust predicates. 1997.")
+
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: metadata("Robust predicates", family="Li"))
+
+    assert result.status == MODULE.AuditStatus.INSUFFICIENT_CONTEXT
+    assert result.author_score is None
+    assert result.title_score == 1.0
+
+
+@pytest.mark.parametrize("author", ["Li", "Wrong"])
+def test_title_equal_to_surname_keeps_author_and_title_occurrences_separate(author: str) -> None:
+    entry = MODULE.DoiEntry(MODULE.Doi.parse("10.1234/test"), 1, f"{author}. Li. 1997.")
+
+    result = MODULE.validate_entry(entry, 1.0, 0.0, lambda *_: metadata("Li", family="Li"))
+
+    assert result.status == (MODULE.AuditStatus.OK if author == "Li" else MODULE.AuditStatus.MISMATCH)
+    assert result.author_score == (1.0 if author == "Li" else 0.0)
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        "Wrong. Translated by Li.",
+        "Translated by Li.",
+        "Wrong. **TRANSLATED BY** Li.",
+        "Wrong. Edited by Li.",
+        "Wrong. Li (translator).",
+        "Wrong. Li (ed.).",
+        "Li. Translated by Jones.",
+    ],
+)
+def test_contributor_roles_do_not_supply_author_evidence(prefix: str) -> None:
+    entry = MODULE.DoiEntry(MODULE.Doi.parse("10.1234/test"), 1, f"{prefix} Robust predicates. 1997.")
+
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: metadata("Robust predicates", family="Li"))
+
+    assert result.status == MODULE.AuditStatus.INSUFFICIENT_CONTEXT
+    assert result.author_score is None
+    assert result.title_score == 1.0
+    assert result.resolved_year == "1997"
+    assert result.mismatched_fields == ()
+    assert "manual verification" in result.message
+
+
+@pytest.mark.parametrize("author", ["Li", "Editor"])
+def test_contributor_words_outside_role_markers_do_not_hide_matching_authors(author: str) -> None:
+    title = "Translated by the sea"
+    entry = MODULE.DoiEntry(MODULE.Doi.parse("10.1234/test"), 1, f"{author}. {title}. 1997.")
+
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: metadata(title, family=author))
+
+    assert result.status == MODULE.AuditStatus.OK
+    assert result.author_score == 1.0
+
+
+def test_contributor_ambiguity_preserves_a_definite_year_mismatch() -> None:
+    entry = MODULE.DoiEntry(MODULE.Doi.parse("10.1234/test"), 1, "Wrong. Translated by Li. Robust predicates. 1900.")
+
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: metadata("Robust predicates", family="Li"))
+
+    assert result.status == MODULE.AuditStatus.MISMATCH
+    assert result.mismatched_fields == ("year",)
+    assert result.author_score is None
+
+
+@pytest.mark.parametrize(("local_year", "status"), [("", "INSUFFICIENT_CONTEXT"), ("(1997).", "OK"), ("(1900).", "MISMATCH")])
+def test_scholarly_year_comparison_distinguishes_absence_from_conflict(local_year: str, status: str) -> None:
+    entry = MODULE.extract_entries(f"Shewchuk. Robust predicates. {local_year} DOI: https://doi.org/10.1234/test")[0]
+
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: metadata("Robust predicates"))
+
+    assert result.status.value == status
+    assert result.resolved_year == "1997"
+    assert result.mismatched_fields == (("year",) if status == "MISMATCH" else ())
+    if not local_year:
+        assert result.local_years == ()
+        assert "manual verification" in result.message
+
+
+@pytest.mark.parametrize("incomplete_author", [{"given": "A."}, {}, {"family": "", "literal": ""}, None, "Unknown"])
+def test_one_incomplete_resolver_author_prevents_scholarly_success(incomplete_author: object) -> None:
+    raw = metadata("Robust predicates")
+    raw["author"] = [{"family": "Shewchuk"}, incomplete_author]
+    entry = MODULE.extract_entries("Shewchuk. Robust predicates. (1997). DOI: https://doi.org/10.1234/test")[0]
+
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: raw)
+
+    assert result.status == MODULE.AuditStatus.INSUFFICIENT_CONTEXT
+    assert result.resolved_authors == ("Shewchuk",)
+    assert result.author_score == 1.0
+    assert result.mismatched_fields == ()
+
+
+@pytest.mark.parametrize("author", [{"family": "Li"}, {"literal": "Li"}, {"family": "", "literal": "Li"}])
+def test_complete_author_records_accept_family_or_literal(author: dict[str, str]) -> None:
+    raw = metadata("Robust predicates")
+    raw["author"] = [author]
+    entry = MODULE.DoiEntry(MODULE.Doi.parse("10.1234/example"), 1, "Li. (1997). Robust predicates. DOI: 10.1234/example")
+
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: raw)
+
+    assert result.status == MODULE.AuditStatus.OK
+    assert result.resolved_authors == ("Li",)
+
+
 def test_validation_reports_malformed_fetcher_response() -> None:
     """Malformed resolver data should produce a failed audit result."""
     entry = MODULE.DoiEntry(doi=MODULE.Doi.parse("10.1007/PL00009321"), line=1, entry="- Fixture entry.")
@@ -352,6 +541,17 @@ def test_incomplete_resolved_software_is_not_a_match(tmp_path: Path, field: str)
     del raw[field]
     result = MODULE.validate_entry(MODULE.extract_entries(SOFTWARE_LINKS[0])[0], 1.0, 0.45, lambda *_: raw, citation=MODULE.SoftwareCitation.load(cff))
     assert result.status == MODULE.AuditStatus.INSUFFICIENT_CONTEXT
+
+
+def test_one_incomplete_resolver_author_prevents_canonical_software_success(tmp_path: Path) -> None:
+    cff = tmp_path / "CITATION.cff"
+    cff.write_text(CFF)
+    raw = {**software_metadata(), "author": [{"family": "Getchell"}, {"given": "A."}]}
+
+    result = MODULE.validate_entry(MODULE.extract_entries(SOFTWARE_LINKS[0])[0], 1.0, 0.45, lambda *_: raw, citation=MODULE.SoftwareCitation.load(cff))
+
+    assert result.status == MODULE.AuditStatus.INSUFFICIENT_CONTEXT
+    assert result.resolved_authors == ("Getchell",)
 
 
 @pytest.mark.parametrize(

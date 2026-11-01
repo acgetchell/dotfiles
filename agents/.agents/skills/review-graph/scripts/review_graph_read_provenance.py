@@ -130,6 +130,7 @@ def bind_runtime_reads(dispatch: dict[str, Any], payload: dict[str, Any]) -> tup
         from review_graph_session import verify_snapshot  # noqa: PLC0415 - optional frozen resource verification.
 
         manifest = verify_snapshot(reference)
+        allowed[reference["path"]] = reference["digest"]
         allowed.update((str(Path(reference["path"]).parent / path), digest) for path, digest in manifest.files)
     allowed.update((path, file_identity(path)) for path in dispatch.get("protocol_input_paths", []))
     reads: set[str] = set(payload.get("nearby_contract_owners", []))

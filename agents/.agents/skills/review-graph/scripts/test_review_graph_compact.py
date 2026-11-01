@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 import review_graph_runtime as runtime
-from review_graph_benchmark import benchmark_fixture
+from review_graph_benchmark import _read_worker_sources, benchmark_fixture
 from review_graph_independent import CHECK_LABELS, SCHEMA
 from review_graph_schema import require_schema
 from test_review_graph_runtime import (
@@ -85,6 +85,53 @@ def test_source_packets_reserve_owned_text_in_mixed_repository(tmp_path: Path) -
         assert record["source_excerpt_status"] == "available"
         for item in excerpts:
             assert item["content_digest"] == _digest((repository / item["path"]).read_bytes())
+
+
+def test_large_rust_group_indexes_late_methods_within_shared_budget(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    plan = runtime._graph_plan(benchmark_fixture(repository)["plan"])
+    seed = next(node for node in plan.actual_worker_nodes if node.mode == "audit")
+    paths = tuple(f"src/large_{index:03d}.rs" for index in range(119))
+    prefix = "//! A long module introduction.\n" * 180 + "use std::fmt;\n" * 80
+    body = "pub struct Builder;\nimpl Builder {\n    pub fn new() -> Self { Self }\n    pub fn build(self) -> usize { 42 }\n}\n"
+    for path in paths:
+        (repository / path).write_bytes((prefix + body).encode())
+    nodes = tuple(replace(seed, node_id=name, coverage=paths) for name in ("fluent", "iter"))
+    groups = runtime._inspection_groups(replace(plan, actual_worker_nodes=nodes), ("scope", "worktree", "repository"), tmp_path / "proof", repository)
+    assert groups["fluent"] is groups["iter"]
+    packet = groups["fluent"]["source_packet"]
+    assert isinstance(packet, dict)
+    budget = packet["budget"]
+    assert 0 < budget["navigation_bytes"] < budget["limit_bytes"]
+    assert budget["navigation_bytes"] + budget["excerpt_text_bytes"] <= 65536
+    assert len(packet["excerpts"]) == 119
+    for excerpt in packet["excerpts"]:
+        assert not excerpt["complete"]
+        assert excerpt["content_digest"] == _digest((prefix + body).encode())
+        navigation = excerpt["navigation"]
+        assert not navigation["complete"]
+        assert navigation["omitted_candidates"] > 0
+        location = next(item for item in navigation["locations"] if "fn new" in item["text"])
+        assert location["start_line"] == location["end_line"] == 263
+        assert "pub fn new() -> Self {" in (prefix + body).splitlines()[location["start_line"] - 1]
+        assert any(item["kind"] == "struct" for item in navigation["locations"])
+    packet_path = tmp_path / "packet.json"
+    packet_path.write_bytes(runtime.canonical_json(packet).encode())
+    reads = _read_worker_sources(
+        [
+            {
+                "dispatch": {
+                    "mode": "audit",
+                    "owned_paths": paths,
+                    "shared_inspection_evidence": {"source_packet_path": str(packet_path), "source_packet_digest": _digest(packet_path.read_bytes())},
+                }
+            }
+        ],
+        repository,
+    )
+    assert reads["source_file_reads"] == 119
+    assert reads["source_bytes_read"] == len((prefix + body).encode()) * 119
+    assert reads["navigation_bytes_read"] == budget["navigation_bytes"]
 
 
 @pytest.mark.parametrize("mode", ["audit", "independent-review"])
