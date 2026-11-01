@@ -40,17 +40,21 @@ def _rust_declaration_end(code: str, start: int, end: int) -> int | None:
     """Locate a top-level terminator in an already masked signature window."""
     closers = {"(": ")", "[": "]", "<": ">", "{": "}"}
     nesting: list[str] = []
+    array_lengths: set[int] = set()
     for position in range(start, end):
         character = code[position]
         if character in ";{" and not nesting:
             return position + 1
-        # Arrows are not generic closers; braced const expressions can contain
-        # comparisons whose angle brackets are not type delimiters.
-        if character in "<>" and ("}" in nesting or (character == ">" and code[position - 1] == "-")):
+        if character == ";" and nesting[-1:] == ["]"]:
+            array_lengths.add(len(nesting))
+        # Braces and array lengths already enclose their constant expressions;
+        # their shifts/comparisons and function arrows are not type delimiters.
+        if character in "<>" and (array_lengths or "}" in nesting or (character == ">" and code[position - 1] == "-")):
             continue
         if character in closers:
             nesting.append(closers[character])
         elif nesting and character == nesting[-1]:
+            array_lengths.discard(len(nesting))
             nesting.pop()
     return None
 

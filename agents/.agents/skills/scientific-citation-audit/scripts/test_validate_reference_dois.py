@@ -245,6 +245,51 @@ def test_scholarly_authors_match_complete_names_without_title_token_filters(reso
     assert result.mismatched_fields == (() if matches else ("authors",))
 
 
+@pytest.mark.parametrize("local_author", ["Wrong", "Li"])
+@pytest.mark.parametrize("citation", ["{author}. {title}. (1997).", "{author}, J. R. (1997). *{title}*.", "J. R. {author}. {title}. 1997."])
+def test_title_surname_is_not_author_evidence(local_author: str, citation: str) -> None:
+    title = "Li distribution and robust predicates"
+    entry = MODULE.DoiEntry(MODULE.Doi.parse("10.1234/test"), 1, citation.format(author=local_author, title=title))
+
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: metadata(title, family="Li"))
+
+    assert result.title_score == 1.0
+    assert result.author_score == (1.0 if local_author == "Li" else 0.0)
+    assert result.status == (MODULE.AuditStatus.OK if local_author == "Li" else MODULE.AuditStatus.MISMATCH)
+    assert result.mismatched_fields == (() if local_author == "Li" else ("authors",))
+
+
+@pytest.mark.parametrize("citation", ["Li distribution and robust predicates. 1997.", "Wrong. Li distribution with robust predicates. 1997."])
+def test_missing_or_unidentified_author_context_requires_manual_verification(citation: str) -> None:
+    entry = MODULE.DoiEntry(MODULE.Doi.parse("10.1234/test"), 1, citation)
+
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: metadata("Li distribution and robust predicates", family="Li"))
+
+    assert result.status == MODULE.AuditStatus.INSUFFICIENT_CONTEXT
+    assert result.author_score is None
+    assert result.mismatched_fields == ()
+
+
+def test_partial_title_match_does_not_extend_author_evidence_into_title() -> None:
+    entry = MODULE.DoiEntry(MODULE.Doi.parse("10.1234/test"), 1, "Wrong. Li robust predicates. 1997.")
+
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: metadata("Robust predicates", family="Li"))
+
+    assert result.status == MODULE.AuditStatus.INSUFFICIENT_CONTEXT
+    assert result.author_score is None
+    assert result.title_score == 1.0
+
+
+@pytest.mark.parametrize("author", ["Li", "Wrong"])
+def test_title_equal_to_surname_keeps_author_and_title_occurrences_separate(author: str) -> None:
+    entry = MODULE.DoiEntry(MODULE.Doi.parse("10.1234/test"), 1, f"{author}. Li. 1997.")
+
+    result = MODULE.validate_entry(entry, 1.0, 0.0, lambda *_: metadata("Li", family="Li"))
+
+    assert result.status == (MODULE.AuditStatus.OK if author == "Li" else MODULE.AuditStatus.MISMATCH)
+    assert result.author_score == (1.0 if author == "Li" else 0.0)
+
+
 @pytest.mark.parametrize(("local_year", "status"), [("", "INSUFFICIENT_CONTEXT"), ("(1997).", "OK"), ("(1900).", "MISMATCH")])
 def test_scholarly_year_comparison_distinguishes_absence_from_conflict(local_year: str, status: str) -> None:
     entry = MODULE.extract_entries(f"Shewchuk. Robust predicates. {local_year} DOI: https://doi.org/10.1234/test")[0]

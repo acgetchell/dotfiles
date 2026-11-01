@@ -61,6 +61,20 @@ def test_compact_diagnostic_points_to_exact_entries_without_rewriting_them(tmp_p
     assert record["commands_executed"] == commands
 
 
+def test_compact_external_read_truncates_only_the_diagnostic(tmp_path: Path) -> None:
+    external = str(tmp_path / ("outer" * 25) / ("inner" * 25) / "external.txt")
+    commands = [shlex.join(["cat", external])]
+    record = {"commands_executed": commands.copy()}
+    assert len(external) > 240
+
+    diagnostic = reuse_eligibility(record, str(tmp_path / "repository"))
+    compact = compact_eligibility(diagnostic)
+
+    assert compact["blockers"] == [{"reason_code": "unbound-external-read", "path": external[:240]}]
+    assert diagnostic["blockers"] == [{"reason_code": "unbound-external-read", "path": external}]
+    assert record["commands_executed"] == commands
+
+
 @pytest.mark.parametrize("context", ["proved", "unknown-command", "external-read", "uncertain"])
 def test_baseline_reports_blockers_before_accepting_and_preserves_only_proved_audits(  # noqa: C901, PLR0915 - complete lifecycle regression.
     tmp_path: Path, capsys: pytest.CaptureFixture[str], context: str
@@ -99,7 +113,7 @@ def test_baseline_reports_blockers_before_accepting_and_preserves_only_proved_au
         if target:
             target_id = entry["node_id"]
             if context == "unknown-command":
-                commands.append(shlex.join([sys.executable, "-c", "pass"]))
+                commands.append(shlex.join([sys.executable, "-c", "pass # " + "long diagnostic " * 20]))
             elif context == "external-read":
                 external = tmp_path / "external.txt"
                 external.write_text("unbound context\n")
@@ -117,7 +131,7 @@ def test_baseline_reports_blockers_before_accepting_and_preserves_only_proved_au
             assert diagnostic["status"] == "blocked"
             assert diagnostic["reason_counts"] == {code: 1}
             field, expected = ("command", commands[-1]) if context == "unknown-command" else ("path", str(tmp_path / "external.txt"))
-            assert diagnostic["blockers"][0][field] == expected
+            assert diagnostic["blockers"][0][field] == expected[:240]
         else:
             assert diagnostic["status"] == "no-known-ledger-blockers"
         # Publication exposes this before compile-node accepts the audit.

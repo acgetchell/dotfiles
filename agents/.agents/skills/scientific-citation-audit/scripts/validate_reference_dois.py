@@ -441,13 +441,23 @@ def title_score(title: str, entry: str) -> float:
     return len(title_tokens & entry_tokens) / len(title_tokens)
 
 
-def author_score(author_names: Iterable[str], entry: str) -> float | None:
-    """Return fraction of resolved author family names present in local entry text."""
+def author_score(author_names: Iterable[str], entry: str, title: str) -> float | None:
+    """Match names only in the author-leading text before an identified title."""
     names = {normalized for name in author_names if (normalized := identity_text(name))}
-    if not names:
+    title_pattern = r"\W+".join(re.escape(word) for word in re.findall(r"\w+", title))
+    if not names or not title_pattern:
         return None
-    normalized_entry = f" {identity_text(entry)} "
-    return sum(f" {name} " in normalized_entry for name in names) / len(names)
+    for match in re.finditer(rf"(?<!\w){title_pattern}(?!\w)", entry, flags=re.IGNORECASE):
+        author_text = entry[: match.start()].rstrip(" \t*_`\"'\u201c\u2018[")
+        if not any(character.isalpha() for character in author_text):
+            continue
+        # A title fragment inside a longer local title does not identify where
+        # the authors end. Retain initials and author-date punctuation.
+        if not author_text.endswith((".", ")")):
+            return None
+        normalized_authors = f" {identity_text(author_text)} "
+        return sum(f" {name} " in normalized_authors for name in names) / len(names)
+    return None
 
 
 def validate_entry(
@@ -496,7 +506,7 @@ def validate_entry(
         return reconcile_software(result, metadata, raw, citation) if citation is not None else result
 
     resolved_title_score = title_score(metadata.title, entry.entry)
-    resolved_author_score = author_score(metadata.author_families, entry.entry)
+    resolved_author_score = author_score(metadata.author_families, entry.entry, metadata.title)
     problems: list[str] = []
     fields: list[str] = []
     local_years = publication_years(entry.entry, entry.doi.value)

@@ -70,6 +70,7 @@ def test_signature_completeness_accounts_for_byte_limit() -> None:
         "pub fn nested<F: Fn() -> [u8; 4]>(value: F) {",
         "pub fn constant(value: Array<{ let n = 4; n }>) {",
         "pub fn comparison(value: Array<{ if 1 < 2 { 4 } else { 8 } }>) {",
+        "pub fn projected(value: [Vec<<T as Trait>::Item>; 4]) {",
     ],
 )
 def test_signature_boundaries_ignore_nested_type_punctuation(signature: str) -> None:
@@ -87,6 +88,16 @@ def test_nested_semicolon_cannot_hide_signature_line_truncation() -> None:
     excerpt, _ = source_excerpt("lib.rs", content, 1024)
 
     assert excerpt["navigation"]["locations"] == [{"kind": "fn", "start_line": 1, "end_line": 6, "text": visible, "window_complete": False}]
+
+
+@pytest.mark.parametrize("length", ["1 << 4", "(1 << 4)", "32 >> 1", "core::mem::size_of::<[u8; 1 << 4]>()"])
+def test_array_length_shifts_do_not_absorb_the_body_or_later_source(length: str) -> None:
+    signature = f"pub fn buffer(value: [u8; {length}]) {{"
+    content = (signature + "}\nconst LATER: u8 = 7;\n" + "// filler\n" * 200).encode()
+
+    excerpt, _ = source_excerpt("lib.rs", content, 1024)
+
+    assert excerpt["navigation"]["locations"] == [{"kind": "fn", "start_line": 1, "end_line": 1, "text": signature, "window_complete": True}]
 
 
 @pytest.mark.parametrize("budget", [0, 1, 19, 256, 512, 16384])
