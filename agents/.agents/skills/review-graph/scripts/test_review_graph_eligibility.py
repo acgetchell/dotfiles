@@ -116,7 +116,8 @@ def test_baseline_reports_blockers_before_accepting_and_preserves_only_proved_au
             code = "unclassified-command" if context == "unknown-command" else "unbound-external-read"
             assert diagnostic["status"] == "blocked"
             assert diagnostic["reason_counts"] == {code: 1}
-            assert diagnostic["blockers"][0].get("command", commands[-1]) == commands[-1]
+            field, expected = ("command", commands[-1]) if context == "unknown-command" else ("path", str(tmp_path / "external.txt"))
+            assert diagnostic["blockers"][0][field] == expected
         else:
             assert diagnostic["status"] == "no-known-ledger-blockers"
         # Publication exposes this before compile-node accepts the audit.

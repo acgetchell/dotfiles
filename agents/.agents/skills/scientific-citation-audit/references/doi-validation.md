@@ -18,8 +18,10 @@ The script extracts DOI labels from Markdown, queries DOI content negotiation
 for CSL JSON metadata, and compares the resolved title with the surrounding
 bibliography entry. Use `--json` for machine-readable output.
 
-Ordinary bibliography entries require usable resolved authors and a publication
-year before the checker reports `OK`. Missing either yields
+Ordinary bibliography entries require usable names for every resolved author
+record and a publication year in both the entry and metadata before the checker
+reports `OK`. Author matching retains short names and requires complete names
+rather than substrings. Missing author or year evidence yields
 `INSUFFICIENT_CONTEXT` and exit status 1 for manual verification. Any definite
 metadata contradiction still takes precedence as `MISMATCH`.
 

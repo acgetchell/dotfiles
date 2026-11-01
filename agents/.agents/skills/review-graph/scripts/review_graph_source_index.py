@@ -8,6 +8,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 _RUST_TOKENS = re.compile(r"//[^\n]*|/\*|(?:br|cr|r)(?P<hashes>\#*)\".*?\"(?P=hashes)|\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\\n])'", re.DOTALL)
+_RUST_BLOCK_DELIMITERS = re.compile(r"/\*|\*/")
 _RUST_DECLARATION = re.compile(
     r"^[ \t]*(?:pub(?:\([^\n)]*\))?[ \t]+)?(?:(?:async|unsafe|const|default|extern)[ \t]+)*"
     r"(?P<kind>fn|struct|enum|trait|type|impl)\b",
@@ -23,9 +24,9 @@ def _rust_code(text: str) -> str:
         end = match.end()
         if match.group() == "/*":
             depth = 1
-            while depth and (token := re.search(r"/\*|\*/", text[end:])):
+            while depth and (token := _RUST_BLOCK_DELIMITERS.search(text, end)):
                 depth += 1 if token.group() == "/*" else -1
-                end += token.end()
+                end = token.end()
             if depth:
                 end = len(text)
         for index in range(match.start(), end):
@@ -33,6 +34,25 @@ def _rust_code(text: str) -> str:
                 result[index] = " "
         position = end
     return "".join(result)
+
+
+def _rust_declaration_end(code: str, start: int, end: int) -> int | None:
+    """Locate a top-level terminator in an already masked signature window."""
+    closers = {"(": ")", "[": "]", "<": ">", "{": "}"}
+    nesting: list[str] = []
+    for position in range(start, end):
+        character = code[position]
+        if character in ";{" and not nesting:
+            return position + 1
+        # Arrows are not generic closers; braced const expressions can contain
+        # comparisons whose angle brackets are not type delimiters.
+        if character in "<>" and ("}" in nesting or (character == ">" and code[position - 1] == "-")):
+            continue
+        if character in closers:
+            nesting.append(closers[character])
+        elif nesting and character == nesting[-1]:
+            nesting.pop()
+    return None
 
 
 def _rust_locations(content: bytes) -> list[dict[str, Any]]:
@@ -46,9 +66,9 @@ def _rust_locations(content: bytes) -> list[dict[str, Any]]:
         # Bound the signature window, including multiline declarations. This is
         # lexical navigation: macros, generated items and full bodies need reads.
         end = min(len(text), line_starts[line + 5] if line + 5 < len(line_starts) else len(text))
-        boundary = re.search(r"[;{]", code[match.end() : end])
-        if boundary:
-            end = match.end() + boundary.end()
+        boundary = _rust_declaration_end(code, match.end(), end)
+        if boundary is not None:
+            end = boundary
         window = text[start:end].strip()
         excerpt = window.encode()[:192].decode("utf-8", errors="ignore")
         locations.append(

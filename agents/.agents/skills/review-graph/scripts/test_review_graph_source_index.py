@@ -60,6 +60,35 @@ def test_signature_completeness_accounts_for_byte_limit() -> None:
     assert (location["start_line"], location["end_line"]) == (1, 1)
 
 
+@pytest.mark.parametrize(
+    "signature",
+    [
+        "pub fn array(value: [u8; 4]) {",
+        "pub fn array() -> [u8; 4] {",
+        "pub type Array = [u8; 4];",
+        "pub struct Array([u8; 4]);",
+        "pub fn nested<F: Fn() -> [u8; 4]>(value: F) {",
+        "pub fn constant(value: Array<{ let n = 4; n }>) {",
+        "pub fn comparison(value: Array<{ if 1 < 2 { 4 } else { 8 } }>) {",
+    ],
+)
+def test_signature_boundaries_ignore_nested_type_punctuation(signature: str) -> None:
+    content = (signature + "\n" + "// filler\n" * 200).encode()
+
+    excerpt, _ = source_excerpt("lib.rs", content, 1024)
+
+    assert excerpt["navigation"]["locations"] == [{"kind": signature.split()[1], "start_line": 1, "end_line": 1, "text": signature, "window_complete": True}]
+
+
+def test_nested_semicolon_cannot_hide_signature_line_truncation() -> None:
+    visible = "pub fn long(\n    a: [u8; 4],\n    b: u8,\n    c: u8,\n    d: u8,\n    e: u8,"
+    content = (visible + "\n) {}\n" + "// filler\n" * 200).encode()
+
+    excerpt, _ = source_excerpt("lib.rs", content, 1024)
+
+    assert excerpt["navigation"]["locations"] == [{"kind": "fn", "start_line": 1, "end_line": 6, "text": visible, "window_complete": False}]
+
+
 @pytest.mark.parametrize("budget", [0, 1, 19, 256, 512, 16384])
 def test_utf8_and_small_budgets_never_exceed_the_allocation(budget: int) -> None:
     content = ("//! λ documentation\n" * 100 + "pub fn créer() {}\n").encode()

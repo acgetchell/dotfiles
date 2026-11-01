@@ -231,6 +231,60 @@ def test_incomplete_scholarly_metadata_preserves_known_mismatches(missing_field:
     assert result.mismatched_fields == (expected_field,)
 
 
+@pytest.mark.parametrize(
+    ("resolved_author", "local_author", "matches"),
+    [("Li", "Li", True), ("Wu", "Wu", True), ("Ng", "Ng", True), ("Li", "Liu", False), ("Van Loan", "Loan", False), ("García", "GARCÍA", True)],
+)
+def test_scholarly_authors_match_complete_names_without_title_token_filters(resolved_author: str, local_author: str, matches: bool) -> None:
+    entry = MODULE.extract_entries(f"{local_author}. Robust predicates. (1997). DOI: https://doi.org/10.1234/test")[0]
+
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: metadata("Robust predicates", family=resolved_author))
+
+    assert result.status == (MODULE.AuditStatus.OK if matches else MODULE.AuditStatus.MISMATCH)
+    assert result.author_score == (1.0 if matches else 0.0)
+    assert result.mismatched_fields == (() if matches else ("authors",))
+
+
+@pytest.mark.parametrize(("local_year", "status"), [("", "INSUFFICIENT_CONTEXT"), ("(1997).", "OK"), ("(1900).", "MISMATCH")])
+def test_scholarly_year_comparison_distinguishes_absence_from_conflict(local_year: str, status: str) -> None:
+    entry = MODULE.extract_entries(f"Shewchuk. Robust predicates. {local_year} DOI: https://doi.org/10.1234/test")[0]
+
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: metadata("Robust predicates"))
+
+    assert result.status.value == status
+    assert result.resolved_year == "1997"
+    assert result.mismatched_fields == (("year",) if status == "MISMATCH" else ())
+    if not local_year:
+        assert result.local_years == ()
+        assert "manual verification" in result.message
+
+
+@pytest.mark.parametrize("incomplete_author", [{"given": "A."}, {}, {"family": "", "literal": ""}, None, "Unknown"])
+def test_one_incomplete_resolver_author_prevents_scholarly_success(incomplete_author: object) -> None:
+    raw = metadata("Robust predicates")
+    raw["author"] = [{"family": "Shewchuk"}, incomplete_author]
+    entry = MODULE.extract_entries("Shewchuk. Robust predicates. (1997). DOI: https://doi.org/10.1234/test")[0]
+
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: raw)
+
+    assert result.status == MODULE.AuditStatus.INSUFFICIENT_CONTEXT
+    assert result.resolved_authors == ("Shewchuk",)
+    assert result.author_score == 1.0
+    assert result.mismatched_fields == ()
+
+
+@pytest.mark.parametrize("author", [{"family": "Li"}, {"literal": "Li"}, {"family": "", "literal": "Li"}])
+def test_complete_author_records_accept_family_or_literal(author: dict[str, str]) -> None:
+    raw = metadata("Robust predicates")
+    raw["author"] = [author]
+    entry = MODULE.DoiEntry(MODULE.Doi.parse("10.1234/example"), 1, "Li. (1997). Robust predicates. DOI: 10.1234/example")
+
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: raw)
+
+    assert result.status == MODULE.AuditStatus.OK
+    assert result.resolved_authors == ("Li",)
+
+
 def test_validation_reports_malformed_fetcher_response() -> None:
     """Malformed resolver data should produce a failed audit result."""
     entry = MODULE.DoiEntry(doi=MODULE.Doi.parse("10.1007/PL00009321"), line=1, entry="- Fixture entry.")
@@ -396,6 +450,17 @@ def test_incomplete_resolved_software_is_not_a_match(tmp_path: Path, field: str)
     del raw[field]
     result = MODULE.validate_entry(MODULE.extract_entries(SOFTWARE_LINKS[0])[0], 1.0, 0.45, lambda *_: raw, citation=MODULE.SoftwareCitation.load(cff))
     assert result.status == MODULE.AuditStatus.INSUFFICIENT_CONTEXT
+
+
+def test_one_incomplete_resolver_author_prevents_canonical_software_success(tmp_path: Path) -> None:
+    cff = tmp_path / "CITATION.cff"
+    cff.write_text(CFF)
+    raw = {**software_metadata(), "author": [{"family": "Getchell"}, {"given": "A."}]}
+
+    result = MODULE.validate_entry(MODULE.extract_entries(SOFTWARE_LINKS[0])[0], 1.0, 0.45, lambda *_: raw, citation=MODULE.SoftwareCitation.load(cff))
+
+    assert result.status == MODULE.AuditStatus.INSUFFICIENT_CONTEXT
+    assert result.resolved_authors == ("Getchell",)
 
 
 @pytest.mark.parametrize(
