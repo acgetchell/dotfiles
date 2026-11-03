@@ -198,7 +198,9 @@ classifies shared Git failures as stale captures while retaining diagnostics.
 
 Capture now avoids unused per-file index queries for regular files and symlinks.
 Line bounds read tree/index inventories once per source side and exact immutable
-blobs in batches of at most 64 objects. The two scope content observations remain
+blobs in batches of at most 64 objects and 16 MiB of aggregate payload. A larger
+blob is read individually, preserving the previous single-blob behavior.
+Metadata size queries are bounded separately. The two scope content observations remain
 independent; source bytes, modes, symlink targets, selection, and index state are
 read anew on every invocation. No stat-based or cross-capture cache is introduced.
 See [capture phase profiling](../agents/.agents/skills/review-graph/references/dispatch-overhead.md#source-capture-phases-253)

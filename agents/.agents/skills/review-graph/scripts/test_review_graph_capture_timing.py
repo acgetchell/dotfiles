@@ -147,7 +147,53 @@ def test_batch_blob_transport_rejects_incomplete_or_unbound_bytes(tmp_path: Path
         output = output[:-1]
     else:
         output += b"unbound\n"
-    monkeypatch.setattr(capture_scope, "_run_git", lambda *_args, **_kwargs: output)
+
+    def query(_git: str, _repo: Path, arguments: Any, **_kwargs: Any) -> bytes:
+        return object_id + b" blob 4\n" if "--batch-check" in arguments else output
+
+    monkeypatch.setattr(capture_scope, "_run_git", query)
+    with pytest.raises(RuntimeError, match="captured Git batch"):
+        capture_scope._batch_blob_line_bounds("git", tmp_path, [object_id])
+
+
+def test_blob_batches_bound_payload_bytes_and_keep_oversized_blobs_supported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    contents = [b"a\n" * 5, b"b" * 10, b"c\n" * 10, b"d" * 100, b"e\nz\n?"]
+    for index, content in enumerate(contents):
+        (repo / f"source-{index}.bin").write_bytes(content)
+    _commit_all(repo)
+    object_ids = [_git(repo, "rev-parse", f"HEAD:source-{index}.bin").strip().encode() for index in range(len(contents))]
+    sizes = dict(zip(object_ids, map(len, contents), strict=True))
+    batches = []
+    run_git = capture_scope._run_git
+
+    def query(git: str, root: Path, arguments: Any, *, payload: bytes | None = None) -> bytes:
+        if "--batch" in arguments:
+            assert payload is not None
+            batches.append(payload.splitlines())
+        return run_git(git, root, arguments, payload=payload)
+
+    monkeypatch.setattr(capture_scope, "_BLOB_BATCH_BYTES", 32, raising=False)
+    monkeypatch.setattr(capture_scope, "_run_git", query)
+    bounds = capture_scope._batch_blob_line_bounds(shutil.which("git") or "git", repo, [*object_ids, object_ids[0]])
+    assert bounds == dict(zip(object_ids, [5, 1, 10, 1, 3], strict=True))
+    assert [oid for batch in batches for oid in batch] == object_ids
+    assert any(len(batch) > 1 for batch in batches)
+    assert [object_ids[3]] in batches
+    assert all(len(batch) == 1 or sum(sizes[oid] for oid in batch) <= 32 for batch in batches)
+
+
+@pytest.mark.parametrize("failure", ["missing", "truncated", "trailing"])
+def test_blob_metadata_failure_stops_before_reading_payloads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str) -> None:
+    object_id = b"1" * 40
+    output = {"missing": object_id + b" missing\n", "truncated": b"", "trailing": object_id + b" blob 4\nextra\n"}[failure]
+
+    def query(_git: str, _repo: Path, arguments: Any, **_kwargs: Any) -> bytes:
+        assert "--batch-check" in arguments
+        return output
+
+    monkeypatch.setattr(capture_scope, "_run_git", query)
     with pytest.raises(RuntimeError, match="captured Git batch"):
         capture_scope._batch_blob_line_bounds("git", tmp_path, [object_id])
 

@@ -40,6 +40,13 @@ enabled and took 0.194–0.253 seconds in the new samples. This synthetic local
 experiment does not reproduce the original Delaunay host/workload or establish
 a general speedup or hosted result.
 
+The subsequent byte-budgeted version bounds payload batches to 64 objects and
+16 MiB, reading an oversized blob individually. Size metadata is queried in
+chunks of at most 1,024 objects before payload batching. Three further frozen
+426-path captures measured 0.958–1.174 seconds and 25 Git queries: one extra
+size-metadata query plus the original seven payload batches. Complete manifests
+and exact index bytes still matched the retained original implementation.
+
 Complete manifests compared equal against the retained original implementation
 on unchanged, stale-metadata, changed-content, staged-index, executable-mode, and
 symlink variants. Each variant also retained exact index bytes. The committed

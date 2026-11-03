@@ -29,11 +29,12 @@ from review_graph_git_objects import GitPathIdentity, git_object_id
 from review_graph_reuse import SNAPSHOT_FORMAT, source_snapshot
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Generator, Mapping, Sequence
 
 _CHUNK_SIZE = 1024 * 1024
 _CAPTURE_MODES = frozenset(("branch", "staged", "worktree", "baseline"))
 _TIMEOUT_SECONDS = 30
+_BLOB_BATCH_BYTES = 16 * 1024 * 1024
 
 
 class _Digest(Protocol):
@@ -332,19 +333,53 @@ def _blob_entries(git: str, repo: Path, revision: str) -> dict[str, tuple[bytes,
     return entries
 
 
+def _batch_blob_size(record: bytes, object_id: bytes) -> int:
+    """Require an exact blob identity and decimal byte size in either batch protocol."""
+    fields = record.split()
+    if len(fields) != 3 or fields[:2] != [object_id, b"blob"] or not fields[2].isdigit():
+        message = "could not parse captured Git batch blob identity"
+        raise RuntimeError(message)
+    return int(fields[2])
+
+
+def _blob_batches(git: str, repo: Path, object_ids: Sequence[bytes]) -> Generator[tuple[tuple[bytes, int], ...]]:
+    """Bound aggregate payload bytes; preserve single reads of oversized blobs."""
+    pending: list[tuple[bytes, int]] = []
+    pending_bytes = 0
+    for identities in batched(dict.fromkeys(object_ids), 1024, strict=False):
+        output = _run_git(git, repo, ("cat-file", "--batch-check"), payload=b"\n".join(identities) + b"\n")
+        records = output.split(b"\n")
+        if len(records) != len(identities) + 1 or records[-1] != b"":
+            message = "invalid captured Git batch metadata"
+            raise RuntimeError(message)
+        for object_id, record in zip(identities, records[:-1], strict=True):
+            size = _batch_blob_size(record, object_id)
+            if pending and (len(pending) == 64 or pending_bytes + size > _BLOB_BATCH_BYTES):
+                yield tuple(pending)
+                pending = []
+                pending_bytes = 0
+            pending.append((object_id, size))
+            pending_bytes += size
+    if pending:
+        yield tuple(pending)
+
+
 def _batch_blob_line_bounds(git: str, repo: Path, object_ids: Sequence[bytes]) -> dict[bytes, int]:
-    """Count immutable blob bytes in bounded batches, including binary/newline payloads."""
+    """Count exact immutable blobs without combining unbounded payloads in memory."""
     bounds = {}
-    for batch in batched(dict.fromkeys(object_ids), 64, strict=False):
-        output = _run_git(git, repo, ("cat-file", "--batch"), payload=b"\n".join(batch) + b"\n")
+    for batch in _blob_batches(git, repo, object_ids):
+        output = _run_git(git, repo, ("cat-file", "--batch"), payload=b"\n".join(oid for oid, _size in batch) + b"\n")
         offset = 0
-        for object_id in batch:
+        for object_id, expected_size in batch:
             header_end = output.find(b"\n", offset)
-            fields = output[offset:header_end].split()
-            if header_end < offset or len(fields) != 3 or fields[:2] != [object_id, b"blob"] or not fields[2].isdigit():
+            if header_end < offset:
                 message = "could not parse captured Git batch blob identity"
                 raise RuntimeError(message)
-            start, end = header_end + 1, header_end + 1 + int(fields[2])
+            size = _batch_blob_size(output[offset:header_end], object_id)
+            if size != expected_size:
+                message = "captured Git batch blob size changed"
+                raise RuntimeError(message)
+            start, end = header_end + 1, header_end + 1 + size
             if end >= len(output) or output[end : end + 1] != b"\n":
                 message = "truncated captured Git batch blob"
                 raise RuntimeError(message)
