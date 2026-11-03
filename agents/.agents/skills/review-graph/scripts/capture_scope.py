@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 """Capture a path-bounded, content-based Git review scope manifest."""
 
-__lazy_modules__ = ("argparse", "subprocess", "research_repo_tools.process", "review_graph_git_objects", "review_graph_reuse")
+__lazy_modules__ = (
+    "argparse",
+    "subprocess",
+    "research_repo_tools.git_inspect",
+    "research_repo_tools.process",
+    "review_graph_git_objects",
+    "review_graph_reuse",
+)
 
 import argparse
 import hashlib
@@ -11,10 +18,13 @@ import shutil
 import stat
 import subprocess
 import sys
+from itertools import batched
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
+from research_repo_tools.git_inspect import git_diff_paths_bytes, git_status_bytes
 from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics, run_command_bytes
+from review_graph_capture_timing import collect_timings, phase, timed_phase
 from review_graph_git_objects import GitPathIdentity, git_object_id
 from review_graph_reuse import SNAPSHOT_FORMAT, source_snapshot
 
@@ -36,25 +46,28 @@ class _Digest(Protocol):
         """Return the hexadecimal digest."""
 
 
-def _run_git(git: str, repo: Path, arguments: Sequence[str]) -> bytes:
-    """Run a bounded Git observation without optional index-cache writes."""
-    is_diff = bool(arguments) and arguments[0] == "diff"
-    if is_diff:
-        arguments = ("diff", "--exit-code", "--no-ext-diff", "--no-textconv", *arguments[1:])
-    # status honors optional locks, but diff's automatic stat refresh needs its
-    # own override. Neither observation may rewrite the index being captured.
-    result = run_command_bytes(
-        git,
-        ("--no-optional-locks", "-c", "diff.autoRefreshIndex=false", "--literal-pathspecs", "-C", os.fspath(repo), *arguments),
-        check=False,
-        timeout=_TIMEOUT_SECONDS,
-    )
-    if result.returncode != 0 and not (is_diff and result.returncode == 1):
-        command = " ".join(("git", *arguments))
-        detail = result.stderr.decode(errors="replace").strip()
-        message = f"{command} failed ({result.returncode}): {detail}"
-        raise RuntimeError(message)
-    return result.stdout
+def _run_git(git: str, repo: Path, arguments: Sequence[str], *, payload: bytes | None = None) -> bytes:
+    """Run a bounded literal metadata/object query; status/diff use shared inspection."""
+    with phase("git." + arguments[0]):
+        result = run_command_bytes(git, ("--literal-pathspecs", "-C", os.fspath(repo), *arguments), check=False, input=payload, timeout=_TIMEOUT_SECONDS)
+        if result.returncode != 0:
+            command = " ".join(("git", *arguments))
+            detail = result.stderr.decode(errors="replace").strip()
+            message = f"{command} failed ({result.returncode}): {detail}"
+            raise RuntimeError(message)
+        return result.stdout
+
+
+@timed_phase("git.diff")
+def _diff_paths(repo: Path, paths: Sequence[str], *, base: str, cached: bool = False) -> list[str]:
+    """Use the published content-based inspection interface with bounded byte transport."""
+    return _decode_zlist(git_diff_paths_bytes(repo, base=base, cached=cached, paths=paths, timeout=_TIMEOUT_SECONDS).stdout)
+
+
+@timed_phase("git.status")
+def _status(repo: Path, paths: Sequence[str]) -> list[str]:
+    """Use the published index-preserving porcelain observation."""
+    return _decode_zlist(git_status_bytes(repo, paths=paths, timeout=_TIMEOUT_SECONDS).stdout)
 
 
 def _try_git(git: str, repo: Path, arguments: Sequence[str]) -> bytes | None:
@@ -73,19 +86,6 @@ def _decode(value: bytes) -> str:
 def _decode_zlist(value: bytes) -> list[str]:
     """Decode a NUL-delimited Git path or status list."""
     return [os.fsdecode(item) for item in value.split(b"\0") if item]
-
-
-def _decode_numstat_paths(value: bytes) -> list[str]:
-    """Decode --numstat -z --no-renames without splitting tabs in filenames."""
-    paths = []
-    for record in value.split(b"\0"):
-        if record:
-            fields = record.split(b"\t", 2)
-            if len(fields) != 3 or not fields[2]:
-                message = "invalid Git numstat path record"
-                raise RuntimeError(message)
-            paths.append(os.fsdecode(fields[2]))
-    return paths
 
 
 def _with_paths(arguments: Sequence[str], pathspecs: Sequence[str]) -> tuple[str, ...]:
@@ -196,11 +196,11 @@ def _file_blob_id(path: Path, expected_size: int, algorithm: str) -> str:
 def _update_worktree_path(digest: _Digest, git: str, repo: Path, relative: str, algorithm: str) -> str:
     """Bind one path to its native Git mode/object identity without writing objects."""
     path = repo / relative
-    index_entry = _index_entry(git, repo, relative)
     _update_part(digest, "path", os.fsencode(relative))
     try:
         metadata = path.lstat()
     except FileNotFoundError:
+        index_entry = _index_entry(git, repo, relative)
         if _is_gitlink(index_entry):
             _update_part(digest, "mode", b"160000-unchecked-out")
             _update_part(digest, "gitlink-index", index_entry)
@@ -227,6 +227,7 @@ def _update_worktree_path(digest: _Digest, git: str, repo: Path, relative: str, 
             raise RuntimeError(message)
         return identity
     if stat.S_ISDIR(metadata.st_mode):
+        index_entry = _index_entry(git, repo, relative)
         if not _is_gitlink(index_entry):
             message = f"unexpected directory in file scope: {relative}"
             raise RuntimeError(message)
@@ -246,6 +247,7 @@ def _update_worktree_path(digest: _Digest, git: str, repo: Path, relative: str, 
     raise RuntimeError(message)
 
 
+@timed_phase("worktree_content_and_modes")
 def _worktree_fingerprint(  # noqa: PLR0913 - optional path identities share the canonical fingerprint traversal.
     *,
     git: str,
@@ -268,6 +270,7 @@ def _worktree_fingerprint(  # noqa: PLR0913 - optional path identities share the
     return digest.hexdigest()
 
 
+@timed_phase("staged_identity")
 def _staged_fingerprint(*, git: str, repo: Path, head: str, pathspecs: Sequence[str], paths: Sequence[str]) -> str:
     """Hash the selected index state from canonical mode and object identities."""
     digest = hashlib.sha256()
@@ -279,11 +282,6 @@ def _staged_fingerprint(*, git: str, repo: Path, head: str, pathspecs: Sequence[
     entries = _run_git(git, repo, _with_paths(("ls-files", "--stage", "-z"), pathspecs))
     _update_part(digest, "index-entries", entries)
     return digest.hexdigest()
-
-
-def _bytes_line_bound(value: bytes) -> int:
-    """Return the greatest one-based text line addressable in exact bytes."""
-    return value.count(b"\n") + int(bool(value) and not value.endswith(b"\n"))
 
 
 def _worktree_line_bound(path: Path) -> int | None:
@@ -313,39 +311,66 @@ def _worktree_line_bound(path: Path) -> int | None:
     return newlines + int(bytes_read > 0 and last_byte != b"\n")
 
 
-def _git_blob_line_bound(git: str, repo: Path, revision: str, relative: str) -> int | None:
-    """Return one tree/index blob's line bound without interpreting symlinks as text."""
-    if revision == ":index":
-        records = tuple(record for record in _index_entry(git, repo, relative).split(b"\0") if record)
-        record = next((entry for entry in records if b" 0\t" in entry), None)
-        if record is None:
-            return None
-        metadata = record.split(b"\t", 1)[0].split()
-        if len(metadata) != 3:
-            message = f"could not parse captured Git index identity for {relative}"
-            raise RuntimeError(message)
-        mode, object_id, _stage = metadata
-        object_type = b"blob"
-    else:
-        records = tuple(record for record in _run_git(git, repo, _with_paths(("ls-tree", "-z", revision), (relative,))).split(b"\0") if record)
-        if not records:
-            return None
-        metadata = records[0].split(b"\t", 1)[0].split()
-        if len(metadata) < 3:
-            message = f"could not parse captured Git object identity for {relative}"
-            raise RuntimeError(message)
-        mode, object_type, object_id = metadata[:3]
-    if mode not in {b"100644", b"100755"} or object_type != b"blob":
-        return 0
-    return _bytes_line_bound(_run_git(git, repo, ("cat-file", "blob", os.fsdecode(object_id))))
+def _blob_entries(git: str, repo: Path, revision: str) -> dict[str, tuple[bytes, bytes]]:
+    """Read one tree/index inventory; unresolved index stages have no current blob."""
+    arguments = ("ls-files", "--stage", "-z") if revision == ":index" else ("ls-tree", "-r", "-z", revision)
+    entries = {}
+    for record in _run_git(git, repo, arguments).split(b"\0"):
+        if not record:
+            continue
+        metadata, relative = record.split(b"\t", 1)
+        mode, second, third = metadata.split()
+        if revision == ":index":
+            if third != b"0":
+                continue
+            object_id = second
+        else:
+            object_id = third
+        entries[os.fsdecode(relative)] = (mode, object_id)
+    return entries
 
 
+def _batch_blob_line_bounds(git: str, repo: Path, object_ids: Sequence[bytes]) -> dict[bytes, int]:
+    """Count immutable blob bytes in bounded batches, including binary/newline payloads."""
+    bounds = {}
+    for batch in batched(dict.fromkeys(object_ids), 64, strict=False):
+        output = _run_git(git, repo, ("cat-file", "--batch"), payload=b"\n".join(batch) + b"\n")
+        offset = 0
+        for object_id in batch:
+            header_end = output.find(b"\n", offset)
+            fields = output[offset:header_end].split()
+            if header_end < offset or len(fields) != 3 or fields[:2] != [object_id, b"blob"] or not fields[2].isdigit():
+                message = "could not parse captured Git batch blob identity"
+                raise RuntimeError(message)
+            start, end = header_end + 1, header_end + 1 + int(fields[2])
+            if end >= len(output) or output[end : end + 1] != b"\n":
+                message = "truncated captured Git batch blob"
+                raise RuntimeError(message)
+            bounds[object_id] = output.count(b"\n", start, end) + int(end > start and output[end - 1 : end] != b"\n")
+            offset = end + 1
+        if offset != len(output):
+            message = "unexpected trailing captured Git batch bytes"
+            raise RuntimeError(message)
+    return bounds
+
+
+def _git_blob_line_bounds(git: str, repo: Path, revision: str, paths: Sequence[str]) -> dict[str, int]:
+    """Derive path bounds from one inventory and exact immutable blob contents."""
+    entries = _blob_entries(git, repo, revision)
+    selected = {path: entries[path] for path in paths if path in entries}
+    bounds = _batch_blob_line_bounds(git, repo, [object_id for mode, object_id in selected.values() if mode in {b"100644", b"100755"}])
+    return {path: bounds[object_id] if mode in {b"100644", b"100755"} else 0 for path, (mode, object_id) in selected.items()}
+
+
+@timed_phase("line_bounds")
 def _captured_path_line_bounds(*, git: str, repo: Path, mode: str, base_revision: str | None, paths: Sequence[str]) -> dict[str, int]:
     """Derive maximum addressable lines from the exact captured source sides."""
+    current_bounds = _git_blob_line_bounds(git, repo, ":index", paths) if mode == "staged" and paths else {}
+    base_bounds = _git_blob_line_bounds(git, repo, base_revision, paths) if base_revision is not None and paths else {}
     bounds: dict[str, int] = {}
     for relative in paths:
-        current = _git_blob_line_bound(git, repo, ":index", relative) if mode == "staged" else _worktree_line_bound(repo / relative)
-        base = _git_blob_line_bound(git, repo, base_revision, relative) if base_revision is not None else None
+        current = current_bounds.get(relative) if mode == "staged" else _worktree_line_bound(repo / relative)
+        base = base_bounds.get(relative)
         candidates = tuple(bound for bound in (current, base) if bound is not None)
         if not candidates:
             message = f"captured path has no current or base-side source identity: {relative}"
@@ -354,6 +379,7 @@ def _captured_path_line_bounds(*, git: str, repo: Path, mode: str, base_revision
     return bounds
 
 
+@timed_phase("repository_state")
 def _repository_state_snapshot(*, git: str, repo: Path, head: str, branch: str, captured_paths: Sequence[str]) -> tuple[str, dict[str, str], str, list[str]]:
     """Hash HEAD, branch, index, tracked worktree, and nonignored untracked content."""
     tracked = _decode_zlist(_run_git(git, repo, ("ls-files", "-z")))
@@ -381,6 +407,7 @@ def _repository_state_snapshot(*, git: str, repo: Path, head: str, branch: str, 
     return digest.hexdigest(), path_fingerprints, hashlib.sha256(index_entries).hexdigest(), sorted(set(tracked) | set(untracked))
 
 
+@timed_phase("scope_capture")
 def _scope_data(git: str, repo: Path, mode: str, base: str | None, pathspecs: Sequence[str]) -> dict[str, object]:  # noqa: PLR0915
     """Build the manifest fields for the requested review mode and path boundary."""
     if mode not in _CAPTURE_MODES:
@@ -402,18 +429,13 @@ def _scope_data(git: str, repo: Path, mode: str, base: str | None, pathspecs: Se
     if mode == "branch":
         base_ref = _resolve_base(git, repo, base)
         merge_base = _decode(_run_git(git, repo, ("merge-base", "HEAD", base_ref)))
-        # numstat compares content even with index refresh and diff drivers off;
-        # name-only can retain stat-only changes on supported Git versions.
-        path_arguments = _with_paths(("diff", "--numstat", "--no-renames", "-z", merge_base), pathspecs)
-        paths = _decode_numstat_paths(_run_git(git, repo, path_arguments))
+        paths = _diff_paths(repo, pathspecs, base=merge_base)
         paths.extend(selected_untracked)
     elif mode == "staged":
-        path_arguments = _with_paths(("diff", "--cached", "--numstat", "--no-renames", "-z", "HEAD"), pathspecs)
-        paths = _decode_numstat_paths(_run_git(git, repo, path_arguments))
+        paths = _diff_paths(repo, pathspecs, base="HEAD", cached=True)
         selected_untracked = []
     elif mode == "worktree":
-        path_arguments = _with_paths(("diff", "--numstat", "--no-renames", "-z", "HEAD"), pathspecs)
-        paths = _decode_numstat_paths(_run_git(git, repo, path_arguments))
+        paths = _diff_paths(repo, pathspecs, base="HEAD")
         paths.extend(selected_untracked)
     elif mode == "baseline":
         path_arguments = _with_paths(("ls-files", "-z"), pathspecs)
@@ -455,8 +477,7 @@ def _scope_data(git: str, repo: Path, mode: str, base: str | None, pathspecs: Se
         message = "captured source changed while deriving path line bounds"
         raise RuntimeError(message)
 
-    worktree_paths_arguments = _with_paths(("diff", "--numstat", "--no-renames", "-z", "HEAD"), pathspecs)
-    captured_worktree_paths = _decode_numstat_paths(_run_git(git, repo, worktree_paths_arguments))
+    captured_worktree_paths = _diff_paths(repo, pathspecs, base="HEAD")
     captured_worktree_paths.extend(_decode_zlist(_run_git(git, repo, untracked_arguments)))
     captured_worktree_fingerprint = _worktree_fingerprint(
         git=git,
@@ -465,8 +486,7 @@ def _scope_data(git: str, repo: Path, mode: str, base: str | None, pathspecs: Se
         paths=captured_worktree_paths,
         repo=repo,
     )
-    status_arguments = _with_paths(("status", "--porcelain=v1", "-z", "--untracked-files=all"), pathspecs)
-    status = _decode_zlist(_run_git(git, repo, status_arguments))
+    status = _status(repo, pathspecs)
     repository_state_fingerprint, repository_path_fingerprints, index_fingerprint, selection_paths = _repository_state_snapshot(
         git=git, repo=repo, head=head, branch=branch, captured_paths=captured_scope_paths
     )
@@ -570,9 +590,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--base", help="Explicit base ref for branch mode")
     parser.add_argument("--path", action="append", default=[], help="Repository-relative or absolute path boundary; repeat for multiple paths")
     parser.add_argument("--output", type=Path, help="Atomically save the complete capture outside the repository and print a compact receipt")
+    parser.add_argument("--timings", action="store_true", help="Write inclusive phase/Git timings to stderr, separately from source evidence")
     return parser
 
 
+@timed_phase("persistence")
 def persist_capture(manifest: dict[str, Any], output: Path) -> dict[str, Any]:
     """Persist immutable capture bytes before returning all observed fingerprints."""
     from review_graph_runtime import _write_bytes_atomically_once  # noqa: PLC0415 - shared durable artifact writer, loaded only for persistence.
@@ -599,7 +621,26 @@ def persist_capture(manifest: dict[str, Any], output: Path) -> dict[str, Any]:
 
 def main() -> int:
     """Print the captured review scope as JSON."""
-    arguments = _parser().parse_args()
+    from review_graph_session import verify_current_snapshot  # noqa: PLC0415 - verify frozen resources before parsing the command.
+
+    with collect_timings() as timing:
+        code = 1
+        try:
+            with phase("runtime_verification"):
+                verify_current_snapshot()
+            arguments = _parser().parse_args()
+            code = _capture_main(arguments)
+            return code
+        except SystemExit as error:
+            code = error.code if isinstance(error.code, int) else int(error.code is not None)
+            raise
+        finally:
+            if "--timings" in sys.argv[1:]:
+                print(json.dumps(timing.as_raw(code), sort_keys=True), file=sys.stderr)
+
+
+def _capture_main(arguments: argparse.Namespace) -> int:
+    """Capture and publish only successful observations."""
     git = shutil.which("git")
     if git is None:
         print("capture_scope.py: git is unavailable", file=sys.stderr)
@@ -607,20 +648,19 @@ def main() -> int:
 
     try:
         requested_repo = Path(os.path.abspath(arguments.repo))  # noqa: PTH100 - preserve a user-provided symlink alias for path translation.
-        root = Path(_decode(_run_git(git, requested_repo, ("rev-parse", "--show-toplevel"))))
-        pathspecs = _normalize_pathspecs(root, requested_repo, arguments.path)
+        with phase("git_discovery"):
+            root = Path(_decode(_run_git(git, requested_repo, ("rev-parse", "--show-toplevel"))))
+            pathspecs = _normalize_pathspecs(root, requested_repo, arguments.path)
         manifest = _scope_data(git, root, arguments.mode, arguments.base, pathspecs)
         result = persist_capture(manifest, arguments.output) if arguments.output is not None else manifest
-    except (ExecutableNotFoundError, OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as error:
+    except (ExecutableNotFoundError, OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
         print(f"capture_scope.py: {format_exception_diagnostics(error)}", file=sys.stderr)
         return 2
 
-    print(json.dumps(result, indent=2, sort_keys=True))
+    with phase("serialization"):
+        print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
 
 if __name__ == "__main__":
-    from review_graph_session import verify_current_snapshot
-
-    verify_current_snapshot()
     raise SystemExit(main())

@@ -1,5 +1,56 @@
 # Dispatch Overhead Measurement
 
+## Source Capture Phases (#253)
+
+Append `--timings` to a public `capture_scope.py` command, including its frozen
+`python -E -s` invocation. It emits one `review-graph-capture-timing-v1` JSON
+diagnostic on stderr; stdout, persisted capture bytes, receipts, and source
+fingerprints retain their normal format. Redirect stderr to an external artifact
+when retaining diagnostics. Expected capture errors emit their usual diagnostic
+followed by the timing JSON and do not publish a capture.
+
+```sh
+uv run --locked python agents/.agents/skills/review-graph/scripts/capture_scope.py \
+  --repo REPOSITORY --mode baseline --timings \
+  --output /tmp/review-capture.json 2>/tmp/review-capture-timing.jsonl
+```
+
+The phases distinguish frozen-resource verification, Git discovery, scope
+capture, raw content/mode hashing, staged identity, line bounds, complete
+repository state, persistence, and serialization. `git.*` entries count and
+time metadata, index, object, status, and diff queries, including unsuccessful
+queries and timeouts. Elapsed times are inclusive: nested phases overlap and
+must not be added to derive a total. `elapsed_seconds` is the invocation total
+after imports; an external wall clock also includes interpreter/import startup.
+These are orchestration diagnostics, not validator command duration or provider
+time/cost. Keep before/after capture durations and other orchestration outside
+the timed command interval, including when that command fails. Existing command
+timing receipts remain authoritative for command duration.
+
+The bounded 2026-11-03 macOS ARM64 / CPython 3.15.1 experiment used 426 small
+tracked Rust files, fresh public frozen-helper processes, and external capture
+outputs. The baseline retained research-repo-tools 0.2.3; the adoption used the
+normally installed 0.2.5 package. Two unprofiled unchanged-source captures took
+17.828–18.290 seconds before and 0.965–0.980 seconds after. One additional
+tracing-profiled capture took 20.535 / 1.160 seconds. The baseline's 2,146 Git
+queries consumed 19.204 seconds in its profiled sample; the replacement used
+24 queries, including seven immutable blob batches. Frozen verification remained
+enabled and took 0.194–0.253 seconds in the new samples. This synthetic local
+experiment does not reproduce the original Delaunay host/workload or establish
+a general speedup or hosted result.
+
+Complete manifests compared equal against the retained original implementation
+on unchanged, stale-metadata, changed-content, staged-index, executable-mode, and
+symlink variants. Each variant also retained exact index bytes. The committed
+regression fixture repeats 426-path capture and guards subprocess scaling without
+a wall-time threshold; separate regressions preserve both content observations,
+binary/literal-path blob bounds, staged/base sides, and failed diagnostics:
+
+```sh
+just test-python \
+  agents/.agents/skills/review-graph/scripts/test_review_graph_capture_timing.py
+```
+
 ## Capability Contract Partitions (#147)
 
 The fixed fixture owns three implementation files: notebook execution,

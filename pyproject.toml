@@ -9,10 +9,22 @@ authors = [{ name = "Adam Getchell", email = "adam@adamgetchell.org" }]
 
 [tool.uv]
 package = false
-required-version = "==0.13.6"
+required-version = "==0.13.7"
+# The source distribution does not bundle Semgrep's native engine.
+no-build-package = ["semgrep"]
 override-dependencies = [
-  # research-repo-tools pins 1.58.0; keep uv-run tools aligned with justfile.
+  # Keep uv-run tools aligned with justfile despite the shared package's pin.
   "rust-just==1.59.0",
+  # Published v0.2.5 Semgrep compatibility constraints, applied by toolchain adopt.
+  "jsonschema==4.26.0",
+  "mcp==1.30.0",
+  "opentelemetry-api==1.45.1",
+  "opentelemetry-exporter-otlp-proto-http==1.45.1",
+  "opentelemetry-instrumentation-requests==0.66b1",
+  "opentelemetry-instrumentation-threading==0.66b1",
+  "opentelemetry-sdk==1.45.1",
+  "pywin32==312; sys_platform == 'win32'",
+  "tomli==2.5.0",
 ]
 
 [tool.research-repo-tools.toolchain]
@@ -233,14 +245,16 @@ dev = [
   "nbformat==5.11.1",
   "PyYAML>=6.0",
   "pytest==9.2.0",
+  "research-repo-tools[semgrep]==0.2.5",
   "ruff==0.17.3",
-  "ty==0.0.95",
+  "ty==0.0.96",
   "yamllint==1.38.0",
-  "zizmor==1.31.1",
+  "zizmor==1.32.0",
 ]
 tooling = [
-    "research-repo-tools==0.2.3",
+    "research-repo-tools==0.2.5",
 ]
 
 [tool.uv.dependency-groups]
+dev = { requires-python = ">=3.15" }
 tooling = { requires-python = ">=3.15" }

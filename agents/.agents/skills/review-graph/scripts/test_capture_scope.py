@@ -106,9 +106,9 @@ def test_selection_capture_preserves_union_across_staging_and_detects_ignore_cha
 def test_source_capture_uses_native_git_objects_without_mutating_git(tmp_path: Path, algorithm: str, monkeypatch: pytest.MonkeyPatch) -> None:
     run_git = capture_scope._run_git
 
-    def without_per_file_hash(git: str, repository: Path, arguments: Sequence[str]) -> bytes:
+    def without_per_file_hash(git: str, repository: Path, arguments: Sequence[str], *, payload: bytes | None = None) -> bytes:
         assert arguments[0] != "hash-object"
-        return run_git(git, repository, arguments)
+        return run_git(git, repository, arguments, payload=payload)
 
     monkeypatch.setattr(capture_scope, "_run_git", without_per_file_hash)
     repo = tmp_path / "repo"
