@@ -223,6 +223,8 @@ locked Python 3.14 scanner in `tooling/semgrep`. Updates use
 additional project; notebook skill assets remain templates.
 `just semgrep-test` reads `[tool.research-repo-tools.semgrep]`; the repository keeps its
 rules and real fixtures while generic runner tests live upstream.
+Its v0.2.5 runner selects the root Python 3.15 Semgrep extra and published
+compatibility pins; native scan recipes use the independent scanner project.
 The Jupyter review skill delegates notebook inspection, advice, validation, native
 Ruff/ty lint, cleanup, and execution to published v0.2.3 shared commands. It keeps
 only review policy and a tested consumer configuration template; generic notebook
@@ -234,9 +236,10 @@ execution dependencies belong to each consumer's locked notebook environment.
 
 ### Shared tooling and Python upgrades
 
-Dotfiles adopts `research-repo-tools==0.2.3` for Python baseline inheritance,
+Dotfiles adopts `research-repo-tools==0.2.5` for Python baseline inheritance,
 tracked and nonignored file selection, notebook policy, workflow audits, dependency
-and secret scans, and managed scanner setup/cleanup. The
+and secret scans, managed scanner setup/cleanup, and index-preserving review
+scope inspection. The
 [adoption map](docs/shared-tooling.md) records the command owners and scope.
 
 `just workflow-allowlist-check` delegates action-step and reusable-workflow checks

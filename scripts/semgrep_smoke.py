@@ -55,6 +55,10 @@ def main() -> int:
                 "SEMGREP_VERSION_CACHE_PATH": str(root / "version-cache"),
                 "SEMGREP_LOG_FILE": str(root / "semgrep.log"),
             }
+            # The native engine initializes TLS even for offline local scans.
+            bundle = Path("/etc/ssl/cert.pem")
+            if bundle.is_file():
+                environment.setdefault("SSL_CERT_FILE", str(bundle))
             result = subprocess.run(  # noqa: S603 - selected environment's scanner, fixed local rule and fixture.
                 [
                     str(executable),

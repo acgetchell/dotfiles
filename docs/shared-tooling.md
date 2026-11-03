@@ -1,6 +1,6 @@
 # Shared tooling adoption
 
-The exact published `research-repo-tools==0.2.3` package owns reusable mechanics.
+The exact published `research-repo-tools==0.2.5` package owns reusable mechanics.
 Dotfiles retains policy, machine provisioning, fixtures, and its skill protocols.
 No sibling checkout or unreleased code is needed.
 
@@ -17,7 +17,7 @@ No sibling checkout or unreleased code is needed.
 | Semgrep fixtures | Shared assertion runner over repository rules, syntax mutation pairs, and count expectations that retain path filters; integration tests exercise real review-graph source/test paths |
 | Notebooks | Published inspection/advice/lint/cleanup/execution in the Jupyter skill; its consumer template prohibits dependency installs inside cells |
 | Reviews | Shared opt-in CodeRabbit wrapper defaults to verified `origin/main`; no review is sent merely by running CI |
-| Review-graph helpers | Direct public exact-byte hashing and subprocess APIs; graph serialization and immutable publication retain their protocol contracts |
+| Review-graph helpers | Public exact-byte hashing, subprocess, and index-preserving status/diff APIs; graph serialization and immutable publication retain their protocol contracts |
 | Dependabot | SHA-pinned v0.1.8 reusable workflow; hosted rollout is tracked in [the rollout guide](../.github/DEPENDABOT.md) |
 
 ## Python authority and upgrades
@@ -49,23 +49,27 @@ lint, and strict ty checks with the first failing batch stopping the command.
 `python-typecheck` uses the same shared owner. `python-fix` retains its narrower
 scope to preserve deliberately invalid Semgrep fixtures.
 
-Semgrep 1.182.1 has an independent Python 3.14 environment in `tooling/semgrep`.
-The root remains Python 3.15. The shared updater's root direct-pin resolution
-selected Semgrep 1.136.0; separating the scanner preserves its exact 1.182.1
-requirement while allowing root tools to advance. Its own manifest retains the
+Native scan recipes retain Semgrep 1.182.1's independent Python 3.14 environment
+in `tooling/semgrep`. Its own manifest retains the
 Windows `pywin32==312` override and the patched `mcp>=1.30.0,<2` constraint.
 It also uses OpenTelemetry 1.45.1/0.66b1 for
 [GHSA-xcq7-p3pf-p88h](https://github.com/advisories/GHSA-xcq7-p3pf-p88h).
-Semgrep installs from wheels only because its source distribution lacks the native engine.
-The root retains the `rust-just==1.59.0` override, aligned with `just_version`.
+The v0.2.5 shared fixture runner requires Semgrep 1.182.1 in its own Python 3.15
+environment. The root dev group therefore requests `research-repo-tools[semgrep]`
+and carries the published compatibility constraints, including Windows pywin32,
+patched MCP, and the consistent OpenTelemetry family. The tooling-only group
+keeps the base package. Both scanner installations require wheels because the
+source distribution lacks the native engine. The root also retains the
+`rust-just==1.59.0` override, aligned with `just_version`.
 
 `just update-python-dependencies` selects Homebrew uv and invokes the published
 `deps update-python --all-projects` command. It updates root development pins,
 upgrades both locks and synchronizes their separate environments. Only
 `tooling/semgrep` is listed in `deps.python-projects`; notebook skill assets are
 consumer templates and are never discovered or synchronized as projects.
-`just python-sync` restores both locked environments. Just places the scanner's
-bin directory on PATH for shared scans and fixture tests. Linux provisioning
+`just python-sync` restores both locked environments. Native scan recipes pass
+the configured scanner's absolute executable path. Shared fixture checks select the root
+environment's absolute scanner entry point. Linux provisioning
 keeps it in a separate `semgrep-venv` beneath `DOTFILES_REVIEW_PREFIX`, selected
 through `DOTFILES_SEMGREP_ENVIRONMENT`, without replacing the main environment.
 The Windows engine smoke selects the scanner project directly and requires one
@@ -158,7 +162,56 @@ network/scanner tier, also required inside the hosted `verify` job;
 zizmor workflow tests authenticated online audits and upload permissions; a local
 offline pass does not establish those hosted results.
 
-## v0.2.3 adoption evidence
+## v0.2.5 Git inspection adoption
+
+The publication gate is the [upstream verification record for #170](https://github.com/acgetchell/research-repo-tools/issues/170#issuecomment-6607734141).
+It records exact release revision `a66f34ceb62258ec3ad02658be00b4940429674d`,
+successful native Linux/macOS/Windows and isolated distribution checks, both
+PyPI distributions, and a clean normal-resolution consumer installation.
+`just shared-python-plan 0.2.5` and `just shared-python-update 0.2.5` resolved the
+published package and updated the root pin/lock; Python remains 3.15.
+The initial full gate exposed the new shared-fixture scanner requirement;
+requesting its published dev extra and applying the shared migration resolved it.
+Consumer allowlist assertions follow the [published 0.2.5 diagnostics](https://github.com/acgetchell/research-repo-tools/blob/v0.2.5/src/research_repo_tools/workflow_allowlist.py):
+the exact denied reference and missing approved identity, with source locations,
+policy authority, failure status, and input preservation still checked. The
+native scanner smoke selects an available `/etc/ssl/cert.pem` CA bundle when the
+caller has not supplied one; its engine initializes TLS even for offline scans.
+
+The wheel SHA-256 in `uv.lock` is
+`5f2c000cba366f7c4c123e12e3b5eb9ebb24b4f8404392982e8b2cf271ba10fb`;
+the sdist SHA-256 is
+`554c59e188ac42eb86b9871ced2c6b0b69c1bd9fe390c75ea4a995e408f7b758`.
+Both match the upstream publication record. No editable, Git/path, sibling, or
+site-packages override supplies this adoption.
+
+Scope capture uses the supported `research_repo_tools.git_inspect` status and
+changed-path functions with 30-second deadlines. The shared helper owns
+optional-lock/index-refresh suppression, literal paths, diff-driver overrides,
+NUL bytes, content-based selection, and error/timeout transport. Its status
+reports renames as deletion/addition. Ordinary metadata/object queries retain
+their bounded literal byte runner; its defaults are not an inspection policy.
+Dotfiles retains all four capture modes, path normalization, raw source
+identities, provenance, frozen-helper isolation, and repair/staging ownership.
+Commit verification uses the same shared status observation. Reconciliation
+classifies shared Git failures as stale captures while retaining diagnostics.
+
+Capture now avoids unused per-file index queries for regular files and symlinks.
+Line bounds read tree/index inventories once per source side and exact immutable
+blobs in batches of at most 64 objects and 16 MiB of aggregate payload. A larger
+blob is read individually, preserving the previous single-blob behavior.
+Metadata size queries are bounded separately. The two scope content observations remain
+independent; source bytes, modes, symlink targets, selection, and index state are
+read anew on every invocation. No stat-based or cross-capture cache is introduced.
+See [capture phase profiling](../agents/.agents/skills/review-graph/references/dispatch-overhead.md#source-capture-phases-253)
+for measurements and diagnostic commands.
+
+Local and hosted validation for the adoption revision are separate: existing
+native CI remains required, including Linux portable review and its graph
+publication/final-proof smoke. Record the exact commit/run/attempt in the PR;
+local macOS results do not establish hosted Linux or Windows validation.
+
+## Historical v0.2.3 adoption evidence
 
 The dependency is the published PyPI wheel recorded by URL and SHA-256 in
 `uv.lock`; no local wheel, editable sibling or source override is used.

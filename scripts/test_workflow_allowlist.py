@@ -52,7 +52,11 @@ def test_actual_workflow_mutations_fail_with_source_locations(tmp_path: Path, na
 
     assert result.returncode == 1
     assert f"{workflow}:{expected_line}:" in result.stderr
-    assert "unapproved/example@*" in result.stderr
+    revision = source.split(approved + "@", 1)[1].split()[0]
+    # Published 0.2.5 reports the actual denied ref, rather than a policy wildcard.
+    assert f"unapproved reference 'unapproved/example@{revision}'" in result.stderr
+    assert "no approved identity 'unapproved/example'" in result.stderr
+    assert str(POLICY) in result.stderr
     assert "passed" not in result.stdout
     assert workflow.read_text() == changed
 
@@ -73,7 +77,9 @@ def test_committed_policy_is_authoritative_for_approved_integrations(tmp_path: P
     result = run_allowlist(workflow, policy=changed)
 
     assert result.returncode == 1
-    assert reference + "@*" in result.stderr
+    assert f"no approved identity {reference!r}" in result.stderr
+    assert str(changed) in result.stderr
+    assert str(workflow) in result.stderr
 
 
 def test_recipe_and_ci_keep_the_shared_allowlist_gate() -> None:

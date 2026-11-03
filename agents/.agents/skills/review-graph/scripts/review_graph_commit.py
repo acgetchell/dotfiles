@@ -8,7 +8,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from capture_scope import _run_git, _scope_data
+from capture_scope import _run_git, _scope_data, _status
 from review_graph_git import _source_discovery_command, fixed_branch_comparison, metadata_audit_blockers
 from review_graph_git_objects import GitPathIdentity
 from review_graph_integrity import canonical_json, digest_bytes
@@ -142,7 +142,7 @@ def verify_live_commit(previous: dict[str, Any], current: dict[str, Any]) -> str
         msg = "commit handoff live capture differs from supplied new_capture"
         raise ValueError(msg)
     # A scoped status misses uncommitted files elsewhere in the repository.
-    if _run_git(git, root, ("status", "--porcelain=v1", "-z", "--untracked-files=all")):
+    if _status(root, ()):
         msg = "commit handoff requires a clean complete repository after committing"
         raise ValueError(msg)
     parents = _run_git(git, root, ("rev-list", "--parents", "-n", "1", after.head)).decode().split()

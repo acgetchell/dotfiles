@@ -61,6 +61,27 @@ def _selected_launcher(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return launcher
 
 
+@pytest.mark.parametrize("configured", [None, "caller-ca.pem"])
+def test_native_smoke_uses_available_ca_bundle_without_overriding_caller(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, configured: str | None) -> None:
+    launcher = _selected_launcher(tmp_path, monkeypatch)
+    bundle = Path("/etc/ssl/cert.pem")
+    is_file = Path.is_file
+    monkeypatch.setattr(Path, "is_file", lambda path: path == bundle or is_file(path))
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    if configured is not None:
+        monkeypatch.setenv("SSL_CERT_FILE", configured)
+
+    def scan(_argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        environment = kwargs["env"]
+        assert isinstance(environment, dict)
+        assert environment["SSL_CERT_FILE"] == (configured or str(bundle))
+        report = {"errors": [], "results": [{"check_id": semgrep_smoke.RULE_ID, "path": "fixture.py"}]}
+        return subprocess.CompletedProcess([str(launcher)], 0, json.dumps(report), "")
+
+    monkeypatch.setattr(semgrep_smoke.subprocess, "run", scan)
+    assert semgrep_smoke.main() == 0
+
+
 def test_missing_scanner_launcher_reports_the_required_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.setattr(semgrep_smoke.sys, "executable", str(tmp_path / "python"))
     assert semgrep_smoke.main() == 2

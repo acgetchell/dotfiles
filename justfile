@@ -218,7 +218,7 @@ semgrep: _ensure-uv _ensure-semgrep
     export SEMGREP_SETTINGS_FILE="$scan_cache/settings.yml"
     export SEMGREP_SEND_METRICS=off OTEL_SDK_DISABLED=true
     if [[ -f /etc/ssl/cert.pem ]]; then export SSL_CERT_FILE=/etc/ssl/cert.pem; fi
-    uv run --locked --group dev research-repo-tools files run --exclude 'tests/semgrep/**' --timeout 600 -- semgrep --disable-version-check --metrics off --error --strict --timeout 120 --config semgrep.yaml
+    uv run --locked --group dev research-repo-tools files run --exclude 'tests/semgrep/**' --timeout 600 -- {{ quote(semgrep_bin / (if os() == "windows" { "semgrep.exe" } else { "semgrep" })) }} --disable-version-check --metrics off --error --strict --timeout 120 --config semgrep.yaml
 
 semgrep-test: _ensure-uv _ensure-semgrep
     #!/usr/bin/env bash
