@@ -5645,8 +5645,8 @@ def _verified_captured_source(
     requested_paths = _capture_pathspecs_from_document(document)
     try:
         manifest = _scope_data(git, repository_root, capture_mode, base_ref, requested_paths)
-    except RuntimeError as error:
-        msg = f"could not independently verify captured source line bounds: {error}"
+    except (RuntimeError, subprocess.SubprocessError) as error:
+        msg = f"could not independently verify captured source line bounds: {format_exception_diagnostics(error)}"
         raise ValueError(msg) from error
     expected_manifest = {
         "base_ref": base_ref,

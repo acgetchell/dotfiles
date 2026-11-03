@@ -5,12 +5,17 @@ import os
 import shutil
 import subprocess
 import sys
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 import capture_scope
 import pytest
+import review_graph_plan
+import review_graph_source_change
 from research_repo_tools import git_inspect
 from review_graph_capture_timing import collect_timings
+from review_graph_commit import verify_live_commit
+from review_graph_results import EvaluationBoundaryError, RejectionKind
 from test_capture_scope import _capture, _capture_result, _commit_all, _git, _init_repo
 
 if TYPE_CHECKING:
@@ -209,3 +214,60 @@ def test_published_inspection_preserves_binary_errors_and_bounded_timeout(tmp_pa
     assert error.value.stdout == b"partial\r\n\xff\0"
     assert error.value.stderr == (b"diagnostic\xff" if failure == "timeout" else b"fatal\xff\n")
     assert timing.phases["git.diff"].failed_calls == 1
+
+
+def test_commit_verification_preserves_stale_index_bytes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    source = repo / "source.py"
+    source.write_bytes(b"original\n")
+    _commit_all(repo)
+    source.write_bytes(b"reviewed\n")
+    before = _capture(repo, "baseline")
+    _commit_all(repo)
+    after = _capture(repo, "baseline")
+    metadata = source.stat()
+    os.utime(source, ns=(metadata.st_atime_ns, metadata.st_mtime_ns - 2_000_000_000))
+    monkeypatch.setenv("GIT_OPTIONAL_LOCKS", "1")
+    index = (repo / ".git/index").read_bytes()
+    entries = _git(repo, "ls-files", "--stage", "-z")
+    assert verify_live_commit(before, after) == before["head"]
+    assert (repo / ".git/index").read_bytes() == index
+    assert _git(repo, "ls-files", "--stage", "-z") == entries
+
+
+@pytest.mark.parametrize("boundary", ["source-change", "plan"])
+@pytest.mark.parametrize("failure", ["error", "timeout"])
+def test_shared_capture_errors_retain_boundary_classification_and_diagnostics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str, failure: str
+) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    (repo / "source.py").write_bytes(b"source\n")
+    _commit_all(repo)
+    capture = _capture(repo, "baseline")
+    error = (
+        subprocess.CalledProcessError(128, ["git", "diff"], output=b"partial\r\n", stderr=b"fatal\xff")
+        if failure == "error"
+        else subprocess.TimeoutExpired(["git", "status"], 30, output=b"partial\r\n", stderr=b"fatal\xff")
+    )
+
+    def failed_capture(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise error
+
+    owner = review_graph_source_change if boundary == "source-change" else review_graph_plan
+    monkeypatch.setattr(owner, "_scope_data", failed_capture)
+    operation = (
+        partial(review_graph_source_change.verify_live_source, capture)
+        if boundary == "source-change"
+        else partial(review_graph_plan._verified_captured_source, capture, ("source.py",), repo, (("source.py", 1),))
+    )
+    message = "live source capture failed" if boundary == "source-change" else "could not independently verify captured source line bounds"
+    with pytest.raises(ValueError, match=message) as observed:
+        operation()
+    assert observed.value.__cause__ is error
+    if boundary == "source-change":
+        assert isinstance(observed.value, EvaluationBoundaryError)
+        assert observed.value.kind == RejectionKind.STALE_CAPTURE
+    assert "partial" in str(observed.value)
+    assert "fatal�" in str(observed.value)

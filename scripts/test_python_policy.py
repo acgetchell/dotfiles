@@ -2,6 +2,7 @@
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -13,6 +14,15 @@ from research_repo_tools.just_inspect import dry_run, inspect_justfile
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_TESTS = "agents/.agents/skills/review-graph/scripts/test_review_graph_contracts.py"
+
+
+def test_native_scan_uses_configured_scanner_despite_root_extra(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    scanner = tmp_path / "independent scanner environment"
+    monkeypatch.setenv("DOTFILES_SEMGREP_ENVIRONMENT", str(scanner))
+    commands = dry_run(REPOSITORY_ROOT, "semgrep").stderr.splitlines()
+    scan = shlex.split(next(line for line in commands if "research-repo-tools files run" in line))
+    binary = scanner / ("Scripts/semgrep.exe" if os.name == "nt" else "bin/semgrep")
+    assert Path(scan[scan.index("--") + 1]) == binary
 
 
 def test_ci_requires_full_python_inventory_and_shared_baseline() -> None:

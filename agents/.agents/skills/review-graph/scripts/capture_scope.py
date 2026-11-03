@@ -49,7 +49,9 @@ class _Digest(Protocol):
 def _run_git(git: str, repo: Path, arguments: Sequence[str], *, payload: bytes | None = None) -> bytes:
     """Run a bounded literal metadata/object query; status/diff use shared inspection."""
     with phase("git." + arguments[0]):
-        result = run_command_bytes(git, ("--literal-pathspecs", "-C", os.fspath(repo), *arguments), check=False, input=payload, timeout=_TIMEOUT_SECONDS)
+        result = run_command_bytes(
+            git, ("--no-optional-locks", "--literal-pathspecs", "-C", os.fspath(repo), *arguments), check=False, input=payload, timeout=_TIMEOUT_SECONDS
+        )
         if result.returncode != 0:
             command = " ".join(("git", *arguments))
             detail = result.stderr.decode(errors="replace").strip()

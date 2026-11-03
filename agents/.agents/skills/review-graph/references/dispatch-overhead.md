@@ -10,9 +10,10 @@ when retaining diagnostics. Expected capture errors emit their usual diagnostic
 followed by the timing JSON and do not publish a capture.
 
 ```sh
+capture_dir="$(cd "$(mktemp -d)" && pwd -P)"
 uv run --locked python agents/.agents/skills/review-graph/scripts/capture_scope.py \
   --repo REPOSITORY --mode baseline --timings \
-  --output /tmp/review-capture.json 2>/tmp/review-capture-timing.jsonl
+  --output "$capture_dir/review-capture.json" 2>"$capture_dir/review-capture-timing.jsonl"
 ```
 
 The phases distinguish frozen-resource verification, Git discovery, scope

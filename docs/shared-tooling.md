@@ -67,8 +67,8 @@ source distribution lacks the native engine. The root also retains the
 upgrades both locks and synchronizes their separate environments. Only
 `tooling/semgrep` is listed in `deps.python-projects`; notebook skill assets are
 consumer templates and are never discovered or synchronized as projects.
-`just python-sync` restores both locked environments. Just places the scanner's
-bin directory on PATH for native scans. Shared fixture checks select the root
+`just python-sync` restores both locked environments. Native scan recipes pass
+the configured scanner's absolute executable path. Shared fixture checks select the root
 environment's absolute scanner entry point. Linux provisioning
 keeps it in a separate `semgrep-venv` beneath `DOTFILES_REVIEW_PREFIX`, selected
 through `DOTFILES_SEMGREP_ENVIRONMENT`, without replacing the main environment.
@@ -193,6 +193,8 @@ reports renames as deletion/addition. Ordinary metadata/object queries retain
 their bounded literal byte runner; its defaults are not an inspection policy.
 Dotfiles retains all four capture modes, path normalization, raw source
 identities, provenance, frozen-helper isolation, and repair/staging ownership.
+Commit verification uses the same shared status observation. Reconciliation
+classifies shared Git failures as stale captures while retaining diagnostics.
 
 Capture now avoids unused per-file index queries for regular files and symlinks.
 Line bounds read tree/index inventories once per source side and exact immutable
