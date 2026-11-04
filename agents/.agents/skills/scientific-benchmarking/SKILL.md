@@ -47,9 +47,10 @@ measured evidence. Do not infer performance from those checks.
    intentional. Repeated jobs, overlapping filters, reconstruction for read-only
    consumers, or sampling again for a report are not. Preserve required exact
    release measurements and scientific coverage; record why a rerun is necessary.
-5. **Establish build provenance and validate evidence.** Before discovery or
-   sampling across separate source exports, isolate compiler build roots unless
-   an established build contract proves invalidation and actual compiled inputs.
+5. **Establish build provenance and validate evidence.** Before discovery,
+   preflight or sampling across separate source exports, isolate compiler build
+   roots unless an established build contract proves invalidation and actual
+   compiled inputs.
    Verified source bytes and a changed manifest path alone do not identify a
    reused executable. Keep result/baseline storage separate from compiler storage.
    Before accepting reuse or comparisons, apply the

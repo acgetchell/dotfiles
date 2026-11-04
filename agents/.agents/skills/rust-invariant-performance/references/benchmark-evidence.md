@@ -15,9 +15,9 @@ Do not infer speed from code shape when a representative proxy exists. Treat a c
 
 When comparing separate source exports, apply the
 [build-provenance contract](../../scientific-benchmarking/references/evidence-contract.md#build-provenance-across-source-exports)
-before discovery or sampling. Use isolated `CARGO_TARGET_DIR` values and isolate
-any redirected intermediate build directories, unless an established build
-contract proves invalidation and actual compiled inputs. Verified source hashes,
+before discovery, preflight or sampling. Use isolated `CARGO_TARGET_DIR` values
+and isolate any redirected intermediate build directories, unless an established
+build contract proves invalidation and actual compiled inputs. Verified source hashes,
 a changed `--manifest-path`, successful exit and matching case IDs cannot alone
 identify a reused executable. Keep Criterion result/baseline storage distinct;
 retain rejected attempts and valid baseline evidence when rebuilding the affected

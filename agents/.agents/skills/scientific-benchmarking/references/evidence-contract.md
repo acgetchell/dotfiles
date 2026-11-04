@@ -41,9 +41,10 @@ not resolve to the same compiler storage. Reuse is acceptable only under an
 established build-system contract that proves invalidation for the relevant
 source changes and identifies actual compiled inputs, including generated inputs
 and any compiler-cache hits. Retain build logs/records linking those inputs to the
-artifact used by discovery and sampling; compile duration or a `Compiling` line
-alone is not that link. In a regression fixture, use an untimed behavior probe in
-the measured library to distinguish compiled sources, not a runtime path label.
+artifact used by discovery, preflight and sampling; compile duration or a
+`Compiling` line alone is not that link. In a regression fixture, use an untimed
+behavior probe in the measured library to distinguish compiled sources, not a
+runtime path label.
 
 For Cargo, isolate each export's `CARGO_TARGET_DIR` (or effective `--target-dir`)
 and any separately configured intermediate build directory. Cargo's
@@ -61,13 +62,14 @@ Verify the harness honors it. Preserve phase/run identities and raw baseline
 samples before mutable result slots are overwritten; sharing an evidence root
 does not authorize sharing executables or compiler intermediates.
 
-If provenance is missing or contradicted, reject the affected discovery/samples
-and withhold comparisons. Preserve the attempted commands, logs, artifact
-identities and rejection reason; supersede only the invalid attempt. Retain a
-valid baseline and other unaffected evidence. Rebuild the affected source in a
-fresh isolated root, repeat its discovery/gates, then sample only when authorized.
-Report observed reuse without inventing a Cargo invalidation bug or a failure of
-an upstream acquisition engine that was not involved in the attempt.
+If provenance is missing or contradicted, reject the affected discovery,
+preflight results or samples and withhold comparisons. Preserve the attempted
+commands, logs, artifact identities and rejection reason; supersede only the
+invalid attempt. Retain a valid baseline and other unaffected evidence. Rebuild
+the affected source in a fresh isolated root, repeat its discovery, preflight
+and correctness gates, then sample only when authorized. Report observed reuse
+without inventing a Cargo invalidation bug or a failure of an upstream
+acquisition engine that was not involved in the attempt.
 
 ## Comparisons and metrics
 
