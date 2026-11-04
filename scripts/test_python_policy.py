@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tomllib
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 import pytest
 from research_repo_tools.just_inspect import dry_run, inspect_justfile
@@ -219,8 +220,12 @@ def test_contract_gate_collects_only_its_module() -> None:
     assert any("test_ordinary_validator_and_all_surface_prompt_budgets" in node for node in nodes)
 
 
-def test_focused_selection_forwards_arguments_once(tmp_path: Path) -> None:
+def _assert_focused_selection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, workers: str | None) -> None:
     """Real Just preserves selector arguments and runs each phase once."""
+    if workers is None:
+        monkeypatch.delenv("DOTFILES_TEST_WORKERS", raising=False)
+    else:
+        monkeypatch.setenv("DOTFILES_TEST_WORKERS", workers)
     just_executable = shutil.which("just")
     assert just_executable is not None
     log = tmp_path / "launches.jsonl"
@@ -233,7 +238,7 @@ def test_focused_selection_forwards_arguments_once(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     launcher.chmod(0o755)
-    selection = [str(tmp_path / "test quoted.py"), "-k", "selected or other", "--durations=25"]
+    selection = [str(tmp_path / "test quoted.py"), "-k", "selected or other", "--durations=25", "-n", "0"]
     result = subprocess.run(  # noqa: S603 - real recipe uses a recording launcher instead of running tests.
         [just_executable, "test-python", *selection],
         cwd=REPOSITORY_ROOT,
@@ -246,9 +251,18 @@ def test_focused_selection_forwards_arguments_once(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stdout + result.stderr
     assert [json.loads(line) for line in log.read_text().splitlines()] == [
         ["--version"],
-        ["run", "--locked", "pytest", CONTRACT_TESTS],
-        ["run", "--locked", "pytest", "--ignore", CONTRACT_TESTS, *selection],
+        ["run", "--locked", "pytest", CONTRACT_TESTS, "-n", "0"],
+        ["run", "--locked", "pytest", "--ignore", CONTRACT_TESTS, "-n", workers or "4", "--dist", "worksteal", "--max-worker-restart", "0", *selection],
     ]
+
+
+def test_focused_selection_forwards_arguments_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _assert_focused_selection(tmp_path, monkeypatch, None)
+
+
+@pytest.mark.parametrize("workers", ["2", "0"])
+def test_worker_override_preserves_selection_and_serial_contract_gate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, workers: str) -> None:
+    _assert_focused_selection(tmp_path, monkeypatch, workers)
 
 
 def test_prompt_regression_stops_recipe_before_remaining_tests(tmp_path: Path) -> None:
@@ -272,7 +286,7 @@ def test_prompt_regression_stops_recipe_before_remaining_tests(tmp_path: Path) -
         f"#!{sys.executable}\nimport json, subprocess, sys\nfrom pathlib import Path\n"
         f"with Path({str(log)!r}).open('a') as output: output.write(json.dumps(sys.argv[1:]) + '\\n')\n"
         f"if sys.argv[1:] == ['--version']: print('uv {version}'); sys.exit(0)\n"
-        f"if sys.argv[1:] == ['run', '--locked', 'pytest', {CONTRACT_TESTS!r}]:\n"
+        f"if sys.argv[1:] == ['run', '--locked', 'pytest', {CONTRACT_TESTS!r}, '-n', '0']:\n"
         f"    sys.exit(subprocess.run([sys.executable, '-m', 'pytest', {str(test_source)!r}, '--color=no']).returncode)\n"
         "sys.exit('Unexpected command after failed contract gate')\n",
         encoding="utf-8",
@@ -288,4 +302,54 @@ def test_prompt_regression_stops_recipe_before_remaining_tests(tmp_path: Path) -
     )
     assert result.returncode != 0
     assert "ordinary coordinator prompt proxy is" in result.stdout
-    assert [json.loads(line) for line in log.read_text().splitlines()] == [["--version"], ["run", "--locked", "pytest", CONTRACT_TESTS]]
+    assert [json.loads(line) for line in log.read_text().splitlines()] == [["--version"], ["run", "--locked", "pytest", CONTRACT_TESTS, "-n", "0"]]
+
+
+def test_parallel_recipe_runs_every_case_and_propagates_worker_failure(tmp_path: Path) -> None:
+    """Real workers retain passing cases and an intentional assertion failure."""
+    just_executable = shutil.which("just")
+    assert just_executable is not None
+    version = tomllib.loads((REPOSITORY_ROOT / "pyproject.toml").read_text())["tool"]["uv"]["required-version"].removeprefix("==")
+    launcher = tmp_path / "uv"
+    delegations = tmp_path / "pytest-arguments.jsonl"
+    launcher.write_text(
+        f"#!{sys.executable}\nimport json, subprocess, sys\nfrom pathlib import Path\n"
+        f"if sys.argv[1:] == ['--version']: print('uv {version}'); sys.exit(0)\n"
+        f"if sys.argv[1:] == ['run', '--locked', 'pytest', {CONTRACT_TESTS!r}, '-n', '0']: sys.exit(0)\n"
+        "assert sys.argv[1:4] == ['run', '--locked', 'pytest']\n"
+        f"with Path({str(delegations)!r}).open('a') as output: output.write(json.dumps(sys.argv[4:]) + '\\n')\n"
+        "sys.exit(subprocess.run([sys.executable, '-m', 'pytest', *sys.argv[4:]]).returncode)\n",
+        encoding="utf-8",
+    )
+    launcher.chmod(0o755)
+    test_source = tmp_path / "test_parallel_failure.py"
+    test_source.write_text(
+        "import os\nfrom pathlib import Path\nimport pytest\n"
+        "@pytest.mark.parametrize('case', range(8))\n"
+        "def test_case(case):\n"
+        f"    Path({str(tmp_path)!r}, f'executed-{{case}}').write_text(os.environ['PYTEST_XDIST_WORKER'])\n"
+        "    assert case != 3, 'intentional parallel regression'\n",
+        encoding="utf-8",
+    )
+    report = tmp_path / "results.xml"
+    result = subprocess.run(  # noqa: S603 - the contract gate is stubbed; real workers execute an isolated failing fixture.
+        [just_executable, "test-python", str(test_source), "-n", "2", "--color=no", f"--junitxml={report}"],
+        cwd=REPOSITORY_ROOT,
+        env={**os.environ, "PATH": str(tmp_path) + os.pathsep + os.environ["PATH"], "PYTEST_ADDOPTS": ""},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    assert result.returncode != 0
+    assert "intentional parallel regression" in result.stdout
+    arguments = [json.loads(line) for line in delegations.read_text().splitlines()]
+    assert len(arguments) == 1
+    assert str(test_source) in arguments[0]
+    cases = list(ET.parse(report).iter("testcase"))  # noqa: S314 - generated by this local pytest fixture, never supplied externally.
+    assert {case.attrib["name"] for case in cases} == {f"test_case[{index}]" for index in range(8)}
+    assert len(cases) == 8
+    assert sum(case.find("failure") is not None for case in cases) == 1
+    assert not any(case.find("skipped") is not None or case.find("error") is not None for case in cases)
+    assert {path.name for path in tmp_path.glob("executed-*")} == {f"executed-{index}" for index in range(8)}
+    assert {(tmp_path / f"executed-{index}").read_text() for index in range(8)} == {"gw0", "gw1"}

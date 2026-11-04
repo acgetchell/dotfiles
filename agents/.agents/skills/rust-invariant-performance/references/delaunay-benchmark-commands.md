@@ -8,6 +8,12 @@ before selecting commands. They own the targets, arguments and required gates.
 ## Routine and Focused Work
 
 - Keep correctness gates and untimed benchmark preflight distinct from sampling.
+- For separate source exports, apply the
+  [build-provenance contract](../../scientific-benchmarking/references/evidence-contract.md#build-provenance-across-source-exports)
+  before discovery, preflight or sampling, including supplemental local
+  comparisons. Keep compiler roots isolated unless the build contract proves
+  safe compiler reuse. Store Criterion results/baselines separately from compiler
+  artifacts.
 - Select representative public API measurements for the claimed dimensions and
   input families; internal diagnostics and large stress workloads remain opt-in.
 - Preserve repository-required checks within the authorized scope. A focused

@@ -16,6 +16,12 @@ its decisions and actual tool actions; do not test for particular wording.
 | F: fixture boundary | Preserves independent correctness tests and untimed result checks; times public validation when that is the operation; resets mutations without removing construction from construction workloads |
 | G: valid reuse | Accepts a presentation-only rerender of complete compatible evidence, preserving baseline-phase peers; does not demand a new campaign or invent an upstream feature |
 | H: routing and authorization | Keeps a prose-only change narrow and respects all execution prohibitions, including hidden Git/worktree effects of measurement wrappers |
+| I: compiled-source provenance | Rejects shared-root current discovery despite verified exports, successful exit and matching IDs; checks the compiled-library probe and build records, isolates target and redirected intermediates before retrying, separates Criterion storage, preserves rejected attempts and valid baseline samples, and accepts the proven isolated retry without claiming a Cargo bug or managed-engine failure |
+
+For case I, also assess the missing-probe and proven-cache variations. Missing
+provenance blocks acceptance without proving stale code; a documented cache
+contract with verified actual inputs can justify reuse. Do not require a
+particular Cargo version to reproduce a stale executable for this policy guard.
 
 Retain a brief assessment of the inputs, outputs, actual actions, failures and
 limitations. Distinguish an offline behavioral exercise from native execution or

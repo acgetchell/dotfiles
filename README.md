@@ -596,7 +596,9 @@ entrypoints are omitted; explicitly checking a missing skill still fails.
 `just test-review-contracts` collects only the prompt-budget and routing guard module.
 `just test-python` runs that gate followed by the remaining tests, and `just ci`
 runs it before static checks and graph execution. Each guard runs once in either
-aggregate. Direct `uv run --locked pytest` still collects the complete suite.
+aggregate. The early gate runs serially; the remaining tests use four isolated
+pytest-xdist worker processes. Direct `uv run --locked pytest` still collects the
+complete suite serially.
 
 Pass pytest selectors to `just test-python` for focused work, for example:
 
@@ -606,6 +608,19 @@ just test-python scripts/test_python_policy.py -k 'prompt or selection'
 ```
 
 The early guards still run; the remaining phase uses the supplied selection.
+Worker crashes fail the run without automatic restarts. No tests are excluded
+from the parallel phase beyond the guards already run by the early gate.
+
+Adjust concurrency for the available CPU, memory, and filesystem capacity:
+
+```sh
+DOTFILES_TEST_WORKERS=2 just check
+just test-python -n 0
+just test-python scripts/test_python_policy.py -n 0 -s
+```
+
+Use `-n 0` for serial debugging, including live output and interactive debuggers.
+The same override applies to an aggregate with `DOTFILES_TEST_WORKERS=0 just check`.
 Run `just python-ci` without selectors for the complete Python gate on the final
 source state. Add `--durations=25` to a planned test run when investigating runtime.
 

@@ -6,12 +6,23 @@ Load this reference when implementing an optimization, evaluating a performance 
 
 1. Pass the relevant correctness checks first.
 2. Select the smallest representative benchmark, smoke proxy, allocation counter, or profile for the claimed hot path.
-3. Record command, inputs, features, toolchain, environment, and baseline result.
+3. Record command, inputs, features, toolchain, environment, build provenance, and baseline result.
 4. Change one bounded performance surface.
 5. Rerun the same evidence and relevant correctness regression.
 6. Classify improvement, no material change, noise, or regression honestly.
 
 Do not infer speed from code shape when a representative proxy exists. Treat a clear regression as a failed optimization: revert, retune, or narrow it before proceeding.
+
+When comparing separate source exports, apply the
+[build-provenance contract](../../scientific-benchmarking/references/evidence-contract.md#build-provenance-across-source-exports)
+before discovery, preflight or sampling. Use isolated `CARGO_TARGET_DIR` values
+and isolate any redirected intermediate build directories, unless an established
+build contract proves invalidation and actual compiled inputs. Verified source hashes,
+a changed `--manifest-path`, successful exit and matching case IDs cannot alone
+identify a reused executable. Keep Criterion result/baseline storage distinct;
+retain rejected attempts and valid baseline evidence when rebuilding the affected
+phase. This guard also applies to supplemental local comparisons outside a
+managed acquisition engine.
 
 ## Evidence Quality
 

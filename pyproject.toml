@@ -245,6 +245,7 @@ dev = [
   "nbformat==5.11.1",
   "PyYAML>=6.0",
   "pytest==9.2.0",
+  "pytest-xdist==3.8.0",
   "research-repo-tools[semgrep]==0.2.5",
   "ruff==0.17.3",
   "ty==0.0.96",
