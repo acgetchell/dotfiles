@@ -37,6 +37,7 @@ from review_graph_reuse import (
     source_snapshot,
     verify_reuse_inputs,
 )
+from review_graph_scope import excluded_paths, scope_exclusions
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -551,6 +552,8 @@ class GraphPlan:
     audit_delta_reviews: tuple[dict[str, Any], ...] = ()
     validation_recoveries: tuple[dict[str, Any], ...] = ()
     audit_replacements: tuple[dict[str, Any], ...] = field(default=(), kw_only=True)
+    audit_continuations: tuple[dict[str, Any], ...] = field(default=(), kw_only=True)
+    review_scope_exclusions: tuple[dict[str, str], ...] = field(default=(), kw_only=True)
     pre_review_validation_nodes: tuple[str, ...] = ()
     commit_handoffs: tuple[ExternalMetadataTransition, ...] = ()
     review_lifecycle: ReviewLifecycle = field(default_factory=ReviewLifecycle)
@@ -2504,6 +2507,8 @@ def graph_plan_digest(plan: GraphPlan) -> str:
             "pre_review_validation_nodes",
             "validation_recoveries",
             "audit_replacements",
+            "audit_continuations",
+            "review_scope_exclusions",
             "audit_delta_reviews",
             "validation_exclusions",
             "validation_requirement_bindings",
@@ -2531,6 +2536,8 @@ def graph_plan_digest_matches(plan: GraphPlan, digest: str) -> bool:
             "pre_review_validation_nodes",
             "validation_recoveries",
             "audit_replacements",
+            "audit_continuations",
+            "review_scope_exclusions",
             "validation_exclusions",
             "validation_requirement_bindings",
         ),
@@ -5716,6 +5723,44 @@ def _constrain_routing_surfaces(
     return tuple(normalized), tuple(blockers)
 
 
+def _apply_review_scope(
+    decisions: tuple[RoutingDecision, ...], exclusions: tuple[dict[str, str], ...], *, captured_paths: Sequence[str]
+) -> tuple[RoutingDecision, ...]:
+    """Reconcile explicit policy exclusions before assigning substantive reads."""
+    by_id = {decision.catalog_id: decision for decision in decisions}
+    captured = frozenset(captured_paths)
+    excluded_by_id: dict[str, set[str]] = {catalog_id: set() for catalog_id in by_id}
+    for item in exclusions:
+        decision = by_id.get(item["catalog_id"])
+        if decision is None or decision.disposition not in {"selected", "exact-evidence-reused"} or item["path"] not in captured:
+            msg = "scope exclusions must name captured paths and selected or reused specialists"
+            raise ValueError(msg)
+        if item["policy_source"] not in {decision.skill_path, *decision.instruction_paths}:
+            msg = "scope exclusion policy_source must be the selected skill or an applicable instruction"
+            raise ValueError(msg)
+        excluded_by_id[item["catalog_id"]].add(item["path"])
+    return tuple(
+        replace(decision, review_surface=tuple(path for path in decision.review_surface if path not in excluded_by_id[decision.catalog_id]))
+        for decision in decisions
+    )
+
+
+def _baseline_skill_coverage(
+    catalog: tuple[RoutingCatalogEntry, ...], decisions: tuple[RoutingDecision, ...], paths: Sequence[str], exclusions: tuple[dict[str, str], ...]
+) -> tuple[str, ...]:
+    """Check explicit whole-repo skill contracts independently of union ownership."""
+    style = next((decision for decision in decisions if decision.catalog_id == "rust.style"), None)
+    if style is None or style.disposition not in {"selected", "exact-evidence-reused"}:
+        return ()
+    entry = next((entry for entry in catalog if entry.catalog_id == style.catalog_id), None)
+    if entry is None:
+        msg = "rust.style coverage requires its catalog entry"
+        raise ValueError(msg)
+    required = set(_catalog_matched_paths(entry, paths, classify_repository_paths(paths))) - excluded_paths(exclusions, (style.catalog_id,))
+    missing = sorted(required - set(style.review_surface))
+    return ("rust.style whole-repository coverage omits required paths: " + ", ".join(missing),) if missing else ()
+
+
 def _resolved_reference_tuple(item: Mapping[str, Any], name: str, skill_roots: Sequence[Path]) -> tuple[str, ...]:
     return tuple(str(_resolve_skill_root_path(path, skill_roots)) for path in _tuple_field(item, name))
 
@@ -5965,6 +6010,7 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0913, PLR0915
     routing_catalog: tuple[RoutingCatalogEntry, ...] = ()
     routing_decisions: tuple[RoutingDecision, ...] = ()
     path_inventory: dict[str, Any] = {}
+    exclusions = scope_exclusions(document.get("review_scope_exclusions", []))
     if exhaustive_routing:
         routing_catalog = load_routing_catalog(catalog_path, skill_roots=skill_roots)
         consulted_routers = _tuple_field(document, "consulted_routers")
@@ -5999,6 +6045,10 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0913, PLR0915
             routing_decisions = _routing_decisions_from_document(document, repository_root, skill_roots)
         if captured_paths is not None:
             routing_decisions, routing_surface_blockers = _constrain_routing_surfaces(routing_catalog, routing_decisions, captured_paths=captured_paths)
+            exclusions = tuple(
+                {**item, "policy_source": str(_resolve_repository_instruction_path(item["policy_source"], repository_root, skill_roots))} for item in exclusions
+            )
+            routing_decisions = _apply_review_scope(routing_decisions, exclusions, captured_paths=captured_paths)
         else:
             routing_surface_blockers = ()
         routing_assessment = validate_routing_ledger(routing_catalog, routing_decisions, consulted_routers=consulted_routers)
@@ -6052,6 +6102,7 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0913, PLR0915
             if not classifier.feasible:
                 routing_metadata_blockers.extend(classifier.blockers)
             if document.get("capture_mode", scope_mode) in {"baseline", "release-readiness"} and not document.get("requested_paths"):
+                routing_metadata_blockers.extend(_baseline_skill_coverage(routing_catalog, routing_decisions, captured_paths, exclusions))
                 leaf_ids = {entry.catalog_id for entry in routing_catalog if entry.target_kind == "leaf"}
                 path_inventory = captured_path_inventory(
                     captured_paths,
@@ -6184,7 +6235,7 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 change_target=(str(item["change_target"]) if item.get("change_target") is not None else None),
             )
         )
-    return plan_graph(
+    plan = plan_graph(
         review_requirements,
         validation_requirements,
         synthesis_nodes,
@@ -6205,6 +6256,7 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0913, PLR0915
         control_root=control_root,
         repository_root=repository_root,
     )
+    return replace(plan, review_scope_exclusions=exclusions)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

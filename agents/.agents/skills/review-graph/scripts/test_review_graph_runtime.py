@@ -4505,6 +4505,8 @@ def test_validation_requirement_bindings_preserve_legacy_plan_digests() -> None:
         "pre_review_validation_nodes",
         "validation_recoveries",
         "audit_replacements",
+        "audit_continuations",
+        "review_scope_exclusions",
         "validation_exclusions",
     ):
         legacy.pop(field)
@@ -4522,7 +4524,7 @@ def test_validation_requirement_bindings_preserve_legacy_plan_digests() -> None:
 def test_graph_plan_preserves_legacy_positional_constructor_tail() -> None:
     """New recovery and origin fields must not shift optional positional arguments."""
     plan = replace(_sparse_plan(), captured_path_inventory={})
-    additions = {"validation_requirement_bindings", "audit_replacements", "captured_path_inventory"}
+    additions = {"validation_requirement_bindings", "audit_replacements", "captured_path_inventory", "audit_continuations", "review_scope_exclusions"}
     legacy_fields = [item.name for item in fields(GraphPlan) if item.name not in additions]
     assert GraphPlan(*(getattr(plan, name) for name in legacy_fields)) == plan
     assert all(item.kw_only for item in fields(GraphPlan) if item.name in additions)
@@ -4540,6 +4542,8 @@ def test_path_inventory_preserves_legacy_plan_digests() -> None:
         "pre_review_validation_nodes",
         "validation_recoveries",
         "audit_replacements",
+        "audit_continuations",
+        "review_scope_exclusions",
         "validation_exclusions",
         "validation_requirement_bindings",
     ):
@@ -4576,6 +4580,8 @@ def test_plan_digest_retains_nonempty_reuse_fields(tmp_path: Path) -> None:
     document.pop("pre_review_validation_nodes")
     document.pop("validation_recoveries")
     document.pop("audit_replacements")
+    document.pop("audit_continuations")
+    document.pop("review_scope_exclusions")
     document.pop("audit_delta_reviews")
     document.pop("validation_exclusions")
     document.pop("validation_requirement_bindings")

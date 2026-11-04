@@ -6,6 +6,11 @@ batch or comprehensive restart; transitions retain the run-wide repair count.
 
 ## Replace An Invalidated Audit
 
+For incomplete inspection on unchanged source, use
+[partial audit continuation](partial-audits.md#continue-published-partial-evidence).
+It preserves completed judgments and can reconcile policy-backed archive
+exclusions discovered after blocked publication.
+
 If an accepted audit applied the wrong checklist, first finish compiling other
 in-flight work, then explicitly invalidate the mistaken node. Set `REVIEW_PYTHON`
 and `REVIEW_RUNTIME` to the interpreter and frozen runtime paths from this run's

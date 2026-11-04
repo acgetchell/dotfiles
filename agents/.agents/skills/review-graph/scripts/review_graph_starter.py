@@ -78,6 +78,7 @@ def starter_template(capture: dict[str, Any], choices: dict[str, Any]) -> dict[s
         ),
         "routing_overrides": choices.get("routing_overrides", []),
         "captured_path_dispositions": choices.get("captured_path_dispositions", []),
+        "review_scope_exclusions": choices.get("review_scope_exclusions", []),
         "validation_requirements": [
             {
                 "requirement_id": "repository-ci",

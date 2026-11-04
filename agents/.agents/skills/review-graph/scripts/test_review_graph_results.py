@@ -126,6 +126,8 @@ def test_interleaved_history_is_detached_and_missing_legacy_field_preserves_plan
         "pre_review_validation_nodes",
         "validation_recoveries",
         "audit_replacements",
+        "audit_continuations",
+        "review_scope_exclusions",
         "audit_delta_reviews",
         "validation_exclusions",
         "validation_requirement_bindings",
