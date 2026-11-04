@@ -23,6 +23,7 @@ _EXECUTION_FIELDS = (
     "handoff_destinations",
     "execution_context",
     "owned_paths",
+    "review_scope_exclusions",
     "command_policy",
     "worker_payload_path",
     "coverage_reuse",

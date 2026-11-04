@@ -81,6 +81,12 @@ dependency, historical/archive, and user-excluded choices and receipt sidecar.
 Restricted captures retain their explicit scope; whole-repository accounting does
 not turn a branch review into a baseline audit.
 
+Reconcile [per-specialist policy exclusions](partial-audits.md#classify-exclusions-before-dispatch)
+through `review_scope_exclusions` before dispatch. Preserve a reason and bound
+policy source for every excluded path. Coverage is also checked per skill:
+whole-repository `rust.style` includes source, tests, benches and examples even
+when other reviewers already own those paths.
+
 Selected leaves require a concrete scope, evidence, reason, priority, owners,
 references, validators, and synthesis dependency. Convert every selected leaf
 to a required review commitment. Convert a selected independent target to an

@@ -70,7 +70,7 @@ from review_graph_integrity import canonical_json, digest_bytes
 from review_graph_isolation import ISOLATION_INSTRUCTIONS, IsolationPublicationError, IsolationViolationError, forbidden_artifacts, isolation_violations
 from review_graph_lifecycle import ComprehensiveRestart, RepairBudgetExtension, ReviewLifecycle, lifecycle_from_document
 from review_graph_metrics import projected_waves, source_demand
-from review_graph_path_inventory import dependency_paths
+from review_graph_path_inventory import captured_path_inventory, dependency_paths
 from review_graph_phases import pending_validation_barrier, phase_accounting, require_validation_barrier, validate_validation_barrier
 from review_graph_plan import (
     _COMPACT_ROUTING_OVERRIDE_FIELDS,
@@ -169,6 +169,7 @@ from review_graph_reuse import (
 )
 from review_graph_scheduling import select_execution_lanes
 from review_graph_schema import SchemaDiagnostic, SchemaValidationError, require_schema, require_schema_definition
+from review_graph_scope import excluded_paths, partial_coverage_units, scope_exclusions, validate_partial_obligations
 from review_graph_session import current_execution_context, runtime_command, verify_current_snapshot
 from review_graph_source_change import verify_live_source
 from review_graph_source_index import navigation_bytes, source_excerpt
@@ -959,7 +960,7 @@ def _review_scope_coverage_blockers(dispatch: dict[str, Any], payload: dict[str,
     limitation_paths = tuple(path for path, _reason in limitations)
     if len(limitation_paths) != len(set(limitation_paths)):
         blockers.append("audit scope_limitations paths must be unique")
-    invalid_limitations = tuple(path for path in limitation_paths if path not in owned or path in inspected)
+    invalid_limitations = tuple(path for path in limitation_paths if path not in owned or path in inspected | reused)
     if invalid_limitations:
         blockers.append("audit scope_limitations must name omitted owned paths: " + ", ".join(invalid_limitations))
     omitted = tuple(path for path in owned_paths if path not in inspected | reused)
@@ -1010,7 +1011,9 @@ def _reconciled_coverage(dispatch: dict[str, Any], payload: dict[str, Any]) -> d
     bound = _publication_dispatch(dispatch) if has_reconciliation and "compiler_preflight" in dispatch else dispatch
     fresh = bool(bound and bound.get("fresh_context"))
     context = reconcile_instructions(dispatch.get("coverage_reuse"), payload, fresh=fresh)
-    return reconcile_requirements(context, payload, fresh=fresh)
+    context = reconcile_requirements(context, payload, fresh=fresh)
+    validate_partial_obligations(context, payload)
+    return context
 
 
 def _validate_review_coverage_partitions(dispatch: dict[str, Any], payload: dict[str, Any]) -> None:
@@ -2757,8 +2760,9 @@ def _reused_review_identity(raw: dict[str, Any]) -> ReusedReviewEvidencePlan:
     )
 
 
-def _audit_replacement_record(raw: dict[str, Any]) -> dict[str, Any]:
+def _audit_replacement_record(raw: dict[str, Any], *, partial: bool = False) -> dict[str, Any]:
     """Decode a complete history record without retaining caller-owned containers."""
+    evidence_field = "originating_evidence_id" if partial else "invalidated_evidence_id"
     required = {
         "node_id",
         "skill_id",
@@ -2767,7 +2771,7 @@ def _audit_replacement_record(raw: dict[str, Any]) -> dict[str, Any]:
         "source_state",
         "previous_plan_digest",
         "previous_journal_head",
-        "invalidated_evidence_id",
+        evidence_field,
         "replacement_node_ids",
         "preserved_files",
         "forbidden_artifacts",
@@ -2775,7 +2779,7 @@ def _audit_replacement_record(raw: dict[str, Any]) -> dict[str, Any]:
     if missing := required - raw.keys():
         msg = "audit replacement record is missing fields: " + ", ".join(sorted(missing))
         raise ValueError(msg)
-    record: dict[str, Any] = {key: _required_text(raw, key) for key in ("node_id", "skill_id", "reason", "invalidated_evidence_id")}
+    record: dict[str, Any] = {key: _required_text(raw, key) for key in ("node_id", "skill_id", "reason", evidence_field)}
     record["requirement_ids"] = list(_text_list(raw, "requirement_ids", required=True))
     record["source_state"] = list(_state(raw, "source_state"))
     record["previous_plan_digest"] = _sha256_digest(raw["previous_plan_digest"], "previous_plan_digest")
@@ -2868,6 +2872,8 @@ def _graph_plan(raw: dict[str, Any]) -> GraphPlan:
         audit_delta_reviews=_records(raw, "audit_delta_reviews"),
         validation_recoveries=_records(raw, "validation_recoveries"),
         audit_replacements=tuple(_audit_replacement_record(item) for item in _records(raw, "audit_replacements")),
+        audit_continuations=tuple(_audit_replacement_record(item, partial=True) for item in _records(raw, "audit_continuations")),
+        review_scope_exclusions=scope_exclusions(raw.get("review_scope_exclusions", [])),
         pre_review_validation_nodes=_string_tuple(raw, "pre_review_validation_nodes"),
         commit_handoffs=tuple(metadata_transition(item) for item in _records(raw, "commit_handoffs")),
         review_lifecycle=lifecycle_from_document(raw.get("review_lifecycle")),
@@ -3420,6 +3426,8 @@ def _synthesis_plan_context(plan: GraphPlan, records: list[dict[str, Any]]) -> d
         ),
         "validation_recoveries": list(plan.validation_recoveries),
         "audit_replacements": list(plan.audit_replacements),
+        "audit_continuations": list(plan.audit_continuations),
+        "review_scope_exclusions": list(plan.review_scope_exclusions),
         **({"commit_handoffs": [asdict(item) for item in plan.commit_handoffs]} if plan.commit_handoffs else {}),
         "validation_reconciliation": _validation_reconciliation(plan, records),
         "handoff_reconciliation": {"handoffs": handoffs, "unresolved_handoff_ids": list(unresolved), "blockers": list(blockers)},
@@ -4568,11 +4576,13 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             common["fresh_context_forbidden_artifacts"] = sorted(
                 {
                     *forbidden_artifacts(node.node_id, isolation_entries),
-                    *(path for replacement in plan.audit_replacements for path in replacement["forbidden_artifacts"]),
+                    *(path for replacement in (*plan.audit_replacements, *plan.audit_continuations) for path in replacement["forbidden_artifacts"]),
                 }
             )
         if document.get("external_metadata_transitions"):
             common["external_metadata_transitions"] = document["external_metadata_transitions"]
+        if exclusions := [item for item in plan.review_scope_exclusions if item["catalog_id"] in node.requirement_ids]:
+            common["review_scope_exclusions"] = exclusions
         if node.mode != "validation":
             common["command_policy"]["planned_validation_units"] = validation_references
         deltas = [item for item in plan.audit_delta_reviews if item["node_id"] == node.node_id]
@@ -5243,16 +5253,19 @@ def _verify_delta_context(context: dict[str, Any], dispatch: dict[str, Any]) -> 
     if not isinstance(expectation, ReviewEvidenceExpectation) or not isinstance(evidence, ReviewEvidence) or inputs is None or record is None:
         msg = "delta coverage requires compiler-bound audit input identities"
         raise ValueError(msg)
-    if _audit_reuse_blocker(record, invalidated=False) is not None or _failed_validation_limits(record) is not None:
+    partial = context.get("partial_audit")
+    if not partial and (_audit_reuse_blocker(record, invalidated=False) is not None or _failed_validation_limits(record) is not None):
         msg = "delta coverage origin must have complete verified coverage without unresolved limitations"
         raise ValueError(msg)
-    if (origin.source_state, inputs.owned_paths, evidence.skill_id, evidence.skill_path, evidence.requirement_ids) != (
-        expectation.source_state,
-        _text_list(dispatch, "owned_paths"),
-        dispatch["skill_id"],
-        dispatch["skill_path"],
-        _text_list(dispatch, "requirement_ids"),
-    ):
+    exclusions = scope_exclusions(partial["review_scope_exclusions"]) if partial else ()
+    excluded = excluded_paths(exclusions, evidence.requirement_ids)
+    if (
+        origin.source_state,
+        tuple(path for path in inputs.owned_paths if path not in excluded),
+        evidence.skill_id,
+        evidence.skill_path,
+        evidence.requirement_ids,
+    ) != (expectation.source_state, _text_list(dispatch, "owned_paths"), dispatch["skill_id"], dispatch["skill_path"], _text_list(dispatch, "requirement_ids")):
         msg = "delta coverage changes original routing, ownership, or source identity"
         raise ValueError(msg)
     transition = AuditReuseTransition(
@@ -5266,7 +5279,16 @@ def _verify_delta_context(context: dict[str, Any], dispatch: dict[str, Any]) -> 
         tuple(metadata_transition(item) for item in _records(context, "metadata_transitions")),
     )
     retained_after = {delta["path"]: delta["after"] for unit in context["units"] for delta in unit.get("input_deltas", [])}
-    decisions = coverage_decisions(record, origin, target, inputs, transition, retained_after=retained_after)
+    if partial:
+        if origin != target or transition.metadata_transitions:
+            msg = "partial audit continuation requires identical captured inputs"
+            raise ValueError(msg)
+        _validate_continuation_exclusions(exclusions, inputs, evidence)
+        decisions = partial_coverage_units(record, inputs.owned_paths, excluded)
+        completed = tuple(sorted(set(inputs.inspected_paths) | set(inputs.inherited_paths)))
+        verify_reuse_inputs(origin, target, replace(inputs, owned_paths=completed), transition)
+    else:
+        decisions = coverage_decisions(record, origin, target, inputs, transition, retained_after=retained_after)
     if (
         context["units"] != decisions
         or context["original_findings"] != record["findings"]
@@ -6757,7 +6779,9 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
     new_plan, coverage_reviews = _plan_delta_audits(reuse_document, old_plan, new_plan, sources)
     suffix = "-verification" if followup is not None else ""
     new_plan = _epoch_scoped_plan(new_plan, epoch, suffix=suffix)
-    new_plan = replace(new_plan, review_lifecycle=repair_lifecycle, audit_replacements=old_plan.audit_replacements)
+    new_plan = replace(
+        new_plan, review_lifecycle=repair_lifecycle, audit_replacements=old_plan.audit_replacements, audit_continuations=old_plan.audit_continuations
+    )
     reused_ids = {item.evidence_id for item in new_plan.audit_reuse_transitions}
     artifact_store = Path(_required_text(document, "artifact_store")).resolve() / f"repair-epoch-{epoch:03d}{suffix}"
     if interleaved is not None:
@@ -8068,6 +8092,87 @@ def _audit_replacement_marker(plan: GraphPlan) -> Path:
     return Path(binding.identity.path).parent / f"audit-replacement-{_plan_digest(plan)[7:]}.json"
 
 
+def _validate_continuation_exclusions(exclusions: tuple[dict[str, str], ...], inputs: AuditInputIdentity, evidence: ReviewEvidence) -> None:
+    for item in exclusions:
+        if item["catalog_id"] not in evidence.requirement_ids or item["policy_source"] not in {evidence.skill_path, *dict(inputs.instruction_digests)}:
+            msg = "partial scope exclusion requires this specialist and its bound skill or instructions"
+            raise ValueError(msg)
+
+
+def _partial_audit_context(document: dict[str, Any], args: argparse.Namespace, entry: dict[str, Any]) -> dict[str, Any]:
+    source = {key: entry[key] for key in ("artifact_path", "metadata_path")}
+    _kind, expectation, evidence, _content, normalized = _load_evidence_source(source, require_normalized=True)
+    if (
+        not isinstance(expectation, ReviewEvidenceExpectation)
+        or not isinstance(evidence, ReviewEvidence)
+        or expectation.audit_input_identity is None
+        or normalized is None
+    ):
+        msg = "partial audit requires compiled input identities"
+        raise ValueError(msg)
+    inputs = expectation.audit_input_identity
+    record = _record_document(normalized)
+    snapshot = source_snapshot(_read_json_object(args.current_capture))
+    snapshot.verify()
+    if snapshot.source_state != expectation.source_state or snapshot.repository_root != entry["dispatch"]["repository_root"]:
+        msg = "partial audit requires unchanged original source and repository"
+        raise ValueError(msg)
+    exclusions = scope_exclusions(document.get("review_scope_exclusions", []))
+    _validate_continuation_exclusions(exclusions, inputs, evidence)
+    if not record["files_inspected"] and not exclusions:
+        msg = "partial audit continuation requires progress: new inspection or policy classification"
+        raise ValueError(msg)
+    units = partial_coverage_units(record, inputs.owned_paths, excluded_paths(exclusions, evidence.requirement_ids))
+    return {
+        **source,
+        "origin": asdict(snapshot),
+        "target": asdict(snapshot),
+        "units": units,
+        "evidence_id": evidence.evidence_id,
+        "artifact_digest": evidence.raw_result_digest,
+        "original_findings": record["findings"],
+        "original_validation_requirements": record["validation_requirements"],
+        "original_handoffs": record["handoffs"],
+        "original_audit_context": {key: record[key] for key in ("execution_facts", "validation_limits", "unresolved_uncertainties") if key in record},
+        "original_git_context": audit_git_context(record),
+        "instruction_digests": [[path, _file_identity_digest(path)] for path, _digest in inputs.instruction_digests],
+        "metadata_transitions": [],
+        "partial_audit": {"review_scope_exclusions": list(exclusions)},
+    }
+
+
+def _partial_audit_plan(plan: GraphPlan, old: WorkerNode, context: dict[str, Any], new_id: str, dispositions: tuple[dict[str, Any], ...]) -> GraphPlan:
+    exclusions = scope_exclusions(context["partial_audit"]["review_scope_exclusions"])
+    excluded = excluded_paths(exclusions, old.requirement_ids)
+    updated = replace(
+        plan,
+        actual_worker_nodes=tuple(
+            replace(node, coverage=tuple(path for path in node.coverage if path not in excluded)) if node.node_id == new_id else node
+            for node in plan.actual_worker_nodes
+        ),
+        routing_decisions=tuple(
+            replace(item, review_surface=tuple(path for path in item.review_surface if path not in excluded))
+            if item.requirement_id in old.requirement_ids
+            else item
+            for item in plan.routing_decisions
+        ),
+        review_scope_exclusions=scope_exclusions([*plan.review_scope_exclusions, *exclusions]),
+        audit_delta_reviews=(*plan.audit_delta_reviews, {**context, "node_id": new_id}),
+    )
+    if not plan.captured_path_inventory:
+        return updated
+    audit_requirements = {requirement for node in updated.actual_worker_nodes if node.mode == "audit" for requirement in node.requirement_ids}
+    audit_requirements.update(item.requirement_id for item in updated.reused_review_identities if item.mode == "audit")
+    ownership = {item.catalog_id: item.review_surface for item in updated.routing_decisions if item.requirement_id in audit_requirements}
+    inventory = captured_path_inventory(
+        tuple(context["target"]["captured_scope_paths"]), ownership, set(ownership), [*plan.captured_path_inventory["dispositions"], *dispositions]
+    )
+    if inventory["unassessed_captured_paths"]:
+        msg = "partial scope correction requires captured_path_dispositions for newly unassigned paths: " + ", ".join(inventory["unassessed_captured_paths"])
+        raise ValueError(msg)
+    return replace(updated, captured_path_inventory=inventory)
+
+
 def replace_invalidated_audit(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
     """Retire a mistaken judgment without editing source or sealed evidence."""
     plan = _graph_plan(document["plan"])
@@ -8080,7 +8185,19 @@ def replace_invalidated_audit(document: dict[str, Any], args: argparse.Namespace
             fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
-def _replacement_plan(plan: GraphPlan, record: dict[str, Any]) -> GraphPlan:
+def continue_partial_audit(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    """Retain completed inspection and assign the remaining applicable paths."""
+    plan = _graph_plan(document["plan"])
+    lock_path = args.journal.with_name(args.journal.name + ".lock")
+    with run_control_lock(plan.review_lifecycle.run_control), lock_path.open("a+b") as stream:
+        fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+        try:
+            return _replace_invalidated_audit_locked(document, args, plan, partial=True)
+        finally:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+
+def _replacement_plan(plan: GraphPlan, record: dict[str, Any], *, partial: bool = False) -> GraphPlan:
     """Give the affected dependency closure new node and evidence identities."""
     mapping = record["replacement_node_ids"]
     rename = lambda node_id: mapping.get(node_id, node_id)  # noqa: E731 - local identity projection.
@@ -8098,11 +8215,12 @@ def _replacement_plan(plan: GraphPlan, record: dict[str, Any]) -> GraphPlan:
         current_epoch_node_ids=tuple(map(rename, plan.current_epoch_node_ids)),
         execution_epochs=tuple(replace(epoch, node_ids=tuple(map(rename, epoch.node_ids))) for epoch in plan.execution_epochs),
         audit_delta_reviews=tuple(item for item in plan.audit_delta_reviews if item["node_id"] not in mapping),
-        audit_replacements=(*plan.audit_replacements, record),
+        audit_replacements=plan.audit_replacements if partial else (*plan.audit_replacements, record),
+        audit_continuations=(*plan.audit_continuations, record) if partial else plan.audit_continuations,
     )
 
 
-def _replace_invalidated_audit_locked(document: dict[str, Any], args: argparse.Namespace, plan: GraphPlan) -> dict[str, Any]:  # noqa: C901, PLR0912, PLR0915 - one serialized replacement transaction.
+def _replace_invalidated_audit_locked(document: dict[str, Any], args: argparse.Namespace, plan: GraphPlan, *, partial: bool = False) -> dict[str, Any]:  # noqa: C901, PLR0912, PLR0915 - one serialized replacement transaction.
     source_state = _state(document, "source_state")
     if _capture_source_state(args.current_capture) != _current_metadata_state(document):
         msg = "audit replacement requires unchanged source state"
@@ -8125,10 +8243,11 @@ def _replace_invalidated_audit_locked(document: dict[str, Any], args: argparse.N
     events, state, head = read_execution_journal(args.journal, plan=plan, source_state=source_state)
     entries = _dispatches_by_node(_read_json_object(args.dispatches), plan=plan, source_state=source_state)
     node = next((node for node in plan.actual_worker_nodes if node.node_id == node_id), None)
-    if node is None or node.mode != "audit" or state.get(node_id) != "invalidated":
-        msg = "audit replacement requires an explicitly invalidated audit"
+    statuses = {"accepted", "blocked"} if partial else {"invalidated"}
+    if node is None or node.mode != "audit" or state.get(node_id) not in statuses:
+        msg = "partial continuation requires a compiled partial audit" if partial else "audit replacement requires an explicitly invalidated audit"
         raise ValueError(msg)
-    accepted = [event for event in events if event["node_id"] == node_id and event["status"] == "accepted"]
+    accepted = [event for event in events if event["node_id"] == node_id and event["status"] in ({"accepted", "blocked"} if partial else {"accepted"})]
     if not accepted:
         msg = "audit replacement requires prior accepted evidence"
         raise ValueError(msg)
@@ -8139,7 +8258,7 @@ def _replace_invalidated_audit_locked(document: dict[str, Any], args: argparse.N
     if any(status in {"in-flight", "awaiting-replan"} for status in state.values()):
         msg = "audit replacement requires quiescent execution"
         raise ValueError(msg)
-    if any(
+    if not partial and any(
         item["skill_id"] == node.skill_id and item["requirement_ids"] == list(node.requirement_ids) and tuple(item["source_state"]) == source_state
         for item in plan.audit_replacements
     ):
@@ -8162,9 +8281,12 @@ def _replace_invalidated_audit_locked(document: dict[str, Any], args: argparse.N
         "source_state": list(source_state),
         "previous_plan_digest": _plan_digest(plan),
         "previous_journal_head": head,
-        "invalidated_evidence_id": accepted[-1]["evidence"]["evidence_id"],
+        "originating_evidence_id" if partial else "invalidated_evidence_id": accepted[-1]["evidence"]["evidence_id"],
     }
-    identity = digest_bytes(canonical_json(record).encode())[7:23]
+    context = _partial_audit_context(document, args, entries[node_id]) if partial else None
+    # Classification is part of the transition identity, including every reason.
+    identity_input = {**record, "partial_audit": context["partial_audit"]} if context is not None else record
+    identity = digest_bytes(canonical_json(identity_input).encode())[7:23]
     record["replacement_node_ids"] = {old: f"{old}-replacement-{identity}" for old in sorted(affected)}
     repository = Path(entries[node_id]["dispatch"]["repository_root"]).resolve()
     history = Path(_required_text(document, "artifact_store")).resolve() / f"audit-history-{identity}"
@@ -8195,11 +8317,23 @@ def _replace_invalidated_audit_locked(document: dict[str, Any], args: argparse.N
     record["preserved_files"] = preserved
     record["forbidden_artifacts"] = sorted({*forbidden_artifacts("", {old: entries[old] for old in affected}), *(item["path"] for item in preserved)})
     sources, records = _accepted_journal_sources(plan, source_state, events, entries, include_blocked=True)
-    expanded = _replacement_plan(plan, record)
+    expanded = _replacement_plan(plan, record, partial=partial)
+    if context is not None:
+        expanded = _partial_audit_plan(expanded, node, context, record["replacement_node_ids"][node_id], _records(document, "captured_path_dispositions"))
     result = _publish_validation_continuation(
-        document, args, plan, expanded, entries, sources, records, head, status="audit-replaced", journal_events=events, replaced_node_id=node_id
+        document,
+        args,
+        plan,
+        expanded,
+        entries,
+        sources,
+        records,
+        head,
+        status="audit-continued" if partial else "audit-replaced",
+        journal_events=events,
+        replaced_node_id=node_id,
     )
-    result["audit_replacement"] = record
+    result["audit_continuation" if partial else "audit_replacement"] = record
     result_path = history / "result.json"
     result_bytes = (json.dumps(result, indent=2, sort_keys=True) + "\n").encode()
     _write_bytes_atomically_once(result_path, result_bytes, mode=0o444)
@@ -8232,7 +8366,7 @@ def _verify_validation_recoveries(plan: GraphPlan) -> None:
             if digest_bytes(content) != _required_text(artifact, "digest"):
                 msg = "preserved validation recovery evidence changed"
                 raise ValueError(msg)
-    for replacement in plan.audit_replacements:
+    for replacement in (*plan.audit_replacements, *plan.audit_continuations):
         for artifact in _records(replacement, "preserved_files"):
             if digest_bytes(_read_regular_file_no_follow(Path(artifact["path"]))) != artifact["digest"]:
                 msg = "preserved audit replacement evidence changed"
@@ -8992,6 +9126,8 @@ def finalize_proof(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, P
         "proof_limitations": _proof_limitations(plan),
         "validation_recoveries": list(plan.validation_recoveries),
         "audit_replacements": list(plan.audit_replacements),
+        "audit_continuations": list(plan.audit_continuations),
+        "review_scope_exclusions": list(plan.review_scope_exclusions),
         "handoff_reconciliation": handoff_reconciliation,
         "independent_review_metrics": {
             "accepted_evidence_count": len(accepted_independent),
@@ -9131,6 +9267,7 @@ def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
     validation_parser.add_argument("--output", type=Path, required=True)
     for operation, description in (
         ("replace-invalidated-audit", "replace an accepted audit invalidated for applying the wrong semantic checklist"),
+        ("continue-partial-audit", "preserve completed inspection and review remaining applicable paths on unchanged source"),
         ("recover-validation-launch", "retry one proven unstarted validator after an executor remedy"),
         ("recover-validation-execution", "retry one failed aggregate after a proven executor restriction"),
     ):
@@ -9626,6 +9763,7 @@ def _json_operation_output(document: dict[str, Any], args: argparse.Namespace) -
         "recover-validation-launch",
         "recover-validation-execution",
         "replace-invalidated-audit",
+        "continue-partial-audit",
     }:
         operation = {
             "reconcile-validation-requirements": reconcile_validation_requirements,
@@ -9633,6 +9771,7 @@ def _json_operation_output(document: dict[str, Any], args: argparse.Namespace) -
             "recover-validation-launch": recover_validation_launch,
             "recover-validation-execution": recover_validation_execution,
             "replace-invalidated-audit": replace_invalidated_audit,
+            "continue-partial-audit": continue_partial_audit,
         }[args.operation]
         return operation(document, args)
     if args.operation == "next-ready":
@@ -9842,7 +9981,13 @@ def _prepare_validation_timing(document: dict[str, Any], args: argparse.Namespac
 def _write_json_operation_result(args: argparse.Namespace, output_path: Path, output: dict[str, Any]) -> None:
     """Write the result, retaining recovery paths after a completed source resume."""
     output_text = json.dumps(output, indent=2, sort_keys=True) + "\n"
-    if args.operation in {"recover-validation-launch", "recover-validation-execution", "reconcile-validation-requirements", "replace-invalidated-audit"}:
+    if args.operation in {
+        "recover-validation-launch",
+        "recover-validation-execution",
+        "reconcile-validation-requirements",
+        "replace-invalidated-audit",
+        "continue-partial-audit",
+    }:
         _write_bytes_atomically_once(output_path, output_text.encode(), mode=0o644)
         return
     try:

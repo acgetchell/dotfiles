@@ -388,6 +388,13 @@
       }
     ]
   },
+  "continue-partial-audit": {
+    "artifact_store": "/tmp/review-continuation",
+    "plan": {},
+    "source_state": ["scope", "worktree", "repository"],
+    "node_id": "audit-001",
+    "reason": "Finish the omitted applicable paths on unchanged inputs; retain the completed inspection."
+  },
   "replace-invalidated-audit": {
     "artifact_store": "/tmp/review-recovery",
     "plan": {},

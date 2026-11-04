@@ -477,7 +477,7 @@
       "target_kind": "leaf",
       "default_priority": "optional-hygiene",
       "synthesis_dependency": "rust-synthesis",
-      "path_patterns": ["src/**/*.rs", "tests/**/*.rs"],
+      "path_patterns": ["src/**/*.rs", "tests/**/*.rs", "benches/**/*.rs", "examples/**/*.rs"],
       "semantic_triggers": ["Naming, imports, path clarity, or redundant qualification are material rather than incidental."]
     },
     {

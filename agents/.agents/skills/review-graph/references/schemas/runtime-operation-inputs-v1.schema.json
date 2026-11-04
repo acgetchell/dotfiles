@@ -1768,6 +1768,34 @@
         }
       }
     },
+    "continue-partial-audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_store", "plan", "source_state", "node_id", "reason"],
+      "properties": {
+        "artifact_store": {"type": "string", "minLength": 1},
+        "plan": {"type": "object"},
+        "source_state": {"$ref": "#/$defs/sourceState"},
+        "node_id": {"type": "string", "minLength": 1},
+        "reason": {"type": "string", "minLength": 1},
+        "external_metadata_transitions": {"type": "array", "items": {"type": "object"}},
+        "captured_path_dispositions": {"type": "array", "items": {"type": "object"}},
+        "review_scope_exclusions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["catalog_id", "path", "reason", "policy_source"],
+            "properties": {
+              "catalog_id": {"type": "string", "minLength": 1},
+              "path": {"type": "string", "minLength": 1},
+              "reason": {"type": "string", "minLength": 1},
+              "policy_source": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      }
+    },
     "replace-invalidated-audit": {
       "type": "object",
       "additionalProperties": false,
