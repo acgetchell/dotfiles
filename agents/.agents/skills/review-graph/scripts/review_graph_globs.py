@@ -62,6 +62,19 @@ def _intersects(left: tuple[str, ...], right: tuple[str, ...], *, paths: bool) -
     return False
 
 
+@lru_cache(maxsize=4096)
+def _literal_directory_prefix(pattern: str) -> str:
+    """Return only complete literal components, including their trailing slash."""
+    wildcard = min((pattern.index(character) for character in "*?[" if character in pattern), default=len(pattern))
+    if wildcard == len(pattern):
+        return pattern + "/"
+    return pattern[: pattern.rfind("/", 0, wildcard) + 1]
+
+
 def path_globs_intersect(left: str, right: str) -> bool:
     """Respect directory boundaries; ** alone spans zero or more components."""
+    left_prefix, right_prefix = _literal_directory_prefix(left), _literal_directory_prefix(right)
+    common = min(len(left_prefix), len(right_prefix))
+    if left_prefix[:common] != right_prefix[:common]:
+        return False
     return _intersects(tuple(left.split("/")), tuple(right.split("/")), paths=True)

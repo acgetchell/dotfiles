@@ -10,10 +10,13 @@ import sys
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from review_graph_environment import ORIGIN_FILE, capture_python_origin, check_retained_origin, verify_helper_environment
 from review_graph_execution import CONTEXT_FILE, capture_execution_context, command_prefix, verify_execution_context
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 _MANIFEST = "runtime-manifest.json"
 _REFERENCE = "runtime-reference.json"
@@ -140,8 +143,8 @@ def _digest(content: bytes) -> str:
     return "sha256:" + hashlib.sha256(content).hexdigest()
 
 
-def _files(root: Path) -> dict[str, bytes]:
-    files = {}
+def _resource_paths(root: Path) -> Iterator[Path]:
+    """Enumerate the exact resource inventory without reading file contents."""
     for path in sorted(root.rglob("*")):
         relative = path.relative_to(root)
         if any(part in {"__pycache__", ".pytest_cache", ".git"} for part in relative.parts) or path.name.startswith("test_") or path.suffix == ".pyc":
@@ -150,8 +153,11 @@ def _files(root: Path) -> dict[str, bytes]:
             msg = f"runtime resources must not traverse symlinks: {path}"
             raise ValueError(msg)
         if path.is_file():
-            files[relative.as_posix()] = path.read_bytes()
-    return files
+            yield path
+
+
+def _files(root: Path) -> dict[str, bytes]:
+    return {path.relative_to(root).as_posix(): path.read_bytes() for path in _resource_paths(root)}
 
 
 def _interpreter() -> InterpreterIdentity:
@@ -181,7 +187,7 @@ def verify_snapshot(reference: object) -> RuntimeManifest:
         if not target.is_relative_to(root) or ".." in Path(relative).parts or target.resolve() != target or _digest(target.read_bytes()) != identity:
             msg = f"frozen runtime resource changed: {relative}"
             raise ValueError(msg)
-    actual = set(_files(root)) - {_MANIFEST, _REFERENCE}
+    actual = {path.relative_to(root).as_posix() for path in _resource_paths(root)} - {_MANIFEST, _REFERENCE}
     if actual != {relative for relative, _identity in manifest.files}:
         msg = "frozen runtime resource inventory changed"
         raise ValueError(msg)

@@ -457,12 +457,12 @@ stow-verify: _ensure-uv
 
 # Cheap instruction/routing guards run once before graph execution, including in ci.
 test-review-contracts: _ensure-uv
-    uv run --locked pytest {{ review_contract_tests }}
+    uv run --locked pytest {{ review_contract_tests }} -n 0
 
 # With no arguments, execute the complete remaining inventory; selectors stay optional.
 [positional-arguments]
 test-python *args: test-review-contracts
-    uv run --locked pytest --ignore {{ review_contract_tests }} "$@"
+    uv run --locked pytest --ignore {{ review_contract_tests }} -n "${DOTFILES_TEST_WORKERS:-4}" --dist worksteal --max-worker-restart 0 "$@"
 
 # Standard-library tests also run on Windows without installing POSIX-only tools.
 test-validation-timing: _ensure-uv

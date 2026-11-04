@@ -115,6 +115,12 @@ complexity evidence before and after an implementation. Use the same command,
 inputs, features, toolchain, and environment; keep fixture construction,
 validation, logging, and parsing outside measured work.
 
+For separate source exports, establish executable provenance before discovery or
+sampling: isolate compiler build roots unless a verified build contract proves
+invalidation and actual compiled inputs. A changed `--manifest-path` and verified
+source bytes alone are insufficient. Keep Criterion results/baselines separate
+from compiler storage; follow the linked evidence guidance for retention/recovery.
+
 Treat a clear regression as a failed optimization. Do not add
 dimension-, size-, seed-, or fixture-specific branches merely to improve a noisy
 table; specialization must follow a genuine domain algorithm boundary.

@@ -139,3 +139,49 @@ The typo has no effect on command syntax, workloads, claims or methodology. The
 repository offers a Markdown check and a `performance-local` wrapper. That
 wrapper fetches tags, creates worktrees, runs two native suites and retains data.
 No other changes are requested.
+
+## I. Compare two source exports
+
+Request: "Audit this supplemental before/after benchmark plan and its discovery
+attempts. Can we sample current and compare it with the retained baseline?"
+
+Exports `exports/original` and `exports/current` have independently verified file
+manifests, the same package name/version and `Cargo.lock`, and different library
+implementation bytes. Both source trees have timestamps older than the first
+build. The harness, workload, inputs, features, compiler and host/session satisfy
+the comparison policy. Both exports discover the same semantic case IDs.
+
+For this synthetic fixture, an untimed `compiled_origin()` probe in the library
+being measured returns `original` or `current` according to the compiled library
+implementation. The common harness calls it; the label is not read from an
+environment variable, manifest argument or working directory. Source verification
+covers both the probe and the implementation. Recorded attempts are:
+
+| Attempt | Build/discovery observations |
+| --- | --- |
+| Original | `--manifest-path exports/original/Cargo.toml`, `CARGO_TARGET_DIR=build/shared`; logs bind original compiler inputs to executable digest A; probe returns `original`; discovery succeeds |
+| Current 1 | Only `--manifest-path` changes to `exports/current/Cargo.toml`; finishes in 0.18 s without a library compilation, same executable path and digest A; relative `src/...` dep-info; probe returns `original`; discovery exits zero with matching case IDs |
+| Current 2 | Fresh `build/current` target and intermediate roots; logs bind current compiler inputs to executed digest B; probe returns `current`; discovery and correctness gates succeed |
+
+Original has complete, independently accepted raw samples and successful gates;
+neither current attempt collected timing samples. Both current attempts' commands,
+logs and artifact digests are retained. Current 2 changes no harness, sampling
+policy or other comparison condition. These are locally orchestrated commands;
+the installed managed acquisition engine did not execute them.
+
+The draft sampling plan switches back to `build/shared` so Criterion can find its
+saved baseline under `build/shared/criterion`, deletes Current 1's log after a
+successful retry, and treats source hashes plus case IDs as sufficient provenance.
+The installed harness honors `CRITERION_HOME`; it has no output-directory override.
+A separate draft sets distinct target roots but leaves `CARGO_BUILD_BUILD_DIR`
+pointing both exports at `build/shared-intermediates` without a cache contract.
+
+Variations to assess separately:
+
+- Current 1 has no recorded probe or executable digest; its other observations
+  are unchanged. No evidence establishes its actual compiled inputs.
+- Another build system deliberately shares a content-addressed cache. Its
+  established contract covers source bytes, generated inputs, dependencies,
+  flags and compiler identity; verified build records identify the actual inputs
+  and executed artifact for each export. Changed current inputs select the
+  correct current artifact, whose library probe returns `current`.
