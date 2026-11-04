@@ -61,7 +61,7 @@ def test_rust_style_coverage_is_per_skill_and_focused_scope_stays_focused(tmp_pa
 
 def _fixture(
     tmp_path: Path, *, exclude_before: bool = False, citation_only_archives: bool = False
-) -> tuple[dict[str, Any], Namespace, dict[str, Any], dict[str, Any]]:
+) -> tuple[dict[str, Any], Namespace, dict[str, Any], dict[str, Any], dict[str, Any]]:
     git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path, instructions=True)
     (repository / "AGENTS.md").write_text("Historical archives and generated changelog archives are excluded from citation maintenance.\n")
     for path in [*ACTIVE, *ARCHIVES]:
@@ -124,7 +124,7 @@ def _fixture(
         "reason": "Finish applicable citation inspection without changing source.",
         "review_scope_exclusions": [{**item, "policy_source": str(repository / "AGENTS.md")} for item in exclusions],
     }
-    return request, args, entry, dispatches
+    return request, args, entry, dispatches, template
 
 
 def _compile(entry: dict[str, Any], payload: dict[str, Any], lifecycle: dict[str, Any], args: Namespace) -> dict[str, Any]:
@@ -178,7 +178,7 @@ def _partial(entry: dict[str, Any], *, finding: bool = False) -> dict[str, Any]:
 
 
 def test_archive_exclusions_apply_before_dispatch_and_active_omissions_still_reject(tmp_path: Path) -> None:
-    request, args, entry, dispatches = _fixture(tmp_path, exclude_before=True)
+    request, args, entry, dispatches, _template = _fixture(tmp_path, exclude_before=True)
     assert entry["dispatch"]["owned_paths"] == ACTIVE
     assert entry["dispatch"]["review_scope_exclusions"] == request["review_scope_exclusions"]
     assert any(set(ARCHIVES) <= set(item["dispatch"]["owned_paths"]) for item in dispatches["dispatches"] if item != entry)
@@ -192,7 +192,7 @@ def test_archive_exclusions_apply_before_dispatch_and_active_omissions_still_rej
 @pytest.mark.parametrize("finding", [False, True])
 @pytest.mark.parametrize("exclude_archives", [False, True])
 def test_continuation_preserves_evidence_and_requires_remaining_inspection(tmp_path: Path, finding: bool, exclude_archives: bool) -> None:
-    request, args, old, dispatches = _fixture(tmp_path)
+    request, args, old, dispatches, _template = _fixture(tmp_path)
     if not exclude_archives:
         request["review_scope_exclusions"] = []
     payload = _partial(old, finding=finding)
@@ -245,7 +245,7 @@ def test_continuation_preserves_evidence_and_requires_remaining_inspection(tmp_p
 
 @pytest.mark.parametrize("damage", ["source", "overlap", "missing-reason", "wrong-policy", "uncertainty", "in-flight", "stopped"])
 def test_continuation_rejects_unsafe_or_incomplete_inputs(tmp_path: Path, damage: str) -> None:
-    request, args, old, dispatches = _fixture(tmp_path)
+    request, args, old, dispatches, _template = _fixture(tmp_path)
     payload = _partial(old)
     if damage == "uncertainty":
         payload["unresolved_uncertainties"] = [{"kind": "semantic", "reason": "Active source semantics remain uncertain."}]
@@ -281,7 +281,7 @@ def test_continuation_rejects_unsafe_or_incomplete_inputs(tmp_path: Path, damage
 
 @pytest.mark.parametrize("progress", [False, True])
 def test_repeated_partial_continuation_requires_progress_and_preserves_findings(tmp_path: Path, progress: bool) -> None:
-    request, args, old, _dispatches = _fixture(tmp_path)
+    request, args, old, _dispatches, _template = _fixture(tmp_path)
     exclusions = request.pop("review_scope_exclusions")
     initial = _partial(old, finding=True)
     _compile(old, initial, request, args)
@@ -322,7 +322,7 @@ def test_repeated_partial_continuation_requires_progress_and_preserves_findings(
 
 
 def test_late_exclusions_reconcile_global_inventory_without_false_owned_coverage(tmp_path: Path) -> None:
-    request, args, old, _dispatches = _fixture(tmp_path, citation_only_archives=True)
+    request, args, old, _dispatches, _template = _fixture(tmp_path, citation_only_archives=True)
     _compile(old, _partial(old), request, args)
     with pytest.raises(ValueError, match="captured_path_dispositions"):
         runtime.continue_partial_audit(request, args)
@@ -339,3 +339,73 @@ def test_late_exclusions_reconcile_global_inventory_without_false_owned_coverage
     assert inventory["unassessed_captured_paths"] == []
     assert set(ARCHIVES) <= set(inventory["unassigned_captured_paths"])
     assert any(set(item["paths"]) == set(ARCHIVES) and item["disposition"] == "archive" for item in inventory["dispositions"])
+
+
+@pytest.mark.parametrize("remove_archive", [False, True])
+@pytest.mark.parametrize("template_exclusions", [False, True])
+@pytest.mark.parametrize("changed_path", [ACTIVE[0], "state.rs"])
+def test_mutation_after_partial_continuation_retains_applicable_exclusions(
+    tmp_path: Path, *, remove_archive: bool, template_exclusions: bool, changed_path: str
+) -> None:
+    request, args, old, _dispatches, template = _fixture(tmp_path)
+    payload = _partial(old)
+    _compile(old, payload, request, args)
+    continued = runtime.continue_partial_audit(request, args)
+    lifecycle = continued["lifecycle_input"]
+    entries = json.loads(Path(continued["dispatches_path"]).read_bytes())
+    new = next(item for item in entries["dispatches"] if "docs.citations" in item["dispatch"]["requirement_ids"])
+    successor = _payload([ACTIVE[1]], dispatch=new["dispatch"])
+    successor["validation_requirements"] = payload["validation_requirements"]
+    _compile(
+        new,
+        successor,
+        lifecycle,
+        Namespace(dispatches=Path(continued["dispatches_path"]), journal=Path(continued["journal_path"]), current_capture=args.current_capture),
+    )
+    previous_capture = json.loads(args.current_capture.read_bytes())
+    repository = Path(previous_capture["repository_root"])
+    (repository / changed_path).write_text("# Updated current scientific references\n" if changed_path in ACTIVE else "pub fn state() { assert!(true); }\n")
+    if remove_archive:
+        (repository / ARCHIVES[1]).unlink()
+        for override in template["routing_overrides"]:
+            override["review_surface"] = [path for path in override.get("review_surface", []) if path != ARCHIVES[1]]
+    expected = [dict(item) for item in request["review_scope_exclusions"] if not remove_archive or item["path"] != ARCHIVES[1]]
+    if template_exclusions:
+        expected[0]["reason"] = "The current planning policy still excludes this historical citation archive."
+        tooling = next(item for item in lifecycle["plan"]["routing_decisions"] if item["catalog_id"] == "repo.tooling")
+        expected.append({**expected[0], "catalog_id": "repo.tooling", "policy_source": tooling["skill_path"]})
+        template["review_scope_exclusions"] = [dict(expected[0]), dict(expected[-1])]
+    original_template = json.dumps(template, sort_keys=True)
+    original_plan = json.dumps(lifecycle["plan"], sort_keys=True)
+    advanced = runtime.advance_after_mutation(
+        {
+            **lifecycle,
+            "previous_capture": previous_capture,
+            "new_capture": _scope_data("git", repository, "baseline", None, ()),
+            "changed_paths": [changed_path, *([ARCHIVES[1]] if remove_archive else [])],
+            "planning_template": template,
+            "authorization_before": "review-only",
+            "authorization_after": "review-and-fix",
+            "repair_epoch": 1,
+            "artifact_store": str(tmp_path / "after-continuation-repair"),
+            "state_verification_command": "capture_scope.py --mode baseline",
+            "journal_path": continued["journal_path"],
+            "dispatches_path": continued["dispatches_path"],
+        }
+    )
+    assert advanced["lifecycle_input"]["plan"]["review_scope_exclusions"] == expected
+    if changed_path in ACTIVE:
+        citations = next(item["dispatch"] for item in advanced["dispatch_set"]["dispatches"] if "docs.citations" in item["dispatch"]["requirement_ids"])
+        assert citations["owned_paths"] == ACTIVE
+        assert citations["review_scope_exclusions"] == [item for item in expected if item["catalog_id"] == "docs.citations"]
+    else:
+        assert new["dispatch"]["evidence_id"] in advanced["reused_evidence_ids"]
+        reused = next(item for item in advanced["lifecycle_input"]["plan"]["reused_review_identities"] if item["requirement_id"] == "docs.citations")
+        assert reused["planned_paths"] == ACTIVE
+    tooling_dispatch = next(item["dispatch"] for item in advanced["dispatch_set"]["dispatches"] if "repo.tooling" in item["dispatch"]["requirement_ids"])
+    assert (ARCHIVES[0] in tooling_dispatch["owned_paths"]) is not template_exclusions
+    if remove_archive:
+        assert all(ARCHIVES[1] not in item["dispatch"]["owned_paths"] for item in advanced["dispatch_set"]["dispatches"])
+    assert advanced["lifecycle_input"]["plan"]["audit_continuations"] == lifecycle["plan"]["audit_continuations"]
+    assert json.dumps(template, sort_keys=True) == original_template
+    assert json.dumps(lifecycle["plan"], sort_keys=True) == original_plan

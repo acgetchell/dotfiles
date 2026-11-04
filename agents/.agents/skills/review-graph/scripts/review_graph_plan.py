@@ -5728,16 +5728,19 @@ def _apply_review_scope(
 ) -> tuple[RoutingDecision, ...]:
     """Reconcile explicit policy exclusions before assigning substantive reads."""
     by_id = {decision.catalog_id: decision for decision in decisions}
+    captured = frozenset(captured_paths)
+    excluded_by_id: dict[str, set[str]] = {catalog_id: set() for catalog_id in by_id}
     for item in exclusions:
         decision = by_id.get(item["catalog_id"])
-        if decision is None or decision.disposition != "selected" or item["path"] not in captured_paths:
-            msg = "scope exclusions must name captured paths and selected specialists"
+        if decision is None or decision.disposition not in {"selected", "exact-evidence-reused"} or item["path"] not in captured:
+            msg = "scope exclusions must name captured paths and selected or reused specialists"
             raise ValueError(msg)
         if item["policy_source"] not in {decision.skill_path, *decision.instruction_paths}:
             msg = "scope exclusion policy_source must be the selected skill or an applicable instruction"
             raise ValueError(msg)
+        excluded_by_id[item["catalog_id"]].add(item["path"])
     return tuple(
-        replace(decision, review_surface=tuple(path for path in decision.review_surface if path not in excluded_paths(exclusions, (decision.catalog_id,))))
+        replace(decision, review_surface=tuple(path for path in decision.review_surface if path not in excluded_by_id[decision.catalog_id]))
         for decision in decisions
     )
 

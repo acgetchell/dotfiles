@@ -6743,6 +6743,13 @@ def advance_after_mutation(document: dict[str, Any]) -> dict[str, Any]:  # noqa:
             raise ValueError(msg)
     interleaved_history = _interleaved_repair_history(document, sources, interleaved) if interleaved is not None else None
     planning_input = bootstrap_document(new_capture, planning_template)
+    captured = frozenset(captured_paths)
+    exclusions = {
+        (item["catalog_id"], item["path"]): item
+        for item in (*old_plan.review_scope_exclusions, *scope_exclusions(planning_input.get("review_scope_exclusions", [])))
+        if item["path"] in captured
+    }
+    planning_input["review_scope_exclusions"] = list(exclusions.values())
     if new_capture["capture_mode"] == "baseline" and not planning_input.get("change_target"):
         planning_input["concrete_change_target"] = bool(captured_head_changes("git", Path(new_capture["repository_root"]), new_capture))
         if planning_input["concrete_change_target"]:
