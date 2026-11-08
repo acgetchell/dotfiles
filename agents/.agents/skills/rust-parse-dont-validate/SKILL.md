@@ -1,16 +1,18 @@
 ---
 name: rust-parse-dont-validate
-description: "Design or audit Rust input boundaries and invariant-bearing types so accepted values retain meaningful validity evidence."
+description: "Design or audit Rust domain types and input boundaries using type-driven design and algebraic data types to preserve meaningful invariants."
 ---
 
 # Rust Parse Don't Validate
 
 Rust-orchestrator passes use the shared [execution-v1 contract](../rust-review-orchestrator/references/execution-v1.md).
 
-For direct invocation, read [references/standalone-workflow.md](references/standalone-workflow.md)
+For direct review invocation, read [references/standalone-workflow.md](references/standalone-workflow.md)
 for scope discovery and the complete standalone report.
 
-Convert raw external representations into domain types that can represent only supported states. Let core computation accept those types and rely on their invariants instead of repeatedly checking raw values.
+At design time, start from valid domain states and operations before choosing fields or implementing behavior. Convert raw external representations into types that carry the established invariants inward, so core computation need not repeatedly check raw values.
+
+For a design request, use the supplied requirements and representative callers even when no code or diff exists. For a review, inspect the scoped implementation and distinguish an admitted invalid state from an optional redesign.
 
 ## Ground Rules
 
@@ -18,6 +20,7 @@ Convert raw external representations into domain types that can represent only s
 - Name the invariant and its canonical owner before introducing a wrapper.
 - Keep passive transport and report shapes simple when core behavior does not trust their fields.
 - Do not promise more than a type proves; account for mutation, aliasing, owner-relative facts, lifetimes, deserialization, and unchecked internal paths.
+- Keep public concept placement, canonical workflows, and compatibility analysis under `rust-api-design`; own the representation and invariant proof here.
 - Keep coordinated multi-field mutation and rollback under `rust-invariant-state-transitions`, error-enum detail under `rust-error-variants`, and lifetime/provenance proof under `rust-borrowed-view-audit`.
 - Keep reviews read-only unless fixes are requested. Preserve compatibility unless a breaking change is authorized.
 
@@ -25,7 +28,7 @@ Convert raw external representations into domain types that can represent only s
 
 Load only the detail matching the scoped boundary:
 
-- Read [references/algebraic-domain-modeling.md](references/algebraic-domain-modeling.md) when booleans, options, strings, parallel fields, modes, or staged states admit impossible combinations.
+- When designing domain states or signatures, or when fields admit impossible combinations, read the [shared type-driven design guide](../review-graph/references/type-driven-design.md), then [Rust modeling rules](references/algebraic-domain-modeling.md).
 - Read [references/nonzero-numeric-refinements.md](references/nonzero-numeric-refinements.md) when positive counts, bounded integers, finite floats, probabilities, tolerances, dimensions, or numeric conversions carry invariants.
 - Read [references/serialization-boundaries.md](references/serialization-boundaries.md) when Serde, configuration, wire formats, checkpoints, persistence, or restore paths can bypass constructors.
 - Read [references/semgrep-guardrails.md](references/semgrep-guardrails.md) only when the repository already uses Semgrep or similar project rules and the pattern is recurring.
@@ -44,7 +47,13 @@ For each value or related field set, record:
 
 Do not create a refined type when no meaningful invariant exists or the value is only passive output.
 
-### 2. Separate raw and domain representations
+### 2. Design the state space and signatures
+
+Use product types (`struct`/tuples) for facts that coexist and sum types (`enum`) for alternatives with their own required payloads. Enumerate legal cases and representative forbidden combinations before selecting a representation. Keep independent choices independent instead of multiplying variants unnecessarily.
+
+Sketch operation inputs and outputs before bodies: require the evidence an operation needs, and return evidence for the next step. Choose an enum, refined value, or staged type only when it removes a concrete invalid state or operation ordering. State which relationships still require runtime checks; a struct of valid fields does not prove a valid relationship between them.
+
+### 3. Separate raw and domain representations
 
 Keep raw data at boundaries such as CLI arguments, configuration, wire/database formats, C/FFI input, checkpoints, and serialization. Convert it once before core computation.
 
@@ -59,7 +68,7 @@ Use `From` only for genuinely infallible conversion. Use `Option` for absence, n
 
 Public fields are appropriate for passive data. They are not a valid domain boundary when arbitrary construction or later assignment can violate behavior-critical relationships.
 
-### 3. Construct valid values only
+### 4. Construct valid values only
 
 Audit:
 
@@ -72,7 +81,7 @@ Prefer validation before storage and name raw public construction fallibly (`try
 
 Do not provide a default when no genuine valid default exists. Keep `*_unchecked` narrow, non-public where possible, and documented with the exact precondition.
 
-### 4. Keep accepted values valid
+### 5. Keep accepted values valid
 
 Check that:
 
@@ -84,13 +93,13 @@ Check that:
 
 Use `rust-invariant-state-transitions` when the proof depends on coordinated publication, rollback, operation sequences, or derived state.
 
-### 5. Avoid false or stale proofs
+### 6. Avoid false or stale proofs
 
 Some facts cannot safely live in a detached wrapper: an index belongs to an owner and generation; a path's existence can change; a handle may belong to one transaction; a borrowed value depends on source lifetime; topology or normalization can be invalidated by mutation.
 
 Bind proof to the owner/generation when practical, keep check and use together when external state can change, or redesign around an owner method. Do not call a wrapper `Valid*` when its property can silently expire.
 
-### 6. Carry evidence inward
+### 7. Carry evidence inward
 
 After parsing succeeds:
 
@@ -99,6 +108,7 @@ After parsing succeeds:
 - keep invariant-backed getters infallible
 - avoid converting back to primitives until an actual boundary needs them
 - remove duplicated checks only after every construction and mutation path preserves the proof
+- handle closed domain variants exhaustively; do not hide an unimplemented case behind a wildcard, fallback, or panic
 
 Keep debug assertions for internal bug detection when useful, but never use panics or assertions as the only rejection mechanism for representable public input.
 
@@ -109,12 +119,17 @@ Add focused tests for:
 - every meaningful rejection variant and numeric boundary
 - default, conversion, parse, deserialize, and round-trip paths that exist
 - dependent fields and state-specific payloads
+- every legal alternative and operation, plus compiler evidence for forbidden construction or use where practical
 - failed mutation preserving the previous value
 - raw DTO rejection before core computation
 - unchecked internal construction followed by boundary reparsing when such escape hatches deliberately exist
 - compile-time visibility or conversion contracts when the repository supports stable compile-fail evidence
 
 Prefer exact error variants and fields over `is_err()`. Use property tests for broad input spaces when they materially improve coverage.
+
+## Design Output
+
+Show the proposed types and operation signatures, representative valid and forbidden uses, the owner and constructor for each invariant, and the runtime checks that remain. Explain any wire/API migration and why a simpler representation is insufficient. Report compiler and runtime evidence separately from an untested design sketch.
 
 ## Finding Standard
 

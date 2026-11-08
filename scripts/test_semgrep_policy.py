@@ -106,15 +106,20 @@ def test_production_paths_with_shared_count_fixtures(tmp_path: Path) -> None:
     """The shared harness enforces positive counts and a production-path exclusion."""
     owned = "agents/.agents/skills/review-graph/scripts"
     ids, expected = _path_fixtures(tmp_path, selected=(f"{owned}/review_graph_runtime.py", f"{owned}/test_runtime.py"))
-    manifest = '[tool.research-repo-tools.semgrep]\nconfig = "semgrep.yaml"\nfixtures = "inputs"\ncwd = "inputs"\nnamespace = "dotfiles.review-graph."\n'
+    # Verify the real locked tool environment while keeping scan settings local
+    # to these fixtures, independently of the repository's configured counts.
+    for filename in ("pyproject.toml", "uv.lock", ".python-version"):
+        shutil.copyfile(REPOSITORY / filename, tmp_path / filename)
+    configuration = '[semgrep]\nconfig = "semgrep.yaml"\nfixtures = "inputs"\ncwd = "inputs"\nnamespace = "dotfiles.review-graph."\n'
     for fixture, counts in expected.items():
-        manifest += f'\n[tool.research-repo-tools.semgrep.counts."inputs/{fixture}"]\n'
-        manifest += "".join(f'"{rule}" = {count}\n' for rule, count in zip(ids, counts, strict=True))
-    (tmp_path / "pyproject.toml").write_text(manifest)
+        configuration += f'\n[semgrep.counts."inputs/{fixture}"]\n'
+        configuration += "".join(f'"{rule}" = {count}\n' for rule, count in zip(ids, counts, strict=True))
+    configuration_path = tmp_path / "research-repo-tools.toml"
+    configuration_path.write_text(configuration)
     executable = shutil.which("research-repo-tools")
     assert executable is not None
     result = subprocess.run(  # noqa: S603
-        [executable, "--root", str(tmp_path), "semgrep", "check-fixtures"],
+        [executable, "--root", str(tmp_path), "--config", str(configuration_path), "semgrep", "check-fixtures"],
         capture_output=True,
         text=True,
         env=_scanner_environment(tmp_path),
