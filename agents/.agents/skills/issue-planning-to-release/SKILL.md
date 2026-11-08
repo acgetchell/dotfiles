@@ -33,8 +33,7 @@ versions, issue groupings, or repository names into reusable policy.
 Use this dependency direction:
 
 ```text
-shared implementation issue -> upstream validation and registry publication
-                           -> separate consumer adoption issue and verification
+implementation issue -> supplier release tracker -> consumer adoption tracker
 ```
 
 A consumer's missing shared capability belongs in its supplier's implementation
@@ -53,6 +52,25 @@ Track these states separately, with their owning repository and evidence:
 | Published | Exact supplying version verified on PyPI/crates.io and normally resolvable; a tag or GitHub Release alone is insufficient |
 | Pinned | Consumer manifest and normal lock resolution use that published version |
 | Verified | Consumer integration and its required domain/native checks pass for the adoption revision |
+
+Close implementation issues when their implementation and required validation
+criteria are satisfied, including merge when it is part of the agreed completion
+boundary. Publication, exact supplying-version records, consumer pins/locks, and
+downstream verification belong in linked release or adoption trackers. Do not add
+them as implementation closure gates, or keep or reopen completed implementation
+issues solely because those later stages remain pending.
+
+If an implementation checklist already mixes in release-only or adoption-only
+criteria, transfer those obligations to the appropriate linked tracker and record
+the handoff in the implementation issue. Preserve their scope and evidence needs;
+do not mark unperformed work complete. Reuse existing filed, linked trackers.
+If none exists, an unfiled proposal may document the plan as described below,
+but cannot receive checklist items. Before closing the implementation issue,
+file and link the receiving tracker and transfer the unfinished obligations.
+If filing is not authorized, leave closure pending that handoff. Release and
+adoption trackers close at their own completion boundaries. Unfinished
+functionality or required implementation validation still blocks implementation
+closure.
 
 Normal adoption uses published PyPI/crates.io dependencies, never editable
 installs, sibling checkouts, Git/path overrides, or private helpers. Upstream
@@ -112,9 +130,9 @@ IDs/links. A compact table works well:
 | --- | --- | --- | --- | --- |
 | Descriptive stage or proposed PR | Repository plus linked issues | Completes, contributes to, or remains blocked | Required state, not merely issue order | Owning checks; known costs and uncertainty |
 
-State whether each item completes an issue or only contributes to it. Audit broad
-extraction/adoption acceptance before claiming closure. Publication requirements
-remain outstanding after merge. Distinguish multiple phases of one PR or issue
+State whether each item completes an issue or only contributes to it. Audit each
+issue's owned completion boundary: a delivered slice does not complete broader
+implementation or adoption scope. Distinguish multiple phases of one PR or issue
 from genuinely separate PRs; report planned PR count explicitly when useful.
 
 Look for an existing release capstone and adoption trackers. If missing, identify

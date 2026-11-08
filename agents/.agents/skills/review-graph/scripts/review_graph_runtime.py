@@ -7761,7 +7761,7 @@ def _fallback_to_coordinator_locked(document: dict[str, Any], args: argparse.Nam
     }
 
 
-def _late_validation_quality_blockers(requirement: ValidationRequirement, *, repository_root: Path, authorization: str) -> tuple[str, ...]:  # noqa: C901, PLR0912
+def _late_validation_quality_blockers(requirement: ValidationRequirement, *, repository_root: Path, authorization: str) -> tuple[str, ...]:  # noqa: C901
     """Reject audit-authored proof obligations that cannot validate the captured epoch."""
     blockers: list[str] = []
     recipes = benchmark_recipes(repository_root)
@@ -7788,9 +7788,12 @@ def _late_validation_quality_blockers(requirement: ValidationRequirement, *, rep
                 if recipe is not None:
                     detail += f"; inspect the repository canonical recipe just {canonical_name}"
                 blockers.append(detail)
-            elif recipe is not None and (canonical := equivalent_recipe(identity, recipe, canonical_name)) is not None:
-                if command != canonical or requirement.canonical_recipe != canonical:
-                    blockers.append(f"cargo benchmark target {target} must use the repository canonical recipe {canonical}")
+            elif (
+                recipe is not None
+                and (canonical := equivalent_recipe(identity, recipe, canonical_name)) is not None
+                and (command != canonical or requirement.canonical_recipe != canonical)
+            ):
+                blockers.append(f"cargo benchmark target {target} must use the repository canonical recipe {canonical}")
     if not requirement.requires_isolation:
         blockers.extend(
             f"working directory does not exist in the captured current state: {directory}"

@@ -246,14 +246,14 @@ dev = [
   "PyYAML>=6.0",
   "pytest==9.2.0",
   "pytest-xdist==3.8.0",
-  "research-repo-tools[semgrep]==0.2.5",
-  "ruff==0.17.3",
-  "ty==0.0.96",
+  "research-repo-tools[semgrep]==0.2.6",
+  "ruff==0.17.4",
+  "ty==0.0.99",
   "yamllint==1.38.0",
   "zizmor==1.32.0",
 ]
 tooling = [
-    "research-repo-tools==0.2.5",
+    "research-repo-tools==0.2.6",
 ]
 
 [tool.uv.dependency-groups]

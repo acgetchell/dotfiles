@@ -1,4 +1,4 @@
 interface:
   display_name: "Rust Parse Don't Validate"
-  short_description: "Audit Rust invariant-bearing types"
-  default_prompt: "Use $rust-parse-dont-validate to audit this Rust code for invariant-bearing types, boundary parsing, and invalid-state prevention."
+  short_description: "Design Rust types that preserve domain invariants"
+  default_prompt: "Use $rust-parse-dont-validate to design or audit domain types, boundaries, and signatures using algebraic data types."

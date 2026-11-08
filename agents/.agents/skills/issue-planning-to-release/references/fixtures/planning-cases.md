@@ -75,6 +75,32 @@ release commit, retained release-artifact verification, and revalidation after
 approval before credentials are acquired. A maintainer asks whether the shortcut
 would allow the release to finish sooner, but has not authorized gate changes.
 
+## Case D: issue completion decisions
+
+`fixture-progress` supplies a PyPI package to `fixture-analysis`.
+
+| Issue | State and acceptance |
+| --- | --- |
+| fixture-progress#61 | Fix rejected correctness-gate status; implementation, regression coverage, source and installed wheel/sdist checks, and required Linux/macOS/Windows jobs passed at merged revision G1; issue remains open |
+| fixture-progress#62 | Fix a separate cancellation defect; implementation merged at G2, Linux/macOS checks passed, required Windows package validation has no result; issue remains open |
+| fixture-progress#63 | Existing release tracker for the next package version: verify selected release artifacts, publish, and record the exact non-yanked supplying version and fresh registry resolution; all publication criteria are pending |
+| fixture-analysis#91 | Existing adoption tracker: use the published supplying version through normal pins/locks, verify real integration/native checks, then remove its working adapter; adoption has not started |
+
+#61's checklist also contains an unchecked item: "Record the exact published
+supplying version so consumers can adopt through normal pin/lock resolution."
+Its other acceptance items are complete. The latest registry version is 1.0 and
+contains neither fix. No newer release is published. #63 covers publication of
+both fixes; #91 covers their consumer adoption. No implementation acceptance
+requires completing a real consumer migration.
+
+The maintainer asks which issues can close now and requests concrete proposed
+checklist/status updates, including where any remaining obligations belong.
+The request is planning-only; no live issue edits or publication are authorized.
+
+Also assess an alternative inventory in which #63 and #91 do not exist and no
+other receiving trackers are filed. Keep all implementation and registry facts,
+the unchecked publication item, and the planning-only authorization unchanged.
+
 ## Request
 
 Use the supplied skill to produce a concrete release/adoption plan for each case.
