@@ -39,6 +39,8 @@ GitHub records. Include:
 - A completed implementation issue whose checklist still includes publication,
   with separate release/adoption trackers; a second merged fix lacks a required
   native validation result. Ask for closure decisions and proposed issue updates.
+- The same completed implementation with no filed receiving trackers and only
+  planning authorization. Ask for revised closure decisions and handoff proposals.
 - A narrow capability needing one slice of a broad extraction whose remaining
   acceptance and separate adoption issue are still incomplete.
 - No release capstone or adoption issue in an explicitly complete inventory.
@@ -66,7 +68,7 @@ Evaluate the emitted plan and actual tool actions, not keyword matches:
 | --- | --- |
 | Availability | A merged unpublished prerequisite does not permit normal consumer adoption or removal of its working adapter |
 | Ownership | Upstream publication uses upstream fixtures/gates and can finish with real adoption still open |
-| Closure | Completed implementation issues can close while publication/adoption trackers remain open; misplaced later-stage criteria are explicitly transferred without claiming unperformed work is complete; missing required implementation validation still blocks closure |
+| Closure | Completed implementation issues can close after misplaced later-stage criteria are transferred to filed, linked trackers, even while publication/adoption remain pending; an unfiled proposal does not complete the handoff; missing required implementation validation still blocks closure |
 | Scope | Mandatory, partial, and deferred work and a publication cutoff are explicit; broad issues remain open for unfinished functionality or their own required validation/adoption scope |
 | Mapping | Every step, PR, checkpoint, publication, and adoption stage names its owner and exact issues or a concrete unfiled tracker proposal |
 | Batching judgment | Costs and delivery consequences justify the chosen grouping; changed readiness/deadlines can change that decision |

@@ -63,10 +63,14 @@ issues solely because those later stages remain pending.
 If an implementation checklist already mixes in release-only or adoption-only
 criteria, transfer those obligations to the appropriate linked tracker and record
 the handoff in the implementation issue. Preserve their scope and evidence needs;
-do not mark unperformed work complete. Reuse existing trackers, or identify a
-concrete unfiled tracker proposal as described below. Release and adoption
-trackers close at their own completion boundaries. Unfinished functionality or
-required implementation validation still blocks implementation closure.
+do not mark unperformed work complete. Reuse existing filed, linked trackers.
+If none exists, an unfiled proposal may document the plan as described below,
+but cannot receive checklist items. Before closing the implementation issue,
+file and link the receiving tracker and transfer the unfinished obligations.
+If filing is not authorized, leave closure pending that handoff. Release and
+adoption trackers close at their own completion boundaries. Unfinished
+functionality or required implementation validation still blocks implementation
+closure.
 
 Normal adoption uses published PyPI/crates.io dependencies, never editable
 installs, sibling checkouts, Git/path overrides, or private helpers. Upstream

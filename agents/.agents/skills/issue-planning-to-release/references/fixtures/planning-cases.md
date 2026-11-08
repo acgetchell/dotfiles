@@ -97,6 +97,10 @@ The maintainer asks which issues can close now and requests concrete proposed
 checklist/status updates, including where any remaining obligations belong.
 The request is planning-only; no live issue edits or publication are authorized.
 
+Also assess an alternative inventory in which #63 and #91 do not exist and no
+other receiving trackers are filed. Keep all implementation and registry facts,
+the unchecked publication item, and the planning-only authorization unchanged.
+
 ## Request
 
 Use the supplied skill to produce a concrete release/adoption plan for each case.
