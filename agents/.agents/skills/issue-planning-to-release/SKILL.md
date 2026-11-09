@@ -53,12 +53,19 @@ Track these states separately, with their owning repository and evidence:
 | Pinned | Consumer manifest and normal lock resolution use that published version |
 | Verified | Consumer integration and its required domain/native checks pass for the adoption revision |
 
-Close implementation issues when their implementation and required validation
-criteria are satisfied, including merge when it is part of the agreed completion
-boundary. Publication, exact supplying-version records, consumer pins/locks, and
-downstream verification belong in linked release or adoption trackers. Do not add
-them as implementation closure gates, or keep or reopen completed implementation
-issues solely because those later stages remain pending.
+Implementation issues track whether the agreed work is delivered. The release
+issue owns release validation and readiness, including final native checks,
+retained-evidence handoffs, timing evidence, publication and published-package
+adoption. Keep these obligations in the designated release or adoption tracker.
+Honor the current maintainer-approved boundary over older mixed checklists;
+do not keep completed implementation issues open for that later validation.
+
+When opening a PR that completes the agreed implementation scope, include
+`Closes #...` for each completed issue so it closes on merge. Use a non-closing
+reference only when the PR leaves implementation work outstanding. Pending PR
+checks, review or merge do not make a complete implementation merely partial;
+those requirements still gate merge. Record unperformed release validation as
+pending in its owning tracker, without claiming that it passed.
 
 If an implementation checklist already mixes in release-only or adoption-only
 criteria, transfer those obligations to the appropriate linked tracker and record
@@ -69,8 +76,9 @@ but cannot receive checklist items. Before closing the implementation issue,
 file and link the receiving tracker and transfer the unfinished obligations.
 If filing is not authorized, leave closure pending that handoff. Release and
 adoption trackers close at their own completion boundaries. Unfinished
-functionality or required implementation validation still blocks implementation
-closure.
+implementation still blocks implementation closure. Validation findings that
+require code changes belong in concrete implementation or fix issues linked
+from the release tracker; avoid duplicating the release checklist across them.
 
 Normal adoption uses published PyPI/crates.io dependencies, never editable
 installs, sibling checkouts, Git/path overrides, or private helpers. Upstream

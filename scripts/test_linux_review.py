@@ -74,11 +74,11 @@ def linux_boundary(tmp_path: Path) -> dict[str, str]:
     for name in ("zsh", "stow", "cargo"):
         executable(binaries / name, f"echo {name} fixture")
     executable(binaries / "rustc", "echo 'rustc 1.85.0 (fixture)'")
-    scanner_bin = tmp_path / "install/semgrep-venv/bin"
+    scanner_bin = tmp_path / "install/venv/bin"
     scanner_bin.mkdir(parents=True)
-    scanner_project = tomllib.loads((REPOSITORY / "tooling/semgrep/pyproject.toml").read_text())["project"]
-    scanner_version = next(dependency.removeprefix("semgrep==") for dependency in scanner_project["dependencies"] if dependency.startswith("semgrep=="))
-    scanner_observation = {"python_executable": str(scanner_bin / "python"), "python_version": "3.14.9", "semgrep_version": scanner_version}
+    packages = tomllib.loads((REPOSITORY / "uv.lock").read_text())["package"]
+    scanner_version = next(package["version"] for package in packages if package["name"] == "semgrep")
+    scanner_observation = {"python_executable": str(scanner_bin / "python"), "python_version": "3.15.9", "semgrep_version": scanner_version}
     executable(scanner_bin / "python", f"printf '%s\\n' {shlex.quote(json.dumps(scanner_observation))}")
     executable(scanner_bin / "semgrep", f"echo semgrep {scanner_version}")
     executable(
@@ -97,8 +97,7 @@ def linux_boundary(tmp_path: Path) -> dict[str, str]:
         f'if [[ "$1" == --version ]]; then echo uv {pins["uv"]}; else\n'
         'printf "%s\\n" "$*" >> "$CALL_LOG"\n'
         'printf "%s|%s\\n" "${UV_PYTHON-UNSET}" "$*" >> "$PYTHON_LOG"\n'
-        'if [[ "$1" == sync && "$*" == *"--project tooling/semgrep"* ]]; then\n'
-        '[[ "$UV_PROJECT_ENVIRONMENT" == "$DOTFILES_REVIEW_PREFIX/semgrep-venv" ]] || exit 29\nfi\n'
+        '[[ "$UV_PROJECT_ENVIRONMENT" == "$DOTFILES_REVIEW_PREFIX/venv" ]] || exit 29\n'
         'if [[ "$1" == run ]]; then\nshift\nwhile [[ "$1" == --* ]]; do shift; done\n'
         'export PATH="$UV_PROJECT_ENVIRONMENT/bin:$PATH"\n'
         '[[ "$1" == python && "$2" == scripts/linux_review.py ]]\nshift\n'
@@ -145,7 +144,7 @@ def test_fresh_setup_and_rerun_use_pins_custom_storage_and_no_shell_changes(linu
     assert {path.name for path in (Path(linux_boundary["DOTFILES_REVIEW_PREFIX"]) / "bin").iterdir()} == {"uv", "just", "dprint", "rumdl"}
     calls = Path(linux_boundary["CALL_LOG"]).read_text()
     assert calls.count("sync --locked --group dev") == 2
-    assert calls.count("sync --locked --project tooling/semgrep") == 2
+    assert "--project tooling/semgrep" not in calls
     assert "run --locked --no-sync python scripts/linux_review.py setup" in calls
     assert "yaml-fmt-check" in calls
     reports = list(Path(linux_boundary["DOTFILES_REVIEW_ARTIFACTS"]).glob("setup-*/environment.json"))
@@ -156,7 +155,7 @@ def test_fresh_setup_and_rerun_use_pins_custom_storage_and_no_shell_changes(linu
 def test_uv_environment_does_not_shadow_provisioned_tools(linux_boundary: dict[str, str]) -> None:
     prefix = Path(linux_boundary["DOTFILES_REVIEW_PREFIX"])
     venv_bin = prefix / "venv/bin"
-    venv_bin.mkdir(parents=True)
+    venv_bin.mkdir(parents=True, exist_ok=True)
     executable(venv_bin / "just", "echo just 0.0.0")
     for mode in ("setup", "check"):
         result = run_installer(linux_boundary, mode)
@@ -168,21 +167,18 @@ def test_uv_environment_does_not_shadow_provisioned_tools(linux_boundary: dict[s
     assert "ci" in Path(linux_boundary["CALL_LOG"]).read_text().splitlines()
 
 
-def test_root_python_selector_does_not_reach_scanner_setup_or_check(linux_boundary: dict[str, str]) -> None:
-    """Site Python selection belongs to root tooling, not the older scanner project."""
+def test_root_python_selector_is_shared_by_tooling_and_scanner(linux_boundary: dict[str, str]) -> None:
+    """Site Python selection reaches the single locked tooling environment."""
     root_python = "/site modules/python 3.15/bin/python"
     linux_boundary["UV_PYTHON"] = root_python
     for mode in ("setup", "check"):
         result = run_installer(linux_boundary, mode)
         assert result.returncode == 0, result.stderr
     observations = [line.split("|", 1) for line in Path(linux_boundary["PYTHON_LOG"]).read_text().splitlines()]
-    scanner_calls = [(selector, command) for selector, command in observations if "--project tooling/semgrep" in command]
-    root_calls = [(selector, command) for selector, command in observations if "--project tooling/semgrep" not in command]
-    assert len(scanner_calls) == 2
-    assert any("--check" in command for _, command in scanner_calls)
-    assert all(selector == "UNSET" for selector, _ in scanner_calls)
-    assert root_calls
-    assert all(selector == root_python for selector, _ in root_calls)
+    assert observations
+    assert any("--check" in command for _, command in observations)
+    assert all("--project tooling/semgrep" not in command for _, command in observations)
+    assert all(selector == root_python for selector, _ in observations)
 
 
 @pytest.mark.parametrize("tool", ["rustc", "cargo"])
@@ -207,7 +203,7 @@ def test_direct_check_records_missing_rust_tool_without_launching_ci(linux_bound
     setup = run_installer(linux_boundary)
     assert setup.returncode == 0, setup.stderr
     linux_boundary["JUST_TEMPDIR"] = str(Path(linux_boundary["DOTFILES_REVIEW_PREFIX"]) / "recipe-tmp")
-    linux_boundary["DOTFILES_SEMGREP_ENVIRONMENT"] = str(Path(linux_boundary["DOTFILES_REVIEW_PREFIX"]) / "semgrep-venv")
+    linux_boundary["UV_PROJECT_ENVIRONMENT"] = str(Path(linux_boundary["DOTFILES_REVIEW_PREFIX"]) / "venv")
     (Path(linux_boundary["PATH"]) / tool).unlink()
     calls = Path(linux_boundary["CALL_LOG"])
     before = calls.read_bytes()
@@ -247,7 +243,7 @@ def test_rust_version_floor_is_checked_before_work(linux_boundary: dict[str, str
     logs = [Path(linux_boundary[name]) for name in ("DOWNLOAD_LOG", "CALL_LOG")]
     before = {path: path.read_bytes() if path.exists() else None for path in logs}
     linux_boundary["JUST_TEMPDIR"] = str(Path(linux_boundary["DOTFILES_REVIEW_PREFIX"]) / "recipe-tmp")
-    linux_boundary["DOTFILES_SEMGREP_ENVIRONMENT"] = str(Path(linux_boundary["DOTFILES_REVIEW_PREFIX"]) / "semgrep-venv")
+    linux_boundary["UV_PROJECT_ENVIRONMENT"] = str(Path(linux_boundary["DOTFILES_REVIEW_PREFIX"]) / "venv")
     argv = (
         [sys.executable, str(REPOSITORY / "scripts/linux_review.py"), "check"]
         if mode == "direct-check"
@@ -289,7 +285,7 @@ def test_executor_keeps_scanner_stack_finite_and_respects_caller_limit(
     """Exercise the real pinned scanner's preexec policy inside the installer boundary."""
     # Read the actual parent environment before the simulated installer replaces
     # its prefix. Its fake uv deliberately does not provision a second scanner.
-    expected_environment = Path(os.environ.get("DOTFILES_SEMGREP_ENVIRONMENT", REPOSITORY / "tooling/semgrep/.venv"))
+    expected_environment = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", REPOSITORY / ".venv"))
     scanner_target = expected_environment
     alias_target = None
     if environment_spelling != "default":
@@ -297,7 +293,7 @@ def test_executor_keeps_scanner_stack_finite_and_respects_caller_limit(
         alias.symlink_to(expected_environment, target_is_directory=True)
         alias_target = alias.readlink()
         expected_environment = alias
-        monkeypatch.setenv("DOTFILES_SEMGREP_ENVIRONMENT", str(alias))
+        monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", str(alias))
     setup = run_installer(linux_boundary)
     assert setup.returncode == 0, setup.stderr
     executable_observation = "sys.executable"
@@ -311,7 +307,7 @@ def test_executor_keeps_scanner_stack_finite_and_respects_caller_limit(
         "print(json.dumps({'before': before, 'after': resource.getrlimit(resource.RLIMIT_STACK), "
         f"'infinity': resource.RLIM_INFINITY, 'executable': {executable_observation}}}))"
     )
-    scanner_python = Path(os.environ.get("DOTFILES_SEMGREP_ENVIRONMENT", REPOSITORY / "tooling/semgrep/.venv")) / "bin/python"
+    scanner_python = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", REPOSITORY / ".venv")) / "bin/python"
     argv = ["/bin/bash", str(REPOSITORY / "bin/linux-review.sh"), "exec", str(scanner_python), "-c", probe]
     if caller_limit_kib is not None:
         argv = ["/bin/bash", "-c", 'ulimit -HS -s "$1"; shift; exec "$@"', "scanner-stack-boundary", str(caller_limit_kib), *argv]
@@ -446,25 +442,25 @@ def test_inventory_excludes_environment_credentials(monkeypatch: pytest.MonkeyPa
     assert source["content_digest"].startswith("sha256:")
 
 
-def test_inventory_identifies_the_independent_scanner_environment() -> None:
+def test_inventory_identifies_the_root_scanner_environment() -> None:
     scanner = linux_review.inventory()["scanner"]
-    expected = Path(os.environ.get("DOTFILES_SEMGREP_ENVIRONMENT", REPOSITORY / "tooling/semgrep/.venv"))
+    expected = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", REPOSITORY / ".venv"))
     assert Path(scanner["environment"]).samefile(expected)
     assert scanner["python"]["executable"] is not None
     assert Path(scanner["python"]["executable"]).parent.parent.samefile(expected)
-    assert scanner["python"]["identity"].startswith("Python 3.14.")
+    assert scanner["python"]["identity"].startswith("Python 3.15.")
     assert scanner["python"]["available"]
     assert scanner["python"]["pin_matches"]
-    project = tomllib.loads((REPOSITORY / "tooling/semgrep/pyproject.toml").read_text())["project"]
-    expected_version = next(dependency.removeprefix("semgrep==") for dependency in project["dependencies"] if dependency.startswith("semgrep=="))
+    packages = tomllib.loads((REPOSITORY / "uv.lock").read_text())["package"]
+    expected_version = next(package["version"] for package in packages if package["name"] == "semgrep")
     assert scanner["semgrep"]["identity"] == f"semgrep {expected_version}"
     assert scanner["semgrep"]["available"]
     assert scanner["semgrep"]["pin_matches"]
-    assert not Path(scanner["python"]["executable"]).parent.parent.samefile(Path(sys.executable).parent.parent)
+    assert Path(scanner["python"]["executable"]).parent.parent.samefile(Path(sys.executable).parent.parent)
 
 
 def test_scanner_inventory_marks_a_missing_environment_unavailable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("DOTFILES_SEMGREP_ENVIRONMENT", str(tmp_path / "missing scanner"))
+    monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", str(tmp_path / "missing scanner"))
     scanner = linux_review.inventory()["scanner"]
     assert not scanner["python"]["available"]
     assert not scanner["semgrep"]["available"]
@@ -478,7 +474,7 @@ def test_scanner_inventory_rejects_malformed_probe_output(monkeypatch: pytest.Mo
     assert not scanner["semgrep"]["available"]
 
 
-@pytest.mark.parametrize(("python_version", "semgrep_version", "missing"), [("3.13.9", "declared", "scanner Python"), ("3.14.9", "0.0.0", "Semgrep")])
+@pytest.mark.parametrize(("python_version", "semgrep_version", "missing"), [("3.13.9", "declared", "scanner Python"), ("3.15.9", "0.0.0", "Semgrep")])
 def test_direct_check_distinguishes_scanner_pin_mismatch_from_unavailability(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, python_version: str, semgrep_version: str, missing: str
 ) -> None:

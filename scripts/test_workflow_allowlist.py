@@ -111,6 +111,7 @@ def test_recipe_and_ci_keep_the_shared_allowlist_gate() -> None:
         ).stdout
     )
     assert any(dependency["recipe"] == "check" for dependency in recipe_graph["recipes"]["ci"]["dependencies"])
-    assert any(dependency["recipe"] == "github-actions-check" for dependency in recipe_graph["recipes"]["check"]["dependencies"])
+    assert any(dependency["recipe"] == "_check-policy" for dependency in recipe_graph["recipes"]["check"]["dependencies"])
+    assert any(dependency["recipe"] == "github-actions-check" for dependency in recipe_graph["recipes"]["_check-policy"]["dependencies"])
     ci = yaml.safe_load((WORKFLOWS / "ci.yml").read_text())
     assert any("just ci" in step.get("run", "") for step in ci["jobs"]["verify"]["steps"])

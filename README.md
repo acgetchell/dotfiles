@@ -217,14 +217,13 @@ Updates stop on failure, but successful package-manager steps remain applied; re
 resolving the failure to finish synchronization and pin reconciliation.
 
 The same locked package owns the Semgrep fixture runner and CodeRabbit wrapper.
-`just python-sync` restores the root Python 3.15 tools and the independently
-locked Python 3.14 scanner in `tooling/semgrep`. Updates use
-`deps update-python --all-projects` with that scanner as the only declared
-additional project; notebook skill assets remain templates.
+`just python-sync` restores one root Python 3.15 environment for tooling and
+the native Semgrep scanner. Updates use `deps update-python --all-projects`;
+there are no additional scanner projects, and notebook skill assets remain templates.
 `just semgrep-test` reads `[tool.research-repo-tools.semgrep]`; the repository keeps its
 rules and real fixtures while generic runner tests live upstream.
-Its v0.2.5 runner selects the root Python 3.15 Semgrep extra and published
-compatibility pins; native scan recipes use the independent scanner project.
+The v0.2.7 runner and native scan recipes select the same locked Semgrep
+installation and published compatibility pins.
 The Jupyter review skill delegates notebook inspection, advice, validation, native
 Ruff/ty lint, cleanup, and execution to published v0.2.3 shared commands. It keeps
 only review policy and a tested consumer configuration template; generic notebook
@@ -236,7 +235,7 @@ execution dependencies belong to each consumer's locked notebook environment.
 
 ### Shared tooling and Python upgrades
 
-Dotfiles adopts `research-repo-tools==0.2.5` for Python baseline inheritance,
+Dotfiles adopts `research-repo-tools==0.2.7` for Python baseline inheritance,
 tracked and nonignored file selection, notebook policy, workflow audits, dependency
 and secret scans, managed scanner setup/cleanup, and index-preserving review
 scope inspection. The
@@ -246,7 +245,8 @@ scope inspection. The
 to the installed shared package, using `.github/settings/actions-selected.json`
 as the sole allowlist. It remains part of `github-actions-check` and CI; actionlint
 owns workflow syntax and zizmor owns SHA pinning. The reusable Dependabot approval
-workflow retains its separately reviewed commit pin.
+workflow selects the v0.2.7 commit; its workflow bytes match the previously
+reviewed pin.
 
 Python 3.15 is inherited from v0.2.3. Preview and apply future upgrades with the published version:
 
@@ -265,7 +265,7 @@ Homebrew's unversioned `python` formula serves the host; uv selects repository P
 
 `just tools-sync` installs checksum-verified OSV/Gitleaks into the package-owned
 `~/.cache/research-repo-tools` store; `just tools-check` verifies them. `just security`
-scans the root and scanner lockfiles, full reachable Git history, and current files, writing redacted
+scans the root lockfile, full reachable Git history, and current files, writing redacted
 reports under `target/security`. It requires online advisory access and runs in the
 required CI `verify` job. `just security-check` remains an alias. Run
 `just security-osv` or `just security-secrets` for either scan separately;
@@ -595,8 +595,10 @@ entrypoints are omitted; explicitly checking a missing skill still fails.
 
 `just test-review-contracts` collects only the prompt-budget and routing guard module.
 `just test-python` runs that gate followed by the remaining tests, and `just ci`
-runs it before static checks and graph execution. Each guard runs once in either
-aggregate. The early gate runs serially; the remaining tests use four isolated
+runs it after environment synchronization and before static checks and graph
+execution. Each guard runs once in either aggregate. The early gate and static
+policy checks run serially. After they pass, the scanner lane (scan then fixtures)
+and Python tests run concurrently. The remaining tests use four isolated
 pytest-xdist worker processes. Direct `uv run --locked pytest` still collects the
 complete suite serially.
 
@@ -621,6 +623,13 @@ just test-python scripts/test_python_policy.py -n 0 -s
 
 Use `-n 0` for serial debugging, including live output and interactive debuggers.
 The same override applies to an aggregate with `DOTFILES_TEST_WORKERS=0 just check`.
+For a completely serial CI run, use `DOTFILES_TEST_WORKERS=0 just --jobs 1 ci`.
+Environment synchronization finishes before either lane starts; neither lane
+runs formatters or modifies source files. Managed Cargo compilation caching is
+not applicable here: this repository declares only managed security binaries.
+The existing versioned installation caches for Just, dprint, and rumdl remain
+owned by their CI installer; user-wide Cargo installations are not cached by
+research-repo-tools.
 Run `just python-ci` without selectors for the complete Python gate on the final
 source state. Add `--durations=25` to a planned test run when investigating runtime.
 

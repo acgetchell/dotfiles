@@ -15,7 +15,7 @@ no-build-package = ["semgrep"]
 override-dependencies = [
   # Keep uv-run tools aligned with justfile despite the shared package's pin.
   "rust-just==1.59.0",
-  # Published v0.2.5 Semgrep compatibility constraints, applied by toolchain adopt.
+  # Published Semgrep compatibility constraints, applied by toolchain adopt.
   "jsonschema==4.26.0",
   "mcp==1.30.0",
   "opentelemetry-api==1.45.1",
@@ -32,7 +32,7 @@ inherit-python = true
 
 [tool.research-repo-tools.toolchain.binaries]
 gitleaks = "8.30.1"
-osv-scanner = "2.7.0"
+osv-scanner = "2.7.1"
 
 [tool.research-repo-tools.zizmor]
 persona = "regular"
@@ -43,10 +43,6 @@ cargo_update_version = "cargo-update"
 dprint_version = "dprint"
 just_version = "just"
 rumdl_version = "rumdl"
-
-[tool.research-repo-tools.deps]
-# Notebook skill assets are consumer templates, not independent uv projects.
-python-projects = ["tooling/semgrep"]
 
 [tool.research-repo-tools.semgrep]
 config = "semgrep.yaml"
@@ -239,6 +235,14 @@ python_functions = ["test_*"]
 markers = ["review_contract: cheap prompt budgets and routing contracts, before graph execution"]
 
 [dependency-groups]
+build = [
+  "cython==3.3.1",
+  "hatchling==1.32.4",
+  "requests==2.34.2",
+  "semver==3.1.1",
+  "setuptools==84.2.1",
+  "wheel==0.48.0",
+]
 dev = [
   { include-group = "tooling" },
   "actionlint-py==1.7.12.25",
@@ -246,14 +250,14 @@ dev = [
   "PyYAML>=6.0",
   "pytest==9.2.0",
   "pytest-xdist==3.8.0",
-  "research-repo-tools[semgrep]==0.2.6",
+  "research-repo-tools[semgrep]==0.2.7",
   "ruff==0.17.4",
-  "ty==0.0.99",
+  "ty==0.0.100",
   "yamllint==1.38.0",
   "zizmor==1.32.0",
 ]
 tooling = [
-    "research-repo-tools==0.2.6",
+    "research-repo-tools==0.2.7",
 ]
 
 [tool.uv.dependency-groups]

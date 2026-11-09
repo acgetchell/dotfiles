@@ -52,7 +52,7 @@ class PythonIdentity(TypedDict, closed=True):
 
 
 class ScannerIdentity(TypedDict, closed=True):
-    """The independently selected scanner environment and its installed pins."""
+    """The root tooling environment's scanner and its installed pins."""
 
     environment: str
     python: ToolIdentity
@@ -129,14 +129,14 @@ def source_identity() -> SourceIdentity:
 
 def scanner_inventory() -> ScannerIdentity:
     """Probe the configured scanner interpreter, never an ambient PATH entry."""
-    project = REPOSITORY / "tooling/semgrep"
-    environment = Path(os.environ.get("DOTFILES_SEMGREP_ENVIRONMENT", project / ".venv"))
+    project = REPOSITORY
+    environment = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", project / ".venv"))
     binaries = environment / ("Scripts" if os.name == "nt" else "bin")
     python = binaries / ("python.exe" if os.name == "nt" else "python")
     semgrep = binaries / ("semgrep.exe" if os.name == "nt" else "semgrep")
     selector = (project / ".python-version").read_text().strip()
-    dependencies = tomllib.loads((project / "pyproject.toml").read_text())["project"]["dependencies"]
-    expected = next((dependency.removeprefix("semgrep==") for dependency in dependencies if dependency.startswith("semgrep==")), None)
+    packages = tomllib.loads((project / "uv.lock").read_text())["package"]
+    expected = next((package["version"] for package in packages if package["name"] == "semgrep"), None)
     probe = (
         "import importlib.metadata as metadata, json, platform, sys\n"
         "try: version = metadata.version('semgrep')\n"

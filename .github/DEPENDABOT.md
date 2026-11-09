@@ -1,6 +1,6 @@
 # Dependabot approval rollout
 
-Dotfiles calls the shared [v0.1.8 approval workflow](https://github.com/acgetchell/research-repo-tools/blob/299c8decfc0c0b2091093ba6a99dd7db2d762dea/.github/workflows/dependabot-approve.yml).
+Dotfiles calls the shared [v0.2.7 approval workflow](https://github.com/acgetchell/research-repo-tools/blob/4a8f53f684dee2abb7c5b8a4beab40ef29212b4c/.github/workflows/dependabot-approve.yml).
 The initial rollout included shared-tools PR #54; its prerequisite pilot
 [PR #52](https://github.com/acgetchell/research-repo-tools/pull/52) merged on
 September 26, 2026. The Python tooling package's registry pin and this workflow's
@@ -25,10 +25,9 @@ The Python security-update group remains configured, but shares that runtime
 limitation; the required OSV audit remains available. Manual Python updates use
 `just update-python-dependencies`, which selects Homebrew-managed uv and runs the
 published `deps update-python --all-projects` command. It updates root development
-pins, upgrades both locks, and synchronizes the root Python 3.15 and declared
-`tooling/semgrep` Python 3.14 environments separately. Semgrep's exact pin and
-scanner overrides belong to `tooling/semgrep/pyproject.toml`; the obsolete
-override-detection fallback has been removed. Review both manifests and locks,
+pins, upgrades the root lock, and synchronizes the shared Python 3.15 environment.
+Semgrep and its compatibility overrides belong to the root manifest and lock;
+the obsolete separate Python 3.14 scanner project has been removed. Review the manifest and lock,
 then run `just ci` and `just security`.
 Restore the uv limit to 10 after a hosted update resolves the committed 3.15
 lockfile successfully. GitHub Actions updates continue on Mondays with their

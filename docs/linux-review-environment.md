@@ -31,8 +31,8 @@ tools on PATH are reused, including site/module tools. Otherwise the installer
 downloads the pinned upstream release binary and verifies its published SHA-256
 checksum before installation. Locked `uv sync --locked --group dev` selects the
 repository Python from `.python-version`; a matching site Python can be selected
-with `UV_PYTHON`. Scanner synchronization clears that root selector and uses
-`tooling/semgrep/.python-version` for its independent Python environment.
+with `UV_PYTHON`. The native scanner shares that locked Python 3.15 environment
+under `DOTFILES_REVIEW_PREFIX/venv`, including the selected site interpreter.
 Installing these release binaries does not compile Rust or require Homebrew;
 the full test suite still requires the host Rust toolchain described above.
 
