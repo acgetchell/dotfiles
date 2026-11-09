@@ -22,7 +22,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-    uses: acgetchell/research-repo-tools/.github/workflows/dependabot-approve.yml@4085125526e21b2855eb7c61a52ee312782ae31a # v0.2.3
+    uses: acgetchell/research-repo-tools/.github/workflows/dependabot-approve.yml@a66f34ceb62258ec3ad02658be00b4940429674d # v0.2.5
     with:
       repository: acgetchell/dotfiles
       policy: >-
