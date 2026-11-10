@@ -61,9 +61,12 @@ Honor the current maintainer-approved boundary over older mixed checklists;
 do not keep completed implementation issues open for that later validation.
 
 When opening a PR that completes the agreed implementation scope, include
-`Closes #...` for each completed issue so it closes on merge. Use a non-closing
-reference only when the PR leaves implementation work outstanding. Pending PR
-checks, review or merge do not make a complete implementation merely partial;
+`Closes #123` for each completed issue in the PR's repository, or
+`Closes OWNER/REPOSITORY#123` for one in another repository, once any required
+tracker handoff below is complete. Until then, use non-closing references such
+as `Refs #123`; replace them with closing references only after the handoff is
+recorded. Also use non-closing references for unfinished implementation. Pending
+PR checks, review or merge do not make a complete implementation merely partial;
 those requirements still gate merge. Record unperformed release validation as
 pending in its owning tracker, without claiming that it passed.
 
@@ -72,9 +75,12 @@ criteria, transfer those obligations to the appropriate linked tracker and recor
 the handoff in the implementation issue. Preserve their scope and evidence needs;
 do not mark unperformed work complete. Reuse existing filed, linked trackers.
 If none exists, an unfiled proposal may document the plan as described below,
-but cannot receive checklist items. Before closing the implementation issue,
-file and link the receiving tracker and transfer the unfinished obligations.
-If filing is not authorized, leave closure pending that handoff. Release and
+but cannot receive checklist items. Before adding a closing reference or closing
+the implementation issue, file and link the receiving tracker, transfer the
+unfinished obligations, and record the handoff in the implementation issue.
+An existing tracker alone does not complete that transfer. If no receiving
+tracker is available or the needed filing or updates are not authorized, keep
+non-closing references and leave closure pending that handoff. Release and
 adoption trackers close at their own completion boundaries. Unfinished
 implementation still blocks implementation closure. Validation findings that
 require code changes belong in concrete implementation or fix issues linked

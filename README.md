@@ -193,9 +193,9 @@ brew bundle dump --file=~/projects/dotfiles/Brewfile.local --force --describe
 `just update` upgrades the Brewfile dependencies and reconciles uv, refreshes Python
 dependencies, then updates Cargo tools and managed security scanners.
 `just update-python-dependencies` advances root development-tool pins and refreshes
-both the root and explicitly declared Semgrep project through the shared
-`deps update-python --all-projects` command. Each retains its own environment,
-constraints and security overrides. See the [update instructions](docs/shared-tooling.md#python-authority-and-upgrades).
+the root lock and environment through the shared `deps update-python --all-projects`
+command, preserving its constraints and security overrides. See the
+[update instructions](docs/shared-tooling.md#python-authority-and-upgrades).
 The locked `research-repo-tools` package supplies pin updates, uv preflight, and tool-pin
 reconciliation. Its exact pin lives in the included `tooling` group and changes only through
 an explicit package upgrade; ranges, markers, and other included-group constraints remain intact.

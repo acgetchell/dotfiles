@@ -12,9 +12,11 @@ name before pushing or opening a pull request.
 
 Implementation issues track whether the agreed work is done; the release issue
 owns release validation and readiness. A PR completing that work should use
-`Closes #...` for each implementation issue. Keep remaining release validation
-in the linked release tracker instead of holding completed implementation issues
-open. Required PR checks and reviews still gate merge. Follow
+`Closes #123` for each implementation issue in the PR's repository and
+`Closes OWNER/REPOSITORY#123` for an issue in another repository. First complete
+any handoff of remaining release validation to a filed, linked release tracker;
+until then, use non-closing references and leave issue closure pending. Required
+PR checks and reviews still gate merge. Follow
 [issue-planning-to-release](skills/issue-planning-to-release/SKILL.md) when
 reconciling completion boundaries or handing work to a release tracker.
 

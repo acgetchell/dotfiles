@@ -124,7 +124,7 @@ parsing and malformed-policy regressions live in the
 Dotfiles retains installed-package consumer tests for its actual workflows,
 unapproved action and reusable-call mutations with file/line diagnostics,
 committed policy authority, and recipe/CI wiring. The shared Dependabot workflow's
-v0.1.8 commit pin is independent of this Python package migration.
+v0.2.7 commit pin is independent of this Python package migration.
 
 Semgrep retains version-comment, locked-command, explicit checkout, bootstrap,
 portability, safe skill YAML loading, selective Python runtime settings, and

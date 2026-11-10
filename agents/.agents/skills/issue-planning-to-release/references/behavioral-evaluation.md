@@ -43,6 +43,9 @@ GitHub records. Include:
   the maintainer has assigned final native validation, retained-evidence handoff,
   cache timings and published-tooling adoption to a filed release tracker. Ask
   for the PR description and issue closure behavior.
+- The same PR with filed receiving trackers but its checklist transfer and
+  recorded issue handoff still pending. Ask for the current PR references and
+  the condition for changing them to closing references.
 - The same completed implementation with no filed receiving trackers and only
   planning authorization. Ask for revised closure decisions and handoff proposals.
 - A narrow capability needing one slice of a broad extraction whose remaining
@@ -72,7 +75,7 @@ Evaluate the emitted plan and actual tool actions, not keyword matches:
 | --- | --- |
 | Availability | A merged unpublished prerequisite does not permit normal consumer adoption or removal of its working adapter |
 | Ownership | Upstream publication uses upstream fixtures/gates and can finish with real adoption still open |
-| Closure | A complete implementation PR uses closing keywords for its implementation issues; required PR checks still gate merge; release validation remains pending in its filed, linked tracker; an unfiled proposal does not complete a handoff, and unfinished implementation keeps its issue open |
+| Closure | A complete implementation PR uses closing keywords only after any required transfer to a filed, linked tracker is recorded in the implementation issue; pending or unavailable handoffs use non-closing references and leave closure pending; required PR checks still gate merge; release validation stays pending in its tracker, and unfinished implementation keeps its issue open |
 | Scope | Mandatory, partial, and deferred work and a publication cutoff are explicit; broad issues remain open for unfinished functionality or their own required validation/adoption scope |
 | Mapping | Every step, PR, checkpoint, publication, and adoption stage names its owner and exact issues or a concrete unfiled tracker proposal |
 | Batching judgment | Costs and delivery consequences justify the chosen grouping; changed readiness/deadlines can change that decision |

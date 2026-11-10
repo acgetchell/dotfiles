@@ -103,10 +103,15 @@ metadata, preserving the repository's tag style. Treat this as a flexible
 starting point: adapt the wording, omit bullets that do not apply, and add
 changelog-relevant details or comments supported by the staged diff.
 
-Keep the release-focused subject when release preparation includes fixes or
-other substantive changes; describe those additional changes in the body.
-Preserve any required breaking-change markers and issue footers. Continue to
-omit validation results unless the user requests them.
+When release preparation includes fixes or other substantive changes, check the
+repository's changelog filters and template before choosing the subject. Use a
+type and scope that include those changes in the generated changelog; when only
+subjects are rendered, describe the substantive changes in the subject as well.
+Keep a release-focused subject only when that configuration preserves their
+visibility. If a required release convention conflicts with changelog visibility,
+flag the conflict and request direction instead of assuming body details will
+appear. Preserve required breaking-change markers and issue footers. Continue
+to omit validation results unless the user requests them.
 
 ## Keep a Changelog mapping
 
