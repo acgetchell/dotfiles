@@ -85,6 +85,34 @@ Footer rules:
 - omit `Co-Authored-By` trailers by default, including when an agent runs `git commit`; add one only when the user explicitly requests it and provides or confirms the actual contributor's name and email
 - never hard-code or infer a co-author identity from this skill, the tool being used, or the act of committing
 
+### Release commits
+
+When the intended commit prepares a release, default to this structure:
+
+```text
+chore(release): release $TAG
+
+- Bump version to $TAG
+- Update citation and package metadata
+- Generate the release changelog
+- Update release documentation
+```
+
+Replace `$TAG` with the release tag established by the conversation or staged
+metadata, preserving the repository's tag style. Treat this as a flexible
+starting point: adapt the wording, omit bullets that do not apply, and add
+changelog-relevant details or comments supported by the staged diff.
+
+When release preparation includes fixes or other substantive changes, check the
+repository's changelog filters and template before choosing the subject. Use a
+type and scope that include those changes in the generated changelog; when only
+subjects are rendered, describe the substantive changes in the subject as well.
+Keep a release-focused subject only when that configuration preserves their
+visibility. If a required release convention conflicts with changelog visibility,
+flag the conflict and request direction instead of assuming body details will
+appear. Preserve required breaking-change markers and issue footers. Continue
+to omit validation results unless the user requests them.
+
 ## Keep a Changelog mapping
 
 Choose a type that maps cleanly to release-note categories in the current repository.
@@ -99,7 +127,7 @@ When no repo-specific mapping exists, use:
 - `security` or `fix` with a security scope for `Security`
 - `docs`, `test`, `build`, `ci`, `chore`, or `style` only when the change is intentionally not user-facing or the repo maps those types into the changelog
 
-The user's preferred workflow is one commit message covering the full staged diff, even when it spans multiple concerns or Keep a Changelog categories. Do not recommend splitting commits or return multiple messages unless the user explicitly asks. Choose the dominant semver-relevant type, preserve any breaking-change markers, and describe meaningful secondary changes in the body.
+The user's preferred workflow is one commit message covering the full staged diff, even when it spans multiple concerns or Keep a Changelog categories. Do not recommend splitting commits or return multiple messages unless the user explicitly asks. For non-release commits, choose the dominant semver-relevant type, preserve any breaking-change markers, and describe meaningful secondary changes in the body.
 
 ## Content guidance
 

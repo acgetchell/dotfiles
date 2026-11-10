@@ -81,25 +81,56 @@ would allow the release to finish sooner, but has not authorized gate changes.
 
 | Issue | State and acceptance |
 | --- | --- |
-| fixture-progress#61 | Fix rejected correctness-gate status; implementation, regression coverage, source and installed wheel/sdist checks, and required Linux/macOS/Windows jobs passed at merged revision G1; issue remains open |
-| fixture-progress#62 | Fix a separate cancellation defect; implementation merged at G2, Linux/macOS checks passed, required Windows package validation has no result; issue remains open |
-| fixture-progress#63 | Existing release tracker for the next package version: verify selected release artifacts, publish, and record the exact non-yanked supplying version and fresh registry resolution; all publication criteria are pending |
+| fixture-progress#61 | Fix rejected correctness-gate status; implementation, regression coverage, source and installed wheel/sdist checks complete at revision G1 in open PR #64; issue remains open |
+| fixture-progress#62 | Fix a separate cancellation defect; implementation and its regression checks complete at G1 in the same open PR #64; issue remains open |
+| fixture-progress#63 | Filed release tracker for the next package version: final native validation, retained-evidence handoff, cache timings, published-tooling adoption, release-artifact verification, publication, and exact non-yanked supplying version with fresh registry resolution; all remain pending |
 | fixture-analysis#91 | Existing adoption tracker: use the published supplying version through normal pins/locks, verify real integration/native checks, then remove its working adapter; adoption has not started |
 
-#61's checklist also contains an unchecked item: "Record the exact published
-supplying version so consumers can adopt through normal pin/lock resolution."
-Its other acceptance items are complete. The latest registry version is 1.0 and
-contains neither fix. No newer release is published. #63 covers publication of
-both fixes; #91 covers their consumer adoption. No implementation acceptance
-requires completing a real consumer migration.
+PR #64 targets the default branch of `fixture-progress`; required PR CI on
+Linux/macOS/Windows and required review are pending. It has not merged. The
+maintainer has assigned final release validation and publication to #63 and
+consumer adoption to #91. The former release-only checklist items from #61 and
+#62 have been copied to #63 with their evidence requirements, and both
+implementation issues record and link that completed handoff. No agreed
+implementation work remains. Required PR CI is separate from final release
+validation and must still pass before merge.
 
-The maintainer asks which issues can close now and requests concrete proposed
-checklist/status updates, including where any remaining obligations belong.
-The request is planning-only; no live issue edits or publication are authorized.
+The PR description currently reads:
 
-Also assess an alternative inventory in which #63 and #91 do not exist and no
-other receiving trackers are filed. Keep all implementation and registry facts,
-the unchecked publication item, and the planning-only authorization unchanged.
+```text
+Fix correctness-gate rejection and cancellation handling, with regression and
+installed-package checks. Required PR CI and review are pending.
+
+Refs #61
+Refs #62
+Release validation and publication: #63
+Consumer adoption: fixture-analysis#91
+```
+
+The latest registry version is 1.0 and contains neither fix. No newer release is
+published. No implementation acceptance requires a real consumer migration.
+The maintainer requests a revised PR description, the issue states before and
+after merge, and proposed checklist/status updates for remaining obligations.
+The request is planning-only; no live edits, merge or publication are authorized.
+
+Also assess three alternative inventories, keeping PR CI, registry facts and
+planning-only authorization unchanged. Implementation remains complete except
+where explicitly changed:
+
+1. #63 and #91 are filed, but the release-only checklist items are still unchecked
+   in #61 and #62; their transfer and the linked handoff records have not happened.
+2. Neither #63 nor #91 exists and no other receiving tracker is filed. The
+   release-only checklist items remain unchecked in #61 and #62.
+3. The filed trackers and completed handoffs from the main case remain, but
+   both implementations are only partial: supported rejection handling in #61
+   and cancellation cleanup in #62 remain unimplemented. PR #64 delivers only
+   the completed subsets; its description still uses `Refs #61` and `Refs #62`.
+
+In all three alternatives, #61 is manually linked to PR #64 through Development,
+and one commit to be merged contains `Closes #62`, despite the PR description's
+`Refs` lines. No authorization to unlink issues or rewrite commits is given.
+For each alternative, give the current PR references and issue-closure behavior,
+whether merge may proceed, and what must happen before those decisions change.
 
 ## Request
 

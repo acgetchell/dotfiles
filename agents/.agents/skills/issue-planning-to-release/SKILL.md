@@ -53,24 +53,46 @@ Track these states separately, with their owning repository and evidence:
 | Pinned | Consumer manifest and normal lock resolution use that published version |
 | Verified | Consumer integration and its required domain/native checks pass for the adoption revision |
 
-Close implementation issues when their implementation and required validation
-criteria are satisfied, including merge when it is part of the agreed completion
-boundary. Publication, exact supplying-version records, consumer pins/locks, and
-downstream verification belong in linked release or adoption trackers. Do not add
-them as implementation closure gates, or keep or reopen completed implementation
-issues solely because those later stages remain pending.
+Implementation issues track whether the agreed work is delivered. The release
+issue owns release validation and readiness, including final native checks,
+retained-evidence handoffs, timing evidence, publication and published-package
+adoption. Keep these obligations in the designated release or adoption tracker.
+Honor the current maintainer-approved boundary over older mixed checklists;
+do not keep completed implementation issues open for that later validation.
+
+When opening a PR that completes the agreed implementation scope, include
+`Closes #123` for each completed issue in the PR's repository, or
+`Closes OWNER/REPOSITORY#123` for one in another repository, once any required
+tracker handoff below is complete. Until then, use non-closing references such
+as `Refs #123`; replace them with closing references only after the handoff is
+recorded. Non-closing prose alone does not prevent automatic closure: whenever
+an issue must remain open, including unfinished implementation or a pending
+handoff, check manual Development links and closing keywords in the PR
+description, commits, and proposed merge/squash message before allowing merge.
+Remove automatic closure paths only when authorized; if they remain or cannot
+be verified, hold the merge until implementation and handoff are complete. If the PR
+merges without closing the issue, close it directly once its implementation and
+handoff are complete and closure is authorized.
+Also use non-closing references for unfinished implementation. Pending
+PR checks, review or merge do not make a complete implementation merely partial;
+those requirements still gate merge. Record unperformed release validation as
+pending in its owning tracker, without claiming that it passed.
 
 If an implementation checklist already mixes in release-only or adoption-only
 criteria, transfer those obligations to the appropriate linked tracker and record
 the handoff in the implementation issue. Preserve their scope and evidence needs;
 do not mark unperformed work complete. Reuse existing filed, linked trackers.
 If none exists, an unfiled proposal may document the plan as described below,
-but cannot receive checklist items. Before closing the implementation issue,
-file and link the receiving tracker and transfer the unfinished obligations.
-If filing is not authorized, leave closure pending that handoff. Release and
+but cannot receive checklist items. Before adding a closing reference or closing
+the implementation issue, file and link the receiving tracker, transfer the
+unfinished obligations, and record the handoff in the implementation issue.
+An existing tracker alone does not complete that transfer. If no receiving
+tracker is available or the needed filing or updates are not authorized, keep
+non-closing references and leave closure pending that handoff. Release and
 adoption trackers close at their own completion boundaries. Unfinished
-functionality or required implementation validation still blocks implementation
-closure.
+implementation still blocks implementation closure. Validation findings that
+require code changes belong in concrete implementation or fix issues linked
+from the release tracker; avoid duplicating the release checklist across them.
 
 Normal adoption uses published PyPI/crates.io dependencies, never editable
 installs, sibling checkouts, Git/path overrides, or private helpers. Upstream

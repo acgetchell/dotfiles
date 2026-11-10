@@ -39,7 +39,7 @@ def main() -> int:
     """Use the current scanner interpreter's entrypoint, including Windows .exe."""
     executable = Path(sys.executable).parent / ("semgrep.exe" if os.name == "nt" else "semgrep")
     if not executable.is_file():
-        print("Run this smoke with uv run --locked --project tooling/semgrep python.", file=sys.stderr)
+        print("Run this smoke with uv run --locked --group dev python.", file=sys.stderr)
         return 2
     try:
         with tempfile.TemporaryDirectory(prefix="dotfiles-semgrep-smoke-") as directory:

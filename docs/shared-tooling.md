@@ -1,6 +1,6 @@
 # Shared tooling adoption
 
-The exact published `research-repo-tools==0.2.5` package owns reusable mechanics.
+The exact published `research-repo-tools==0.2.7` package owns reusable mechanics.
 Dotfiles retains policy, machine provisioning, fixtures, and its skill protocols.
 No sibling checkout or unreleased code is needed.
 
@@ -11,16 +11,37 @@ No sibling checkout or unreleased code is needed.
 | File selection | Shared inventory and bounded batches for Python, Markdown, YAML, actionlint, and Semgrep |
 | Python lint/type policy | Complete configured Ruff and ty checks over tracked/nonignored `.py` and `.pyi`, including fixtures; fixers retain the narrower safe scope |
 | Workflow auditing | One locked Python zizmor pin and explicit persona; SHA pinning, offline local gate, required-online hosted audit, guarded SARIF upload; shared Actions allowlist command reads the committed settings |
-| Dependency/secret scanning | Managed OSV/Gitleaks, explicit root/scanner locks, full reachable history and current files, redacted reports; required CI `verify` includes the gate |
+| Dependency/secret scanning | Managed OSV/Gitleaks, the root lock, full reachable history and current files, redacted reports; required CI `verify` includes the gate |
 | Scanner lifecycle | `tools-sync`, `tools-check`, `update-security-tools`, and preview-first `clean`; package-owned cache store |
-| Dependency/tool updates | Shared `deps update-python --all-projects` for the root and explicitly declared scanner; Homebrew uv pin reconciliation; machine Cargo tools retain their existing owner |
+| Dependency/tool updates | Shared `deps update-python --all-projects` for the single root environment; Homebrew uv pin reconciliation; machine Cargo tools retain their existing owner |
 | Semgrep fixtures | Shared assertion runner over repository rules, syntax mutation pairs, and count expectations that retain path filters; integration tests exercise real review-graph source/test paths |
 | Notebooks | Published inspection/advice/lint/cleanup/execution in the Jupyter skill; its consumer template prohibits dependency installs inside cells |
 | Reviews | Shared opt-in CodeRabbit wrapper defaults to verified `origin/main`; no review is sent merely by running CI |
 | Review-graph helpers | Public exact-byte hashing, subprocess, and index-preserving status/diff APIs; graph serialization and immutable publication retain their protocol contracts |
-| Dependabot | SHA-pinned v0.1.8 reusable workflow; hosted rollout is tracked in [the rollout guide](../.github/DEPENDABOT.md) |
+| Dependabot | SHA-pinned v0.2.7 reusable workflow, byte-identical to the previously reviewed workflow; hosted rollout is tracked in [the rollout guide](../.github/DEPENDABOT.md) |
 
 ## Python authority and upgrades
+
+The current supplier is published v0.2.7. CI synchronizes the root environment,
+runs the early guards and static policy checks, then runs the serialized Semgrep
+lane alongside the remaining Python tests. `DOTFILES_TEST_WORKERS=0 just --jobs 1 ci`
+provides the complete serial fallback. There are no managed Cargo tools here, so
+the shared managed Cargo build cache does not apply to this repository.
+
+On 9 November 2026, both recipe schedules passed on the same macOS worktree:
+`just --jobs 1 ci` took 579.29 seconds and `just ci` took 556.10 seconds.
+Each run retained four pytest workers and passed 2,760 tests, with two native
+platform skips. These are single observations with warm tool caches on a busy
+host, not a measured speedup. The Python suite remains the dominant cost.
+The [validation graph and native timing record](validation-adoption.md) maps
+every validator to its owner and records the completed native jobs, queue and
+runner time, and dependency-cache cold/warm observations for #263.
+
+`just release-dependency-builds` authenticates the root's source-built native
+Python dependencies. `just release-dependencies` verifies the shared tooling and
+scanner environment against its single declared policy and registry lock.
+The obsolete Python 3.14 scanner project has been removed; no cross-interpreter
+provenance support or multiple-project source-build policy is needed here.
 
 The installed release supplies its Python requirement and development minor.
 `.python-version` and dependency-only `project.requires-python` are checked mirrors.
@@ -49,33 +70,27 @@ lint, and strict ty checks with the first failing batch stopping the command.
 `python-typecheck` uses the same shared owner. `python-fix` retains its narrower
 scope to preserve deliberately invalid Semgrep fixtures.
 
-Native scan recipes retain Semgrep 1.182.1's independent Python 3.14 environment
-in `tooling/semgrep`. Its own manifest retains the
-Windows `pywin32==312` override and the patched `mcp>=1.30.0,<2` constraint.
-It also uses OpenTelemetry 1.45.1/0.66b1 for
-[GHSA-xcq7-p3pf-p88h](https://github.com/advisories/GHSA-xcq7-p3pf-p88h).
-The v0.2.5 shared fixture runner requires Semgrep 1.182.1 in its own Python 3.15
-environment. The root dev group therefore requests `research-repo-tools[semgrep]`
+Native scan recipes and the shared fixture runner use the root Python 3.15
+environment. The root dev group requests `research-repo-tools[semgrep]`
 and carries the published compatibility constraints, including Windows pywin32,
 patched MCP, and the consistent OpenTelemetry family. The tooling-only group
-keeps the base package. Both scanner installations require wheels because the
+keeps the base package. The scanner installation requires a wheel because the
 source distribution lacks the native engine. The root also retains the
 `rust-just==1.59.0` override, aligned with `just_version`.
 
 `just update-python-dependencies` selects Homebrew uv and invokes the published
 `deps update-python --all-projects` command. It updates root development pins,
-upgrades both locks and synchronizes their separate environments. Only
-`tooling/semgrep` is listed in `deps.python-projects`; notebook skill assets are
-consumer templates and are never discovered or synchronized as projects.
-`just python-sync` restores both locked environments. Native scan recipes pass
-the configured scanner's absolute executable path. Shared fixture checks select the root
-environment's absolute scanner entry point. Linux provisioning
-keeps it in a separate `semgrep-venv` beneath `DOTFILES_REVIEW_PREFIX`, selected
-through `DOTFILES_SEMGREP_ENVIRONMENT`, without replacing the main environment.
-The Windows engine smoke selects the scanner project directly and requires one
+upgrades the root lock and synchronizes the shared environment. Notebook skill
+assets are consumer templates and are never synchronized as projects.
+`just python-sync` restores the locked environment. Native scan recipes and shared
+fixture checks select its absolute scanner entry point. Linux provisioning
+uses `DOTFILES_REVIEW_PREFIX/venv`, selected through `UV_PROJECT_ENVIRONMENT`.
+The Windows engine smoke selects the root dev group and requires one
 expected finding from a local rule and fixture, with no scanner errors. This
-configured check still needs native Windows evidence for the current changes.
-`just security-osv` scans both locks.
+configured check passed on the adoption and documentation-follow-up commits;
+the [native evidence record](validation-adoption.md#native-ci-measurements)
+identifies both runs and preserves the scope of the Windows checks.
+`just security-osv` scans the root lock.
 The obsolete override-detection preflight has been removed. Each successful
 project update remains applied if a later project fails; inspect the diff and
 retry the same recipe after resolving the failure.
@@ -113,7 +128,7 @@ parsing and malformed-policy regressions live in the
 Dotfiles retains installed-package consumer tests for its actual workflows,
 unapproved action and reusable-call mutations with file/line diagnostics,
 committed policy authority, and recipe/CI wiring. The shared Dependabot workflow's
-v0.1.8 commit pin is independent of this Python package migration.
+v0.2.7 commit pin is independent of this Python package migration.
 
 Semgrep retains version-comment, locked-command, explicit checkout, bootstrap,
 portability, safe skill YAML loading, selective Python runtime settings, and
@@ -127,7 +142,7 @@ YAML forms and count assertions when a rule's path scope changes. Python 3.15
 fixtures cover unsafe C/Python loader selection and global lazy-import settings;
 the production-path matrix also checks imported aliases and test exclusions.
 
-OSV scans the root and independent scanner Python lockfiles. The embedded zero-dependency Rust warmup
+OSV scans the root Python lockfile. The embedded zero-dependency Rust warmup
 fixture is deliberate review input, not a shipped Cargo product. Root Cargo
 dependency upgrades, cargo-deny, Rust documentation snippet scans, scientific
 validators, coverage summaries, benchmark-publication tooling, changelog

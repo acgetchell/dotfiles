@@ -4,7 +4,7 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
 export UV_CACHE_DIR := env_var_or_default("UV_CACHE_DIR", ".uv-cache")
-semgrep_environment := env_var_or_default("DOTFILES_SEMGREP_ENVIRONMENT", justfile_directory() / "tooling/semgrep/.venv")
+semgrep_environment := env_var_or_default("UV_PROJECT_ENVIRONMENT", justfile_directory() / ".venv")
 semgrep_bin := semgrep_environment / (if os() == "windows" { "Scripts" } else { "bin" })
 export PATH := semgrep_bin + (if os() == "windows" { ";" } else { ":" }) + env_var("PATH")
 
@@ -78,7 +78,7 @@ _ensure-uv:
 
 _ensure-semgrep:
     @test -x {{ quote(semgrep_bin / (if os() == "windows" { "semgrep.exe" } else { "semgrep" })) }} || { echo "Run just python-sync to restore the locked Semgrep environment." >&2; exit 1; }
-    @env -u UV_PYTHON UV_PROJECT_ENVIRONMENT={{ quote(semgrep_environment) }} uv sync --locked --project tooling/semgrep --check || { echo "Run just python-sync to restore the locked Semgrep environment." >&2; exit 1; }
+    @uv sync --locked --group dev --check || { echo "Run just python-sync to restore the locked Semgrep environment." >&2; exit 1; }
 
 action-lint: _ensure-actionlint
     uv run --locked --group dev research-repo-tools files run --include '.github/workflows/*.yml' --include '.github/workflows/*.yaml' -- actionlint
@@ -112,8 +112,21 @@ brew-cleanup-preview: _ensure-brew
 brew-install: _ensure-brew
     brew bundle install --file="$PWD/Brewfile"
 
-check: test-review-contracts shell-check git-config-check justfile-fmt-check toml-check yaml-check markdown-check github-actions-check check-skills semgrep semgrep-test python-ci
+check: python-sync test-review-contracts _check-policy _check-execution
     @echo "Checks complete!"
+
+# Stop on inexpensive policy failures before starting either independent lane.
+[private]
+_check-policy: shell-check git-config-check justfile-fmt-check toml-check yaml-check markdown-check github-actions-check check-skills python-check
+
+# Scanner outputs and pytest temporary outputs do not overlap.
+[parallel]
+[private]
+_check-execution: _check-semgrep test-python
+
+# Serialize the scanner and its fixture harness in their shared environment.
+[private]
+_check-semgrep: semgrep semgrep-test
 
 check-skills: _ensure-uv
     uv run --locked python scripts/skill_validate.py --repository .
@@ -172,7 +185,6 @@ python-lint: python-check
 
 python-sync: _ensure-uv
     uv sync --locked --group dev
-    env -u UV_PYTHON UV_PROJECT_ENVIRONMENT={{ quote(semgrep_environment) }} uv sync --locked --project tooling/semgrep
 
 python-typecheck: _ensure-uv
     uv run --locked --group dev research-repo-tools python typecheck
@@ -277,13 +289,21 @@ files +args: _ensure-uv
     uv run --locked --group dev research-repo-tools files "$@"
 
 security-osv: _ensure-uv
-    uv run --locked --group dev research-repo-tools security osv uv.lock tooling/semgrep/uv.lock
+    uv run --locked --group dev research-repo-tools security osv uv.lock
 
 security-secrets: _ensure-uv
     uv run --locked --group dev research-repo-tools security secrets
 
 # Scan dependency vulnerabilities and secrets with the pinned OSV/Gitleaks tools.
 security: security-osv security-secrets
+
+# Rebuild source-only Python dependencies and authenticate their native wheels.
+release-dependency-builds: python-sync
+    uv run --locked --no-sync research-repo-tools release dependency-builds
+
+# Verify the shared tooling and scanner environment against its registry lock.
+release-dependencies:
+    uv run --locked --no-sync research-repo-tools release dependencies
 
 alias security-check := security
 

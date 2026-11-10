@@ -17,9 +17,9 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_TESTS = "agents/.agents/skills/review-graph/scripts/test_review_graph_contracts.py"
 
 
-def test_native_scan_uses_configured_scanner_despite_root_extra(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    scanner = tmp_path / "independent scanner environment"
-    monkeypatch.setenv("DOTFILES_SEMGREP_ENVIRONMENT", str(scanner))
+def test_native_scan_uses_the_configured_root_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    scanner = tmp_path / "root environment"
+    monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", str(scanner))
     commands = dry_run(REPOSITORY_ROOT, "semgrep").stderr.splitlines()
     scan = shlex.split(next(line for line in commands if "research-repo-tools files run" in line))
     binary = scanner / ("Scripts/semgrep.exe" if os.name == "nt" else "bin/semgrep")
@@ -29,7 +29,17 @@ def test_native_scan_uses_configured_scanner_despite_root_extra(tmp_path: Path, 
 def test_ci_requires_full_python_inventory_and_shared_baseline() -> None:
     """CI includes fixtures once through the complete Python gate."""
     recipes = inspect_justfile(REPOSITORY_ROOT).recipes
-    for parent, child in (("ci", "check"), ("check", "python-ci"), ("python-ci", "python-check")):
+    for parent, child in (
+        ("ci", "check"),
+        ("check", "python-sync"),
+        ("check", "_check-policy"),
+        ("check", "_check-execution"),
+        ("_check-policy", "python-check"),
+        ("_check-execution", "test-python"),
+        ("_check-execution", "_check-semgrep"),
+        ("_check-semgrep", "semgrep"),
+        ("_check-semgrep", "semgrep-test"),
+    ):
         assert child in {dependency["recipe"] for dependency in recipes[parent]["dependencies"]}
     assert recipes["python-check"]["body"] == [["uv run --locked --group dev research-repo-tools python check"]]
     assert recipes["python-typecheck"]["body"] == [["uv run --locked --group dev research-repo-tools python typecheck"]]
@@ -37,7 +47,7 @@ def test_ci_requires_full_python_inventory_and_shared_baseline() -> None:
 
 def test_scanner_guard_rejects_executable_in_stale_environment(tmp_path: Path) -> None:
     """An executable alone must not authorize scanning against a stale lock."""
-    scanner_environment = Path(os.environ.get("DOTFILES_SEMGREP_ENVIRONMENT", REPOSITORY_ROOT / "tooling/semgrep/.venv"))
+    scanner_environment = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", REPOSITORY_ROOT / ".venv"))
     stale = tmp_path / "stale scanner"
     uv = shutil.which("uv")
     just = shutil.which("just")
@@ -66,7 +76,7 @@ def test_scanner_guard_rejects_executable_in_stale_environment(tmp_path: Path) -
     result = subprocess.run(  # noqa: S603 - actual recipe validates the isolated stale environment without synchronizing it.
         [just, "_ensure-semgrep"],
         cwd=REPOSITORY_ROOT,
-        env={**os.environ, "DOTFILES_SEMGREP_ENVIRONMENT": str(stale), "UV_OFFLINE": "1"},
+        env={**os.environ, "UV_PROJECT_ENVIRONMENT": str(stale), "UV_OFFLINE": "1"},
         check=False,
         capture_output=True,
         text=True,
@@ -79,7 +89,7 @@ def test_scanner_guard_rejects_executable_in_stale_environment(tmp_path: Path) -
     assert snapshot() == before
 
 
-def test_scanner_guard_ignores_root_python_selector() -> None:
+def test_scanner_guard_accepts_root_python_selector() -> None:
     """The real locked scanner check works when the site selects root Python 3.15."""
     just = shutil.which("just")
     assert just is not None
@@ -95,8 +105,8 @@ def test_scanner_guard_ignores_root_python_selector() -> None:
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_python_sync_keeps_root_python_selector_out_of_scanner(tmp_path: Path) -> None:
-    """Execute the real recipe and observe selector scope at each uv boundary."""
+def test_python_sync_selects_one_environment_for_tooling_and_scanner(tmp_path: Path) -> None:
+    """Execute the real recipe and preserve the caller's shared environment."""
     just = shutil.which("just")
     assert just is not None
     log = tmp_path / "sync-environments.jsonl"
@@ -118,7 +128,7 @@ def test_python_sync_keeps_root_python_selector_out_of_scanner(tmp_path: Path) -
             **os.environ,
             "PATH": str(tmp_path) + os.pathsep + os.environ["PATH"],
             "UV_PYTHON": sys.executable,
-            "DOTFILES_SEMGREP_ENVIRONMENT": str(scanner_environment),
+            "UV_PROJECT_ENVIRONMENT": str(scanner_environment),
         },
         check=False,
         capture_output=True,
@@ -127,11 +137,11 @@ def test_python_sync_keeps_root_python_selector_out_of_scanner(tmp_path: Path) -
     )
     assert result.returncode == 0, result.stdout + result.stderr
     calls = [json.loads(line) for line in log.read_text().splitlines()]
-    assert len(calls) == 2
-    root, scanner = calls
+    assert len(calls) == 1
+    root = calls[0]
     assert root["argv"] == ["sync", "--locked", "--group", "dev"]
     assert root["python"] == sys.executable
-    assert scanner == {"argv": ["sync", "--locked", "--project", "tooling/semgrep"], "python": None, "environment": str(scanner_environment)}
+    assert root["environment"] == str(scanner_environment)
 
 
 @pytest.mark.parametrize(

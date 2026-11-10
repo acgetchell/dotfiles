@@ -17,11 +17,11 @@ def test_windows_ci_runs_the_native_engine_smoke() -> None:
     workflow = yaml.safe_load((REPOSITORY / ".github/workflows/ci.yml").read_text())
     steps = workflow["jobs"]["validation-timing"]["steps"]
     windows_commands = [step.get("run", "") for step in steps if step.get("if") == "runner.os == 'Windows'"]
-    assert any("uv run --locked --project tooling/semgrep python scripts/semgrep_smoke.py" in command for command in windows_commands)
+    assert any("uv run --locked --group dev python scripts/semgrep_smoke.py" in command for command in windows_commands)
 
 
 def test_real_native_scanner_engine_finds_the_fixture() -> None:
-    environment = Path(os.environ.get("DOTFILES_SEMGREP_ENVIRONMENT", REPOSITORY / "tooling/semgrep/.venv"))
+    environment = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", REPOSITORY / ".venv"))
     python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     result = subprocess.run(  # noqa: S603 - actual locked scanner environment, fixed offline fixture.
         [str(python), str(REPOSITORY / "scripts/semgrep_smoke.py")], check=False, capture_output=True, text=True, timeout=120
@@ -86,7 +86,7 @@ def test_missing_scanner_launcher_reports_the_required_environment(tmp_path: Pat
     monkeypatch.setattr(semgrep_smoke.sys, "executable", str(tmp_path / "python"))
     assert semgrep_smoke.main() == 2
     output = capsys.readouterr()
-    assert "uv run --locked --project tooling/semgrep python" in output.err
+    assert "uv run --locked --group dev python" in output.err
     assert output.out == ""
 
 
