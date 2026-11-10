@@ -65,7 +65,15 @@ When opening a PR that completes the agreed implementation scope, include
 `Closes OWNER/REPOSITORY#123` for one in another repository, once any required
 tracker handoff below is complete. Until then, use non-closing references such
 as `Refs #123`; replace them with closing references only after the handoff is
-recorded. Also use non-closing references for unfinished implementation. Pending
+recorded. Non-closing prose alone does not prevent automatic closure: whenever
+an issue must remain open, including unfinished implementation or a pending
+handoff, check manual Development links and closing keywords in the PR
+description, commits, and proposed merge/squash message before allowing merge.
+Remove automatic closure paths only when authorized; if they remain or cannot
+be verified, hold the merge until implementation and handoff are complete. If the PR
+merges without closing the issue, close it directly once its implementation and
+handoff are complete and closure is authorized.
+Also use non-closing references for unfinished implementation. Pending
 PR checks, review or merge do not make a complete implementation merely partial;
 those requirements still gate merge. Record unperformed release validation as
 pending in its owning tracker, without claiming that it passed.

@@ -113,16 +113,24 @@ The maintainer requests a revised PR description, the issue states before and
 after merge, and proposed checklist/status updates for remaining obligations.
 The request is planning-only; no live edits, merge or publication are authorized.
 
-Also assess two alternative inventories, keeping implementation, PR CI, registry
-facts and planning-only authorization unchanged:
+Also assess three alternative inventories, keeping PR CI, registry facts and
+planning-only authorization unchanged. Implementation remains complete except
+where explicitly changed:
 
 1. #63 and #91 are filed, but the release-only checklist items are still unchecked
    in #61 and #62; their transfer and the linked handoff records have not happened.
 2. Neither #63 nor #91 exists and no other receiving tracker is filed. The
    release-only checklist items remain unchecked in #61 and #62.
+3. The filed trackers and completed handoffs from the main case remain, but
+   both implementations are only partial: supported rejection handling in #61
+   and cancellation cleanup in #62 remain unimplemented. PR #64 delivers only
+   the completed subsets; its description still uses `Refs #61` and `Refs #62`.
 
+In all three alternatives, #61 is manually linked to PR #64 through Development,
+and one commit to be merged contains `Closes #62`, despite the PR description's
+`Refs` lines. No authorization to unlink issues or rewrite commits is given.
 For each alternative, give the current PR references and issue-closure behavior,
-and identify what must happen before either can change.
+whether merge may proceed, and what must happen before those decisions change.
 
 ## Request
 

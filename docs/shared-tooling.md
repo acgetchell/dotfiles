@@ -32,8 +32,10 @@ On 9 November 2026, both recipe schedules passed on the same macOS worktree:
 `just --jobs 1 ci` took 579.29 seconds and `just ci` took 556.10 seconds.
 Each run retained four pytest workers and passed 2,760 tests, with two native
 platform skips. These are single observations with warm tool caches on a busy
-host, not a measured speedup. The Python suite remains the dominant cost;
-hosted Linux and Windows results still belong to the eventual PR checks.
+host, not a measured speedup. The Python suite remains the dominant cost.
+The [validation graph and native timing record](validation-adoption.md) maps
+every validator to its owner and records the completed native jobs, queue and
+runner time, and dependency-cache cold/warm observations for #263.
 
 `just release-dependency-builds` authenticates the root's source-built native
 Python dependencies. `just release-dependencies` verifies the shared tooling and
@@ -85,7 +87,9 @@ fixture checks select its absolute scanner entry point. Linux provisioning
 uses `DOTFILES_REVIEW_PREFIX/venv`, selected through `UV_PROJECT_ENVIRONMENT`.
 The Windows engine smoke selects the root dev group and requires one
 expected finding from a local rule and fixture, with no scanner errors. This
-configured check still needs native Windows evidence for the current changes.
+configured check passed on the adoption and documentation-follow-up commits;
+the [native evidence record](validation-adoption.md#native-ci-measurements)
+identifies both runs and preserves the scope of the Windows checks.
 `just security-osv` scans the root lock.
 The obsolete override-detection preflight has been removed. Each successful
 project update remains applied if a later project fails; inspect the diff and
