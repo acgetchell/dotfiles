@@ -59,7 +59,7 @@ Linux portable review (Ubuntu 24.04)
   checkout -> host prerequisites -> linux setup -> repeated linux setup
   resource report -> linux check -> linux smoke -> evidence upload
 linux setup -> locked environment/tool checks -> yaml-fmt-check/plugin warmup
-linux check -> environment/skill checks -> timed ci (offline, no sync)
+linux check -> environment/skill checks -> timed ci (uv offline; includes python-sync)
 linux smoke -> environment/skill checks -> timed graph publication/final proof
 Validation timing (Linux and Windows)
   checkout -> native shells/Python/Just/uv -> test-validation-timing
@@ -69,6 +69,13 @@ GitHub Actions Security Analysis (separate zizmor workflow)
   -> SARIF generation -> permitted SARIF upload
 ```
 
+The Linux launcher sets `UV_OFFLINE=1` to disable uv network access and
+`UV_NO_SYNC=1` to disable implicit environment synchronization by `uv run`.
+Its preflight checks the locked environment, but the timed `just ci` still
+invokes `python-sync`, which explicitly runs `uv sync --locked --group dev`.
+That sync inherits uv's offline setting and can modify the environment; the
+timed gate is not read-only or guaranteed to avoid synchronization.
+
 The jobs retain their existing names and native coverage. No required validator
 was removed or assigned to a different job. macOS and Linux run complete local
 CI; Windows retains its native executor/timing and scanner checks. An offline
@@ -77,7 +84,7 @@ audit is not evidence of the separate authenticated online audit.
 ## Validator owners
 
 In this table, CI means local `just ci`, hosted macOS `verify`, and Linux's
-offline `ci` invocation. Shared commands own generic mechanics; dotfiles owns
+`ci` invocation with uv offline. Shared commands own generic mechanics; dotfiles owns
 the selected source inventory, policy and consumer assertions.
 
 | Validator | Final implementation owner | Execution owner |
@@ -100,10 +107,10 @@ the selected source inventory, policy and consumer assertions.
 | Dependency advisories | `security-osv`, shared OSV checker over `uv.lock` | macOS `verify` and explicit local `security` |
 | Secrets | `security-secrets`, shared Gitleaks history/current-files scan | macOS `verify` and explicit local `security` |
 | Online workflow security and SARIF | `zizmor-check`, shared scanner | `GitHub Actions Security Analysis`; findings gate remains distinct from report production |
-| Linux installation, repeatability and installed environment | `bin/linux-review.sh`, `scripts/linux_review.py` | `Linux portable review`, before offline checks |
+| Linux installation, repeatability and installed environment | `bin/linux-review.sh`, `scripts/linux_review.py` | `Linux portable review`, before CI |
 | Native executor shells/timing | `test-validation-timing`, `review-validator/scripts/test_run_timed.py` | Linux and Windows timing jobs; also covered by the platform-applicable CI tests |
 | Native Windows scanner | `scripts/semgrep_smoke.py`, root dev lock | Windows timing job; requires one expected finding and no scanner errors |
-| Graph publication/final proof | `review-graph/scripts/review_graph_smoke.py` | Linux smoke after offline CI; `review-environment-smoke` is the local entry point |
+| Graph publication/final proof | `review-graph/scripts/review_graph_smoke.py` | Linux smoke after CI; `review-environment-smoke` is the local entry point |
 
 Focused aliases preserve these owners: `markdown-lint` delegates to
 `markdown-check`; `python-lint` delegates to `python-check`; `python-ci` composes
@@ -160,7 +167,7 @@ workflow is excluded. Both online workflow audits also passed. Stage detail:
 | macOS complete `just ci` | 522 | 532 |
 | Linux fresh unprivileged setup | 19 | 20 |
 | Linux repeated setup, same command and verification | 1 | 1 |
-| Linux complete offline suite | 323 | 327 |
+| Linux complete suite with uv offline, including explicit sync | 323 | 327 |
 | Linux graph publication/final-proof smoke | <1 | <1 |
 | Linux timing tests | 2 | 4 |
 | Windows timing tests | 7 | 6 |
@@ -191,7 +198,8 @@ job 609/612 seconds. These observations do not demonstrate an overall speedup.
 Linux uses fresh job-private installation/cache directories without Actions
 cache restoration. Its first and repeated setup commands verify the same pinned
 tool/environment contract and measured cold/warm setup at 19/1 and 20/1 seconds.
-The later offline suite runs against that provisioned environment. Windows
+The later suite runs against that provisioned environment with uv offline,
+including its explicit sync. Windows
 timing jobs disable setup-uv caching; no warm-cache Windows full-suite result
 is claimed. There is no managed Cargo cache to measure in dotfiles.
 
