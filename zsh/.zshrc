@@ -105,8 +105,9 @@ if [[ -n "${HOMEBREW_PREFIX:-}" ]]; then
   export PATH="$HOMEBREW_PREFIX/opt/rustup/bin:${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
 fi
 
-# Add Command Line Tools (system path; safe everywhere)
-export PATH="/Library/Developer/CommandLineTools/usr/bin:$PATH"
+# Use Apple's /usr/bin compiler shims so xcode-select controls SDK discovery.
+# Remove the old direct compiler path when reloading an existing shell too.
+path=("${(@)path:#/Library/Developer/CommandLineTools/usr/bin}")
 
 # Add MacTeX/BasicTeX tools when present.
 if [[ -d /Library/TeX/texbin && ":$PATH:" != *":/Library/TeX/texbin:"* ]]; then

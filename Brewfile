@@ -11,7 +11,6 @@
 # ---- CLI tools (formulae) ----
 brew "actionlint"                      # GitHub Actions workflow linter
 brew "ansible"                         # configuration management and automation
-brew "azure-cli"                       # Azure CLI (`az`)
 brew "cmake"                           # cross-platform build system generator
 brew "dotnet"                          # .NET SDK/runtime CLI (`dotnet`)
 brew "gh"                              # GitHub CLI
@@ -43,6 +42,7 @@ brew "zola"                            # static site generator
 cask "1password"                      # password manager
 cask "1password-cli"                  # 1Password CLI (`op`)
 cask "anki"                           # spaced-repetition flashcards
+cask "azure-cli"                      # Azure CLI (`az`)
 cask "battle-net"                     # Blizzard game launcher
 cask "chatgpt"                        # ChatGPT desktop app (replaces deprecated codex-app cask)
 cask "coderabbit"                     # AI code review CLI (`coderabbit`)
