@@ -234,7 +234,12 @@ def run(output: Path, repeats: int, scale: int) -> dict[str, Any]:
         "Four seeded findings prove preservation, not discovery quality. JIT is queried only after timed operations.",
     }
     # Machine paths remain in private replay artifacts; the shareable summary uses placeholders.
-    portable = json.dumps(report, indent=2, sort_keys=True).replace(str(REPOSITORY), "$REPO").replace(str(output), "$RUN").replace(str(Path.home()), "$HOME")
+    portable = (
+        json.dumps(report, indent=2, sort_keys=True, allow_nan=False)
+        .replace(str(REPOSITORY), "$REPO")
+        .replace(str(output), "$RUN")
+        .replace(str(Path.home()), "$HOME")
+    )
     (output / "report.json").write_text(portable + "\n", encoding="utf-8")
     return report
 

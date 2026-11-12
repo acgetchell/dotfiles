@@ -110,6 +110,32 @@ def test_summary_preserves_samples_and_robust_dispersion() -> None:
     assert benchmark.summary([1.0, 3.0, 100.0]) == {"samples_seconds": [1.0, 3.0, 100.0], "median_seconds": 3.0, "mad_seconds": 2.0}
 
 
+def test_overflowing_ratio_median_cannot_publish_a_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Two finite ratios near 1e308 overflow the median's intermediate sum."""
+    values = iter(float(value) for value in range(8))
+    monkeypatch.setattr(benchmark.time, "perf_counter", lambda: next(values))
+    monkeypatch.setattr(benchmark, "source_identity", lambda: "unchanged")
+
+    def subprocess_result(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        enabled = kwargs["env"]["PYTHON_JIT"] == "1"
+        trial = {
+            "jit_available": True,
+            "jit_enabled": enabled,
+            "findings": ["preserved"],
+            "planner_seconds": [1.0],
+            "cold_replay_seconds": 1.0 if enabled else 1e-308,
+            "warm_replay_seconds": [1.0],
+        }
+        return subprocess.CompletedProcess(argv, 0, json.dumps(trial, allow_nan=False), "")
+
+    monkeypatch.setattr(benchmark.subprocess, "run", subprocess_result)
+    output = tmp_path / "results"
+    with pytest.raises(ValueError, match="Out of range float values"):
+        benchmark.run(output, 2, 1)
+    assert not (output / "report.json").exists()
+    assert len(list(output.glob("*/worker.stdout"))) == 4
+
+
 @pytest.mark.parametrize("destination", ["fixture", "output", "symlink-fixture", "symlink-output", "scale"])
 def test_worker_rejects_invalid_destinations_before_preparing_fixtures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, destination: str) -> None:
     """Exercise direct entry, including symlink traversal, without touching the checkout."""

@@ -36,13 +36,28 @@ def test_metadata_cannot_turn_nontext_titles_into_identity(title: object) -> Non
         MODULE.CslMetadata.parse(raw)
 
 
-@pytest.mark.parametrize("family", [{"text": "Shewchuk"}, True, 1997])
-def test_metadata_cannot_turn_nontext_authors_into_complete_identity(family: object) -> None:
+@pytest.mark.parametrize("field", ["family", "literal"])
+@pytest.mark.parametrize("family", [{"text": "Shewchuk"}, True, 1997, ["Shewchuk"]])
+def test_metadata_cannot_turn_nontext_authors_into_complete_identity(field: str, family: object) -> None:
     raw = metadata("Robust predicates")
-    raw["author"] = [{"family": family}]
+    raw["author"] = [{field: family}]
     parsed = MODULE.CslMetadata.parse(raw)
     assert parsed.author_families == ()
     assert not parsed.authors_complete
+    entry = MODULE.DoiEntry(MODULE.Doi.parse("10.1234/test"), 1, "Shewchuk. Robust predicates. (1997).")
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: raw)
+    assert result.status == MODULE.AuditStatus.INSUFFICIENT_CONTEXT
+
+
+def test_metadata_preserves_text_lists_for_titles_and_containers() -> None:
+    raw = metadata("Robust predicates")
+    raw["title"] = ["<i>Robust predicates</i>"]
+    raw["container-title"] = ["Fixture Journal"]
+    parsed = MODULE.CslMetadata.parse(raw)
+    assert parsed.title == "Robust predicates"
+    assert parsed.container == "Fixture Journal"
+    assert parsed.author_families == ("Shewchuk",)
+    assert parsed.authors_complete
 
 
 @pytest.mark.parametrize("doi", ["10.1007/example", "10.12345/paper.2018", "10.1007/example.2018"])
