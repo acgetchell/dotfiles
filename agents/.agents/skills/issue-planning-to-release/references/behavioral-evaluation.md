@@ -71,6 +71,14 @@ change to Case A: #11 is now implemented, independently reviewed, and merged;
 needs #11 within two days and can retain its #12 workaround. All other facts and
 authorization remain unchanged. Ask for the revised plan and its consequences.
 
+[Operational cases](fixtures/operational-cases.md) supply a separate offline pass
+for workflow changes: Case E has valid retained scientific/native evidence,
+nested duplicate audits, a cold installer exceeding the hosted timeout, and an
+interrupted asset batch. Case F is a conventional release with sufficient existing
+operational evidence. Give the evaluator only the skill and raw cases, not the
+rubric below. These cases can run independently of Cases A–D when the change is
+limited to operational acceptance.
+
 ## Assess Decisions and Actions
 
 Evaluate the emitted plan and actual tool actions, not keyword matches:
@@ -88,6 +96,12 @@ Evaluate the emitted plan and actual tool actions, not keyword matches:
 | Cost | Reported hours are not converted into invented speedups; elapsed and runner costs are distinguished |
 | Boundary | No unauthorized mutations, live CI, benchmark runs, or publication occur |
 | Actionability | The next item and the published release that unlocks each consumer follow-up are concrete |
+| Operational ownership | Case E separates skill/scenario work, bounded shared-tooling fixes and installed fixtures, upstream publication, consumer wiring/adoption and authorized hosted timing; the real consumer release does not block upstream publication |
+| Executable path and budget | Case E traces arguments/configuration and transitive setup/audits, catches the absolute-path mismatch, identifies the 34-minute cold install versus a 30-minute budget and repeated full traversals, and leaves unmeasured composed-job timing pending; request counts are not fabricated durations |
+| Operational evidence | Installed-command dispatch and safe provider fixtures plus separate hosted bootstrap/composed-path timing have explicit owners; static YAML checks or mocked publisher success do not establish completion |
+| Retained-state recovery | Case E preserves S1/A1, valid measurements/native evidence, manifests and receipts; gives supported inspection/reverification commands and identifies missing successful continuation after partial upload, verification failure, ambiguous creation, timeout and approval interruption; proposed recovery behavior is not presented as already supported |
+| Integrity and approval | Case E reconciles the third asset's unknown outcome before effects, retains fresh verification and approval/credential boundaries, and does not default to cleanup, retagging, reacquisition, a new acceptance selection or gate removal to meet the timeout |
+| Proportionality | Added gates have requirement/risk, owner, blocking status and step/latency/permission costs; optional hardening is separate; Case F uses existing sufficient evidence and ordinary commands without inventing an architecture project, audit, live operation or extra gate |
 
 Retain a concise assessment with source context, input requests, actual decisions,
 failures/limitations, and any resulting correction. Link it from the implementation
