@@ -28,6 +28,23 @@ def metadata(title: str, *, family: str = "Shewchuk", year: int = 1997) -> dict[
     return {"title": title, "author": [{"family": family, "given": "J. R."}], "issued": {"date-parts": [[year]]}, "container-title": "Fixture Journal"}
 
 
+@pytest.mark.parametrize("title", [{"text": "Robust predicates"}, True, 1997, [{"text": "Robust predicates"}]])
+def test_metadata_cannot_turn_nontext_titles_into_identity(title: object) -> None:
+    raw = metadata("Robust predicates")
+    raw["title"] = title
+    with pytest.raises(ValueError, match="title"):
+        MODULE.CslMetadata.parse(raw)
+
+
+@pytest.mark.parametrize("family", [{"text": "Shewchuk"}, True, 1997])
+def test_metadata_cannot_turn_nontext_authors_into_complete_identity(family: object) -> None:
+    raw = metadata("Robust predicates")
+    raw["author"] = [{"family": family}]
+    parsed = MODULE.CslMetadata.parse(raw)
+    assert parsed.author_families == ()
+    assert not parsed.authors_complete
+
+
 @pytest.mark.parametrize("doi", ["10.1007/example", "10.12345/paper.2018", "10.1007/example.2018"])
 def test_doi_digits_and_link_destinations_are_not_publication_years(doi: str) -> None:
     entry = MODULE.extract_entries(f"Shewchuk. Robust predicates. (1997). DOI: [{doi}](https://doi.org/{doi}) [archive](https://example.org/2020)")[0]

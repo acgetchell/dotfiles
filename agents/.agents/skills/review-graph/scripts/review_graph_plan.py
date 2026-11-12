@@ -29,8 +29,8 @@ from review_graph_results import EvaluationRejection, parse_json_object
 from review_graph_reuse import (
     AuditInputIdentity,
     AuditReuseTransition,
-    ExternalMetadataTransition,
     ExternalSourceTransition,
+    MetadataTransition,
     ReviewSourceSnapshot,
     audit_inputs_document,
     metadata_states,
@@ -555,7 +555,7 @@ class GraphPlan:
     audit_continuations: tuple[dict[str, Any], ...] = field(default=(), kw_only=True)
     review_scope_exclusions: tuple[dict[str, str], ...] = field(default=(), kw_only=True)
     pre_review_validation_nodes: tuple[str, ...] = ()
-    commit_handoffs: tuple[ExternalMetadataTransition, ...] = ()
+    commit_handoffs: tuple[MetadataTransition, ...] = ()
     review_lifecycle: ReviewLifecycle = field(default_factory=ReviewLifecycle)
     independent_review_after_audits: bool = False
 
@@ -567,7 +567,7 @@ class FingerprintEvidence:
     expected: tuple[str, str, str]
     before: tuple[str, str, str]
     after: tuple[str, str, str]
-    metadata_transitions: tuple[ExternalMetadataTransition, ...] = ()
+    metadata_transitions: tuple[MetadataTransition, ...] = ()
 
     def matches(self, observed: tuple[str, str, str]) -> bool:
         """Match an observed capture through an explicit content-equivalence proof."""
@@ -5612,7 +5612,7 @@ def _capture_pathspecs_from_document(document: Mapping[str, Any]) -> tuple[str, 
     return normalized
 
 
-def _verify_repair_metadata_recapture(transition: ExternalMetadataTransition, expected_manifest: dict[str, Any], manifest: dict[str, Any]) -> None:
+def _verify_repair_metadata_recapture(transition: MetadataTransition, expected_manifest: dict[str, Any], manifest: dict[str, Any]) -> None:
     """Bind the intermediate repair to a real, independently recaptured staging state."""
     transition.verify()
     before = asdict(transition.before)
@@ -5631,7 +5631,7 @@ def _verified_captured_source(
     captured_paths: Sequence[str],
     repository_root: Path | None,
     declared_bounds: Sequence[tuple[str, int]],
-    observed_metadata_transition: ExternalMetadataTransition | None = None,
+    observed_metadata_transition: MetadataTransition | None = None,
 ) -> dict[str, Any]:
     """Recapture exact source state and reject caller-authored line-bound claims."""
     if repository_root is None:
@@ -5966,7 +5966,7 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0913, PLR0915
     catalog_path: Path = DEFAULT_ROUTING_CATALOG,
     skill_roots: Sequence[Path] = (DEFAULT_SKILL_ROOT,),
     repository_root: Path | None = None,
-    observed_metadata_transition: ExternalMetadataTransition | None = None,
+    observed_metadata_transition: MetadataTransition | None = None,
     control_root: Path | None = None,
 ) -> GraphPlan:
     """Build a graph plan from the exhaustive fixture/CLI JSON schema."""

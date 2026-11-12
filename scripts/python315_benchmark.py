@@ -1,10 +1,10 @@
 """Measure JIT costs on the canonical planner and publication fixture."""
 
 import argparse
-import hashlib
 import importlib
 import importlib.metadata
 import json
+import math
 import os
 import platform
 import statistics
@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from research_repo_tools.evidence import fingerprint_files
 from research_repo_tools.selection import select_files
 
 REPOSITORY = Path(__file__).resolve().parents[1]
@@ -48,10 +49,7 @@ def runtime_identity() -> dict[str, object]:
 
 def source_identity() -> str:
     """Hash selected source bytes without changing repository or Git state."""
-    digest = hashlib.sha256()
-    for name in select_files(REPOSITORY):
-        digest.update(name.encode() + b"\0" + (REPOSITORY / name).read_bytes() + b"\0")
-    return digest.hexdigest()
+    return fingerprint_files(REPOSITORY, [Path(name) for name in select_files(REPOSITORY)])
 
 
 def worker(root: Path, output: Path, scale: int) -> dict[str, Any]:
@@ -127,22 +125,35 @@ def summary(samples: list[float]) -> dict[str, object]:
 def trial_metrics(trial: dict[str, Any]) -> dict[str, float]:
     """Weight every subprocess equally, including its internal warm samples."""
     return {
-        "planner": statistics.median(trial["planner_seconds"]),
-        "cold_replay": trial["cold_replay_seconds"],
-        "warm_replay": statistics.median(trial["warm_replay_seconds"]),
-        "whole_process": trial["process_seconds"],
+        "planner": statistics.median(_positive_durations(trial["planner_seconds"])),
+        "cold_replay": _positive_durations([trial["cold_replay_seconds"]])[0],
+        "warm_replay": statistics.median(_positive_durations(trial["warm_replay_seconds"])),
+        "whole_process": _positive_durations([trial["process_seconds"]])[0],
     }
+
+
+def _positive_durations(raw: object) -> tuple[float, ...]:
+    message = "benchmark measurements must be nonempty, finite and positive"
+    if not isinstance(raw, (list, tuple)) or not raw or any(type(value) not in (int, float) for value in raw):
+        raise ValueError(message)
+    try:
+        values = tuple(float(value) for value in raw)
+    except OverflowError as error:
+        raise ValueError(message) from error
+    if any(not math.isfinite(value) or value <= 0 for value in values):
+        raise ValueError(message)
+    return values
 
 
 def paired_effects(off: list[dict[str, Any]], on: list[dict[str, Any]]) -> dict[str, object]:
     """Retain within-pair JIT differences and dimensionless ratios."""
     pairs = [(trial_metrics(before), trial_metrics(after)) for before, after in zip(off, on, strict=True)]
+    if not pairs:
+        msg = "benchmark comparison requires at least one pair"
+        raise ValueError(msg)
     effects = {}
     for metric in pairs[0][0]:
-        if any(before[metric] <= 0 or after[metric] <= 0 for before, after in pairs):
-            msg = "benchmark measurements must be positive"
-            raise ValueError(msg)
-        ratios = [after[metric] / before[metric] for before, after in pairs]
+        ratios = list(_positive_durations([after[metric] / before[metric] for before, after in pairs]))
         median = statistics.median(ratios)
         effects[metric] = {
             "on_minus_off": summary([after[metric] - before[metric] for before, after in pairs]),

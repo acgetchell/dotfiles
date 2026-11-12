@@ -14,6 +14,38 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+def test_source_identity_frames_inventory_and_content(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(benchmark, "REPOSITORY", tmp_path)
+    names = ["a"]
+    monkeypatch.setattr(benchmark, "select_files", lambda _: tuple(names))
+    (tmp_path / "a").write_bytes(b"x\0b\0y")
+    before = benchmark.source_identity()
+    (tmp_path / "a").write_bytes(b"x")
+    (tmp_path / "b").write_bytes(b"y")
+    names.append("b")
+    assert benchmark.source_identity() != before
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf"), 0.0, -1.0])
+def test_paired_effects_reject_invalid_measurements(value: float) -> None:
+    trial = {"planner_seconds": [1.0], "cold_replay_seconds": value, "warm_replay_seconds": [1.0], "process_seconds": 1.0}
+    with pytest.raises(ValueError, match="positive"):
+        benchmark.paired_effects([trial], [trial])
+
+
+@pytest.mark.parametrize("samples", [[float("nan"), 1.0, 2.0], [1.0, 2.0, float("inf")], [True], []])
+def test_trial_metrics_reject_invalid_samples_before_reduction(samples: list[float]) -> None:
+    trial = {"planner_seconds": samples, "cold_replay_seconds": 1.0, "warm_replay_seconds": [1.0], "process_seconds": 1.0}
+    with pytest.raises(ValueError, match="positive"):
+        benchmark.trial_metrics(trial)
+
+
+def test_paired_effects_reject_nonfinite_ratio() -> None:
+    trial = {"planner_seconds": [1.0], "cold_replay_seconds": 1e-300, "warm_replay_seconds": [1.0], "process_seconds": 1.0}
+    with pytest.raises(ValueError, match="finite"):
+        benchmark.paired_effects([trial], [{**trial, "cold_replay_seconds": 1e300}])
+
+
 def test_canonical_worker_preserves_all_findings_and_separates_warm_samples(tmp_path: Path) -> None:
     """Real planning/publication operations supply evidence without timing thresholds."""
     output = tmp_path / "replays"

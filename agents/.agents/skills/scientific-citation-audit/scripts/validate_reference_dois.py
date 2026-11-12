@@ -387,7 +387,9 @@ def plain_text(value: object) -> str:
     """Normalize CSL JSON title/container fields."""
     if isinstance(value, list):
         value = value[0] if value else ""
-    text = str(value or "")
+    if not isinstance(value, str):
+        return ""
+    text = value
     text = re.sub(r"<[^>]+>", " ", text)
     return re.sub(r"\s+", " ", text).strip()
 

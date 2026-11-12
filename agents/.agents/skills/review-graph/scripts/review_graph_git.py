@@ -12,7 +12,7 @@ from review_graph_reads import source_read_operands
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from review_graph_reuse import ExternalMetadataTransition
+    from review_graph_reuse import MetadataTransition
 
 _DIFF_OPTIONS = frozenset(
     {
@@ -125,7 +125,7 @@ def _inherited_metadata_context(record: dict[str, Any]) -> dict[str, Any] | None
     }
 
 
-def _metadata_context_blockers(record: dict[str, Any], transition: ExternalMetadataTransition) -> list[dict[str, str]]:
+def _metadata_context_blockers(record: dict[str, Any], transition: MetadataTransition) -> list[dict[str, str]]:
     blockers = git_dependency_blockers(record)
     if transition.before.capture_mode == "branch" and transition.before.merge_base == transition.after.merge_base:
         blockers = [
@@ -207,7 +207,7 @@ def covers_captured_worktree(command: str, capture: Mapping[str, Any]) -> bool:
     )
 
 
-def metadata_audit_blockers(record: dict[str, Any], transition: ExternalMetadataTransition, *, fresh_current: bool = False) -> list[dict[str, str]]:
+def metadata_audit_blockers(record: dict[str, Any], transition: MetadataTransition, *, fresh_current: bool = False) -> list[dict[str, str]]:
     """Check fresh and inherited judgments without presenting old reads as fresh."""
     blockers = [] if fresh_current else _metadata_context_blockers(record, transition)
     inherited = _inherited_metadata_context(record)
@@ -216,14 +216,14 @@ def metadata_audit_blockers(record: dict[str, Any], transition: ExternalMetadata
     return blockers
 
 
-def intervening_metadata_blockers(record: dict[str, Any], transitions: tuple[ExternalMetadataTransition, ...]) -> list[dict[str, str]]:
+def intervening_metadata_blockers(record: dict[str, Any], transitions: tuple[MetadataTransition, ...]) -> list[dict[str, str]]:
     """Reject stale judgments when content reuse crosses a staging transition."""
     if not transitions:
         return []
     return metadata_audit_blockers(record, transitions[-1], fresh_current=tuple(record.get("observed_source_state", ())) == transitions[-1].after.source_state)
 
 
-def discovery_reconciliation(record: dict[str, Any], transition: ExternalMetadataTransition) -> dict[str, Any]:
+def discovery_reconciliation(record: dict[str, Any], transition: MetadataTransition) -> dict[str, Any]:
     """Bind discovery to the combined HEAD-to-worktree change, retaining the original commands."""
     return {
         "basis": "unchanged-reviewed-path-identities" if transition.before.head != transition.after.head else "combined-staged-and-unstaged-content",

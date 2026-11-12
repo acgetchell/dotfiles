@@ -113,17 +113,22 @@ def source_identity() -> SourceIdentity:
     if not commit or commit == "unavailable":
         msg = "Source identity unavailable; Git HEAD could not be read."
         raise ValueError(msg)
-    digest = hashlib.sha256()
+    digest = hashlib.sha256(b"dotfiles/linux-source/v2\0")
     for name in sorted(set(result.stdout.split(b"\0")) - {b""}):
         path = REPOSITORY / os.fsdecode(name)
         digest.update(name + b"\0")
         if path.is_symlink():
+            kind = b"symlink"
             content = os.fsencode(path.readlink())
         elif path.is_file():
+            kind = b"executable" if path.stat().st_mode & 0o111 else b"regular"
             content = path.read_bytes()
+        elif path.exists():
+            msg = f"Source identity unavailable; unsupported file kind: {os.fsdecode(name)!r}"
+            raise ValueError(msg)
         else:
-            content = b"missing"
-        digest.update(str(len(content)).encode() + b"\0" + content)
+            kind, content = b"missing", b""
+        digest.update(kind + b"\0" + str(len(content)).encode() + b"\0" + content)
     return {"commit": commit, "content_digest": f"sha256:{digest.hexdigest()}"}
 
 

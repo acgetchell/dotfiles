@@ -37,6 +37,29 @@ def _history_document() -> dict[str, Any]:
     }
 
 
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"repair_budget": 100},
+        {"repairs_completed": -1},
+        {"repairs_completed": True},
+        {"repairs_completed": 3},
+        {"budget_extensions": []},
+        {"comprehensive_restarts": []},
+        {"stop_reason": " "},
+        {"run_control": {}},
+        {"interleaved_repair_epochs": [1]},
+        {"interleaved_repair_epochs": (True,)},
+        {"repairs_completed": 2, "interleaved_repair_epochs": (2, 1)},
+    ],
+)
+def test_direct_lifecycle_construction_preserves_parsed_invariants(fields: dict[str, Any]) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        ReviewLifecycle(**fields)
+    with pytest.raises((TypeError, ValueError)):
+        replace(ReviewLifecycle(), **fields)
+
+
 def test_parsed_history_is_detached_and_keeps_the_plan_identity() -> None:
     raw = _history_document()
     expected = {**deepcopy(raw), "interleaved_repair_epochs": []}
