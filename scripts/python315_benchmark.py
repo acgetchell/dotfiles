@@ -235,7 +235,7 @@ def run(output: Path, repeats: int, scale: int) -> dict[str, Any]:
     }
     # Machine paths remain in private replay artifacts; the shareable summary uses placeholders.
     portable = (
-        json.dumps(report, indent=2, sort_keys=True, allow_nan=False)
+        json.dumps(report, indent=2, sort_keys=True, allow_nan=False, ensure_ascii=False)
         .replace(str(REPOSITORY), "$REPO")
         .replace(str(output), "$RUN")
         .replace(str(Path.home()), "$HOME")

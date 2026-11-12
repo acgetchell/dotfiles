@@ -206,8 +206,20 @@ def test_worker_preserves_checkout_behind_nested_symlinks(tmp_path: Path, monkey
     assert link.samefile(target)
 
 
-def test_successful_report_records_pairs_identity_and_equal_process_weight(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("path_name", "interpreter_root", "placeholder"),
+    [("plain", "checkout", "$REPO"), ("Zoë", "checkout", "$REPO"), ("Zoë", "results", "$RUN"), ("Zoë", "home", "$HOME")],
+)
+def test_successful_report_records_pairs_identity_and_equal_process_weight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path_name: str, interpreter_root: str, placeholder: str
+) -> None:
     """Known process measurements independently establish the serialized report contract."""
+    home_directory = tmp_path / path_name
+    repository = home_directory / "checkout"
+    output = home_directory / "results"
+    interpreter_directory = home_directory if interpreter_root == "home" else home_directory / interpreter_root
+    monkeypatch.setattr(benchmark, "REPOSITORY", repository)
+    monkeypatch.setattr(benchmark.Path, "home", classmethod(lambda _cls: home_directory))
     order = []
     values = iter([0.0, 10.0, 20.0, 40.0, 50.0, 90.0, 100.0, 180.0])
     monkeypatch.setattr(benchmark.time, "perf_counter", lambda: next(values))
@@ -225,12 +237,11 @@ def test_successful_report_records_pairs_identity_and_equal_process_weight(tmp_p
             "planner_seconds": [2.0, 4.0, 100.0] if pair == 0 else [8.0],
             "cold_replay_seconds": 6.0 if enabled else 3.0,
             "warm_replay_seconds": [2.0] if enabled else [4.0],
-            "environment": {"executable": str(benchmark.REPOSITORY / ".venv/bin/python"), "private_environment": False},
+            "environment": {"executable": str(interpreter_directory / ".venv/bin/python"), "private_environment": False},
         }
         return subprocess.CompletedProcess(argv, 0, json.dumps(trial), "")
 
     monkeypatch.setattr(benchmark.subprocess, "run", subprocess_result)
-    output = tmp_path / "results"
     report = benchmark.run(output, 2, 1)
     assert order == ["off", "on", "on", "off"]
     assert report["pair_order"] == [{"pair_index": 0, "modes": ["off", "on"]}, {"pair_index": 1, "modes": ["on", "off"]}]
@@ -238,11 +249,13 @@ def test_successful_report_records_pairs_identity_and_equal_process_weight(tmp_p
     assert report["paired"]["cold_replay"]["on_minus_off"] == {"samples_seconds": [3.0, 3.0], "median_seconds": 3.0, "mad_seconds": 0.0}
     assert report["paired"]["warm_replay"]["on_over_off"] == {"samples": [0.5, 0.5], "median": 0.5, "mad": 0.0}
     assert report["paired"]["whole_process"]["on_minus_off"]["samples_seconds"] == [10.0, -40.0]
-    persisted = json.loads((output / "report.json").read_text())
+    persisted = json.loads((output / "report.json").read_text(encoding="utf-8"))
     assert persisted["schema_version"] == 2
     assert persisted["source_sha256"] == "unchanged"
     assert persisted["results"]["on"]["trials"][1]["pair_index"] == 1
-    assert persisted["results"]["off"]["trials"][0]["environment"]["executable"] == "$REPO/.venv/bin/python"
+    for mode in ("off", "on"):
+        for trial in persisted["results"][mode]["trials"]:
+            assert trial["environment"]["executable"] == f"{placeholder}/.venv/bin/python"
     assert len(list(output.glob("*/worker.stdout"))) == 4
 
 
