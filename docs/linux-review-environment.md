@@ -168,6 +168,11 @@ A passing connected probe does not prove the compute environment has API access.
 Each command creates a new private directory and prints its `environment.json`.
 It records source commit and checkout content digest, distribution, architecture,
 libc, Python, shell/tool identities, command outcome, and artifact references.
+The checkout digest uses versioned framing that distinguishes missing paths,
+regular/executable files and exact symlink targets. It is an observation of the
+checkout, not an atomic snapshot or a native Git tree identity. Historical
+digests from the earlier framing remain historical evidence and should not be
+compared with newly generated digests as if they used the same format.
 The scanner inventory separately records its configured environment, actual
 Python executable/version, installed Semgrep version, and selector/pin matches;
 unavailable tools and mismatched versions cannot produce a successful report.

@@ -1,8 +1,8 @@
 # Review Validation And Check Handoffs
 
-This describes the uncommitted implementation for issue #167 and the decisions
-implemented after design review. It does not claim that full repository CI has
-passed.
+This describes the current review-validation protocol introduced for issue #167
+and refined by subsequent changes. Validation results remain bound to the exact
+source and environment that produced them.
 
 Execute a check once for its inputs, persist the result in one standard format,
 and let another agent verify and consume it. Reporting, staging, or a branch
@@ -148,6 +148,15 @@ source/Git inputs. The outcome remains available as the typed
 The lower-level model supports an injected artifact observer for focused tests
 and other callers. The runtime API supplies its existing artifact identity
 policy, so callers do not need to implement checksumming themselves.
+
+Continuation parsing uses the `MetadataTransition` union in
+[review_graph_reuse.py](../agents/.agents/skills/review-graph/scripts/review_graph_reuse.py).
+Its variants retain their own source, staging, repair or commit payloads; the
+parser rejects mixed, missing and unknown variant fields. Runtime classification
+handles every variant explicitly, with `assert_never` checked by ty. Existing
+serialized field names remain unchanged. `ReviewLifecycle` also checks its
+counters, immutable histories and authorization binding during direct
+construction and `dataclasses.replace`, as well as document parsing.
 
 ## Repository-Owned Check Contracts
 

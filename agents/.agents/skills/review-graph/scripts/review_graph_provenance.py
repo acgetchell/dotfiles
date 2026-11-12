@@ -8,10 +8,10 @@ from review_graph_integrity import canonical_json, digest_bytes, digest_json
 from review_graph_reuse import audit_inputs_document
 
 if TYPE_CHECKING:
-    from review_graph_reuse import AuditInputIdentity, ExternalMetadataTransition
+    from review_graph_reuse import AuditInputIdentity, MetadataTransition
 
 
-def metadata_transition_reference(transitions: tuple[ExternalMetadataTransition, ...]) -> dict[str, Any]:
+def metadata_transition_reference(transitions: tuple[MetadataTransition, ...]) -> dict[str, Any]:
     """Bind bounded native output to the complete verified chain in metadata."""
     if not transitions:
         msg = "metadata transition reference requires a nonempty chain"

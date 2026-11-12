@@ -585,3 +585,27 @@ def test_failed_git_enumeration_cannot_publish_a_passing_smoke(tmp_path: Path, m
     assert report["source"]["content_digest"] == "unavailable"
     assert not (report_path.parent / "graph").exists()
     assert marker not in report_path.read_text() + capsys.readouterr().err
+
+
+def test_source_identity_distinguishes_file_kinds_and_execution_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    git = tmp_path / "git"
+    executable(git, 'case "$1" in ls-files) printf "source\\0" ;; rev-parse) echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;; esac')
+    monkeypatch.setattr(linux_review, "REPOSITORY", checkout)
+    monkeypatch.setattr(linux_review.shutil, "which", lambda _: str(git))
+    source = checkout / "source"
+    missing = linux_review.source_identity()
+    source.write_bytes(b"missing")
+    source.chmod(0o644)
+    regular = linux_review.source_identity()
+    source.chmod(0o755)
+    executable_file = linux_review.source_identity()
+    source.unlink()
+    source.symlink_to("missing")
+    symlink = linux_review.source_identity()
+    assert len({entry["content_digest"] for entry in (missing, regular, executable_file, symlink)}) == 4
+    source.unlink()
+    source.mkdir()
+    with pytest.raises(ValueError, match="unsupported file kind"):
+        linux_review.source_identity()

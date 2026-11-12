@@ -34,7 +34,14 @@ def regular_file_fingerprint(path: str, content: bytes, *, executable: bool = Fa
 
 
 def _repository_path(path: str) -> bool:
-    return bool(path) and not path.startswith("/") and "\\" not in path and PurePosixPath(path).as_posix() == path and not {"..", "."} & set(path.split("/"))
+    return (
+        bool(path)
+        and "\0" not in path
+        and not path.startswith("/")
+        and "\\" not in path
+        and PurePosixPath(path).as_posix() == path
+        and not {"..", "."} & set(path.split("/"))
+    )
 
 
 @dataclass(frozen=True)
@@ -191,11 +198,16 @@ def audit_inputs_document(inputs: AuditInputIdentity) -> dict[str, Any]:
 
 
 @dataclass(frozen=True)
-class ExternalMetadataTransition:
-    """Observed external staging, retaining both complete captures unchanged."""
+class _TransitionEndpoints:
+    """Shared captures; variant-specific verification belongs to the closed sum."""
 
     before: ReviewSourceSnapshot
     after: ReviewSourceSnapshot
+
+
+@dataclass(frozen=True)
+class ExternalMetadataTransition(_TransitionEndpoints):
+    """Observed external staging, retaining both complete captures unchanged."""
 
     def verify(self) -> None:
         """Permit branch/index metadata changes with identical source and comparison."""
@@ -214,13 +226,12 @@ class ExternalMetadataTransition:
 
 
 @dataclass(frozen=True)
-class ExternalSourceTransition(ExternalMetadataTransition):
+class ExternalSourceTransition(_TransitionEndpoints):
     """Attributed content edits within an existing review boundary, without agent repairs."""
 
     external_source_actor: str
     external_source_attribution: str
 
-    @override
     def verify(self) -> None:
         """Preserve Git, selection and scope while exposing actual content deltas."""
         self._verify_source_change(preserve_index=True)
@@ -284,12 +295,11 @@ class StagedExternalSourceTransition(ExternalSourceTransition):
 
 
 @dataclass(frozen=True)
-class ObservedSourceTransition(ExternalMetadataTransition):
+class ObservedSourceTransition(_TransitionEndpoints):
     """Actual source-only endpoints already bound by a prior audit reuse proof."""
 
     observed_source_only: Literal[True] = dataclass_field(default=True, init=False)
 
-    @override
     def verify(self) -> None:
         """Bridge saved source captures without inventing attribution or Git history."""
         self.before.verify()
@@ -311,7 +321,7 @@ class ObservedSourceTransition(ExternalMetadataTransition):
 
 
 @dataclass(frozen=True)
-class InterleavedRepairTransition(ExternalMetadataTransition):
+class InterleavedRepairTransition(_TransitionEndpoints):
     """Two real captures around an attributed repair and interleaved staging."""
 
     repair_epoch: int
@@ -319,7 +329,6 @@ class InterleavedRepairTransition(ExternalMetadataTransition):
     repair_attribution: str
     staging_attribution: str
 
-    @override
     def verify(self) -> None:
         """Prove the bounded endpoint delta without claiming an intermediate state."""
         self.before.verify()
@@ -361,12 +370,11 @@ class InterleavedRepairTransition(ExternalMetadataTransition):
 
 
 @dataclass(frozen=True)
-class AuthorizedGitContextTransition(ExternalMetadataTransition):
+class AuthorizedGitContextTransition(_TransitionEndpoints):
     """An authorized externally performed commit/rebase with identical source."""
 
     git_context_authorization: str
 
-    @override
     def verify(self) -> None:
         """Separate source equality from changed HEAD, branch and comparison state."""
         self.before.verify()
@@ -400,12 +408,11 @@ class AuthorizedGitContextTransition(ExternalMetadataTransition):
 
 
 @dataclass(frozen=True)
-class CommitHandoffTransition(ExternalMetadataTransition):
+class CommitHandoffTransition(_TransitionEndpoints):
     """An authorized commit of reviewed bytes, with immutable reconciliation proof."""
 
     commit_handoff: dict[str, Any]
 
-    @override
     def verify(self) -> None:
         """Verify the separate commit contract without relaxing index-only resumes."""
         from review_graph_commit import verify_commit_transition  # noqa: PLC0415 - avoid the snapshot type import cycle.
@@ -413,6 +420,17 @@ class CommitHandoffTransition(ExternalMetadataTransition):
         self.before.verify()
         self.after.verify()
         verify_commit_transition(self)
+
+
+type MetadataTransition = (
+    ExternalMetadataTransition
+    | ExternalSourceTransition
+    | StagedExternalSourceTransition
+    | ObservedSourceTransition
+    | InterleavedRepairTransition
+    | AuthorizedGitContextTransition
+    | CommitHandoffTransition
+)
 
 
 def _external_source_text(raw: object) -> str:
@@ -481,13 +499,13 @@ def _external_source_transition(raw: dict[str, Any], before: ReviewSourceSnapsho
     return ExternalSourceTransition(before, after, actor, attribution)
 
 
-def metadata_transition(raw: dict[str, Any]) -> ExternalMetadataTransition:
+def metadata_transition(raw: dict[str, Any]) -> MetadataTransition:
     """Parse and verify an externally observed metadata transition."""
     if not isinstance(raw, dict) or any(not isinstance(raw.get(field), dict) for field in ("before", "after")):
         msg = "external metadata transition requires before and after snapshot objects"
         raise ValueError(msg)
     before, after = source_snapshot(raw["before"]), source_snapshot(raw["after"])
-    result: ExternalMetadataTransition
+    result: MetadataTransition
     if "observed_source_only" in raw:
         result = _observed_source_transition(raw, before, after)
     elif "repair_epoch" in raw:
@@ -504,11 +522,14 @@ def metadata_transition(raw: dict[str, Any]) -> ExternalMetadataTransition:
         result = AuthorizedGitContextTransition(before, after, authorization)
     else:
         result = ExternalMetadataTransition(before, after)
+    if set(raw) != set(result.__dataclass_fields__):
+        msg = "metadata transition fields must describe exactly one complete transition variant"
+        raise ValueError(msg)
     result.verify()
     return result
 
 
-def metadata_states(origin: tuple[str, str, str], transitions: tuple[ExternalMetadataTransition, ...]) -> tuple[tuple[str, str, str], ...]:
+def metadata_states(origin: tuple[str, str, str], transitions: tuple[MetadataTransition, ...]) -> tuple[tuple[str, str, str], ...]:
     """Follow a verified chain without relabeling any historical source triple."""
     states = [origin]
     for transition in transitions:
@@ -531,7 +552,7 @@ class AuditReuseTransition:
     artifact_path: str
     metadata_path: str
     instruction_digests: tuple[tuple[str, str], ...]
-    metadata_transitions: tuple[ExternalMetadataTransition, ...] = ()
+    metadata_transitions: tuple[MetadataTransition, ...] = ()
 
 
 def verify_reuse_inputs(  # noqa: C901 - fail-closed source, metadata, instruction and dependency proof.

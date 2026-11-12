@@ -195,6 +195,24 @@ only for changed inputs/context, failures, unresolved concerns, or a required
 approval-time gate. Never save time by weakening assertions, shrinking scientific
 workloads, or treating skipped required coverage as success.
 
+## Require Operational Acceptance for Workflow Changes
+
+When a plan changes a release workflow, read
+[operational acceptance](references/operational-acceptance.md). Map the actual
+maintainer commands and transitive recipes, setup and job budgets, verification,
+durable effects, and approval boundaries. Assign an operational acceptance owner
+and distinguish installed-tool/provider-fixture evidence from authorized hosted
+bootstrap timing. Static workflow checks or a mocked publisher alone do not prove
+the composed path runnable within its timeout.
+
+Require retained-state recovery with a supported next command after partial
+effects or interruption; name missing command support as implementation work.
+Tie each added gate to a requirement/risk and owner, expose its maintainer-step,
+latency, and permission costs, and separate optional hardening from blockers.
+Keep this proportional to the changed path: a small fix does not mandate a new
+architecture, exhaustive audit, or live benchmark/registry operation. Preserve
+required freshness, scientific validation, and credential/approval boundaries.
+
 ## Deliver Within Authorization
 
 Planning is read-only by default. A plan does not authorize Git mutations, GitHub

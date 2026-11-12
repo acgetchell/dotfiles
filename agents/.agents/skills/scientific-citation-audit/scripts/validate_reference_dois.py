@@ -387,7 +387,9 @@ def plain_text(value: object) -> str:
     """Normalize CSL JSON title/container fields."""
     if isinstance(value, list):
         value = value[0] if value else ""
-    text = str(value or "")
+    if not isinstance(value, str):
+        return ""
+    text = value
     text = re.sub(r"<[^>]+>", " ", text)
     return re.sub(r"\s+", " ", text).strip()
 
@@ -426,7 +428,7 @@ def author_families(value: object) -> tuple[str, ...]:
         if not isinstance(item, dict):
             continue
         family = item.get("family") or item.get("literal")
-        normalized = plain_text(family)
+        normalized = plain_text(family) if isinstance(family, str) else ""
         if normalized:
             families.append(normalized)
     return tuple(families)

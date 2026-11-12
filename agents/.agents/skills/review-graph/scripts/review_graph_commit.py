@@ -18,7 +18,7 @@ from review_graph_validation import VerifiedValidationRecord
 
 if TYPE_CHECKING:
     from review_graph_plan import GraphPlan
-    from review_graph_reuse import ExternalMetadataTransition
+    from review_graph_reuse import MetadataTransition
 
 
 def verify_commit_transition(transition: CommitHandoffTransition) -> None:
@@ -188,10 +188,7 @@ def commit_node_reasons(mode: str, record: dict[str, Any], transition: CommitHan
 
 
 def reconciliation_policy(
-    document: dict[str, Any],
-    records: dict[str, dict[str, Any] | VerifiedValidationRecord],
-    entries: dict[str, dict[str, Any]],
-    transition: ExternalMetadataTransition,
+    document: dict[str, Any], records: dict[str, dict[str, Any] | VerifiedValidationRecord], entries: dict[str, dict[str, Any]], transition: MetadataTransition
 ) -> dict[str, Any]:
     """Bind explicit execution/comparison declarations to accepted evidence identities."""
     preserved: dict[str, Any] = {}
@@ -267,12 +264,12 @@ def _unchanged_comparison(target: str, head: str) -> bool:
     return _source_discovery_command(shlex.join(["HEAD" if word == head else word for word in words]))
 
 
-def comparison_commit(transition: ExternalMetadataTransition) -> str:
+def comparison_commit(transition: MetadataTransition) -> str:
     """Branch repairs keep their original merge base even as HEAD advances."""
     return transition.before.merge_base if transition.before.capture_mode == "branch" and transition.before.merge_base is not None else transition.before.head
 
 
-def _handoff_comparison(target: str, transition: ExternalMetadataTransition) -> bool:
+def _handoff_comparison(target: str, transition: MetadataTransition) -> bool:
     """Accept branch comparisons only against an immutable captured base SHA."""
     comparison = comparison_commit(transition)
     if transition.before.capture_mode != "branch":
@@ -298,7 +295,7 @@ def pin_independent_rechecks(plan: GraphPlan, transition: CommitHandoffTransitio
     return replace(plan, actual_worker_nodes=tuple(nodes))
 
 
-def native_target(transitions: tuple[ExternalMetadataTransition, ...], node_id: str) -> dict[str, Any] | None:
+def native_target(transitions: tuple[MetadataTransition, ...], node_id: str) -> dict[str, Any] | None:
     """Find the latest exact commit obligation in a composed metadata chain."""
     for transition in reversed(transitions):
         if isinstance(transition, CommitHandoffTransition) and node_id in transition.commit_handoff["native_ci"]:

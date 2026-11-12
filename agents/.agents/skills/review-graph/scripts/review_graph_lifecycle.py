@@ -14,6 +14,10 @@ def _substantive_text(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
+def _immutable_history(value: object, entry_type: type[object]) -> bool:
+    return isinstance(value, tuple) and all(isinstance(entry, entry_type) for entry in value)
+
+
 @dataclass(frozen=True, slots=True)
 class ControlReference:
     """An immutable runtime-issued control artifact reference."""
@@ -120,6 +124,31 @@ class ReviewLifecycle:
     run_control: RunControlBinding | None = None
     interleaved_repair_epochs: tuple[int, ...] = ()
 
+    def __post_init__(self) -> None:
+        """Preserve parsed invariants for direct construction and replacement too."""
+        if type(self.repair_budget) is not int or type(self.repairs_completed) is not int or not 0 <= self.repairs_completed <= self.repair_budget:
+            msg = "review_lifecycle requires nonnegative counters within the repair budget"
+            raise ValueError(msg)
+        if not _immutable_history(self.budget_extensions, RepairBudgetExtension) or not _immutable_history(self.comprehensive_restarts, ComprehensiveRestart):
+            msg = "review_lifecycle history requires immutable parsed entries"
+            raise TypeError(msg)
+        if self.repair_budget != 2 + sum(entry.additional_epochs for entry in self.budget_extensions):
+            msg = "repair budget differs from its explicit extension history"
+            raise ValueError(msg)
+        if self.stop_reason is not None and not _substantive_text(self.stop_reason):
+            msg = "stop_reason must be null or substantive text"
+            raise ValueError(msg)
+        if self.run_control is not None and not isinstance(self.run_control, RunControlBinding):
+            msg = "review_lifecycle requires a parsed run control binding"
+            raise TypeError(msg)
+        epochs = self.interleaved_repair_epochs
+        if not isinstance(epochs, tuple) or any(type(epoch) is not int or not 1 <= epoch <= self.repairs_completed for epoch in epochs):
+            msg = "interleaved repair history requires completed positive epoch ordinals"
+            raise ValueError(msg)
+        if epochs != tuple(sorted(set(epochs))):
+            msg = "interleaved repair epoch history must be ordered and unique"
+            raise ValueError(msg)
+
     def next_repair(self, ordinal: int) -> ReviewLifecycle:
         """Count one content-changing batch, including optional fixes and formatting."""
         self.require_active()
@@ -147,30 +176,17 @@ def lifecycle_from_document(raw: Any) -> ReviewLifecycle:
         msg = "review_lifecycle requires the complete lifecycle fields"
         raise ValueError(msg)
     budget, completed = raw["repair_budget"], raw["repairs_completed"]
-    if type(budget) is not int or type(completed) is not int or not 0 <= completed <= budget:
-        msg = "review_lifecycle requires nonnegative counters within the repair budget"
-        raise ValueError(msg)
     extensions = raw["budget_extensions"]
     restarts = raw["comprehensive_restarts"]
     if not isinstance(extensions, (list, tuple)) or not isinstance(restarts, (list, tuple)):
         msg = "review_lifecycle history must be arrays"
         raise TypeError(msg)
     parsed_extensions = tuple(RepairBudgetExtension.from_document(entry) for entry in extensions)
-    expected_budget = 2 + sum(entry.additional_epochs for entry in parsed_extensions)
-    if budget != expected_budget:
-        msg = "repair budget differs from its explicit extension history"
-        raise ValueError(msg)
     parsed_restarts = tuple(ComprehensiveRestart.from_document(entry) for entry in restarts)
     reason = raw["stop_reason"]
-    if reason is not None and (not isinstance(reason, str) or not reason.strip()):
-        msg = "stop_reason must be null or substantive text"
-        raise ValueError(msg)
     binding = RunControlBinding.from_document(raw["run_control"]) if raw.get("run_control") is not None else None
     epochs = raw.get("interleaved_repair_epochs", ())
-    if not isinstance(epochs, (list, tuple)) or any(type(epoch) is not int or not 1 <= epoch <= completed for epoch in epochs):
+    if not isinstance(epochs, (list, tuple)):
         msg = "interleaved repair history requires completed positive epoch ordinals"
-        raise ValueError(msg)
-    if tuple(epochs) != tuple(sorted(set(epochs))):
-        msg = "interleaved repair epoch history must be ordered and unique"
-        raise ValueError(msg)
+        raise ValueError(msg)  # noqa: TRY004 - preserve the public malformed-history diagnostic contract.
     return ReviewLifecycle(budget, completed, parsed_extensions, parsed_restarts, reason, binding, tuple(epochs))

@@ -4,6 +4,34 @@ The exact published `research-repo-tools==0.2.7` package owns reusable mechanics
 Dotfiles retains policy, machine provisioning, fixtures, and its skill protocols.
 No sibling checkout or unreleased code is needed.
 
+## Evolving the shared boundary
+
+Inspect the pinned public API and relevant upstream issues before adding a
+consumer helper. Reuse a supported capability when its contract fits; retain a
+small local adapter when the required behavior is still being developed. Keep
+generic parsing, process and publication mechanics upstream, and keep review
+protocols, scientific acceptance and repository policy with their consumer.
+
+The [RRT v0.2.9 tracker](https://github.com/acgetchell/research-repo-tools/issues/236)
+owns planned selective setup, executable workflow examples, retained release
+handoffs, bounded verification/recovery and isolated-runtime work. These are
+adoption candidates when the supplying release is published and verified, not
+commands available through this repository's current pin. Update the pin and
+lock through the existing migration recipes, then replace superseded adapters
+and retain consumer integration and native-platform checks. Do not duplicate
+upstream implementation while waiting or require unrelated dotfiles fixes to
+wait for that release.
+
+The JIT benchmark uses `evidence.fingerprint_files` for its selected regular
+files. Linux environment evidence needs file kinds, executable modes, symlink
+targets and missing tracked paths; its local framing remains until a compatible
+shared API is published. That separate capability is tracked in
+[RRT #239](https://github.com/acgetchell/research-repo-tools/issues/239), outside
+the current v0.2.9 scope. The review graph's native Git-object identities and
+reuse policy remain its own protocol contract.
+
+## Current adoption
+
 | Capability | Dotfiles adoption |
 | --- | --- |
 | Python baseline | `inherit-python = true`; shared `python check` validates the mirrors as part of CI; `python-baseline-check` remains available separately |

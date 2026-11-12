@@ -14,6 +14,38 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+def test_source_identity_frames_inventory_and_content(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(benchmark, "REPOSITORY", tmp_path)
+    names = ["a"]
+    monkeypatch.setattr(benchmark, "select_files", lambda _: tuple(names))
+    (tmp_path / "a").write_bytes(b"x\0b\0y")
+    before = benchmark.source_identity()
+    (tmp_path / "a").write_bytes(b"x")
+    (tmp_path / "b").write_bytes(b"y")
+    names.append("b")
+    assert benchmark.source_identity() != before
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf"), 0.0, -1.0])
+def test_paired_effects_reject_invalid_measurements(value: float) -> None:
+    trial = {"planner_seconds": [1.0], "cold_replay_seconds": value, "warm_replay_seconds": [1.0], "process_seconds": 1.0}
+    with pytest.raises(ValueError, match="positive"):
+        benchmark.paired_effects([trial], [trial])
+
+
+@pytest.mark.parametrize("samples", [[float("nan"), 1.0, 2.0], [1.0, 2.0, float("inf")], [True], []])
+def test_trial_metrics_reject_invalid_samples_before_reduction(samples: list[float]) -> None:
+    trial = {"planner_seconds": samples, "cold_replay_seconds": 1.0, "warm_replay_seconds": [1.0], "process_seconds": 1.0}
+    with pytest.raises(ValueError, match="positive"):
+        benchmark.trial_metrics(trial)
+
+
+def test_paired_effects_reject_nonfinite_ratio() -> None:
+    trial = {"planner_seconds": [1.0], "cold_replay_seconds": 1e-300, "warm_replay_seconds": [1.0], "process_seconds": 1.0}
+    with pytest.raises(ValueError, match="finite"):
+        benchmark.paired_effects([trial], [{**trial, "cold_replay_seconds": 1e300}])
+
+
 def test_canonical_worker_preserves_all_findings_and_separates_warm_samples(tmp_path: Path) -> None:
     """Real planning/publication operations supply evidence without timing thresholds."""
     output = tmp_path / "replays"
@@ -76,6 +108,32 @@ def test_invalid_measurements_cannot_publish_a_report(tmp_path: Path, monkeypatc
 
 def test_summary_preserves_samples_and_robust_dispersion() -> None:
     assert benchmark.summary([1.0, 3.0, 100.0]) == {"samples_seconds": [1.0, 3.0, 100.0], "median_seconds": 3.0, "mad_seconds": 2.0}
+
+
+def test_overflowing_ratio_median_cannot_publish_a_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Two finite ratios near 1e308 overflow the median's intermediate sum."""
+    values = iter(float(value) for value in range(8))
+    monkeypatch.setattr(benchmark.time, "perf_counter", lambda: next(values))
+    monkeypatch.setattr(benchmark, "source_identity", lambda: "unchanged")
+
+    def subprocess_result(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        enabled = kwargs["env"]["PYTHON_JIT"] == "1"
+        trial = {
+            "jit_available": True,
+            "jit_enabled": enabled,
+            "findings": ["preserved"],
+            "planner_seconds": [1.0],
+            "cold_replay_seconds": 1.0 if enabled else 1e-308,
+            "warm_replay_seconds": [1.0],
+        }
+        return subprocess.CompletedProcess(argv, 0, json.dumps(trial, allow_nan=False), "")
+
+    monkeypatch.setattr(benchmark.subprocess, "run", subprocess_result)
+    output = tmp_path / "results"
+    with pytest.raises(ValueError, match="Out of range float values"):
+        benchmark.run(output, 2, 1)
+    assert not (output / "report.json").exists()
+    assert len(list(output.glob("*/worker.stdout"))) == 4
 
 
 @pytest.mark.parametrize("destination", ["fixture", "output", "symlink-fixture", "symlink-output", "scale"])
@@ -148,8 +206,20 @@ def test_worker_preserves_checkout_behind_nested_symlinks(tmp_path: Path, monkey
     assert link.samefile(target)
 
 
-def test_successful_report_records_pairs_identity_and_equal_process_weight(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("path_name", "interpreter_root", "placeholder"),
+    [("plain", "checkout", "$REPO"), ("Zoë", "checkout", "$REPO"), ("Zoë", "results", "$RUN"), ("Zoë", "home", "$HOME")],
+)
+def test_successful_report_records_pairs_identity_and_equal_process_weight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path_name: str, interpreter_root: str, placeholder: str
+) -> None:
     """Known process measurements independently establish the serialized report contract."""
+    home_directory = tmp_path / path_name
+    repository = home_directory / "checkout"
+    output = home_directory / "results"
+    interpreter_directory = home_directory if interpreter_root == "home" else home_directory / interpreter_root
+    monkeypatch.setattr(benchmark, "REPOSITORY", repository)
+    monkeypatch.setattr(benchmark.Path, "home", classmethod(lambda _cls: home_directory))
     order = []
     values = iter([0.0, 10.0, 20.0, 40.0, 50.0, 90.0, 100.0, 180.0])
     monkeypatch.setattr(benchmark.time, "perf_counter", lambda: next(values))
@@ -167,12 +237,11 @@ def test_successful_report_records_pairs_identity_and_equal_process_weight(tmp_p
             "planner_seconds": [2.0, 4.0, 100.0] if pair == 0 else [8.0],
             "cold_replay_seconds": 6.0 if enabled else 3.0,
             "warm_replay_seconds": [2.0] if enabled else [4.0],
-            "environment": {"executable": str(benchmark.REPOSITORY / ".venv/bin/python"), "private_environment": False},
+            "environment": {"executable": str(interpreter_directory / ".venv/bin/python"), "private_environment": False},
         }
         return subprocess.CompletedProcess(argv, 0, json.dumps(trial), "")
 
     monkeypatch.setattr(benchmark.subprocess, "run", subprocess_result)
-    output = tmp_path / "results"
     report = benchmark.run(output, 2, 1)
     assert order == ["off", "on", "on", "off"]
     assert report["pair_order"] == [{"pair_index": 0, "modes": ["off", "on"]}, {"pair_index": 1, "modes": ["on", "off"]}]
@@ -180,11 +249,13 @@ def test_successful_report_records_pairs_identity_and_equal_process_weight(tmp_p
     assert report["paired"]["cold_replay"]["on_minus_off"] == {"samples_seconds": [3.0, 3.0], "median_seconds": 3.0, "mad_seconds": 0.0}
     assert report["paired"]["warm_replay"]["on_over_off"] == {"samples": [0.5, 0.5], "median": 0.5, "mad": 0.0}
     assert report["paired"]["whole_process"]["on_minus_off"]["samples_seconds"] == [10.0, -40.0]
-    persisted = json.loads((output / "report.json").read_text())
+    persisted = json.loads((output / "report.json").read_text(encoding="utf-8"))
     assert persisted["schema_version"] == 2
     assert persisted["source_sha256"] == "unchanged"
     assert persisted["results"]["on"]["trials"][1]["pair_index"] == 1
-    assert persisted["results"]["off"]["trials"][0]["environment"]["executable"] == "$REPO/.venv/bin/python"
+    for mode in ("off", "on"):
+        for trial in persisted["results"][mode]["trials"]:
+            assert trial["environment"]["executable"] == f"{placeholder}/.venv/bin/python"
     assert len(list(output.glob("*/worker.stdout"))) == 4
 
 

@@ -20,7 +20,7 @@ from contextvars import ContextVar
 from dataclasses import asdict, dataclass, replace
 from io import BytesIO
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, assert_never, cast
 
 from capture_scope import captured_head_changes
 from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics, run_command_bytes
@@ -156,10 +156,13 @@ from review_graph_reuse import (
     SNAPSHOT_FORMAT,
     AuditInputIdentity,
     AuditReuseTransition,
+    AuthorizedGitContextTransition,
     CommitHandoffTransition,
     ExternalMetadataTransition,
     ExternalSourceTransition,
     InterleavedRepairTransition,
+    MetadataTransition,
+    ObservedSourceTransition,
     ReuseInputError,
     StagedExternalSourceTransition,
     metadata_states,
@@ -5035,7 +5038,7 @@ def _carry_forward_audits(  # noqa: C901, PLR0912, PLR0913, PLR0915 - preserve p
     *,
     invalidated: tuple[str, ...],
     sources: dict[str, tuple[dict[str, Any], dict[str, Any]]],
-    observed_metadata_transition: ExternalMetadataTransition | None = None,
+    observed_metadata_transition: MetadataTransition | None = None,
 ) -> tuple[GraphPlan, list[dict[str, Any]]]:
     """Convert only proven unchanged leaves into non-executable routed reuse."""
     decisions: dict[str, dict[str, Any]] = {
@@ -5458,7 +5461,7 @@ def _verify_audit_metadata(payload: dict[str, Any], fingerprints: FingerprintEvi
         raise ValueError(msg)
 
 
-def _metadata_chain_from(document: dict[str, Any], state: tuple[str, str, str]) -> tuple[ExternalMetadataTransition, ...]:
+def _metadata_chain_from(document: dict[str, Any], state: tuple[str, str, str]) -> tuple[MetadataTransition, ...]:
     transitions = tuple(metadata_transition(item) for item in _records(document, "external_metadata_transitions"))
     for reuse in _records(document.get("plan", {}), "audit_reuse_transitions"):
         if _state(reuse, "source_state") == state:
@@ -5531,7 +5534,7 @@ def _external_source_node_reasons(
     )
 
 
-def _metadata_node_reasons(mode: str, predecessors: tuple[str, ...], record: EvidenceRecord, transition: ExternalMetadataTransition) -> list[dict[str, str]]:  # noqa: PLR0911 - separate variant-specific applicability gates.
+def _metadata_node_reasons(mode: str, predecessors: tuple[str, ...], record: EvidenceRecord, transition: MetadataTransition) -> list[dict[str, str]]:  # noqa: PLR0911 - separate variant-specific applicability gates.
     """Keep fresh review, execution, and synthesis policies separate from audit dependencies."""
     if isinstance(record, VerifiedValidationRecord):
         reasons = validation_applicability(record, target=transition.after, current_unit=record.expectation.validation_unit)
@@ -5573,7 +5576,7 @@ def _metadata_node_reasons(mode: str, predecessors: tuple[str, ...], record: Evi
 
 
 def _metadata_resume_decisions(
-    plan: GraphPlan, lifecycle: dict[str, str], records: dict[str, EvidenceRecord], transition: ExternalMetadataTransition
+    plan: GraphPlan, lifecycle: dict[str, str], records: dict[str, EvidenceRecord], transition: MetadataTransition
 ) -> list[dict[str, Any]]:
     """Explain both preserved evidence and work awaiting a current-state execution."""
     decisions = []
@@ -5627,7 +5630,7 @@ def _metadata_resume_decisions(
 
 
 def _restart_reused_metadata_audits(
-    plan: GraphPlan, records: Sequence[EvidenceRecord], transition: ExternalMetadataTransition, catalog_path: Path
+    plan: GraphPlan, records: Sequence[EvidenceRecord], transition: MetadataTransition, catalog_path: Path
 ) -> tuple[GraphPlan, list[dict[str, Any]]]:
     """Turn invalidated non-executable audit reuse back into routed review work."""
     records = [item for item in records if isinstance(item, dict)]
@@ -5929,15 +5932,19 @@ def _archive_metadata_validation_logs(
     return archives
 
 
-def _transition_kind(transition: ExternalMetadataTransition) -> str:
+def _transition_kind(transition: MetadataTransition) -> str:
     if isinstance(transition, StagedExternalSourceTransition):
         return "staged-external-source-change"
     if isinstance(transition, ExternalSourceTransition):
         return "external-source-change"
-    return "authorized-commit-handoff" if isinstance(transition, CommitHandoffTransition) else "observed-external-git-metadata"
+    if isinstance(transition, CommitHandoffTransition):
+        return "authorized-commit-handoff"
+    if isinstance(transition, (ExternalMetadataTransition, ObservedSourceTransition, InterleavedRepairTransition, AuthorizedGitContextTransition)):
+        return "observed-external-git-metadata"
+    assert_never(transition)
 
 
-def _verify_continuation_instructions(plan: GraphPlan, entries: dict[str, dict[str, Any]], transition: ExternalMetadataTransition) -> None:
+def _verify_continuation_instructions(plan: GraphPlan, entries: dict[str, dict[str, Any]], transition: MetadataTransition) -> None:
     """Reject changed instruction contracts before any continuation is published."""
     for node in plan.actual_worker_nodes:
         dispatch = entries[node.node_id]["dispatch"]
@@ -5954,7 +5961,7 @@ def _verify_continuation_instructions(plan: GraphPlan, entries: dict[str, dict[s
             raise ValueError(msg)
 
 
-def _metadata_proof_store(document: dict[str, Any], transition: ExternalMetadataTransition) -> Path:
+def _metadata_proof_store(document: dict[str, Any], transition: MetadataTransition) -> Path:
     """Reject overlapping continuation destinations before publishing any bytes."""
     root = Path(document["artifact_store"]).resolve()
     repository = Path(transition.after.repository_root).resolve()
@@ -5964,7 +5971,7 @@ def _metadata_proof_store(document: dict[str, Any], transition: ExternalMetadata
     return root
 
 
-def _resume_metadata(document: dict[str, Any], transition: ExternalMetadataTransition) -> dict[str, Any]:
+def _resume_metadata(document: dict[str, Any], transition: MetadataTransition) -> dict[str, Any]:
     """Share publication machinery while retaining distinct transition contracts."""
     root = _metadata_proof_store(document, transition)
     if transition.before.source_state != _current_metadata_state(document):
