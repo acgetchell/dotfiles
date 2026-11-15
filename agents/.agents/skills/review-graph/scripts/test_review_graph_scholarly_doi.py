@@ -154,7 +154,7 @@ def test_checker_output_reconciles_doi_digits_and_adjacent_items(tmp_path: Path,
     validate_scholarly_doi_resolution(resolution, original, {original["evidence_id"]: original})
 
 
-@pytest.mark.parametrize("style", ["full", "collapsed", "shortcut"])
+@pytest.mark.parametrize("style", ["full", "full-multiline", "collapsed", "shortcut"])
 @pytest.mark.parametrize("defect", [None, "different-target", "unresolved", "different-line", "different-year"])
 def test_reference_use_reconciles_only_its_retained_destination_and_claims(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, style: str, defect: str | None
@@ -164,8 +164,10 @@ def test_reference_use_reconciles_only_its_retained_destination_and_claims(
     lines, definitions = [], []
     for index, row in enumerate(rows):
         claim = f"{', '.join(row['resolved_authors'])}. {row['resolved_title']}. {row['local_years'][0]}."
-        label = f"paper {index}" if style == "full" else claim
-        suffix = f"[{label}]" if style == "full" else "[]" if style == "collapsed" else ""
+        label = f"paper {index}-{row['resolved_year']}" if style.startswith("full") else claim
+        use_label = label.replace(" ", "\n", 1) if style == "full-multiline" else label
+        suffix = f"[{use_label}]" if style.startswith("full") else "[]" if style == "collapsed" else ""
+        resolution["checks"][0]["occurrences"][index]["line"] = sum(line.count("\n") + 2 for line in lines) + 1
         lines.append(f"[{claim}]{suffix}")
         definition_label = label.replace(" ", "\n", 1)
         title = f"{', '.join(row['resolved_authors'])}. {row['resolved_title']}. {row['resolved_year']}."
@@ -187,7 +189,7 @@ def test_reference_use_reconciles_only_its_retained_destination_and_claims(
     results = checker["validate_entries"](checker["extract_entries"](markdown), 1.0, 0.45, lambda doi, _timeout: resolved[doi.value])
     reported = [{**result.to_json_object(), "source": source} for result in results]
     assert [row["status"] for row in reported] == ["MISMATCH", "MISMATCH", "OK", "OK"]
-    assert [row["local_years"] for row in reported[:2]] == [["2005"], ["2013"]]
+    assert [row["local_years"] for row in reported] == [["2005"], ["2013"], ["2018"], ["2012"]]
     if defect in {"different-target", "unresolved"}:
         changed = (
             markdown.replace(rows[0]["doi"], rows[0]["doi"] + "extra")

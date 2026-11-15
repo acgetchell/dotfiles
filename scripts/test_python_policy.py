@@ -342,10 +342,12 @@ def test_parallel_recipe_runs_every_case_and_propagates_worker_failure(tmp_path:
         encoding="utf-8",
     )
     report = tmp_path / "results.xml"
+    unrelated_temp_root = tmp_path / "unrelated-pytest-runs"
+    unrelated_temp_root.mkdir()
     result = subprocess.run(  # noqa: S603 - the contract gate is stubbed; real workers execute an isolated failing fixture.
-        [just_executable, "test-python", str(test_source), "-n", "2", "--color=no", f"--junitxml={report}"],
+        [just_executable, "test-python", str(test_source), "-n", "2", "--color=no", f"--junitxml={report}", f"--basetemp={tmp_path / 'nested-pytest'}"],
         cwd=REPOSITORY_ROOT,
-        env={**os.environ, "PATH": str(tmp_path) + os.pathsep + os.environ["PATH"], "PYTEST_ADDOPTS": ""},
+        env={**os.environ, "PATH": str(tmp_path) + os.pathsep + os.environ["PATH"], "PYTEST_ADDOPTS": "", "PYTEST_DEBUG_TEMPROOT": str(unrelated_temp_root)},
         capture_output=True,
         text=True,
         check=False,
@@ -363,3 +365,4 @@ def test_parallel_recipe_runs_every_case_and_propagates_worker_failure(tmp_path:
     assert not any(case.find("skipped") is not None or case.find("error") is not None for case in cases)
     assert {path.name for path in tmp_path.glob("executed-*")} == {f"executed-{index}" for index in range(8)}
     assert {(tmp_path / f"executed-{index}").read_text() for index in range(8)} == {"gw0", "gw1"}
+    assert list(unrelated_temp_root.iterdir()) == []

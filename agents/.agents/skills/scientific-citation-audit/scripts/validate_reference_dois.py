@@ -24,10 +24,12 @@ from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from bibliography_context import collect_entry, publication_years, reference_definition, reference_definitions, reference_destinations
+from bibliography_context import collect_claims, collect_entry, mask_images, publication_years, reference_definition, reference_definitions, reference_uses
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
+
+    from bibliography_context import CitationClaims, ReferenceDefinition
 
 STOPWORDS = {"a", "an", "and", "are", "as", "by", "for", "from", "in", "into", "is", "it", "of", "on", "or", "the", "to", "using", "with"}
 _CONTRIBUTOR_ROLE = re.compile(
@@ -35,9 +37,6 @@ _CONTRIBUTOR_ROLE = re.compile(
     r"|\(\s*(?:translators?|editors?|compilers?|illustrators?|trans\.?|eds?\.?)\s*\)",
     re.IGNORECASE,
 )
-_LINK_DESTINATION = r"\((?:[^()\n]|\([^()\n]*\))*\)"
-_IMAGE = rf"!\[[^\]\n]*\](?:{_LINK_DESTINATION}|\[[^\]\n]*\])?"
-_LINKED_IMAGE = re.compile(rf"\[{_IMAGE}\](?:{_LINK_DESTINATION}|\[[^\]\n]*\])")
 
 
 class AuditStatus(StrEnum):
@@ -83,19 +82,28 @@ class DoiEntry:
     line: int
     entry: str
     badge_only: bool = False
+    claims: CitationClaims | None = None
+
+    @property
+    def bibliographic_claims(self) -> str:
+        """Use parsed visible claims while retaining raw entries for provenance."""
+        return self.entry if self.claims is None else self.claims.text
 
     @property
     def context_only(self) -> bool:
         """Recognize links and citation pointers without discarding unknown prose."""
-        return self._context_only(self.entry, ())
+        return self._context_only(self.bibliographic_claims, ())
 
     def _context_only(self, entry: str, pointer_extensions: tuple[str, ...]) -> bool:
         """Strip link syntax while retaining words that can assert an identity."""
-        definition = reference_definition(entry)
-        text = entry if definition is None else " ".join(definition[1:])
-        text = _LINKED_IMAGE.sub("", text)
-        text = re.sub(r"\[([^\]]*)\]\([^\s]+\)", r"\1", text)
-        text = re.sub(r"\[([^\]]*)\]\[[^\]]*\]", r"\1", text)
+        definition = reference_definition(self.entry)
+        if definition is not None:
+            # Parsed titles are literal text. Keep a caller's extracted pointer
+            # suffix instead of restoring the complete citation instructions.
+            text = entry if self.claims is not None else definition[2]
+        else:
+            text = mask_images(entry, include_links=True) if self.claims is None else entry
+            text = re.sub(r"\[([^\]]*)\]\([^\s]+\)", r"\1", text)
         text = text.replace(f"https://doi.org/{self.doi.value}", "").replace(self.doi.value, "")
         text = re.sub(r"CITATION\.cff", "", text, flags=re.IGNORECASE)
         # A deliberately small vocabulary: unknown names, dates, and titles must
@@ -141,11 +149,12 @@ class DoiEntry:
 
     def canonical_pointer_context(self, citation: SoftwareCitation) -> bool:
         """Recognize citation instructions only when their named software agrees."""
-        request = re.match(r"If you use (.+?) in your work, cite the software using\s+", self.entry, flags=re.IGNORECASE)
+        claims = self.bibliographic_claims
+        request = re.match(r"If you use (.+?) in your work, cite the software using\s+", claims, flags=re.IGNORECASE)
         if request is None or identity_text(request[1]) not in {identity_text(citation.title), identity_text(citation.title.partition(":")[0])}:
             return False
         return self._context_only(
-            self.entry[request.end() :],
+            claims[request.end() :],
             ("include", "used", "so", "others", "can", "identify", "same", "covers", "specific", "from", "corresponding", "record", "when", "an", "exact"),
         )
 
@@ -309,27 +318,36 @@ def parse_unit_interval(raw: str) -> float:
     return value
 
 
-def extract_entries(markdown: str) -> list[DoiEntry]:
-    """Extract DOI labels and nearby bibliography entries from Markdown text."""
-    lines = markdown.splitlines()
-    entries: list[DoiEntry] = []
-    seen: set[tuple[str, int]] = set()
-    definitions: dict[str, str] = {}
+def _definition_content(parsed: tuple[ReferenceDefinition, ...]) -> dict[int, list[str]]:
+    """Keep destination and title fragments on their physical source lines."""
     definition_content: dict[int, list[str]] = {}
-    parsed = reference_definitions(lines)
     for definition in parsed:
-        definitions.setdefault(definition.label, definition.destination)
         for idx in range(definition.start, definition.end):
             definition_content[idx] = []
         definition_content[definition.destination_line].append(definition.destination)
         for offset, title_line in enumerate(definition.title.splitlines()):
             definition_content[definition.title_line + offset].append(title_line)
+    return definition_content
+
+
+def extract_entries(markdown: str) -> list[DoiEntry]:
+    """Extract DOI labels and nearby bibliography entries from Markdown text."""
+    lines = markdown.splitlines()
+    entries: list[DoiEntry] = []
+    seen: set[tuple[str, int]] = set()
+    parsed = reference_definitions(lines)
+    definition_content = _definition_content(parsed)
+
+    reference_content: dict[int, list[str]] = {}
+    for use in reference_uses(lines, parsed):
+        if use.destination.startswith("https://doi.org/"):
+            reference_content.setdefault(use.line, []).append(use.destination.removeprefix("https://doi.org/"))
 
     for idx, line in enumerate(lines):
         if idx in definition_content:
             candidates = [raw for text in definition_content[idx] for raw in doi_candidates_from_line(text)]
         else:
-            candidates = [*doi_candidates_from_line(line), *reference_doi_candidates(line, definitions)]
+            candidates = [*doi_candidates_from_line(line), *reference_content.get(idx, [])]
         for raw in candidates:
             try:
                 doi = Doi.parse(raw)
@@ -340,19 +358,12 @@ def extract_entries(markdown: str) -> list[DoiEntry]:
                 continue
             seen.add(key)
             paragraph = collect_entry(lines, idx, parsed)
-            # Remove linked images, not ordinary citation links or their labels.
-            without_badges = _LINKED_IMAGE.sub("", paragraph)
+            # Identify image-only badges while preserving ordinary citation text.
+            without_badges = mask_images(paragraph, parsed, include_links=True)
             badge_only = without_badges != paragraph and not re.search(r"\w", without_badges)
-            entries.append(DoiEntry(doi=doi, line=idx + 1, entry=paragraph, badge_only=badge_only))
+            entries.append(DoiEntry(doi=doi, line=idx + 1, entry=paragraph, badge_only=badge_only, claims=collect_claims(lines, idx, parsed)))
 
     return entries
-
-
-def reference_doi_candidates(line: str, definitions: dict[str, str]) -> list[str]:
-    """Retain each reference-link use so its visible claims are checked locally."""
-    return [
-        destination.removeprefix("https://doi.org/") for destination in reference_destinations(line, definitions) if destination.startswith("https://doi.org/")
-    ]
 
 
 def doi_candidates_from_line(line: str) -> list[str]:
@@ -555,11 +566,12 @@ def validate_entry(
         )
         return reconcile_software(result, metadata, raw, citation) if citation is not None else result
 
-    resolved_title_score = title_score(metadata.title, entry.entry)
-    resolved_author_score = author_score(metadata.author_families, entry.entry, metadata.title)
+    claims = entry.bibliographic_claims
+    resolved_title_score = title_score(metadata.title, claims)
+    resolved_author_score = author_score(metadata.author_families, claims, metadata.title)
     problems: list[str] = []
     fields: list[str] = []
-    local_years = publication_years(entry.entry, entry.doi.value)
+    local_years = publication_years(claims, entry.doi.value)
     if resolved_title_score < min_title_score:
         problems.append("resolved title has low overlap with local entry")
         fields.append("title")
