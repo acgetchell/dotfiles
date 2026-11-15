@@ -259,6 +259,17 @@ partial files. The updated runtime retains the original plan's skill locations
 and verifies its run control and evidence; it consumes the already requested repair
 epoch once and does not restart the comprehensive review. Follow only the returned
 continuation paths. Never patch the old frozen resources or signed plan.
+
+Updated-runtime continuation also preserves historical execution-view guidance.
+New canonical inputs bind their exact instruction text. Older inputs without that
+binding are rendered by their original frozen runtime after its manifest,
+resource inventory, interpreter, and helper origin pass verification. The
+updated runtime compares the complete view bytes, including command, scope,
+payload, and instruction bindings. A changed instruction string is not silently
+ignored, and the old view is never regenerated on disk. Keep the original
+runtime and Python runner available for `compile-node`, `continue-partial-audit`,
+and source-preserving validation expansion.
+
 Per-node `reuse_decisions` explain disposition and reason code, distinguishing
 `coverage-limitations`, `unclassified-limitations`, `unresolved-uncertainty`,
 and `validation-evidence-limits`. Typed execution facts and delegated validation

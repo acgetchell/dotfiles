@@ -11,10 +11,12 @@ from typing import cast
 
 import pytest
 import review_graph_runtime as runtime
+import review_graph_views as views
 from capture_scope import _scope_data
 from review_graph_bootstrap import bootstrap_document
 from review_graph_execution import capture_execution_context
 from review_graph_plan import plan_from_document
+from review_graph_read_provenance import _protocol_input_bindings
 from review_graph_receipts import dispatch_summary
 from review_graph_session import freeze_runtime, verify_snapshot
 from test_review_graph_git import _accept, _discovery_payload
@@ -301,6 +303,73 @@ def test_branch_scope_preserves_source_audits_and_completed_independent_review(t
     )
     assert result["lifecycle_input"]["plan"]["review_lifecycle"] == json.loads(json.dumps(asdict(plan.review_lifecycle)))
     assert not runtime._metadata_evidence_blockers(result["lifecycle_input"], [metadata["normalized_record"]])
+
+
+def _use_historical_views(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
+    """Materialize the legacy unbound format using different frozen guidance."""
+    live = tmp_path / "historical-skills"
+    shutil.copytree(SKILL_ROOT, live, ignore=shutil.ignore_patterns("__pycache__", "test_*.py", "*.pyc"))
+    renderer = live / "review-graph/scripts/review_graph_views.py"
+    content = renderer.read_text().replace("Read skill/instructions", "Historical guidance: read skill/instructions")
+    renderer.write_text(content.replace(' + "\\n").encode()', ' + "\\r\\n").encode()'))
+    reference = freeze_runtime(live, tmp_path / "frozen", repository=SKILL_ROOT.parents[2])
+    monkeypatch.setattr(runtime, "verify_current_snapshot", lambda: reference)
+    # Historical materialization did not bind guidance into the canonical input.
+    monkeypatch.setattr(runtime, "bind_execution_instructions", lambda _entry: None)
+    return reference
+
+
+def test_updated_runtime_accepts_frozen_guidance_and_rejects_tampering(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    reference = _use_historical_views(tmp_path, monkeypatch)
+    lifecycle, entries = _worker_input_fixture(tmp_path)
+    audit = next(item for item in entries["dispatches"] if item["dispatch"]["mode"] == "audit")
+    view_path = Path(audit["worker_execution_path"])
+    original = view_path.read_bytes()
+    assert original.endswith(b"\r\n")
+    view = json.loads(original)
+    assert view["instructions"].startswith("Historical guidance:")
+    plan = runtime._graph_plan(lifecycle["plan"])
+    state = tuple(lifecycle["source_state"])
+    assert runtime._dispatches_by_node(entries, plan=plan, source_state=state)[audit["node_id"]] == audit
+    assert _protocol_input_bindings(audit["dispatch"])[str(view_path)] == runtime.digest_bytes(original)
+    journal = tmp_path / "journal.jsonl"
+    _compile_repair_fixture_entry(audit, lifecycle, journal)
+    assert view_path.read_bytes() == original
+    for field in ("instructions", "publish_command", "payload_schema", "dispatch", "canonical_input"):
+        altered = {**view, field: "tampered"}
+        view_path.chmod(0o644)
+        view_path.write_text(json.dumps(altered))
+        with pytest.raises(ValueError, match="execution view"):
+            runtime._dispatches_by_node(entries, plan=plan, source_state=state)
+        with pytest.raises(ValueError, match="execution view"):
+            _protocol_input_bindings(audit["dispatch"])
+        view_path.write_bytes(original)
+    frozen_renderer = Path(reference["path"]).parent / "skills/review-graph/scripts/review_graph_views.py"
+    frozen_renderer.chmod(0o644)
+    frozen_renderer.write_text("raise RuntimeError('must never execute changed frozen code')\n")
+    with pytest.raises(ValueError, match="resource changed"):
+        runtime._dispatches_by_node(entries, plan=plan, source_state=state)
+
+
+@pytest.mark.parametrize("output", [b"", b"not json", b"[]", b"{}", b'{"instructions":null}'])
+def test_instruction_binding_rejects_bad_renderer_output_without_mutation(monkeypatch: pytest.MonkeyPatch, output: bytes) -> None:
+    entry = {"execution_view_instructions": "retained", "dispatch": {"node_id": "audit-1"}}
+    monkeypatch.setattr(views, "execution_view_bytes", lambda _entry, _canonical: output)
+    with pytest.raises((ValueError, TypeError)):
+        views.bind_execution_instructions(entry)
+    assert entry == {"execution_view_instructions": "retained", "dispatch": {"node_id": "audit-1"}}
+
+
+@pytest.mark.parametrize("failure", ["timeout", "exit"])
+def test_historical_renderer_reports_process_failures(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure: str) -> None:
+    def fail(argv: list[str], **_kwargs: object) -> None:
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(argv, 30)
+        raise subprocess.CalledProcessError(2, argv, stderr=b"retained renderer unavailable")
+
+    monkeypatch.setattr(views.subprocess, "run", fail)
+    with pytest.raises(ValueError, match="exceeded 30 seconds" if failure == "timeout" else "exited 2.*retained renderer unavailable"):
+        views._frozen_view(str(tmp_path), "sha256:fixture", b"{}")
 
 
 def test_compact_view_publishes_semantics_and_tampering_blocks_scheduling(tmp_path: Path) -> None:

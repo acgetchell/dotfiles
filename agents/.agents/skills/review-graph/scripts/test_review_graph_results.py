@@ -124,6 +124,7 @@ def test_interleaved_history_is_detached_and_missing_legacy_field_preserves_plan
         "independent_review_after_audits",
         "commit_handoffs",
         "pre_review_validation_nodes",
+        "software_doi_rechecks",
         "validation_recoveries",
         "audit_replacements",
         "audit_continuations",

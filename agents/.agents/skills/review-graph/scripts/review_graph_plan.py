@@ -42,6 +42,8 @@ from review_graph_scope import excluded_paths, scope_exclusions
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
+    from review_graph_doi_gate import SoftwareDoiRecheck
+
 _REQUIRED_CAPACITY_FIELDS = frozenset({"active_workers", "concurrent_worker_limit", "source"})
 _OPTIONAL_CAPACITY_FIELDS = frozenset({"fresh_worker_creations_remaining", "lifecycle_semantics"})
 _CAPACITY_FIELDS = _REQUIRED_CAPACITY_FIELDS | _OPTIONAL_CAPACITY_FIELDS
@@ -555,6 +557,7 @@ class GraphPlan:
     audit_continuations: tuple[dict[str, Any], ...] = field(default=(), kw_only=True)
     review_scope_exclusions: tuple[dict[str, str], ...] = field(default=(), kw_only=True)
     pre_review_validation_nodes: tuple[str, ...] = ()
+    software_doi_rechecks: tuple[SoftwareDoiRecheck, ...] = field(default=(), kw_only=True)
     commit_handoffs: tuple[MetadataTransition, ...] = ()
     review_lifecycle: ReviewLifecycle = field(default_factory=ReviewLifecycle)
     independent_review_after_audits: bool = False
@@ -2505,6 +2508,7 @@ def graph_plan_digest(plan: GraphPlan) -> str:
             "captured_path_inventory",
             "commit_handoffs",
             "pre_review_validation_nodes",
+            "software_doi_rechecks",
             "validation_recoveries",
             "audit_replacements",
             "audit_continuations",
@@ -2534,6 +2538,7 @@ def graph_plan_digest_matches(plan: GraphPlan, digest: str) -> bool:
             "captured_path_inventory",
             "commit_handoffs",
             "pre_review_validation_nodes",
+            "software_doi_rechecks",
             "validation_recoveries",
             "audit_replacements",
             "audit_continuations",

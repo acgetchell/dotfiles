@@ -2,12 +2,15 @@
 
 from typing import TYPE_CHECKING, Any
 
+from review_graph_doi_gate import bound_failure, journal_resolutions, validate_rechecks
+
 if TYPE_CHECKING:
     from review_graph_plan import GraphPlan
 
 
 def validate_validation_barrier(plan: GraphPlan) -> None:
     """Reject malformed saved plans before materialization or lifecycle replay."""
+    validate_rechecks(plan)
     early = plan.pre_review_validation_nodes
     units = {unit.node_id: unit for unit in plan.coalesced_validation_units}
     modes = {node.node_id: node.mode for node in plan.actual_worker_nodes}
@@ -29,10 +32,19 @@ def pending_validation_barrier(plan: GraphPlan, state: dict[str, str], latest: d
     """Failed evidence is accepted history but cannot release subsequent work."""
     early = plan.pre_review_validation_nodes
     predecessors = early[: early.index(node_id)] if node_id in early else early
+    exempt = {binding.original.node_id for binding in plan.software_doi_rechecks if binding.node_id == node_id and bound_failure(binding, state, latest)}
+    # Resume at the failed early check's position. Later unstarted checks cannot
+    # run until it is resolved; already attempted unrelated failures still gate.
+    positions = [index for index, candidate in enumerate(early) if candidate in exempt]
+    if positions:
+        later = set(early[min(positions) + 1 :])
+        predecessors = tuple(candidate for candidate in predecessors if candidate not in later or candidate in state)
+    resolved = journal_resolutions(plan, state, latest)
     return tuple(
         candidate
         for candidate in predecessors
-        if state.get(candidate) != "accepted" or (latest.get(candidate, {}).get("evidence") or {}).get("evidence_status") not in {"passed", "reused"}
+        if candidate not in exempt | resolved
+        and (state.get(candidate) != "accepted" or (latest.get(candidate, {}).get("evidence") or {}).get("evidence_status") not in {"passed", "reused"})
     )
 
 
