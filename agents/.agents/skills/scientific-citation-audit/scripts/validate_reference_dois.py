@@ -24,7 +24,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from bibliography_context import collect_entry, publication_years, reference_definition, reference_definition_at
+from bibliography_context import collect_entry, publication_years, reference_definition, reference_definitions, reference_destinations
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
@@ -38,7 +38,6 @@ _CONTRIBUTOR_ROLE = re.compile(
 _LINK_DESTINATION = r"\((?:[^()\n]|\([^()\n]*\))*\)"
 _IMAGE = rf"!\[[^\]\n]*\](?:{_LINK_DESTINATION}|\[[^\]\n]*\])?"
 _LINKED_IMAGE = re.compile(rf"\[{_IMAGE}\](?:{_LINK_DESTINATION}|\[[^\]\n]*\])")
-_REFERENCE_LINK = re.compile(r"(?<!\\)\[([^\[\]\n]*)\](?:\[([^\[\]\n]*)\])?")
 
 
 class AuditStatus(StrEnum):
@@ -316,20 +315,19 @@ def extract_entries(markdown: str) -> list[DoiEntry]:
     entries: list[DoiEntry] = []
     seen: set[tuple[str, int]] = set()
     definitions: dict[str, str] = {}
-    definition_destinations: dict[int, str] = {}
-    definition_headers: set[int] = set()
-    for idx, line in enumerate(lines):
-        if (definition := reference_definition_at(lines, idx)) is not None:
-            definitions.setdefault(definition[0], definition[1])
-            destination_line = idx if reference_definition(line) is not None else idx + 1
-            definition_destinations[destination_line] = definition[1]
-            definition_headers.add(idx)
+    definition_content: dict[int, list[str]] = {}
+    parsed = reference_definitions(lines)
+    for definition in parsed:
+        definitions.setdefault(definition.label, definition.destination)
+        for idx in range(definition.start, definition.end):
+            definition_content[idx] = []
+        definition_content[definition.destination_line].append(definition.destination)
+        for offset, title_line in enumerate(definition.title.splitlines()):
+            definition_content[definition.title_line + offset].append(title_line)
 
     for idx, line in enumerate(lines):
-        if idx in definition_destinations:
-            candidates = doi_candidates_from_line(definition_destinations[idx])
-        elif idx in definition_headers:
-            continue
+        if idx in definition_content:
+            candidates = [raw for text in definition_content[idx] for raw in doi_candidates_from_line(text)]
         else:
             candidates = [*doi_candidates_from_line(line), *reference_doi_candidates(line, definitions)]
         for raw in candidates:
@@ -341,7 +339,7 @@ def extract_entries(markdown: str) -> list[DoiEntry]:
             if key in seen:
                 continue
             seen.add(key)
-            paragraph = collect_entry(lines, idx)
+            paragraph = collect_entry(lines, idx, parsed)
             # Remove linked images, not ordinary citation links or their labels.
             without_badges = _LINKED_IMAGE.sub("", paragraph)
             badge_only = without_badges != paragraph and not re.search(r"\w", without_badges)
@@ -352,16 +350,9 @@ def extract_entries(markdown: str) -> list[DoiEntry]:
 
 def reference_doi_candidates(line: str, definitions: dict[str, str]) -> list[str]:
     """Retain each reference-link use so its visible claims are checked locally."""
-    text = re.sub(_IMAGE, "", line)
-    candidates = []
-    for match in _REFERENCE_LINK.finditer(text):
-        if text[match.end() :].startswith("("):
-            continue  # An inline link takes precedence over a shortcut reference.
-        label = " ".join((match[2] or match[1]).casefold().split())
-        destination = definitions.get(label, "")
-        if destination.startswith("https://doi.org/"):
-            candidates.append(destination.removeprefix("https://doi.org/"))
-    return candidates
+    return [
+        destination.removeprefix("https://doi.org/") for destination in reference_destinations(line, definitions) if destination.startswith("https://doi.org/")
+    ]
 
 
 def doi_candidates_from_line(line: str) -> list[str]:
