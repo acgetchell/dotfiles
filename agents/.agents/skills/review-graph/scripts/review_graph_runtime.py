@@ -51,6 +51,7 @@ from review_graph_coverage import (
 )
 from review_graph_discovery import SourceDiscovery, discovery_context
 from review_graph_doi import captured_doi_inputs, captured_software_inputs, inspect_canonical_recheck
+from review_graph_doi_gate import SoftwareDoiRecheck, journal_resolutions, resolved_records
 from review_graph_eligibility import compact_eligibility, reuse_eligibility
 from review_graph_executor import executor_permissions, remedied_features
 from review_graph_git import (
@@ -181,9 +182,9 @@ from review_graph_synthesis import synthesis_fields, validate_synthesis
 from review_graph_timing import timing_blocker, timing_documents, timing_prerequisite
 from review_graph_usage import digest as usage_digest, measure_call
 from review_graph_validation import ArtifactIdentity, ValidationPayload, ValidationRecord, VerifiedValidationRecord, bind_validation_payload
-from review_graph_validation_contracts import ContractBinding, load_contract_binding, validation_reuse_prerequisite
+from review_graph_validation_contracts import ContractBinding, load_contract_binding, object_fields, validation_reuse_prerequisite
 from review_graph_validation_outputs import changed_identity_fields, obligation_identity
-from review_graph_views import execution_view_bytes
+from review_graph_views import bind_execution_instructions, execution_view_bytes
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -2883,6 +2884,7 @@ def _graph_plan(raw: dict[str, Any]) -> GraphPlan:
         audit_continuations=tuple(_audit_replacement_record(item, partial=True) for item in _records(raw, "audit_continuations")),
         review_scope_exclusions=scope_exclusions(raw.get("review_scope_exclusions", [])),
         pre_review_validation_nodes=_string_tuple(raw, "pre_review_validation_nodes"),
+        software_doi_rechecks=tuple(SoftwareDoiRecheck.parse(item) for item in _records(raw, "software_doi_rechecks")),
         commit_handoffs=tuple(metadata_transition(item) for item in _records(raw, "commit_handoffs")),
         review_lifecycle=lifecycle_from_document(raw.get("review_lifecycle")),
         independent_review_after_audits=_required_bool({"policy": raw.get("independent_review_after_audits", False)}, "policy"),
@@ -4738,6 +4740,7 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             "worker_payload_path": str(worker_payload_path),
             "worker_prompt": _worker_prompt(contract, common),
         }
+        bind_execution_instructions(entry)
         worker_input_bytes = (json.dumps(entry, indent=2, sort_keys=True) + "\n").encode()
         if node.mode in {"audit", "synthesis", "validation"} or contract == "compact-independent-review":
             persistence_contract["compiler_preflight"] = {"worker_input_path": str(worker_input_path), "digest": digest_bytes(worker_input_bytes)}
@@ -6988,7 +6991,7 @@ def _sha256_digest(value: object, name: str) -> str:
     return value
 
 
-def _historical_validation_evidence(evidence: dict[str, str], plan: GraphPlan, node: WorkerNode) -> bool:
+def _historical_validation_evidence(evidence: dict[str, Any], plan: GraphPlan, node: WorkerNode) -> bool:
     """Verify an old attempt against the recovery's immutable prior journal."""
     if node.mode != "validation":
         return False
@@ -7023,13 +7026,33 @@ def _historical_validation_evidence(evidence: dict[str, str], plan: GraphPlan, n
     return any(event["node_id"] == node.node_id and event["evidence"] == evidence for event in events)
 
 
+def _verify_doi_journal_source(raw: dict[str, Any], plan: GraphPlan, node: WorkerNode) -> None:
+    """Verify optional DOI source pointers through the ordinary evidence compiler."""
+    if "canonical_doi_source" not in raw:
+        return
+    if not any(binding.node_id == node.node_id for binding in plan.software_doi_rechecks):
+        msg = "canonical DOI journal source requires a bound follow-up validator"
+        raise ValueError(msg)
+    fields = {"artifact_path", "metadata_path"}
+    supplied = object_fields(raw["canonical_doi_source"], "canonical DOI source", required=fields)
+    source = {key: _required_text(supplied, key) for key in fields}
+    unit = next((unit for unit in plan.coalesced_validation_units if unit.node_id == node.node_id), None)
+    if unit is None:
+        msg = "canonical DOI journal source requires a planned validation unit"
+        raise ValueError(msg)
+    verified, _limitations = _verified_journal_evidence(source, plan=plan, node=node, source_state=unit.source_state)
+    if verified != raw:
+        msg = "canonical DOI source does not match accepted evidence"
+        raise ValueError(msg)
+
+
 def _journal_evidence(raw: object, *, plan: GraphPlan, node: WorkerNode, status: str, superseded: bool = False) -> dict[str, str] | None:
     if raw is None:
         if status == "accepted":
             msg = f"accepted journal event requires verified evidence: {node.node_id}"
             raise ValueError(msg)
         return None
-    if not isinstance(raw, dict) or set(raw) != _JOURNAL_EVIDENCE_KEYS:
+    if not isinstance(raw, dict) or set(raw) - {"canonical_doi_source"} != _JOURNAL_EVIDENCE_KEYS:
         msg = "journal evidence record has unexpected fields"
         raise ValueError(msg)
     record = cast("dict[str, Any]", raw)
@@ -7037,7 +7060,8 @@ def _journal_evidence(raw: object, *, plan: GraphPlan, node: WorkerNode, status:
     _sha256_digest(evidence["artifact_digest"], "journal artifact_digest")
     _sha256_digest(evidence["normalized_record_digest"], "journal normalized_record_digest")
     expected_evidence_id = _expected_evidence_id(node, plan)
-    if evidence["evidence_id"] != expected_evidence_id and not (superseded and _historical_validation_evidence(evidence, plan, node)):
+    historical = evidence["evidence_id"] != expected_evidence_id
+    if historical and not (superseded and _historical_validation_evidence(record, plan, node)):
         msg = f"journal evidence ID differs from plan for {node.node_id}"
         raise ValueError(msg)
     valid_statuses = {"passed", "failed", "blocked", "reused", "not-applicable"} if node.mode == "validation" else _REVIEW_STATUSES
@@ -7054,6 +7078,10 @@ def _journal_evidence(raw: object, *, plan: GraphPlan, node: WorkerNode, status:
     if status not in {"accepted", "blocked"}:
         msg = f"{status} journal event must not contain evidence"
         raise ValueError(msg)
+    if not historical:
+        _verify_doi_journal_source(raw, plan, node)
+    # Historical evidence, including DOI source pointers, was matched exactly
+    # against the preserved journal and verified while replaying its own plan.
     return evidence
 
 
@@ -7065,7 +7093,7 @@ def _verified_journal_evidence(
     source_state: tuple[str, str, str],
     loaded: tuple[str, ReviewEvidenceExpectation | ValidationEvidenceExpectation, ReviewEvidence | ValidationEvidence, bytes, EvidenceRecord | None]
     | None = None,
-) -> tuple[dict[str, str], tuple[str, ...]]:
+) -> tuple[dict[str, Any], tuple[str, ...]]:
     kind, expectation, evidence, _content, normalized = loaded if loaded is not None else _load_evidence_source(source, require_normalized=True)
     normalized = _record_document(normalized) if normalized is not None else None
     if normalized is None:  # Defensive for type narrowing after require_normalized.
@@ -7112,6 +7140,8 @@ def _verified_journal_evidence(
         "evidence_status": evidence.status,
         "normalized_record_digest": digest_bytes(canonical_json(normalized).encode()),
     }
+    if any(binding.node_id == node.node_id for binding in plan.software_doi_rechecks):
+        return {**record, "canonical_doi_source": {key: source[key] for key in ("artifact_path", "metadata_path")}}, limitations
     return record, limitations
 
 
@@ -7260,7 +7290,7 @@ def _read_execution_journal_content(
 
 def _new_journal_evidence(
     request: JournalEventRequest, *, plan: GraphPlan, node: WorkerNode, source_state: tuple[str, str, str]
-) -> tuple[dict[str, str] | None, tuple[str, ...]]:
+) -> tuple[dict[str, Any] | None, tuple[str, ...]]:
     if request.source is None:
         if request.status == "accepted":
             msg = f"accepted journal event requires verified evidence: {request.node_id}"
@@ -7511,8 +7541,11 @@ def next_ready_nodes(document: dict[str, Any], *, journal_events: tuple[dict[str
     stop_reason = _review_stop_reason(document)
     if stop_reason is not None:
         blockers.append("review stopped: " + stop_reason)
+    resolved_early = journal_resolutions(plan, state, latest)
     failed_early = [
-        node_id for node_id in plan.pre_review_validation_nodes if (latest.get(node_id, {}).get("evidence") or {}).get("evidence_status") == "failed"
+        node_id
+        for node_id in plan.pre_review_validation_nodes
+        if node_id not in resolved_early and (latest.get(node_id, {}).get("evidence") or {}).get("evidence_status") == "failed"
     ]
     if failed_early:
         blockers.append("pre-review validation failed: " + ", ".join(failed_early))
@@ -7598,6 +7631,7 @@ def _coordinator_lane_entry(original: dict[str, Any], store: Path, pending: dict
         command = persistence[field]
         command[command.index("--input") + 1] = str(contract_path)
     entry["worker_prompt"] = _worker_prompt(entry["result_contract"], dispatch)
+    bind_execution_instructions(entry)
     entry_bytes = (json.dumps(entry, indent=2, sort_keys=True) + "\n").encode()
     contract = _read_json_object(Path(original["worker_payload_contract_path"]))
     if "compiler_preflight" in contract:
@@ -7867,6 +7901,30 @@ def _expanded_validation_bindings(
     return bindings
 
 
+def _software_doi_recheck_bindings(
+    document: dict[str, Any], records: Sequence[EvidenceRecord], mappings: tuple[ValidationEvidenceMapping, ...]
+) -> tuple[SoftwareDoiRecheck, ...]:
+    """Retain parsed original evidence and its exact new planned owner."""
+    nodes = {mapping.requirement_id: mapping.validation_unit_id for mapping in mappings}
+    originals = {_record_document(record)["evidence_id"]: record for record in records}
+    bindings = []
+    for request in _records(document, "software_doi_rechecks"):
+        node_id, original = nodes.get(request["requirement_id"]), originals.get(request["evidence_id"])
+        if node_id is None or original is None:
+            msg = "software DOI recheck requires a new planned validator and accepted original evidence"
+            raise ValueError(msg)
+        bindings.append(
+            SoftwareDoiRecheck(
+                node_id=node_id,
+                requirement_id=request["requirement_id"],
+                execution_index=request["execution_index"],
+                original_report=request["original_report"],
+                original_record_json=original.report_json if isinstance(original, VerifiedValidationRecord) else canonical_json(original),
+            )
+        )
+    return tuple(bindings)
+
+
 def _expanded_validation_plan(
     document: dict[str, Any], plan: GraphPlan, records: Sequence[EvidenceRecord], repository_root: Path, *, authorization: str
 ) -> GraphPlan:
@@ -7929,6 +7987,7 @@ def _expanded_validation_plan(
         validation_evidence_mapping=(*plan.validation_evidence_mapping, *mappings),
         validation_exclusions=tuple(exclusions),
         validation_requirement_bindings=tuple(bindings[identity] for identity in sorted(bindings)),
+        software_doi_rechecks=(*plan.software_doi_rechecks, *_software_doi_recheck_bindings(document, records, mappings)),
         execution_epochs=epochs,
         current_epoch_node_ids=epochs[0].node_ids if epochs else tuple(node.node_id for node in nodes),
         requires_continuation=len(epochs) > 1,
@@ -8955,6 +9014,7 @@ def finalize_proof(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, P
     successful_validation = {
         record["node_id"] for record in normalized_records if record.get("mode") == "validation" and record["status"] in {"passed", "reused"}
     }
+    successful_validation.update(resolved_records(plan, {record["node_id"]: record for record in normalized_records}))
     preblockers.extend(
         f"pre-review validation has not passed: {node_id}" for node_id in plan.pre_review_validation_nodes if node_id not in successful_validation
     )

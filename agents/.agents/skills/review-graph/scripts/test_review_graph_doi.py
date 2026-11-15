@@ -5,29 +5,40 @@ import json
 import shlex
 from argparse import Namespace
 from copy import deepcopy
+from dataclasses import asdict, replace
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
 import pytest
 from review_graph_doi import captured_software_inputs, validate_software_doi_resolution
-from review_graph_plan import plan_from_document
+from review_graph_doi_gate import SoftwareDoiRecheck
+from review_graph_integrity import canonical_json, digest_bytes, digest_json
+from review_graph_phases import pending_validation_barrier
+from review_graph_plan import GraphPlan, plan_from_document
 from review_graph_reuse import SNAPSHOT_FORMAT, regular_file_fingerprint, source_snapshot
 from review_graph_runtime import (
     JournalEventRequest,
+    _graph_plan,
+    _journal_evidence,
     append_journal_event,
     build_synthesis_bundle,
+    capture_workspace_snapshot,
     compile_review,
     compile_validation,
     main,
     materialize_dispatches,
+    next_ready_nodes,
+    read_execution_journal,
     reconcile_validation_requirements,
+    recover_validation_execution,
 )
 from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
 from review_graph_synthesis import validate_synthesis
 from test_capture_scope import _capture, _commit_all, _init_repo
 from test_review_graph_runtime import ROUTING_CATALOG, SCHEMA_ROOT, SKILL_ROOT, _compile_repair_fixture_entry, _json_plan, _sparse_plan_document
 from test_review_graph_transitions import _synthesis_payload
+from test_support_review_graph import _prepare_all_fixture_timing
 
 CFF_CONTENT = b"title: 'Project: Scientific software'\n"
 
@@ -468,10 +479,147 @@ def _requirement(record: dict[str, Any], *, baseline: bool) -> dict[str, Any]:
             "requires_isolation": True,
             "isolation_root": record["executions"][0]["working_directory"],
             "expected_workspace_effects": [],
-            "allowed_artifacts": [{"path": artifact["path"], "kind": "report", "repository_status": "outside-repository"} for artifact in record["artifacts"]],
+            "allowed_artifacts": [
+                {"path": artifact["path"], "kind": artifact["kind"], "repository_status": "outside-repository"} for artifact in record["artifacts"]
+            ],
         }
     )
     return requirement
+
+
+def _bound_doi_fixture(tmp_path: Path, *, failed_followup: bool = False) -> tuple[GraphPlan, SoftwareDoiRecheck, dict[str, Any], dict[str, Any]]:
+    """Bind real compiled original evidence, retaining independent canonical report data."""
+    original, verified, _resolution = _fixture(tmp_path)
+    if failed_followup:
+        log = tmp_path / "denied.log"
+        log.write_bytes(b"PermissionError: [Errno 1] Operation not permitted\n")
+        verified.update(status="failed")
+        verified["executions"][0].update(result="failed", exit_code=1, evidence=log.read_text().strip())
+        verified["executions"][0]["artifact_paths"].append(str(log))
+        verified["artifacts"].append(
+            {
+                "path": str(log),
+                "kind": "log",
+                "repository_status": "outside-repository",
+                "artifact_digest_mode": "content-sha256-v1",
+                "artifact_digest": digest_bytes(log.read_bytes()),
+            }
+        )
+    planning = _sparse_plan_document()
+    planning["validation_requirements"] = [_requirement(original, baseline=True), _requirement(verified, baseline=False)]
+    planning["pre_review_validation_requirement_ids"] = ["original"]
+    plan = plan_from_document(planning, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=SKILL_ROOT.parents[2])
+    nodes = {mapping.requirement_id: mapping.validation_unit_id for mapping in plan.validation_evidence_mapping}
+    original["node_id"], verified["node_id"] = nodes["original"], nodes["verified"]
+    lifecycle = {"plan": _json_plan(plan), "source_state": original["observed_source_state"]}
+    dispatches = materialize_dispatches(
+        {
+            **lifecycle,
+            "artifact_store": str(tmp_path / "initial"),
+            "authorization": "review-only",
+            "repository_root": str(SKILL_ROOT.parents[2]),
+            "state_verification_command": "capture_scope.py --mode baseline",
+        }
+    )
+    entry = next(entry for entry in dispatches["dispatches"] if entry["node_id"] == nodes["original"])
+    original["evidence_id"] = entry["dispatch"]["evidence_id"]
+    source = _compile_validator(entry, lifecycle, tmp_path / "journal.jsonl", original)
+    original = json.loads(Path(source["metadata_path"]).read_bytes())["normalized_record"]
+    binding = SoftwareDoiRecheck(nodes["verified"], "verified", 0, original["artifacts"][0]["path"], canonical_json(original))
+    return replace(plan, software_doi_rechecks=(binding,)), binding, original, verified
+
+
+@pytest.mark.parametrize(
+    "defect", ["none", "redirected-report", "wrong-source", "wrong-cff", "wrong-report", "contradiction", "failed", "unrelated", "altered-original"]
+)
+def test_early_doi_gate_requires_complete_canonical_evidence(tmp_path: Path, defect: str) -> None:
+    plan, binding, original, verified = _bound_doi_fixture(tmp_path)
+    nodes = {mapping.requirement_id: mapping.validation_unit_id for mapping in plan.validation_evidence_mapping}
+    state = {nodes["original"]: "accepted"}
+    latest = {
+        nodes["original"]: {
+            "evidence": {"evidence_id": original["evidence_id"], "evidence_status": "failed", "normalized_record_digest": digest_json(original)}
+        }
+    }
+    assert pending_validation_barrier(plan, state, latest, nodes["verified"]) == ()
+    assert pending_validation_barrier(plan, state, latest, "semantic-work") == (nodes["original"],)
+    if defect == "redirected-report":
+        verified["executions"][0]["command"] += " > " + shlex.quote(verified["artifacts"][0]["path"])
+        extra = _save_report(tmp_path / "summary.json", [])
+        verified["artifacts"].append(extra)
+        verified["executions"][0]["artifact_paths"].append(extra["path"])
+    elif defect == "wrong-source":
+        verified["observed_source_state"][0] = "different"
+    elif defect == "failed":
+        verified["status"] = "failed"
+        verified["executions"][0].update(result="failed", exit_code=1)
+    elif defect == "wrong-report":
+        verified["executions"][0]["artifact_paths"] = []
+    elif defect in {"wrong-cff", "contradiction"}:
+        report = Path(verified["artifacts"][0]["path"])
+        rows = json.loads(report.read_bytes())
+        if defect == "wrong-cff":
+            rows[0]["canonical_software"]["digest"] = "sha256:" + "0" * 64
+        else:
+            rows[0]["local_status"] = "MISMATCH"
+        verified["artifacts"] = [_save_report(report, rows)]
+    elif defect == "unrelated":
+        plan = replace(plan, pre_review_validation_nodes=(*plan.pre_review_validation_nodes, "unrelated"))
+        state["unrelated"] = "accepted"
+        latest["unrelated"] = {"evidence": {"evidence_status": "failed"}}
+        assert pending_validation_barrier(plan, state, latest, nodes["verified"]) == ("unrelated",)
+    elif defect == "altered-original":
+        latest[nodes["original"]]["evidence"]["normalized_record_digest"] = "sha256:" + "0" * 64
+        assert pending_validation_barrier(plan, state, latest, nodes["verified"]) == (nodes["original"],)
+    artifact, metadata = tmp_path / "compiled.md", tmp_path / "compiled.metadata.json"
+    artifact.write_bytes(b"canonical fixture evidence")
+    metadata.write_text(json.dumps({"normalized_record": verified}))
+    state[nodes["verified"]] = "accepted"
+    latest[nodes["verified"]] = {
+        "evidence": {
+            "evidence_id": verified["evidence_id"],
+            "evidence_status": verified["status"],
+            "normalized_record_digest": digest_json(verified),
+            "artifact_digest": digest_bytes(artifact.read_bytes()),
+            "canonical_doi_source": {"artifact_path": str(artifact), "metadata_path": str(metadata)},
+        }
+    }
+    pending = pending_validation_barrier(plan, state, latest, "semantic-work")
+    assert pending == (() if defect in {"none", "redirected-report"} else ("unrelated",) if defect == "unrelated" else (nodes["original"],))
+    assert binding.original.status.value == "failed"
+
+
+@pytest.mark.parametrize("defect", ["missing", "extra", "boolean-index", "negative-index", "unknown-report", "malformed-record", "passed-record"])
+def test_doi_binding_rejects_invalid_construction_and_detaches_exports(tmp_path: Path, defect: str) -> None:
+    _plan, binding, original, _verified = _bound_doi_fixture(tmp_path)
+    raw = asdict(binding)
+    assert SoftwareDoiRecheck.parse(raw) == binding
+    detached = binding.original_document()
+    detached["executions"][0]["result"] = "passed"
+    assert binding.original.executions[0].result.value == "failed"
+    if defect == "missing":
+        del raw["original_report"]
+    elif defect == "extra":
+        raw["unbound_policy"] = True
+    elif defect == "boolean-index":
+        raw["execution_index"] = True
+    elif defect == "negative-index":
+        raw["execution_index"] = -1
+    elif defect == "unknown-report":
+        raw["original_report"] = str(tmp_path / "other.json")
+    elif defect == "malformed-record":
+        raw["original_record_json"] = "{}"
+    else:
+        original.update(status="passed")
+        original["executions"][0].update(result="passed", exit_code=0)
+        raw["original_record_json"] = canonical_json(original)
+    with pytest.raises((ValueError, TypeError)):
+        SoftwareDoiRecheck.parse(raw)
+    if defect not in {"missing", "extra"}:
+        with pytest.raises((ValueError, TypeError)):
+            SoftwareDoiRecheck(**raw)
+        with pytest.raises((ValueError, TypeError)):
+            replace(binding, **raw)
 
 
 def _compile_validator(entry: dict[str, Any], lifecycle: dict[str, Any], journal: Path, record: dict[str, Any]) -> dict[str, str]:
@@ -496,10 +644,114 @@ def _compile_validator(entry: dict[str, Any], lifecycle: dict[str, Any], journal
     return source
 
 
-def test_canonical_followup_expands_only_validation_and_finalizes_with_failed_history(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:  # noqa: PLR0915
-    original, verified, resolution = _fixture(tmp_path)
+def _doi_recovery_fixture(tmp_path: Path) -> tuple[dict[str, Any], Namespace, dict[str, Any], dict[str, Any]]:
+    plan, binding, original, verified = _bound_doi_fixture(tmp_path, failed_followup=True)
+    # Early validators keep their superseded events in the migrated journal.
+    plan = replace(plan, pre_review_validation_nodes=(*plan.pre_review_validation_nodes, binding.node_id))
+    lifecycle = {"plan": _json_plan(plan), "source_state": original["observed_source_state"]}
+    dispatches = materialize_dispatches(
+        {
+            **lifecycle,
+            "artifact_store": str(tmp_path / "bound"),
+            "authorization": "review-only",
+            "repository_root": str(SKILL_ROOT.parents[2]),
+            "state_verification_command": "capture_scope.py --mode baseline",
+        }
+    )
+    entries = {entry["node_id"]: entry for entry in dispatches["dispatches"]}
+    args = Namespace(journal=tmp_path / "bound.jsonl", dispatches=tmp_path / "dispatches.json", current_capture=tmp_path / "capture.json")
+    args.dispatches.write_text(json.dumps(dispatches))
+    args.current_capture.write_text(json.dumps(_source_capture(tmp_path)))
+    _compile_validator(entries[binding.original.node_id], lifecycle, args.journal, original)
+    entry = entries[binding.node_id]
+    verified["evidence_id"] = entry["dispatch"]["evidence_id"]
+    _compile_validator(entry, lifecycle, args.journal, verified)
+    after = capture_workspace_snapshot(entry["dispatch"])
+    for phase, snapshot in (("before", {**after, "records": []}), ("after", after)):
+        (tmp_path / f"{phase}.json").write_text(json.dumps(snapshot))
+    request = {
+        **lifecycle,
+        "artifact_store": str(tmp_path / "recovery"),
+        "node_id": entry["node_id"],
+        "failure_kind": "executor-permission",
+        "checks_started": True,
+        "reason": "The canonical follow-up encountered a captured executor permission denial.",
+        "remedy": "Use the permitted executor.",
+        "environment": "permitted native executor",
+        "permission_change": "restricted to permitted executor",
+        "executor_permissions": "require_escalated",
+        "failure_evidence": {
+            "log_path": str(tmp_path / "denied.log"),
+            "diagnostic": "PermissionError: [Errno 1] Operation not permitted",
+            "before_capture": str(args.current_capture),
+            "after_capture": str(args.current_capture),
+            "workspace_before": str(tmp_path / "before.json"),
+            "workspace_after": str(tmp_path / "after.json"),
+        },
+    }
+    return request, args, entry, verified
+
+
+def test_doi_execution_recovery_verifies_superseded_sources_against_retained_attempt(tmp_path: Path) -> None:
+    request, args, entry, verified = _doi_recovery_fixture(tmp_path)
+    preserved = {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+    original_events = read_execution_journal(args.journal, plan=_graph_plan(request["plan"]), source_state=tuple(request["source_state"]))[0]
+    historical = original_events[-1]["evidence"]
+    recovered = recover_validation_execution(request, args)
+    lifecycle = recovered["lifecycle_input"]
+    plan = _graph_plan(lifecycle["plan"])
+    journal = Path(recovered["journal_path"])
+    node = next(node for node in plan.actual_worker_nodes if node.node_id == entry["node_id"])
+    checked = _journal_evidence(historical, plan=plan, node=node, status="accepted", superseded=True)
+    assert checked is not None
+    assert checked["evidence_id"] == verified["evidence_id"]
+    with pytest.raises(ValueError, match="evidence ID differs"):
+        _journal_evidence(historical, plan=plan, node=node, status="accepted")
+    altered = deepcopy(historical)
+    altered["canonical_doi_source"]["metadata_path"] = str(tmp_path / "unbound.json")
+    with pytest.raises(ValueError, match="evidence ID differs"):
+        _journal_evidence(altered, plan=plan, node=node, status="accepted", superseded=True)
+    entries = json.loads(Path(recovered["dispatches_path"]).read_bytes())
+    _prepare_all_fixture_timing(entries)
+    events = read_execution_journal(journal, plan=plan, source_state=tuple(lifecycle["source_state"]))[0]
+    ready = next_ready_nodes({**lifecycle, "current_source_state": lifecycle["source_state"]}, journal_events=events, dispatch_set=entries)
+    assert ready["ready_node_ids"] == [entry["node_id"]]
+    retry = ready["ready_dispatches"][0]
+    assert retry["dispatch"]["evidence_id"] != verified["evidence_id"]
+    verified.update(status="passed", evidence_id=retry["dispatch"]["evidence_id"])
+    verified["executions"][0].update(result="passed", exit_code=0, evidence="Canonical report completed on the permitted executor")
+    _compile_validator(retry, lifecycle, journal, verified)
+    events = read_execution_journal(journal, plan=plan, source_state=tuple(lifecycle["source_state"]))[0]
+    assert events[-1]["evidence"]["evidence_id"] == verified["evidence_id"]
+    assert any(event["evidence"] == historical for event in events)
+    assert all(path.read_bytes() == content for path, content in preserved.items())
+    old_artifact = Path(historical["canonical_doi_source"]["artifact_path"])
+    old_artifact.chmod(0o644)
+    old_artifact.write_bytes(old_artifact.read_bytes() + b"\nchanged historical result\n")
+    with pytest.raises(ValueError, match=r"digest|identity|result"):
+        read_execution_journal(journal, plan=plan, source_state=tuple(lifecycle["source_state"]))
+
+
+def _followup_planning(original: dict[str, Any], verified: dict[str, Any], *, early: bool, later_check: bool) -> tuple[dict[str, Any], dict[str, Any]]:
     planning = _sparse_plan_document()
     planning["validation_requirements"] = [_requirement(original, baseline=True)]
+    if early:
+        planning["pre_review_validation_requirement_ids"] = ["original"]
+    later = deepcopy(verified)
+    later.update(requirement_ids=["later"], artifacts=[])
+    later["executions"][0].update(command="true", artifact_paths=[])
+    if later_check:
+        planning["validation_requirements"].append(_requirement(later, baseline=False))
+        planning["pre_review_validation_requirement_ids"].append("later")
+    return planning, later
+
+
+@pytest.mark.parametrize(("early", "later_check"), [(False, False), (True, False), (True, True)])
+def test_canonical_followup_expands_only_validation_and_finalizes_with_failed_history(  # noqa: C901, PLR0915 - complete preserved-history continuation.
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], early: bool, later_check: bool
+) -> None:
+    original, verified, resolution = _fixture(tmp_path)
+    planning, later = _followup_planning(original, verified, early=early, later_check=later_check)
     plan = plan_from_document(planning, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=SKILL_ROOT.parents[2])
     lifecycle = {"plan": _json_plan(plan), "source_state": original["observed_source_state"]}
     dispatches = materialize_dispatches(
@@ -516,10 +768,10 @@ def test_canonical_followup_expands_only_validation_and_finalizes_with_failed_hi
     paths["capture"].write_text(json.dumps(_source_capture(tmp_path)))
     sources = []
     for entry in dispatches["dispatches"]:
-        if entry["result_contract"] == "compact-validation":
+        if entry["result_contract"] == "compact-validation" and "original" in entry["dispatch"]["requirement_ids"]:
             original["evidence_id"] = entry["dispatch"]["evidence_id"]
             sources.append(_compile_validator(entry, lifecycle, paths["journal"], original))
-        elif entry["dispatch"]["mode"] == "audit":
+        elif entry["dispatch"]["mode"] == "audit" and not early:
             sources.append(_compile_repair_fixture_entry(entry, lifecycle, paths["journal"]))
     preserved = {Path(path): Path(path).read_bytes() for source in sources for path in source.values()}
     preserved[paths["journal"]] = paths["journal"].read_bytes()
@@ -567,11 +819,34 @@ def test_canonical_followup_expands_only_validation_and_finalizes_with_failed_hi
     lifecycle = expanded["lifecycle_input"]
     journal = Path(expanded["journal_path"])
     entries = json.loads(Path(expanded["dispatches_path"]).read_bytes())["dispatches"]
+    expanded_plan = _graph_plan(lifecycle["plan"])
+    _prepare_all_fixture_timing(json.loads(Path(expanded["dispatches_path"]).read_bytes()))
+    events, _state, _head = read_execution_journal(journal, plan=expanded_plan, source_state=tuple(lifecycle["source_state"]))
+    ready = next_ready_nodes(
+        {**lifecycle, "current_source_state": lifecycle["source_state"]},
+        journal_events=events,
+        dispatch_set=json.loads(Path(expanded["dispatches_path"]).read_bytes()),
+    )
     for entry in entries:
-        if entry["result_contract"] == "compact-validation" and entry["node_id"] not in expanded["retained_node_ids"]:
+        if entry["result_contract"] == "compact-validation" and "verified" in entry["dispatch"]["requirement_ids"]:
+            assert entry["node_id"] in ready["ready_node_ids"], ready
             verified["evidence_id"] = entry["dispatch"]["evidence_id"]
             resolution["checks"][0]["verification_evidence_id"] = verified["evidence_id"]
             sources.append(_compile_validator(entry, lifecycle, journal, verified))
+    for entry in entries:
+        if entry["result_contract"] == "compact-validation" and "later" in entry["dispatch"]["requirement_ids"]:
+            assert entry["node_id"] not in ready["ready_node_ids"]
+            events, _state, _head = read_execution_journal(journal, plan=expanded_plan, source_state=tuple(lifecycle["source_state"]))
+            resumed = next_ready_nodes(
+                {**lifecycle, "current_source_state": lifecycle["source_state"]},
+                journal_events=events,
+                dispatch_set=json.loads(Path(expanded["dispatches_path"]).read_bytes()),
+            )
+            assert entry["node_id"] in resumed["ready_node_ids"]
+            later["evidence_id"] = entry["dispatch"]["evidence_id"]
+            sources.append(_compile_validator(entry, lifecycle, journal, later))
+    if early:
+        sources.extend(_compile_repair_fixture_entry(entry, lifecycle, journal) for entry in entries if entry["dispatch"]["mode"] == "audit")
     for entry in entries:
         if entry["dispatch"].get("mode") != "synthesis":
             continue

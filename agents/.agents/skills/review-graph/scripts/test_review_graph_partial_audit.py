@@ -19,6 +19,7 @@ from test_review_graph_runtime import (
     _complete_structural_fixture_routing,
     _set_fixture_routing,
 )
+from test_review_graph_sessions import _use_historical_views
 from test_review_graph_transitions import _materialize, _payload
 
 ACTIVE = ["docs/current.md", "docs/remaining.md"]
@@ -191,8 +192,14 @@ def test_archive_exclusions_apply_before_dispatch_and_active_omissions_still_rej
 
 @pytest.mark.parametrize("finding", [False, True])
 @pytest.mark.parametrize("exclude_archives", [False, True])
-def test_continuation_preserves_evidence_and_requires_remaining_inspection(tmp_path: Path, finding: bool, exclude_archives: bool) -> None:
-    request, args, old, dispatches, _template = _fixture(tmp_path)
+@pytest.mark.parametrize("historical", [False, True])
+def test_continuation_preserves_evidence_and_requires_remaining_inspection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, finding: bool, exclude_archives: bool, historical: bool
+) -> None:
+    with monkeypatch.context() as legacy:
+        if historical:
+            _use_historical_views(tmp_path, legacy)
+        request, args, old, dispatches, _template = _fixture(tmp_path)
     if not exclude_archives:
         request["review_scope_exclusions"] = []
     payload = _partial(old, finding=finding)

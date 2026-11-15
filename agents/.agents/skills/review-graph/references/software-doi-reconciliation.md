@@ -58,6 +58,21 @@ only the additional check and downstream syntheses run. A legacy `MISMATCH`
 may justify a recheck, but cannot by itself justify readiness. No readiness
 decision is made during this expansion.
 
+When the failed validator is in the pre-review gate, the continuation binds the
+new validator to that exact accepted failed execution. Only this follow-up can
+run past that failure; unrelated early failures still block it. Semantic work
+remains blocked until accepted canonical evidence satisfies the complete
+reconciliation below. An exit-zero command alone is insufficient. The journal
+retains the original failed status and binds the follow-up's compiled evidence;
+replay and final proof verify both identities and reports again.
+
+For an older continuation that added a follow-up without this binding, rerun the
+original expansion request with the updated runtime, original lifecycle/journal/
+dispatches, retained Python runner, and a fresh output artifact directory.
+Keep the older continuation intact. Follow the new returned paths; do not edit
+the early-node list, rewrite evidence, consume a repair batch, or rerun unrelated
+accepted validators.
+
 ## Synthesis And Final Proof
 
 Use the accepted reports to add `software_doi_resolution` to the original

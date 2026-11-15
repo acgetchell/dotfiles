@@ -1,10 +1,15 @@
 """Small worker execution views; canonical provenance stays in immutable sidecars."""
 
 import json
+import subprocess
+import sys
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from review_graph_integrity import digest_bytes
 from review_graph_isolation import ISOLATION_INSTRUCTIONS
+from review_graph_results import parse_json_object
 
 _EXECUTION_FIELDS = (
     "node_id",
@@ -49,7 +54,7 @@ _EXECUTION_FIELDS = (
 )
 
 
-def execution_view_bytes(entry: dict[str, Any], canonical_bytes: bytes) -> bytes:
+def _render_execution_view(entry: dict[str, Any], canonical_bytes: bytes) -> bytes:
     """Preserve semantic tasks and commands without duplicating compiler identities."""
     dispatch = entry["dispatch"]
     mode = dispatch["mode"]
@@ -141,4 +146,66 @@ def execution_view_bytes(entry: dict[str, Any], canonical_bytes: bytes) -> bytes
             "After inspection, run audit_observations.after.capture_command. These commands persist complete immutable captures and receipts; "
             "compile-node requires those exact files. Never copy expected fingerprints into a capture or reconstruct a missing before observation."
         )
+    if "execution_view_instructions" in entry:
+        instructions = entry["execution_view_instructions"]
+        if not isinstance(instructions, str) or not instructions:
+            msg = "execution view instructions must be nonempty bound text"
+            raise ValueError(msg)
+        view["instructions"] = instructions
     return (json.dumps(view, indent=2, sort_keys=True) + "\n").encode()
+
+
+def bind_execution_instructions(entry: dict[str, Any]) -> None:
+    """Bind new guidance before hashing the canonical input, without a digest cycle."""
+    candidate = {key: value for key, value in entry.items() if key != "execution_view_instructions"}
+    canonical_bytes = (json.dumps(candidate, indent=2, sort_keys=True) + "\n").encode()
+    view = parse_json_object(execution_view_bytes(candidate, canonical_bytes))
+    instructions = view.get("instructions")
+    if not isinstance(instructions, str) or not instructions:
+        msg = "execution renderer did not produce nonempty instruction text"
+        raise ValueError(msg)
+    entry["execution_view_instructions"] = instructions
+
+
+@lru_cache(maxsize=128)
+def _frozen_view(scripts: str, manifest_digest: str, canonical_bytes: bytes) -> bytes:
+    """Render only after the caller verifies the complete immutable runtime inventory."""
+    code = (
+        "import json, sys; sys.path.insert(0, sys.argv[1]); "
+        "import review_graph_views as views; raw = sys.stdin.buffer.read(); "
+        "render = getattr(views, '_render_execution_view', views.execution_view_bytes); "
+        "sys.stdout.buffer.write(render(json.loads(raw), raw))"
+    )
+    try:
+        result = subprocess.run(  # noqa: S603 - original interpreter and verified frozen renderer, no submitted commands.
+            [sys.executable, "-E", "-s", "-P", "-B", "-c", code, scripts], input=canonical_bytes, capture_output=True, check=True, timeout=30
+        )
+    except subprocess.TimeoutExpired as error:
+        msg = "historical execution renderer exceeded 30 seconds; preserve the snapshot and retained Python runtime"
+        raise ValueError(msg) from error
+    except subprocess.CalledProcessError as error:
+        diagnostic = (error.stderr or b"").decode("utf-8", errors="backslashreplace")[-1000:]
+        msg = f"historical execution renderer exited {error.returncode}; retained runtime diagnostic: {diagnostic}"
+        raise ValueError(msg) from error
+    view = parse_json_object(result.stdout)
+    if view.get("schema_version") != 1 or not isinstance(view.get("instructions"), str) or not view["instructions"]:
+        msg = "historical execution renderer produced an invalid view"
+        raise ValueError(msg)
+    return result.stdout
+
+
+def execution_view_bytes(entry: dict[str, Any], canonical_bytes: bytes) -> bytes:
+    """Verify historical guidance against its frozen authority, never today's prose."""
+    if "execution_view_instructions" not in entry and (reference := entry["dispatch"].get("runtime_snapshot")):
+        from review_graph_session import verify_snapshot  # noqa: PLC0415 - avoid the runtime/session initialization cycle.
+
+        # Reverify even on cache hits: changed resources must never inherit trust.
+        manifest = verify_snapshot(reference)
+        relative = "skills/review-graph/scripts/review_graph_views.py"
+        if relative not in dict(manifest.files):
+            msg = "frozen runtime lacks the execution view renderer"
+            raise ValueError(msg)
+        renderer = Path(reference["path"]).parent / relative
+        if renderer.read_bytes() != Path(__file__).read_bytes():
+            return _frozen_view(str(renderer.parent), reference["digest"], canonical_bytes)
+    return _render_execution_view(entry, canonical_bytes)

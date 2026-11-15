@@ -4495,6 +4495,7 @@ def test_plan_digest_survives_current_format_round_trip() -> None:
 def test_validation_requirement_bindings_preserve_legacy_plan_digests() -> None:
     plan = _sparse_plan()
     legacy = _json_plan(plan)
+    legacy.pop("software_doi_rechecks")
     legacy.pop("validation_requirement_bindings")
     restored = _graph_plan(legacy)
     assert restored.validation_requirement_bindings == ()
@@ -4524,7 +4525,14 @@ def test_validation_requirement_bindings_preserve_legacy_plan_digests() -> None:
 def test_graph_plan_preserves_legacy_positional_constructor_tail() -> None:
     """New recovery and origin fields must not shift optional positional arguments."""
     plan = replace(_sparse_plan(), captured_path_inventory={})
-    additions = {"validation_requirement_bindings", "audit_replacements", "captured_path_inventory", "audit_continuations", "review_scope_exclusions"}
+    additions = {
+        "validation_requirement_bindings",
+        "audit_replacements",
+        "captured_path_inventory",
+        "audit_continuations",
+        "review_scope_exclusions",
+        "software_doi_rechecks",
+    }
     legacy_fields = [item.name for item in fields(GraphPlan) if item.name not in additions]
     assert GraphPlan(*(getattr(plan, name) for name in legacy_fields)) == plan
     assert all(item.kw_only for item in fields(GraphPlan) if item.name in additions)
@@ -4535,6 +4543,7 @@ def test_graph_plan_preserves_legacy_positional_constructor_tail() -> None:
 def test_path_inventory_preserves_legacy_plan_digests() -> None:
     plan = replace(_sparse_plan(), captured_path_inventory={})
     legacy = _json_plan(plan)
+    legacy.pop("software_doi_rechecks")
     for name in (
         "captured_path_inventory",
         "independent_review_after_audits",
@@ -4576,6 +4585,7 @@ def test_plan_digest_retains_nonempty_reuse_fields(tmp_path: Path) -> None:
     result = advance_after_mutation(request)
     plan = _graph_plan(json.loads(json.dumps(result["new_plan"])))
     document = _json_plan(plan)
+    document.pop("software_doi_rechecks")
     document.pop("commit_handoffs")
     document.pop("pre_review_validation_nodes")
     document.pop("validation_recoveries")
