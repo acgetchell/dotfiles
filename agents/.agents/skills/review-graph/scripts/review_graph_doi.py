@@ -445,6 +445,7 @@ def _source_row(row: dict[str, Any], markdown: Path, original: dict[str, Any], r
     parser = _bibliography_parser()
     parsed = parser["reference_definitions"](lines)
     destinations = [use.destination for use in parser["reference_uses"](lines, parsed) if use.line == index]
+    destinations.extend(link.destination for link in parser["inline_links"]("\n".join(lines), parsed) if link.line == index)
     if not 0 <= index < len(lines) or (
         row["doi"].casefold() not in lines[index].casefold()
         and f"https://doi.org/{row['doi']}".casefold() not in {destination.casefold() for destination in destinations}

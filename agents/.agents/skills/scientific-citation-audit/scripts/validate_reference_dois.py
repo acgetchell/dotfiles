@@ -47,6 +47,7 @@ _CONTRIBUTOR_ROLE = re.compile(
     re.IGNORECASE,
 )
 _DOI_URL = re.compile(r"https://doi\.org/(\S+)", re.IGNORECASE)
+_DOI_AUTOLINK = re.compile(r"<https://doi\.org/([^<>\x00-\x20]+)>", re.IGNORECASE)
 
 
 class AuditStatus(StrEnum):
@@ -349,6 +350,8 @@ def extract_entries(markdown: str) -> list[DoiEntry]:
     seen: set[tuple[str, int]] = set()
     parsed = reference_definitions(lines)
     definition_content = _definition_content(parsed)
+    inline_content, remainder = extract_inline_dois("\n".join(lines), parsed)
+    residual_lines = remainder.split("\n")
 
     reference_content: dict[int, list[str]] = {}
     for use in reference_uses(lines, parsed):
@@ -359,7 +362,12 @@ def extract_entries(markdown: str) -> list[DoiEntry]:
         if idx in definition_content:
             candidates = [raw for text in definition_content[idx] for raw in doi_candidates_from_line(text)]
         else:
-            candidates = [*doi_candidates_from_line(line), *reference_content.get(idx, [])]
+            candidates = [
+                *(match[1] for match in _structured_doi_matches(line)),
+                *doi_candidates_from_line(residual_lines[idx]),
+                *inline_content.get(idx, []),
+                *reference_content.get(idx, []),
+            ]
         for raw in candidates:
             try:
                 doi = Doi.parse(raw)
@@ -378,15 +386,17 @@ def extract_entries(markdown: str) -> list[DoiEntry]:
     return entries
 
 
+def _structured_doi_matches(line: str) -> list[re.Match[str]]:
+    """Retain explicit DOI labels even when their inline links are consumed."""
+    return [*re.finditer(r"DOI:\s*\[([^\]]+)\]", line, flags=re.IGNORECASE), *re.finditer(r"DOI:\s*<https://doi\.org/([^>]+)>", line, flags=re.IGNORECASE)]
+
+
 def doi_candidates_from_line(line: str) -> list[str]:
     """Extract raw DOI candidates from one Markdown line."""
-    structured = [
-        *re.finditer(r"DOI:\s*\[([^\]]+)\]", line, flags=re.IGNORECASE),
-        *re.finditer(r"DOI:\s*<https://doi\.org/([^>]+)>", line, flags=re.IGNORECASE),
-    ]
+    structured = _structured_doi_matches(line)
     candidates: list[str] = [match[1] for match in structured]
     inline, line = extract_inline_dois(line)
-    candidates.extend(inline)
+    candidates.extend(raw for values in inline.values() for raw in values)
     for match in sorted(structured, key=lambda match: match.start(), reverse=True):
         line = line[: match.start()] + " " * (match.end() - match.start()) + line[match.end() :]
     if "doi.org/" in line.casefold():
@@ -394,23 +404,31 @@ def doi_candidates_from_line(line: str) -> list[str]:
     return candidates
 
 
-def extract_inline_dois(line: str) -> tuple[list[str], str]:
-    """Extract inline DOI occurrences and mask consumed links in the remainder."""
-    destinations: list[str] = []
-    links = inline_links(line)
+def extract_inline_dois(text: str, parsed: tuple[ReferenceDefinition, ...] = ()) -> tuple[dict[int, list[str]], str]:
+    """Bind inline DOI occurrences to physical lines before masking consumed links."""
+    destinations: dict[int, list[str]] = {}
+    links = inline_links(text, parsed)
     for link in links:
         if match := _DOI_URL.match(link.destination):
-            destinations.append(match[1])
+            destinations.setdefault(link.line, []).append(match[1])
         else:
-            destinations.extend(raw_doi_urls(link.text))
+            for offset, label_line in enumerate(link.text.split("\n")):
+                destinations.setdefault(link.text_line + offset, []).extend(raw_doi_urls(label_line))
     for link in sorted(links, key=lambda link: link.start, reverse=True):
-        line = line[: link.start] + " " * (link.end - link.start) + line[link.end :]
-    return destinations, line
+        text = text[: link.start] + re.sub(r"[^\n]", " ", text[link.start : link.end]) + text[link.end :]
+    return destinations, text
 
 
 def raw_doi_urls(line: str) -> list[str]:
     """Extract DOI labels from raw URLs outside structured Markdown links."""
-    return [trim_raw_url_doi(match[1]) for match in _DOI_URL.finditer(line)]
+    values: list[str] = []
+    cursor = 0
+    for autolink in _DOI_AUTOLINK.finditer(line):
+        values.extend(trim_raw_url_doi(match[1]) for match in _DOI_URL.finditer(line, cursor, autolink.start()))
+        values.append(autolink[1])
+        cursor = autolink.end()
+    values.extend(trim_raw_url_doi(match[1]) for match in _DOI_URL.finditer(line, cursor))
+    return values
 
 
 def trim_raw_url_doi(value: str) -> str:

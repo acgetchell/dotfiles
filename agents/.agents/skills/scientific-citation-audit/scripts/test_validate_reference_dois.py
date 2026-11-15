@@ -843,8 +843,10 @@ def test_resolver_case_preserves_doi_path_and_conflicting_use(resolver: str, sty
 
 @pytest.mark.parametrize("structured", ["[DOI](https://doi.org/10.1234/First(Part))", "DOI: <https://doi.org/10.1234/First(Part)>"])
 @pytest.mark.parametrize("raw_first", [False, True])
-def test_structured_and_raw_dois_on_same_line_are_both_audited(structured: str, raw_first: bool) -> None:
-    raw = "HTTPS://DOI.ORG/10.1234/Second(Part)"
+@pytest.mark.parametrize("autolink", [False, True])
+def test_structured_and_raw_dois_on_same_line_are_both_audited(structured: str, raw_first: bool, autolink: bool) -> None:
+    raw_url = "HTTPS://DOI.ORG/10.1234/Second(Part)"
+    raw = f"<{raw_url}>" if autolink else raw_url
     links = f"{raw} {structured}" if raw_first else f"{structured} {raw}"
     entries = MODULE.extract_entries(f"Shewchuk. Robust predicates. 1997. {links}")
     assert {(entry.line, entry.doi.value) for entry in entries} == {(1, "10.1234/First(Part)"), (1, "10.1234/Second(Part)")}
@@ -870,6 +872,31 @@ def test_inline_destination_escapes_preserve_doi_identity(destination: str) -> N
     assert [entry.doi.value for entry in entries] == ["10.1234/PaPer(Part)"]
     rows = MODULE.validate_entries(entries, 1, 0.45, lambda *_: metadata("Robust predicates"))
     assert [row.status for row in rows] == [MODULE.AuditStatus.OK]
+
+
+@pytest.mark.parametrize(
+    ("markdown", "line"),
+    [
+        ("[Shewchuk. Robust\npredicates. 1997.](https://doi.org/10.1234/paper)", 2),
+        ("[Shewchuk. Robust predicates. 1997.](\nhttps://doi.org/10.1234/paper)", 2),
+        ("[Shewchuk. Robust\npredicates. 1997.](\n<https://doi.org/10.1234/paper>)", 3),
+    ],
+)
+def test_wrapped_inline_links_keep_the_destination_source_line(markdown: str, line: int) -> None:
+    entries = MODULE.extract_entries(markdown)
+    assert [(entry.line, entry.doi.value) for entry in entries] == [(line, "10.1234/paper")]
+    assert entries[0].bibliographic_claims == "Shewchuk. Robust predicates. 1997."
+    rows = MODULE.validate_entries(entries, 1, 0.45, lambda *_: metadata("Robust predicates", year=2018))
+    assert [row.status for row in rows] == [MODULE.AuditStatus.MISMATCH]
+    assert rows[0].mismatched_fields == ("year",)
+
+
+@pytest.mark.parametrize("destination", ["https://example.org/archive", "https://doi.org/10.1234/target"])
+def test_explicit_doi_labels_remain_candidates_when_inline_links_are_masked(destination: str) -> None:
+    entries = MODULE.extract_entries(f"Shewchuk. Robust predicates. 1997. DOI: [10.1234/label]({destination})")
+    expected = {"10.1234/label", "10.1234/target"} if "doi.org" in destination else {"10.1234/label"}
+    assert {entry.doi.value for entry in entries} == expected
+    assert all(entry.line == 1 for entry in entries)
 
 
 def test_definition_identifier_is_not_a_publication_year_claim() -> None:

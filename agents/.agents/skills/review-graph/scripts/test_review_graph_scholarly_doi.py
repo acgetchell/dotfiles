@@ -154,6 +154,56 @@ def test_checker_output_reconciles_doi_digits_and_adjacent_items(tmp_path: Path,
     validate_scholarly_doi_resolution(resolution, original, {original["evidence_id"]: original})
 
 
+@pytest.mark.parametrize("style", ["escaped", "wrapped-escaped", "angle-escaped"])
+@pytest.mark.parametrize("defect", [None, "different-line", "different-target"])
+def test_escaped_inline_doi_reconciles_only_its_retained_destination(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, style: str, defect: str | None) -> None:
+    original, _verified, resolution, capture = _scholarly_fixture(tmp_path, first_doi="10.1234/PaPer(Part)")
+    rows = json.loads(Path(original["artifacts"][0]["path"]).read_bytes())
+    prior = base64.b64decode(rows[0]["source"]["content_base64"]).decode()
+    destination = r"https://doi.org/10.1234/PaPer\(Part\)"
+    if style == "angle-escaped":
+        destination = f"<{destination}>"
+    claim = "Brezinski. La méthode de Cholesky. (2005)."
+    if style == "wrapped-escaped":
+        claim = claim.replace("méthode ", "méthode\n")
+    markdown = f"[{claim}]({destination})\n\n" + prior.split("\n\n", 1)[1]
+    references = markdown.encode()
+    source = {**rows[0]["source"], "digest": "sha256:" + sha256(references).hexdigest(), "content_base64": base64.b64encode(references).decode()}
+    checker_path = SKILL_ROOT / "scientific-citation-audit" / "scripts" / "validate_reference_dois.py"
+    monkeypatch.syspath_prepend(str(checker_path.parent))
+    checker = runpy.run_path(str(checker_path))
+    resolved = {
+        row["doi"]: {
+            "title": row["resolved_title"],
+            "author": [{"family": name} for name in row["resolved_authors"]],
+            "issued": {"date-parts": [[int(row["resolved_year"])]]},
+        }
+        for row in rows
+    }
+    results = checker["validate_entries"](checker["extract_entries"](markdown), 1.0, 0.45, lambda doi, _timeout: resolved[doi.value])
+    reported = [{**result.to_json_object(), "source": source} for result in results]
+    assert [row["status"] for row in reported] == ["MISMATCH", "MISMATCH"]
+    assert [row["mismatched_fields"] for row in reported] == [["year"], ["year"]]
+    assert [row["line"] for row in reported] == ([2, 4] if style == "wrapped-escaped" else [1, 3])
+    if defect == "different-line":
+        reported[0]["line"] = 1 if style == "wrapped-escaped" else 2
+    elif defect == "different-target":
+        references = markdown.replace("PaPer", "Other").encode()
+        source.update(digest="sha256:" + sha256(references).hexdigest(), content_base64=base64.b64encode(references).decode())
+    for occurrence, row in zip(resolution["checks"][0]["occurrences"], reported, strict=True):
+        occurrence["line"] = row["line"]
+    original["artifacts"] = [_save_report(Path(original["artifacts"][0]["path"]), reported)]
+    capture["repository_path_fingerprints"]["README.md"] = regular_file_fingerprint("README.md", references)
+    capture["repository_state_fingerprint"] = source_snapshot(capture).computed_fingerprint()
+    original["observed_source_state"] = list(source_snapshot(capture).source_state)
+    original["captured_doi_inputs"] = captured_doi_inputs(original, capture)
+    if defect is None:
+        validate_scholarly_doi_resolution(resolution, original, {original["evidence_id"]: original})
+    else:
+        with pytest.raises(ValueError, match="DOI occurrence is absent"):
+            validate_scholarly_doi_resolution(resolution, original, {})
+
+
 @pytest.mark.parametrize("style", ["full", "full-multiline", "collapsed", "shortcut"])
 @pytest.mark.parametrize("defect", [None, "different-target", "unresolved", "different-line", "different-year"])
 def test_reference_use_reconciles_only_its_retained_destination_and_claims(

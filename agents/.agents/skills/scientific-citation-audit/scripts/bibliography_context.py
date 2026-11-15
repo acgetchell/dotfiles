@@ -43,6 +43,8 @@ class InlineLink:
     text: str
     start: int
     end: int
+    line: int
+    text_line: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -346,8 +348,10 @@ def _link_matches(text: str, definitions: dict[str, str]) -> list[_LinkMatch]:
     return matches
 
 
-def inline_links(text: str) -> tuple[InlineLink, ...]:
+def inline_links(text: str, parsed: tuple[ReferenceDefinition, ...] = ()) -> tuple[InlineLink, ...]:
     """Resolve inline destinations using the same boundaries as visible claims."""
+    definition_lines = {index for definition in parsed for index in range(definition.start, definition.end)}
+    text = "\n".join(" " * len(line) if index in definition_lines else line for index, line in enumerate(text.split("\n")))
     links = []
     for match in _link_matches(text, {}):
         start = match.start + int(match.image) + len(match.text) + len("[](")
@@ -358,7 +362,9 @@ def inline_links(text: str) -> tuple[InlineLink, ...]:
         if destination.startswith("<"):
             destination = destination[1:-1]
         destination = _BACKSLASH_ESCAPE.sub(r"\1", destination)
-        links.append(InlineLink(destination, match.text, match.start, match.end))
+        links.append(
+            InlineLink(destination, match.text, match.start, match.end, text.count("\n", 0, start), text.count("\n", 0, match.start + int(match.image) + 1))
+        )
     return tuple(links)
 
 
