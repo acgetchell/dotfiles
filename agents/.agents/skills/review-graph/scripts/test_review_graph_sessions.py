@@ -351,6 +351,16 @@ def test_updated_runtime_accepts_frozen_guidance_and_rejects_tampering(tmp_path:
         runtime._dispatches_by_node(entries, plan=plan, source_state=state)
 
 
+def test_historical_renderer_excludes_launch_directory_imports(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_historical_views(tmp_path, monkeypatch)
+    marker = tmp_path / "imported-sentinel"
+    (tmp_path / "json.py").write_text(f"from pathlib import Path\nPath({str(marker)!r}).write_bytes(b'imported')\nraise RuntimeError('untrusted json')\n")
+    monkeypatch.chdir(tmp_path)
+    lifecycle, entries = _worker_input_fixture(tmp_path)
+    assert not marker.exists()
+    assert runtime._dispatches_by_node(entries, plan=runtime._graph_plan(lifecycle["plan"]), source_state=tuple(lifecycle["source_state"]))
+
+
 @pytest.mark.parametrize("output", [b"", b"not json", b"[]", b"{}", b'{"instructions":null}'])
 def test_instruction_binding_rejects_bad_renderer_output_without_mutation(monkeypatch: pytest.MonkeyPatch, output: bytes) -> None:
     entry = {"execution_view_instructions": "retained", "dispatch": {"node_id": "audit-1"}}

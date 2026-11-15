@@ -178,7 +178,7 @@ def _frozen_view(scripts: str, manifest_digest: str, canonical_bytes: bytes) -> 
     )
     try:
         result = subprocess.run(  # noqa: S603 - original interpreter and verified frozen renderer, no submitted commands.
-            [sys.executable, "-E", "-s", "-B", "-c", code, scripts], input=canonical_bytes, capture_output=True, check=True, timeout=30
+            [sys.executable, "-E", "-s", "-P", "-B", "-c", code, scripts], input=canonical_bytes, capture_output=True, check=True, timeout=30
         )
     except subprocess.TimeoutExpired as error:
         msg = "historical execution renderer exceeded 30 seconds; preserve the snapshot and retained Python runtime"

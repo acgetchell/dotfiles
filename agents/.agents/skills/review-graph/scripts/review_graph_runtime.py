@@ -6991,7 +6991,7 @@ def _sha256_digest(value: object, name: str) -> str:
     return value
 
 
-def _historical_validation_evidence(evidence: dict[str, str], plan: GraphPlan, node: WorkerNode) -> bool:
+def _historical_validation_evidence(evidence: dict[str, Any], plan: GraphPlan, node: WorkerNode) -> bool:
     """Verify an old attempt against the recovery's immutable prior journal."""
     if node.mode != "validation":
         return False
@@ -7060,7 +7060,8 @@ def _journal_evidence(raw: object, *, plan: GraphPlan, node: WorkerNode, status:
     _sha256_digest(evidence["artifact_digest"], "journal artifact_digest")
     _sha256_digest(evidence["normalized_record_digest"], "journal normalized_record_digest")
     expected_evidence_id = _expected_evidence_id(node, plan)
-    if evidence["evidence_id"] != expected_evidence_id and not (superseded and _historical_validation_evidence(evidence, plan, node)):
+    historical = evidence["evidence_id"] != expected_evidence_id
+    if historical and not (superseded and _historical_validation_evidence(record, plan, node)):
         msg = f"journal evidence ID differs from plan for {node.node_id}"
         raise ValueError(msg)
     valid_statuses = {"passed", "failed", "blocked", "reused", "not-applicable"} if node.mode == "validation" else _REVIEW_STATUSES
@@ -7077,7 +7078,10 @@ def _journal_evidence(raw: object, *, plan: GraphPlan, node: WorkerNode, status:
     if status not in {"accepted", "blocked"}:
         msg = f"{status} journal event must not contain evidence"
         raise ValueError(msg)
-    _verify_doi_journal_source(raw, plan, node)
+    if not historical:
+        _verify_doi_journal_source(raw, plan, node)
+    # Historical evidence, including DOI source pointers, was matched exactly
+    # against the preserved journal and verified while replaying its own plan.
     return evidence
 
 

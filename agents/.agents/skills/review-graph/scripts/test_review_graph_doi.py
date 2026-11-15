@@ -19,8 +19,11 @@ from review_graph_plan import GraphPlan, plan_from_document
 from review_graph_reuse import SNAPSHOT_FORMAT, regular_file_fingerprint, source_snapshot
 from review_graph_runtime import (
     JournalEventRequest,
+    _graph_plan,
+    _journal_evidence,
     append_journal_event,
     build_synthesis_bundle,
+    capture_workspace_snapshot,
     compile_review,
     compile_validation,
     main,
@@ -28,6 +31,7 @@ from review_graph_runtime import (
     next_ready_nodes,
     read_execution_journal,
     reconcile_validation_requirements,
+    recover_validation_execution,
 )
 from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
 from review_graph_synthesis import validate_synthesis
@@ -475,15 +479,32 @@ def _requirement(record: dict[str, Any], *, baseline: bool) -> dict[str, Any]:
             "requires_isolation": True,
             "isolation_root": record["executions"][0]["working_directory"],
             "expected_workspace_effects": [],
-            "allowed_artifacts": [{"path": artifact["path"], "kind": "report", "repository_status": "outside-repository"} for artifact in record["artifacts"]],
+            "allowed_artifacts": [
+                {"path": artifact["path"], "kind": artifact["kind"], "repository_status": "outside-repository"} for artifact in record["artifacts"]
+            ],
         }
     )
     return requirement
 
 
-def _bound_doi_fixture(tmp_path: Path) -> tuple[GraphPlan, SoftwareDoiRecheck, dict[str, Any], dict[str, Any]]:
+def _bound_doi_fixture(tmp_path: Path, *, failed_followup: bool = False) -> tuple[GraphPlan, SoftwareDoiRecheck, dict[str, Any], dict[str, Any]]:
     """Bind real compiled original evidence, retaining independent canonical report data."""
     original, verified, _resolution = _fixture(tmp_path)
+    if failed_followup:
+        log = tmp_path / "denied.log"
+        log.write_bytes(b"PermissionError: [Errno 1] Operation not permitted\n")
+        verified.update(status="failed")
+        verified["executions"][0].update(result="failed", exit_code=1, evidence=log.read_text().strip())
+        verified["executions"][0]["artifact_paths"].append(str(log))
+        verified["artifacts"].append(
+            {
+                "path": str(log),
+                "kind": "log",
+                "repository_status": "outside-repository",
+                "artifact_digest_mode": "content-sha256-v1",
+                "artifact_digest": digest_bytes(log.read_bytes()),
+            }
+        )
     planning = _sparse_plan_document()
     planning["validation_requirements"] = [_requirement(original, baseline=True), _requirement(verified, baseline=False)]
     planning["pre_review_validation_requirement_ids"] = ["original"]
@@ -623,6 +644,94 @@ def _compile_validator(entry: dict[str, Any], lifecycle: dict[str, Any], journal
     return source
 
 
+def _doi_recovery_fixture(tmp_path: Path) -> tuple[dict[str, Any], Namespace, dict[str, Any], dict[str, Any]]:
+    plan, binding, original, verified = _bound_doi_fixture(tmp_path, failed_followup=True)
+    # Early validators keep their superseded events in the migrated journal.
+    plan = replace(plan, pre_review_validation_nodes=(*plan.pre_review_validation_nodes, binding.node_id))
+    lifecycle = {"plan": _json_plan(plan), "source_state": original["observed_source_state"]}
+    dispatches = materialize_dispatches(
+        {
+            **lifecycle,
+            "artifact_store": str(tmp_path / "bound"),
+            "authorization": "review-only",
+            "repository_root": str(SKILL_ROOT.parents[2]),
+            "state_verification_command": "capture_scope.py --mode baseline",
+        }
+    )
+    entries = {entry["node_id"]: entry for entry in dispatches["dispatches"]}
+    args = Namespace(journal=tmp_path / "bound.jsonl", dispatches=tmp_path / "dispatches.json", current_capture=tmp_path / "capture.json")
+    args.dispatches.write_text(json.dumps(dispatches))
+    args.current_capture.write_text(json.dumps(_source_capture(tmp_path)))
+    _compile_validator(entries[binding.original.node_id], lifecycle, args.journal, original)
+    entry = entries[binding.node_id]
+    verified["evidence_id"] = entry["dispatch"]["evidence_id"]
+    _compile_validator(entry, lifecycle, args.journal, verified)
+    after = capture_workspace_snapshot(entry["dispatch"])
+    for phase, snapshot in (("before", {**after, "records": []}), ("after", after)):
+        (tmp_path / f"{phase}.json").write_text(json.dumps(snapshot))
+    request = {
+        **lifecycle,
+        "artifact_store": str(tmp_path / "recovery"),
+        "node_id": entry["node_id"],
+        "failure_kind": "executor-permission",
+        "checks_started": True,
+        "reason": "The canonical follow-up encountered a captured executor permission denial.",
+        "remedy": "Use the permitted executor.",
+        "environment": "permitted native executor",
+        "permission_change": "restricted to permitted executor",
+        "executor_permissions": "require_escalated",
+        "failure_evidence": {
+            "log_path": str(tmp_path / "denied.log"),
+            "diagnostic": "PermissionError: [Errno 1] Operation not permitted",
+            "before_capture": str(args.current_capture),
+            "after_capture": str(args.current_capture),
+            "workspace_before": str(tmp_path / "before.json"),
+            "workspace_after": str(tmp_path / "after.json"),
+        },
+    }
+    return request, args, entry, verified
+
+
+def test_doi_execution_recovery_verifies_superseded_sources_against_retained_attempt(tmp_path: Path) -> None:
+    request, args, entry, verified = _doi_recovery_fixture(tmp_path)
+    preserved = {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+    original_events = read_execution_journal(args.journal, plan=_graph_plan(request["plan"]), source_state=tuple(request["source_state"]))[0]
+    historical = original_events[-1]["evidence"]
+    recovered = recover_validation_execution(request, args)
+    lifecycle = recovered["lifecycle_input"]
+    plan = _graph_plan(lifecycle["plan"])
+    journal = Path(recovered["journal_path"])
+    node = next(node for node in plan.actual_worker_nodes if node.node_id == entry["node_id"])
+    checked = _journal_evidence(historical, plan=plan, node=node, status="accepted", superseded=True)
+    assert checked is not None
+    assert checked["evidence_id"] == verified["evidence_id"]
+    with pytest.raises(ValueError, match="evidence ID differs"):
+        _journal_evidence(historical, plan=plan, node=node, status="accepted")
+    altered = deepcopy(historical)
+    altered["canonical_doi_source"]["metadata_path"] = str(tmp_path / "unbound.json")
+    with pytest.raises(ValueError, match="evidence ID differs"):
+        _journal_evidence(altered, plan=plan, node=node, status="accepted", superseded=True)
+    entries = json.loads(Path(recovered["dispatches_path"]).read_bytes())
+    _prepare_all_fixture_timing(entries)
+    events = read_execution_journal(journal, plan=plan, source_state=tuple(lifecycle["source_state"]))[0]
+    ready = next_ready_nodes({**lifecycle, "current_source_state": lifecycle["source_state"]}, journal_events=events, dispatch_set=entries)
+    assert ready["ready_node_ids"] == [entry["node_id"]]
+    retry = ready["ready_dispatches"][0]
+    assert retry["dispatch"]["evidence_id"] != verified["evidence_id"]
+    verified.update(status="passed", evidence_id=retry["dispatch"]["evidence_id"])
+    verified["executions"][0].update(result="passed", exit_code=0, evidence="Canonical report completed on the permitted executor")
+    _compile_validator(retry, lifecycle, journal, verified)
+    events = read_execution_journal(journal, plan=plan, source_state=tuple(lifecycle["source_state"]))[0]
+    assert events[-1]["evidence"]["evidence_id"] == verified["evidence_id"]
+    assert any(event["evidence"] == historical for event in events)
+    assert all(path.read_bytes() == content for path, content in preserved.items())
+    old_artifact = Path(historical["canonical_doi_source"]["artifact_path"])
+    old_artifact.chmod(0o644)
+    old_artifact.write_bytes(old_artifact.read_bytes() + b"\nchanged historical result\n")
+    with pytest.raises(ValueError, match=r"digest|identity|result"):
+        read_execution_journal(journal, plan=plan, source_state=tuple(lifecycle["source_state"]))
+
+
 def _followup_planning(original: dict[str, Any], verified: dict[str, Any], *, early: bool, later_check: bool) -> tuple[dict[str, Any], dict[str, Any]]:
     planning = _sparse_plan_document()
     planning["validation_requirements"] = [_requirement(original, baseline=True)]
@@ -710,8 +819,6 @@ def test_canonical_followup_expands_only_validation_and_finalizes_with_failed_hi
     lifecycle = expanded["lifecycle_input"]
     journal = Path(expanded["journal_path"])
     entries = json.loads(Path(expanded["dispatches_path"]).read_bytes())["dispatches"]
-    from review_graph_runtime import _graph_plan  # noqa: PLC0415 - use the persisted continuation, including its typed bindings.
-
     expanded_plan = _graph_plan(lifecycle["plan"])
     _prepare_all_fixture_timing(json.loads(Path(expanded["dispatches_path"]).read_bytes()))
     events, _state, _head = read_execution_journal(journal, plan=expanded_plan, source_state=tuple(lifecycle["source_state"]))
