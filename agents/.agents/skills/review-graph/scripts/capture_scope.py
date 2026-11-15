@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from research_repo_tools.git_inspect import git_diff_paths_bytes, git_status_bytes
 from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics, run_command_bytes
 from review_graph_capture_timing import collect_timings, phase, timed_phase
+from review_graph_environment import check_helper_compatibility
 from review_graph_git_objects import GitPathIdentity, git_object_id
 from review_graph_reuse import SNAPSHOT_FORMAT, source_snapshot
 
@@ -666,6 +667,12 @@ def main() -> int:
             with phase("runtime_verification"):
                 verify_current_snapshot()
             arguments = _parser().parse_args()
+            try:
+                check_helper_compatibility()
+            except ValueError as error:
+                print(f"capture_scope.py: {error}", file=sys.stderr)
+                code = 2
+                return code
             code = _capture_main(arguments)
             return code
         except SystemExit as error:

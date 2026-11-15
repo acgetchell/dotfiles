@@ -2,15 +2,26 @@
 
 import json
 import shlex
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from review_graph_discovery import SourceDiscovery, bind_discovery
 from review_graph_integrity import digest_bytes
 from review_graph_reads import shell_words, source_read_operands
 
 
 class MissingReadProvenanceError(ValueError):
     """A completed judgment omitted required instruction declarations."""
+
+
+@dataclass(frozen=True)
+class BoundRuntimeReads:
+    """Compiler-verified external inputs, exact executions and selection dependencies."""
+
+    inputs: tuple[tuple[str, str], ...]
+    commands: tuple[str, ...]
+    discoveries: tuple[SourceDiscovery, ...]
 
 
 def file_identity(path: str) -> str:
@@ -51,14 +62,21 @@ def _capture_output(command: str, dispatch: dict[str, Any]) -> str | None:  # no
     observation = next((item for item in dispatch.get("audit_observations", {}).values() if command == item["capture_command"]), None)
     if not prefix or (observation is None and not command.startswith(prefix + " > ")):
         return None
-    from review_graph_session import runtime_command  # noqa: PLC0415 - optional framework capture identity.
+    from review_graph_execution import command_prefix  # noqa: PLC0415 - optional bound runner identity.
+    from review_graph_session import ORIGIN_FILE, runtime_command  # noqa: PLC0415 - optional framework capture identity.
 
     words = shell_words(prefix)
     executable = runtime_command(Path(__file__).with_name("capture_scope.py"))
+    if reference := dispatch.get("runtime_snapshot"):
+        root = Path(reference["path"]).parent
+        executable = command_prefix(dispatch.get("execution_context"))
+        if (origin_path := root / ORIGIN_FILE).is_file() and json.loads(origin_path.read_bytes())["helper_version"] is not None:
+            executable.extend(("-E", "-s"))
+        executable.append(str(root / "skills/review-graph/scripts/capture_scope.py"))
     if words is None or words[: len(executable)] != executable:
         return None
-    arguments = words[len(executable) :]
-    if len(arguments) % 2 or any(arguments[index] not in {"--mode", "--repo", "--base", "--path"} for index in range(0, len(arguments), 2)):
+    arguments = [word for word in words[len(executable) :] if not word.startswith("--output=")]
+    if len(arguments) % 2 or any(arguments[index] not in {"--mode", "--repo", "--base", "--path", "--output"} for index in range(0, len(arguments), 2)):
         return None
     suffix = shlex.quote(observation["capture_path"]) if observation is not None else command[len(prefix) + 3 :]
     try:
@@ -121,7 +139,103 @@ def _instruction_read(command: str, dispatch: dict[str, Any]) -> dict[str, str] 
     return {reference["path"]: reference["digest"], record["snapshot_path"]: record["digest"], record["path"]: record["digest"]}
 
 
-def bind_runtime_reads(dispatch: dict[str, Any], payload: dict[str, Any]) -> tuple[tuple[tuple[str, str], ...], tuple[str, ...]]:
+def _payload_input(path: str, dispatch: dict[str, Any], payload: dict[str, Any]) -> dict[str, str]:
+    """Bind only a regular external file containing this node's actual semantic payload."""
+    if Path(path).is_relative_to(Path(dispatch["repository_root"])):
+        msg = "protocol payload input must be outside the source repository"
+        raise ValueError(msg)
+    digest = file_identity(path)
+    content = Path(path).read_bytes()
+    if digest_bytes(content) != digest or json.loads(content) != payload:
+        msg = "protocol payload input differs from the submitted worker payload"
+        raise ValueError(msg)
+    return {path: digest}
+
+
+def _publication_inputs(command: str, dispatch: dict[str, Any], payload: dict[str, Any]) -> dict[str, str] | None:
+    persistence = dispatch.get("worker_payload_persistence", {})
+    publications = {shlex.join(persistence[key]) for key in ("publish_command", "command", "review_command") if key in persistence}
+    if command in publications:
+        return {}
+    for prefix in publications:
+        if not command.startswith(prefix + " < "):
+            continue
+        suffix = command[len(prefix) + 3 :]
+        words = shell_words(suffix)
+        if words is not None and len(words) == 1 and suffix == shlex.quote(words[0]):
+            return _payload_input(words[0], dispatch, payload)
+    return None
+
+
+def _operation_inputs(command: str, dispatch: dict[str, Any], payload: dict[str, Any]) -> tuple[dict[str, str], SourceDiscovery | None] | None:
+    if (inputs := _publication_inputs(command, dispatch, payload)) is not None:
+        inputs.update((path, file_identity(path)) for path in dispatch.get("protocol_input_paths", []))
+        return inputs, None
+    if (inputs := _instruction_read(command, dispatch)) is not None:
+        return inputs, None
+    if (output := _capture_output(command, dispatch)) is not None:
+        inputs = {output: file_identity(output)}
+        observation = next((item for item in dispatch.get("audit_observations", {}).values() if command == item["capture_command"]), None)
+        if observation is not None:
+            receipt = observation["receipt_path"]
+            if not isinstance(receipt, str):
+                msg = "protocol capture receipt_path must be a string"
+                raise TypeError(msg)
+            inputs[receipt] = file_identity(receipt)
+            if json.loads(Path(receipt).read_bytes()).get("capture_digest") != inputs[output]:
+                msg = "protocol capture receipt differs from its captured bytes"
+                raise ValueError(msg)
+        return inputs, None
+    if (discovered := bind_discovery(command, dispatch)) is not None:
+        query, binding = discovered
+        return dict([binding]), query
+    return None
+
+
+def _protocol_input_bindings(dispatch: dict[str, Any]) -> dict[str, str]:
+    """Check generated sidecars against the publication contract's bound canonical input."""
+    paths = dispatch.get("protocol_input_paths", [])
+    bindings: dict[str, str] = {path: file_identity(path) for path in paths}
+    contract_path = dispatch.get("worker_payload_persistence", {}).get("input_path")
+    if contract_path not in bindings:
+        return bindings
+    contract = json.loads(Path(contract_path).read_bytes())
+    if not (reference := contract.get("compiler_preflight")):
+        return bindings  # Historical contracts retain their original narrower policy.
+    input_path = reference["worker_input_path"]
+    if input_path not in bindings or bindings[input_path] != reference["digest"]:
+        msg = "protocol input differs from its bound publication contract"
+        raise ValueError(msg)
+    content = Path(input_path).read_bytes()
+    entry = json.loads(content)
+    canonical_dispatch = entry["dispatch"]
+    # The compiler separately verifies metadata transitions and reconciles
+    # inherited coverage. Neither rewrites the original publication contract.
+    if changed := [
+        key for key, value in canonical_dispatch.items() if key not in {"external_metadata_transitions", "coverage_reuse"} and dispatch.get(key) != value
+    ]:
+        msg = "protocol canonical input differs from the dispatched contract: " + ", ".join(changed)
+        raise ValueError(msg)
+    expected = {
+        **({"coverage_reuse": canonical_dispatch["coverage_reuse"]} if "coverage_reuse" in canonical_dispatch else {}),
+        **{key: canonical_dispatch[key] for key in ("mode", "node_id", "owned_paths", "worker_payload_path")},
+        "result_contract": entry["result_contract"],
+        "schema_version": 1,
+        "compiler_preflight": reference,
+    }
+    if contract != expected:
+        msg = "protocol publication contract differs from its canonical input"
+        raise ValueError(msg)
+    if (execution_path := entry.get("worker_execution_path")) in bindings:
+        from review_graph_views import execution_view_bytes  # noqa: PLC0415 - generated sidecar verification without initialization cycles.
+
+        if bindings[execution_path] != digest_bytes(execution_view_bytes(entry, content)):
+            msg = "protocol execution view differs from its canonical input"
+            raise ValueError(msg)
+    return bindings
+
+
+def bind_runtime_reads(dispatch: dict[str, Any], payload: dict[str, Any]) -> BoundRuntimeReads:
     """Only dispatch-owned resources and verified capture outputs can be bound."""
     require_instruction_reads(dispatch, payload)
     root = Path(dispatch.get("repository_root", "."))
@@ -132,33 +246,36 @@ def bind_runtime_reads(dispatch: dict[str, Any], payload: dict[str, Any]) -> tup
         manifest = verify_snapshot(reference)
         allowed[reference["path"]] = reference["digest"]
         allowed.update((str(Path(reference["path"]).parent / path), digest) for path, digest in manifest.files)
-    allowed.update((path, file_identity(path)) for path in dispatch.get("protocol_input_paths", []))
     reads: set[str] = set(payload.get("nearby_contract_owners", []))
     protocol: list[str] = []
-    persistence = dispatch.get("worker_payload_persistence", {})
-    publications = {shlex.join(persistence[key]) for key in ("publish_command", "command", "review_command") if key in persistence}
+    discoveries: list[SourceDiscovery] = []
+    protocol_used = False
     for command in payload.get("commands_executed", []):
-        if command in publications:
-            protocol.append(command)
-            reads.update(dispatch.get("protocol_input_paths", []))
-        elif (instruction_inputs := _instruction_read(command, dispatch)) is not None:
-            allowed.update(instruction_inputs)
-            reads.update(instruction_inputs)
-            protocol.append(command)
-        elif (output := _capture_output(command, dispatch)) is not None:
-            allowed[output] = file_identity(output)
-            reads.add(output)
-            observation = next((item for item in dispatch.get("audit_observations", {}).values() if command == item["capture_command"]), None)
-            if observation is not None:
-                receipt = observation["receipt_path"]
-                allowed[receipt] = file_identity(receipt)
-                reads.add(receipt)
-            protocol.append(command)
-        elif (operands := source_read_operands(command)) is not None:
-            reads.update(operands)
+        lines = [line for line in command.split("\n") if line.strip()]
+        classified, has_protocol = bool(lines), False
+        for line in lines:
+            if (operation := _operation_inputs(line, dispatch, payload)) is not None:
+                inputs, query = operation
+                allowed.update(inputs)
+                reads.update(inputs)
+                has_protocol = True
+                protocol_used = True
+                if query is not None:
+                    discoveries.append(query)
+            elif (operands := source_read_operands(line)) is not None:
+                reads.update(operands)
+            else:
+                classified = False
+        if classified and has_protocol:
+            protocol.append(command)  # Preserve the whole original execution, including newlines.
+    if protocol_used or reads.intersection(dispatch.get("protocol_input_paths", [])):
+        allowed.update(_protocol_input_bindings(dispatch))
+    own_payload = dispatch.get("worker_payload_path")
+    if own_payload in reads:
+        allowed.update(_payload_input(own_payload, dispatch, payload))
     bindings = tuple(sorted((path, allowed[path]) for path in reads if path in allowed and not Path(path).is_relative_to(root)))
     verify_runtime_inputs(bindings, str(root))
-    return bindings, tuple(protocol)
+    return BoundRuntimeReads(bindings, tuple(protocol), tuple(discoveries))
 
 
 def normalized_read_provenance(inputs: Any) -> dict[str, Any]:

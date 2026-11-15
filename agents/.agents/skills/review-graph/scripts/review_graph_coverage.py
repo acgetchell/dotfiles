@@ -212,6 +212,7 @@ def coverage_decisions(  # noqa: PLR0913 - shared provenance proof plus optional
                 inputs.runtime_inputs,
                 inputs.protocol_commands,
                 command_paths,
+                source_discoveries=inputs.source_discoveries,
             )
             try:
                 verify_reuse_inputs(origin, target, unit_inputs, transition)

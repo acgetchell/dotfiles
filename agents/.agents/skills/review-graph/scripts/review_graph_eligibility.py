@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from review_graph_git import git_dependency_blockers
-from review_graph_reads import source_read_operands
+from review_graph_reads import bound_read_operands
 
 
 def reuse_eligibility(record: dict[str, Any], repository: str) -> dict[str, Any]:
@@ -16,7 +16,7 @@ def reuse_eligibility(record: dict[str, Any], repository: str) -> dict[str, Any]
         if "command" in blocker:
             blocker["command_entries"] = [index for index, command in enumerate(commands, 1) if command == blocker["command"]]
     reads = {*record.get("files_inspected", []), *record.get("nearby_contract_owners", [])}
-    reads.update(path for command in commands for path in source_read_operands(command) or ())
+    reads.update(path for command in commands for path in bound_read_operands(command, record.get("protocol_commands", [])))
     reads.update(path for unit in record.get("coverage_units", []) for path in unit.get("dependency_paths", []))
     bindings = dict(record.get("runtime_inputs", []))
     root = Path(repository)

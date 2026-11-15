@@ -36,7 +36,8 @@ def test_frozen_framework_inspections_bind_only_exact_verified_resources(tmp_pat
     _execute_reads(repository, commands)
     dispatch = {"repository_root": str(repository), "runtime_snapshot": reference}
     payload = {"commands_executed": commands}
-    bindings, protocol = bind_runtime_reads(dispatch, payload)
+    bound = bind_runtime_reads(dispatch, payload)
+    bindings, protocol = bound.inputs, bound.commands
     assert set(dict(bindings)) == {helper, reference["path"]}
     assert not protocol  # Readers stay readers; only their external identities are bound.
     assert reuse_eligibility({**payload, "runtime_inputs": bindings}, str(repository))["status"] == "no-known-ledger-blockers"

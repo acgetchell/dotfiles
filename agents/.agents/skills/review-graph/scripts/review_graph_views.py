@@ -45,6 +45,7 @@ _EXECUTION_FIELDS = (
     "timing_prerequisite",
     "validation_observations",
     "audit_observations",
+    "source_discovery",
 )
 
 
@@ -72,6 +73,9 @@ def execution_view_bytes(entry: dict[str, Any], canonical_bytes: bytes) -> bytes
             "Publish semantic JSON through publish_command (stdin); the runtime assembles provenance, canonical evidence and receipts. "
             "Record exact text for each actual shell execution in commands_executed, including newlines; prose is not command provenance. "
             "Independent bounded cat/sed/rg reads run together may occupy one newline-separated entry; never split or infer past executions. "
+            "Use source_discovery for captured path selection after the before capture; its policy lists supported selectors. "
+            "Exact generated instruction, capture, discovery and publication operations may share newline-separated entries with bounded reads. "
+            "Publication may use stdin or '<' with an external file containing exactly this node's submitted payload. "
             "Inspect publication reuse_eligibility diagnostics before acceptance; unknown commands and unbound external reads prevent reuse. "
             "Record truthful limitations. Command policy is authoritative; delegate validator-owned checks. "
             "Use handoff_destinations to choose an exact catalog_id for handoffs. "

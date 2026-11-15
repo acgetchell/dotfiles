@@ -11,6 +11,7 @@ import review_graph_runtime as runtime
 from review_graph_bootstrap import bootstrap_document
 from review_graph_handoffs import _literal_words, audit_observations, validation_observations
 from review_graph_plan import plan_from_document
+from review_graph_read_provenance import bind_runtime_reads
 from review_graph_session import runtime_command
 from test_capture_scope import _commit_all, _init_repo
 from test_review_graph_runtime import ROUTING_CATALOG, SKILL_ROOT, _baseline_mutation_fixture, _json_plan, _worker_input_fixture
@@ -88,6 +89,12 @@ def test_validator_rebinds_existing_capture_outputs_and_snapshots_full_json(tmp_
         subprocess.run(observation["workspace_command"], check=True, capture_output=True)  # noqa: S603
         assert json.loads(Path(observation["workspace_path"]).read_bytes())["observed_source_state"] == validator["dispatch"]["source_state"]
     assert old.read_bytes() == original
+    audit = next(entry["dispatch"] for entry in entries["dispatches"] if entry["dispatch"]["mode"] == "audit")
+    observation = audit["audit_observations"]["before"]
+    subprocess.run(shlex.split(observation["capture_command"]), check=True, capture_output=True)  # noqa: S603 - generated audit capture with rebound output.
+    bound = bind_runtime_reads(audit, {"commands_executed": [observation["capture_command"]]})
+    assert bound.commands == (observation["capture_command"],)
+    assert dict(bound.inputs)[observation["capture_path"]] == runtime.digest_bytes(Path(observation["capture_path"]).read_bytes())
 
 
 def test_invalid_custom_observation_can_be_corrected_before_materialization(tmp_path: Path) -> None:

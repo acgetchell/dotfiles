@@ -319,6 +319,22 @@ def _check_resumed_runner(reference: RuntimeReference, runner_path: Path | None)
         raise ValueError(msg)
 
 
+def _bootstrap_runtime(args: argparse.Namespace, skill_root: Path) -> RuntimeReference:
+    """Check new-runtime API requirements while retaining an existing retry snapshot."""
+    from review_graph_environment import check_helper_compatibility  # noqa: PLC0415 - check APIs before freezing/fanout, not during origin-only inspection.
+
+    destination = args.output.resolve().with_suffix(".runtime")
+    if not (destination / _REFERENCE).exists():
+        check_helper_compatibility()
+    capture = json.loads(args.capture.read_bytes())
+    if not isinstance(capture, dict):
+        msg = "bootstrap capture must be an object"
+        raise TypeError(msg)
+    repository = Path(_text(capture.get("repository_root"), "captured repository root"))
+    context = capture_execution_context(json.loads(args.python_runner.read_bytes()), repository) if args.python_runner else None
+    return RuntimeReference.parse(freeze_runtime(skill_root, destination, repository=repository, execution_context=context, helper_version=args.helper_version))
+
+
 def bootstrap_frozen(args: argparse.Namespace, argv: list[str]) -> None:
     """Re-execute startup under the retained version; identical retries recover it."""
     if verify_current_snapshot() is not None:
@@ -339,17 +355,7 @@ def bootstrap_frozen(args: argparse.Namespace, argv: list[str]) -> None:
         check_retained_origin(reference.path.parent, args.helper_version)
         _check_resumed_runner(reference, args.python_runner)
     else:
-        capture = json.loads(args.capture.read_bytes())
-        if not isinstance(capture, dict):
-            msg = "bootstrap capture must be an object"
-            raise ValueError(msg)
-        repository = Path(_text(capture.get("repository_root"), "captured repository root"))
-        context = capture_execution_context(json.loads(args.python_runner.read_bytes()), repository) if args.python_runner else None
-        reference = RuntimeReference.parse(
-            freeze_runtime(
-                roots[0], args.output.resolve().with_suffix(".runtime"), repository=repository, execution_context=context, helper_version=args.helper_version
-            )
-        )
+        reference = _bootstrap_runtime(args, roots[0])
     frozen = reference.path.parent / "skills"
     catalog = args.catalog.resolve().relative_to(roots[0].resolve())
     remapped = []

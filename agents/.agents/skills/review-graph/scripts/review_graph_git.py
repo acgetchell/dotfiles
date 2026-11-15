@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from review_graph_integrity import MAX_NATIVE_IDENTIFIER_LENGTH
 from review_graph_read_provenance import verify_runtime_inputs
-from review_graph_reads import source_read_operands
+from review_graph_reads import bound_read_operands, source_read_operands
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -134,7 +134,7 @@ def _metadata_context_blockers(record: dict[str, Any], transition: MetadataTrans
             if not (blocker.get("dependency") == "head" and fixed_branch_comparison(blocker.get("command", ""), transition.before.merge_base))
         ]
     paths = set(record.get("files_inspected", [])) | set(record.get("nearby_contract_owners", []))
-    paths.update(path for command in record.get("commands_executed", []) for path in source_read_operands(command) or ())
+    paths.update(path for command in record.get("commands_executed", []) for path in bound_read_operands(command, record.get("protocol_commands", [])))
     bindings = tuple(tuple(item) for item in record.get("runtime_inputs", []))
     try:
         verify_runtime_inputs(bindings, transition.before.repository_root)
