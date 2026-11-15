@@ -412,7 +412,7 @@ def extract_inline_dois(text: str, parsed: tuple[ReferenceDefinition, ...] = ())
         if match := _DOI_URL.match(link.destination):
             destinations.setdefault(link.line, []).append(match[1])
         else:
-            for offset, label_line in enumerate(link.text.split("\n")):
+            for offset, label_line in enumerate(mask_images(link.text, parsed).split("\n")):
                 destinations.setdefault(link.text_line + offset, []).extend(raw_doi_urls(label_line))
     for link in sorted(links, key=lambda link: link.start, reverse=True):
         text = text[: link.start] + re.sub(r"[^\n]", " ", text[link.start : link.end]) + text[link.end :]

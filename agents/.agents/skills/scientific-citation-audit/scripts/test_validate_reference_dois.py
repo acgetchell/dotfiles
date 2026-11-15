@@ -899,6 +899,22 @@ def test_explicit_doi_labels_remain_candidates_when_inline_links_are_masked(dest
     assert all(entry.line == 1 for entry in entries)
 
 
+@pytest.mark.parametrize("wrapped_image", [False, True])
+@pytest.mark.parametrize("visible_doi", [False, True])
+def test_nested_image_destinations_do_not_leak_into_outer_link_label_scan(wrapped_image: bool, visible_doi: bool) -> None:
+    destination = "https://doi.org/10.1234/PaPer(Part)"
+    if wrapped_image:
+        destination = "\n" + destination
+    label = f"![DOI]({destination})"
+    if visible_doi:
+        label += "\nhttps://doi.org/10.1234/Second(Part)"
+    entries = MODULE.extract_entries(f"[{label}](https://example.org/archive)")
+    expected = [(2 if wrapped_image else 1, "10.1234/PaPer(Part)")]
+    if visible_doi:
+        expected.append((3 if wrapped_image else 2, "10.1234/Second(Part)"))
+    assert [(entry.line, entry.doi.value) for entry in entries] == expected
+
+
 def test_definition_identifier_is_not_a_publication_year_claim() -> None:
     text = '[paper-2018]: https://doi.org/10.1234/paper "Shewchuk. Robust predicates. (1997)."'
     row = MODULE.validate_entries(MODULE.extract_entries(text), 1, 0.45, lambda *_: metadata("Robust predicates", year=2018))[0]

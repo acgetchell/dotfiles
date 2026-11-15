@@ -155,12 +155,15 @@ def test_checker_output_reconciles_doi_digits_and_adjacent_items(tmp_path: Path,
 
 
 @pytest.mark.parametrize("style", ["escaped", "wrapped-escaped", "angle-escaped"])
+@pytest.mark.parametrize("punctuation", ["", ".", ",", ";", ".,;"])
 @pytest.mark.parametrize("defect", [None, "different-line", "different-target"])
-def test_escaped_inline_doi_reconciles_only_its_retained_destination(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, style: str, defect: str | None) -> None:
+def test_escaped_inline_doi_reconciles_only_its_retained_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, style: str, punctuation: str, defect: str | None
+) -> None:
     original, _verified, resolution, capture = _scholarly_fixture(tmp_path, first_doi="10.1234/PaPer(Part)")
     rows = json.loads(Path(original["artifacts"][0]["path"]).read_bytes())
     prior = base64.b64decode(rows[0]["source"]["content_base64"]).decode()
-    destination = r"https://doi.org/10.1234/PaPer\(Part\)"
+    destination = r"https://doi.org/10.1234/PaPer\(Part\)" + punctuation
     if style == "angle-escaped":
         destination = f"<{destination}>"
     claim = "Brezinski. La méthode de Cholesky. (2005)."

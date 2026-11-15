@@ -448,7 +448,7 @@ def _source_row(row: dict[str, Any], markdown: Path, original: dict[str, Any], r
     destinations.extend(link.destination for link in parser["inline_links"]("\n".join(lines), parsed) if link.line == index)
     if not 0 <= index < len(lines) or (
         row["doi"].casefold() not in lines[index].casefold()
-        and f"https://doi.org/{row['doi']}".casefold() not in {destination.casefold() for destination in destinations}
+        and f"https://doi.org/{row['doi']}".casefold() not in {destination.rstrip(".,;").casefold() for destination in destinations}
     ):
         msg = "DOI occurrence is absent from captured bibliography line"
         raise _reject(msg)
