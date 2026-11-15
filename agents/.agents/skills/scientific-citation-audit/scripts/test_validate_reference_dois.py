@@ -489,6 +489,177 @@ SOFTWARE_LINKS = [
     f"For citations of this software, see [CITATION.cff](CITATION.cff) and the DOI: https://doi.org/{SOFTWARE_DOI}",
 ]
 
+README_BADGES = SOFTWARE_LINKS[0] + "\n[![PyPI version][pypi-badge]][pypi]\n[![License][license-badge]][license]\n[![CI][ci-badge]][ci-workflow]"
+README_DEFINITIONS = (
+    "[dependency-sources]: https://example.org/docs/dependency-sources\n"
+    f"[doi]: https://doi.org/{SOFTWARE_DOI}\n"
+    "[draft-api]: https://example.org/docs/release-evidence-api#draft-preparation"
+)
+
+
+@pytest.mark.parametrize(("layout", "line"), [(README_BADGES, 1), (README_DEFINITIONS, 2)])
+def test_readme_badge_and_definition_blocks_use_canonical_identity(tmp_path: Path, layout: str, line: int) -> None:
+    cff = tmp_path / "CITATION.cff"
+    cff.write_text(CFF)
+    entries = MODULE.extract_entries(layout)
+    assert [(entry.doi.value, entry.line) for entry in entries] == [(SOFTWARE_DOI, line)]
+    original = MODULE.validate_entries(entries, 1, 0.45, lambda *_: software_metadata())
+    assert original[0].status == MODULE.AuditStatus.INSUFFICIENT_CONTEXT
+    checked = MODULE.validate_entries(entries, 1, 0.45, lambda *_: software_metadata(), citation=MODULE.SoftwareCitation.load(cff))
+    assert checked[0].status == MODULE.AuditStatus.OK
+    assert checked[0].local_status == MODULE.AuditStatus.INSUFFICIENT_CONTEXT
+    assert checked[0].canonical_software is not None
+
+
+@pytest.mark.parametrize("definition_first", [False, True])
+def test_definition_blocks_do_not_absorb_adjacent_real_citations(tmp_path: Path, definition_first: bool) -> None:
+    cff = tmp_path / "CITATION.cff"
+    cff.write_text(CFF)
+    citation = "Shewchuk. Robust predicates. (1997). DOI: https://doi.org/10.1234/paper"
+    blocks = [README_DEFINITIONS, citation] if definition_first else [citation, README_DEFINITIONS]
+    entries = MODULE.extract_entries("\n".join(blocks))
+    rows = MODULE.validate_entries(
+        entries,
+        1,
+        0.45,
+        lambda doi, _: software_metadata() if doi.value == SOFTWARE_DOI else metadata("Robust predicates"),
+        citation=MODULE.SoftwareCitation.load(cff),
+    )
+    assert len(rows) == 2
+    assert all(row.status == MODULE.AuditStatus.OK for row in rows)
+    paper = next(row for row in rows if row.doi == "10.1234/paper")
+    assert paper.canonical_software is None
+    assert paper.local_years == ("1997",)
+
+
+@pytest.mark.parametrize("claim", ["Wrong, A. " + SOFTWARE_TITLE + ". 2026.", "Getchell. Unrelated science. 2026.", "Getchell. " + SOFTWARE_TITLE + ". 2001."])
+@pytest.mark.parametrize("reference", [False, True])
+def test_readme_markup_preserves_conflicting_visible_claims(tmp_path: Path, claim: str, reference: bool) -> None:
+    cff = tmp_path / "CITATION.cff"
+    cff.write_text(CFF)
+    text = f"[{claim}][doi]\n\n{README_DEFINITIONS}" if reference else claim + "\n" + README_BADGES
+    rows = MODULE.validate_entries(MODULE.extract_entries(text), 1, 0.45, lambda *_: software_metadata(), citation=MODULE.SoftwareCitation.load(cff))
+    assert rows[0].line == (1 if reference else 2)
+    assert rows[0].status == MODULE.AuditStatus.MISMATCH
+    assert rows[0].canonical_software is None
+    if reference:
+        assert len(rows) == 2
+        assert rows[1].status == MODULE.AuditStatus.OK
+        assert rows[1].canonical_software is not None
+
+
+@pytest.mark.parametrize("name", [SOFTWARE_TITLE.partition(":")[0], "unrelated-project"])
+def test_named_citation_instructions_require_the_same_canonical_software(tmp_path: Path, name: str) -> None:
+    cff = tmp_path / "CITATION.cff"
+    cff.write_text(CFF)
+    text = (
+        f"If you use {name} in your work, cite the software using\n"
+        "[CITATION.cff](https://example.org/CITATION.cff).\n"
+        "Include the version used so others can identify the same release. The\n"
+        "[Zenodo concept DOI][doi] covers all versions; use the version-specific DOI from\n"
+        "the corresponding Zenodo record when citing an exact release.\n\n" + README_DEFINITIONS
+    )
+    rows = MODULE.validate_entries(MODULE.extract_entries(text), 1, 0.45, lambda *_: software_metadata(), citation=MODULE.SoftwareCitation.load(cff))
+    assert [row.line for row in rows] == [4, 8]
+    assert (rows[0].status == MODULE.AuditStatus.OK) is (name == SOFTWARE_TITLE.partition(":")[0])
+    assert rows[1].status == MODULE.AuditStatus.OK
+
+
+def test_named_pointer_vocabulary_does_not_weaken_ordinary_title_claims(tmp_path: Path) -> None:
+    cff = tmp_path / "CITATION.cff"
+    cff.write_text(CFF)
+    entry = MODULE.extract_entries(f"Exact record. https://doi.org/{SOFTWARE_DOI}")[0]
+    row = MODULE.validate_entry(entry, 1, 0.45, lambda *_: software_metadata(), citation=MODULE.SoftwareCitation.load(cff))
+    assert row.status == MODULE.AuditStatus.MISMATCH
+    assert row.mismatched_fields == ("title",)
+    assert row.canonical_software is None
+
+
+@pytest.mark.parametrize(
+    "link", ["[DOI][Software DOI]", "[Software DOI][]", "[Software DOI]", "[![DOI][badge]][Software DOI]", "[![DOI](badge.svg)][Software DOI]"]
+)
+def test_reference_forms_retain_use_and_definition_occurrences(tmp_path: Path, link: str) -> None:
+    cff = tmp_path / "CITATION.cff"
+    cff.write_text(CFF)
+    text = link + f"\n\n[software   doi]: <https://doi.org/{SOFTWARE_DOI}>\n[badge]: https://example.org/badge.svg"
+    entries = MODULE.extract_entries(text)
+    assert [(entry.line, entry.doi.value) for entry in entries] == [(1, SOFTWARE_DOI), (3, SOFTWARE_DOI)]
+    rows = MODULE.validate_entries(entries, 1, 0.45, lambda *_: software_metadata(), citation=MODULE.SoftwareCitation.load(cff))
+    assert all(row.status == MODULE.AuditStatus.OK for row in rows)
+
+
+@pytest.mark.parametrize("link", [r"\[DOI]", "[DOI](https://example.org/another-target)", "[DOI][undefined]"])
+def test_unrelated_link_syntax_does_not_create_a_reference_occurrence(link: str) -> None:
+    entries = MODULE.extract_entries(link + f"\n\n[doi]: https://doi.org/{SOFTWARE_DOI}")
+    assert [entry.line for entry in entries] == [3]
+
+
+@pytest.mark.parametrize("separator", [" ", "\n  ", "\n"])
+def test_reference_definition_title_retains_local_claims(tmp_path: Path, separator: str) -> None:
+    cff = tmp_path / "CITATION.cff"
+    cff.write_text(CFF)
+    entry = MODULE.extract_entries(f'[doi]: https://doi.org/{SOFTWARE_DOI}{separator}"Wrong. Unrelated science. 2001."')[0]
+    row = MODULE.validate_entry(entry, 1, 0.45, lambda *_: software_metadata(), citation=MODULE.SoftwareCitation.load(cff))
+    assert row.status == MODULE.AuditStatus.MISMATCH
+    assert row.canonical_software is None
+    assert row.local_years == ("2001",)
+
+
+def test_multiline_definition_title_does_not_contaminate_next_citation(tmp_path: Path) -> None:
+    cff = tmp_path / "CITATION.cff"
+    cff.write_text(CFF)
+    text = f'[doi]: https://doi.org/{SOFTWARE_DOI}\n  "Wrong.\n  Unrelated science. 2001."\nShewchuk. Robust predicates. 1997. https://doi.org/10.1234/paper'
+    rows = MODULE.validate_entries(
+        MODULE.extract_entries(text),
+        1,
+        0.45,
+        lambda doi, _: software_metadata() if doi.value == SOFTWARE_DOI else metadata("Robust predicates"),
+        citation=MODULE.SoftwareCitation.load(cff),
+    )
+    assert [(row.line, row.status) for row in rows] == [(1, MODULE.AuditStatus.MISMATCH), (4, MODULE.AuditStatus.OK)]
+    assert rows[1].local_years == ("1997",)
+
+
+@pytest.mark.parametrize("angle_destination", [False, True])
+@pytest.mark.parametrize(
+    ("claim", "status"),
+    [
+        (f"Getchell. {SOFTWARE_TITLE}. 2026.", MODULE.AuditStatus.OK),
+        (f"Wrong, A. {SOFTWARE_TITLE}. 2026.", MODULE.AuditStatus.MISMATCH),
+        ("Getchell. Unrelated science. 2026.", MODULE.AuditStatus.MISMATCH),
+        (f"Getchell. {SOFTWARE_TITLE}. 2001.", MODULE.AuditStatus.MISMATCH),
+    ],
+)
+def test_reference_destination_on_next_line_preserves_use_claims(tmp_path: Path, angle_destination: bool, claim: str, status: Any) -> None:
+    cff = tmp_path / "CITATION.cff"
+    cff.write_text(CFF)
+    destination = f"https://doi.org/{SOFTWARE_DOI}"
+    if angle_destination:
+        destination = f"<{destination}>"
+    text = f"[{claim}][doi]\n\n[doi]:\n  {destination}\n[guide]: https://example.org/guide"
+    entries = MODULE.extract_entries(text)
+    assert [(entry.line, entry.doi.value) for entry in entries] == [(1, SOFTWARE_DOI), (4, SOFTWARE_DOI)]
+    rows = MODULE.validate_entries(entries, 1, 0.45, lambda *_: software_metadata(), citation=MODULE.SoftwareCitation.load(cff))
+    assert [row.status for row in rows] == [status, MODULE.AuditStatus.OK]
+    assert rows[0].canonical_software is None
+    assert rows[1].canonical_software is not None
+
+
+def test_continued_definition_retains_title_and_adjacent_citation_boundaries(tmp_path: Path) -> None:
+    cff = tmp_path / "CITATION.cff"
+    cff.write_text(CFF)
+    text = f'[doi]:\n  https://doi.org/{SOFTWARE_DOI}\n  "Wrong.\n  Unrelated science. 2001."\nShewchuk. Robust predicates. 1997. https://doi.org/10.1234/paper'
+    rows = MODULE.validate_entries(
+        MODULE.extract_entries(text),
+        1,
+        0.45,
+        lambda doi, _: software_metadata() if doi.value == SOFTWARE_DOI else metadata("Robust predicates"),
+        citation=MODULE.SoftwareCitation.load(cff),
+    )
+    assert [(row.line, row.status) for row in rows] == [(2, MODULE.AuditStatus.MISMATCH), (5, MODULE.AuditStatus.OK)]
+    assert rows[0].local_years == ("2001",)
+    assert rows[1].local_years == ("1997",)
+
 
 def test_repeated_software_pointer_is_checked_per_occurrence(tmp_path: Path) -> None:
     cff = tmp_path / "CITATION.cff"

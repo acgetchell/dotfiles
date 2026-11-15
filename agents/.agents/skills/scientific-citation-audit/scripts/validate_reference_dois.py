@@ -24,7 +24,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from bibliography_context import collect_entry, publication_years
+from bibliography_context import collect_entry, publication_years, reference_definition, reference_definition_at
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
@@ -35,6 +35,10 @@ _CONTRIBUTOR_ROLE = re.compile(
     r"|\(\s*(?:translators?|editors?|compilers?|illustrators?|trans\.?|eds?\.?)\s*\)",
     re.IGNORECASE,
 )
+_LINK_DESTINATION = r"\((?:[^()\n]|\([^()\n]*\))*\)"
+_IMAGE = rf"!\[[^\]\n]*\](?:{_LINK_DESTINATION}|\[[^\]\n]*\])?"
+_LINKED_IMAGE = re.compile(rf"\[{_IMAGE}\](?:{_LINK_DESTINATION}|\[[^\]\n]*\])")
+_REFERENCE_LINK = re.compile(r"(?<!\\)\[([^\[\]\n]*)\](?:\[([^\[\]\n]*)\])?")
 
 
 class AuditStatus(StrEnum):
@@ -84,8 +88,15 @@ class DoiEntry:
     @property
     def context_only(self) -> bool:
         """Recognize links and citation pointers without discarding unknown prose."""
-        text = re.sub(r"\[!\[[^\]]*\]\([^\n]*?\)\]\(https?://[^\s]+\)", "", self.entry)
+        return self._context_only(self.entry, ())
+
+    def _context_only(self, entry: str, pointer_extensions: tuple[str, ...]) -> bool:
+        """Strip link syntax while retaining words that can assert an identity."""
+        definition = reference_definition(entry)
+        text = entry if definition is None else " ".join(definition[1:])
+        text = _LINKED_IMAGE.sub("", text)
         text = re.sub(r"\[([^\]]*)\]\([^\s]+\)", r"\1", text)
+        text = re.sub(r"\[([^\]]*)\]\[[^\]]*\]", r"\1", text)
         text = text.replace(f"https://doi.org/{self.doi.value}", "").replace(self.doi.value, "")
         text = re.sub(r"CITATION\.cff", "", text, flags=re.IGNORECASE)
         # A deliberately small vocabulary: unknown names, dates, and titles must
@@ -127,7 +138,17 @@ class DoiEntry:
             "versions",
             "are",
         }
-        return set(re.findall(r"\w+", text.casefold())) <= pointer_words
+        return set(re.findall(r"\w+", text.casefold())) <= pointer_words.union(pointer_extensions)
+
+    def canonical_pointer_context(self, citation: SoftwareCitation) -> bool:
+        """Recognize citation instructions only when their named software agrees."""
+        request = re.match(r"If you use (.+?) in your work, cite the software using\s+", self.entry, flags=re.IGNORECASE)
+        if request is None or identity_text(request[1]) not in {identity_text(citation.title), identity_text(citation.title.partition(":")[0])}:
+            return False
+        return self._context_only(
+            self.entry[request.end() :],
+            ("include", "used", "so", "others", "can", "identify", "same", "covers", "specific", "from", "corresponding", "record", "when", "an", "exact"),
+        )
 
 
 def identity_text(value: str) -> str:
@@ -294,9 +315,23 @@ def extract_entries(markdown: str) -> list[DoiEntry]:
     lines = markdown.splitlines()
     entries: list[DoiEntry] = []
     seen: set[tuple[str, int]] = set()
+    definitions: dict[str, str] = {}
+    definition_destinations: dict[int, str] = {}
+    definition_headers: set[int] = set()
+    for idx, line in enumerate(lines):
+        if (definition := reference_definition_at(lines, idx)) is not None:
+            definitions.setdefault(definition[0], definition[1])
+            destination_line = idx if reference_definition(line) is not None else idx + 1
+            definition_destinations[destination_line] = definition[1]
+            definition_headers.add(idx)
 
     for idx, line in enumerate(lines):
-        candidates = doi_candidates_from_line(line)
+        if idx in definition_destinations:
+            candidates = doi_candidates_from_line(definition_destinations[idx])
+        elif idx in definition_headers:
+            continue
+        else:
+            candidates = [*doi_candidates_from_line(line), *reference_doi_candidates(line, definitions)]
         for raw in candidates:
             try:
                 doi = Doi.parse(raw)
@@ -308,11 +343,25 @@ def extract_entries(markdown: str) -> list[DoiEntry]:
             seen.add(key)
             paragraph = collect_entry(lines, idx)
             # Remove linked images, not ordinary citation links or their labels.
-            without_badges = re.sub(r"\[!\[[^\]]*\]\([^\n]*?\)\]\(https?://[^\s]+\)", "", paragraph)
+            without_badges = _LINKED_IMAGE.sub("", paragraph)
             badge_only = without_badges != paragraph and not re.search(r"\w", without_badges)
             entries.append(DoiEntry(doi=doi, line=idx + 1, entry=paragraph, badge_only=badge_only))
 
     return entries
+
+
+def reference_doi_candidates(line: str, definitions: dict[str, str]) -> list[str]:
+    """Retain each reference-link use so its visible claims are checked locally."""
+    text = re.sub(_IMAGE, "", line)
+    candidates = []
+    for match in _REFERENCE_LINK.finditer(text):
+        if text[match.end() :].startswith("("):
+            continue  # An inline link takes precedence over a shortcut reference.
+        label = " ".join((match[2] or match[1]).casefold().split())
+        destination = definitions.get(label, "")
+        if destination.startswith("https://doi.org/"):
+            candidates.append(destination.removeprefix("https://doi.org/"))
+    return candidates
 
 
 def doi_candidates_from_line(line: str) -> list[str]:
@@ -498,7 +547,7 @@ def validate_entry(
 
     publication_dates = {year for field, year in metadata.date_provenance if field in PUBLICATION_DATE_FIELDS}
     conflict = "resolver publication date fields disagree; inspect primary publication records" if len(publication_dates) > 1 else ""
-    if entry.context_only:
+    if entry.context_only or (citation is not None and entry.canonical_pointer_context(citation)):
         result = DoiResult(
             doi=entry.doi.value,
             line=entry.line,
