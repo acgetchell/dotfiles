@@ -11,7 +11,7 @@ if [[ -d "$prefix/cargo/bin" ]]; then
   export RUSTUP_HOME="$prefix/rustup" CARGO_HOME="$prefix/cargo"
   export PATH="$CARGO_HOME/bin:$PATH"
 fi
-if command -v rustc >/dev/null && command -v cargo >/dev/null; then
+if command -v rustc >/dev/null && command -v cargo >/dev/null && cargo --version >/dev/null 2>&1; then
   if identity="$(rustc --version)" && [[ "$identity" =~ ^rustc\ ([0-9]+)\.([0-9]+)\. ]] && (( BASH_REMATCH[1] > 1 || (BASH_REMATCH[1] == 1 && BASH_REMATCH[2] >= 85) )); then
     exit 0
   fi

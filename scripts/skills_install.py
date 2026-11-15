@@ -9,6 +9,7 @@ import runpy
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from skill_validate import validate_skill
@@ -139,18 +140,28 @@ def prepare_helper(directory: Path) -> None:
         check_helper(python)
         return
     environment = {key: value for key, value in os.environ.items() if key not in SELECTORS}
-    environment["UV_PROJECT_ENVIRONMENT"] = str(directory)
     uv = shutil.which("uv")
     if uv is None:
         msg = "uv is required to prepare the isolated helper"
         raise ValueError(msg)
-    subprocess.run(  # noqa: S603 - supported locked sync into an explicit new environment.
-        [uv, "sync", "--locked", "--project", str(ROOT), "--only-group", "tooling", "--no-default-groups", "--link-mode", "copy"],
-        check=True,
-        env=environment,
-        timeout=600,
-    )
-    check_helper(python)
+    directory.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=f".{directory.name}-", dir=directory.parent) as temporary:
+        staged = Path(temporary) / "helper"
+        environment["UV_PROJECT_ENVIRONMENT"] = str(staged)
+        # Relocatable scripts keep working after the verified environment is published.
+        subprocess.run(  # noqa: S603 - repository-pinned Python in a new staging directory.
+            [uv, "venv", "--relocatable", "--python", (ROOT / ".python-version").read_text().strip(), str(staged)], check=True, env=environment, timeout=600
+        )
+        subprocess.run(  # noqa: S603 - supported locked sync into the staged environment.
+            [uv, "sync", "--locked", "--project", str(ROOT), "--only-group", "tooling", "--no-default-groups", "--link-mode", "copy"],
+            check=True,
+            env=environment,
+            timeout=600,
+        )
+        check_helper(staged / "bin/python")
+        if directory.exists() or directory.is_symlink():
+            raise FileExistsError(f"Helper destination appeared during setup: {directory}; preserve it and retry")
+        staged.rename(directory)
 
 
 def main(argv: list[str] | None = None) -> int:

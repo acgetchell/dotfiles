@@ -25,7 +25,7 @@ def check_shell(shell: str, expected: dict[str, str]) -> None:
         commands.append(f"command -v {shlex.quote(name)} >/dev/null || exit 2")
         if version:
             commands.append(f'[ "$({shlex.quote(name)} --version | head -n 1)" = {shlex.quote(version)} ] || exit 2')
-    options = "-lic" if shell == "zsh" else "-lc"
+    options = "-lic" if shell in {"bash", "zsh"} else "-lc"
     environment = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
     result = subprocess.run(  # noqa: S603 - fixed shells and read-only version probes.
         [executable, options, "\n".join(commands)], check=False, capture_output=True, text=True, env=environment, timeout=30

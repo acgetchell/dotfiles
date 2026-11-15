@@ -50,6 +50,25 @@ def write_bootstrap_justfile(repository: Path, checkout: Path, just: str) -> Non
     (checkout / "justfile").write_text("\n".join(fixture_lines) + "\n", encoding="utf-8")
 
 
+@pytest.mark.parametrize("system", ["Linux", "FreeBSD"])
+def test_bootstrap_rejects_other_hosts_before_setup(tmp_path: Path, system: str) -> None:
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+    write_executable(binaries, "uname", f'[[ "$1" == -s ]]\nprintf "%s\\n" "{system}"')
+    repository = Path(__file__).resolve().parents[1]
+    environment = {"PATH": f"{binaries}:/usr/bin:/bin", "HOME": str(tmp_path), "DOTFILES_DIR": str(tmp_path / "absent checkout")}
+    # Rosetta can create its own HOME/.cache before Bash executes any script.
+    subprocess.run(["/bin/bash", "-c", ":"], env=environment, check=True, capture_output=True, timeout=10)
+    before = set(tmp_path.rglob("*"))
+    result = subprocess.run(  # noqa: S603 - isolated platform rejection before any installer effects.
+        ["/bin/bash", str(repository / "bin/bootstrap.sh")], env=environment, check=False, capture_output=True, text=True, timeout=10
+    )
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "macOS bootstrap requires Darwin" in result.stderr
+    assert set(tmp_path.rglob("*")) == before
+
+
 @pytest.mark.parametrize("omz_state", ["missing", "installed", "incomplete"])
 @pytest.mark.parametrize("installed_version", [None, "1.0.0", "22.1.1"])
 def test_bootstrap_installs_updater_by_package_and_checks_its_executable(tmp_path: Path, installed_version: str | None, omz_state: str) -> None:
@@ -75,6 +94,8 @@ def test_bootstrap_installs_updater_by_package_and_checks_its_executable(tmp_pat
     install_log = tmp_path / "installs"
     omz = prepare_omz(tmp_path, omz_state)
 
+    # This fixture models macOS host tools, including the bootstrap precondition.
+    write_executable(binaries, "uname", '[[ "$1" == -s ]]\nprintf "Darwin\\n"')
     write_executable(
         binaries,
         "git",

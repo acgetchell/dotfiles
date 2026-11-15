@@ -13,14 +13,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def snapshot(destination: Path) -> SourceIdentity:
-    """Copy only Git-selected public source; omit Git metadata, caches, and ignored overrides."""
-    before = source_identity(ROOT)
+    """Copy tracked working files; staging explicitly opts new files into the context."""
+    before = source_identity(ROOT, include_untracked=False)
     git = shutil.which("git")
     if git is None:
         msg = "Git is required for read-only source selection"
         raise ValueError(msg)
     listing = subprocess.run(  # noqa: S603 - read-only enumeration; no archive, index, or branch mutation.
-        [git, "ls-files", "--cached", "--others", "--exclude-standard", "-z"], cwd=ROOT, capture_output=True, check=True, timeout=30
+        [git, "ls-files", "--cached", "-z"], cwd=ROOT, capture_output=True, check=True, timeout=30
     ).stdout
     for name in sorted(set(listing.split(b"\0")) - {b""}):
         path = Path(os.fsdecode(name))
@@ -34,7 +34,7 @@ def snapshot(destination: Path) -> SourceIdentity:
             target.symlink_to(source.readlink(), target_is_directory=source.is_dir())
         else:
             shutil.copy2(source, target)
-    if before != source_identity(ROOT):
+    if before != source_identity(ROOT, include_untracked=False):
         msg = "Working files changed while preparing the rebuild snapshot; rerun"
         raise ValueError(msg)
     return before

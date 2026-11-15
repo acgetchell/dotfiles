@@ -128,9 +128,10 @@ receipts. Failed attempts remain available and do not imply successful readiness
 just docker-rebuild
 ```
 
-Docker is only needed for this test. The harness copies current Git-selected
-public working files into a temporary build context without Git metadata,
-ignored overrides, or host credentials. It uses a digest-pinned Ubuntu 24.04
+Docker is only needed for this test. The harness copies current tracked
+working files into a temporary build context without Git metadata or untracked
+files. Stage intended new public source files explicitly before running it;
+untracked files such as a private `.env` stay outside the context. It uses a digest-pinned Ubuntu 24.04
 image, an ordinary user with an empty home, and a checkout path containing
 spaces. It runs setup twice, then starts a separate container with networking
 disabled. No host home or checkout is mounted. Disposable Git fixture metadata

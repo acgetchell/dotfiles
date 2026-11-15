@@ -76,22 +76,31 @@ def test_source_as_destination_is_rejected_without_self_links(tmp_path: Path) ->
 
 def test_partial_link_failure_rolls_back_only_new_links(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = sources(tmp_path)
+    third = root / "third"
+    third.mkdir()
+    (third / "SKILL.md").write_text("third skill")
     destination = tmp_path / "destination"
     destination.mkdir()
+    existing = destination / "first"
+    existing.symlink_to(root / "first", target_is_directory=True)
+    existing_target = existing.readlink()
     marker = destination / "unrelated"
     marker.write_text("preserve")
     original = Path.symlink_to
 
-    def fail_second(path: Path, target: Path, target_is_directory: bool = False) -> None:
-        if path.name == "second":
+    def fail_third(path: Path, target: Path, target_is_directory: bool = False) -> None:
+        if path.name == "third":
             msg = "fixture permission denial"
             raise PermissionError(msg)
         original(path, target, target_is_directory=target_is_directory)
 
-    monkeypatch.setattr(Path, "symlink_to", fail_second)
+    monkeypatch.setattr(Path, "symlink_to", fail_third)
     with pytest.raises(PermissionError, match="fixture"):
         skills_install.link_skills(root, destination)
-    assert list(destination.iterdir()) == [marker]
+    assert set(destination.iterdir()) == {marker, existing}
+    assert existing.is_symlink()
+    assert existing.readlink() == existing_target
+    assert existing.samefile(root / "first")
     assert marker.read_text() == "preserve"
 
 
@@ -111,3 +120,60 @@ def test_missing_helper_does_not_create_skill_links(tmp_path: Path, monkeypatch:
     destination = tmp_path / "destination"
     assert skills_install.main(["install", "--destination", str(destination), "--helper", str(tmp_path / "missing")]) == 2
     assert not destination.exists()
+
+
+@pytest.mark.parametrize("failure", ["sync", "verification", "interrupt"])
+def test_failed_helper_creation_is_unpublished_and_retryable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str) -> None:
+    destination = tmp_path / "helper"
+    failed = False
+    calls: list[list[str]] = []
+
+    def run(argv: list[str], *, env: dict[str, str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal failed
+        calls.append(argv)
+        directory = Path(env["UV_PROJECT_ENVIRONMENT"])
+        (directory / "bin").mkdir(parents=True, exist_ok=True)
+        (directory / "bin/python").touch()
+        if argv[1] == "sync":
+            assert not destination.exists()
+            if not failed and failure in {"sync", "interrupt"}:
+                failed = True
+                if failure == "interrupt":
+                    raise KeyboardInterrupt
+                raise subprocess.CalledProcessError(7, argv)
+            (directory / "ready").write_text("verified helper")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    def verify(python: Path) -> dict[str, object]:
+        nonlocal failed
+        assert (python.parent.parent / "ready").read_text() == "verified helper"
+        if failure == "verification" and not failed:
+            failed = True
+            msg = "fixture verification failed"
+            raise ValueError(msg)
+        return {}
+
+    monkeypatch.setattr(skills_install.shutil, "which", lambda _name: "/fixture/uv")
+    monkeypatch.setattr(skills_install.subprocess, "run", run)
+    monkeypatch.setattr(skills_install, "check_helper", verify)
+    expected = {"sync": subprocess.CalledProcessError, "verification": ValueError, "interrupt": KeyboardInterrupt}[failure]
+    with pytest.raises(expected):
+        skills_install.prepare_helper(destination)
+    assert list(tmp_path.iterdir()) == []
+    skills_install.prepare_helper(destination)
+    assert (destination / "ready").read_text() == "verified helper"
+    count = len(calls)
+    skills_install.prepare_helper(destination)
+    assert len(calls) == count
+    assert list(tmp_path.iterdir()) == [destination]
+
+
+def test_invalid_existing_helper_is_preserved(tmp_path: Path) -> None:
+    directory = tmp_path / "existing helper"
+    directory.mkdir()
+    marker = directory / "keep"
+    marker.write_text("existing environment")
+    with pytest.raises(ValueError, match="missing"):
+        skills_install.prepare_helper(directory)
+    assert marker.read_text() == "existing environment"
+    assert list(directory.iterdir()) == [marker]

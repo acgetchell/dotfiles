@@ -8,12 +8,15 @@ from pathlib import Path
 
 import pytest
 
+import profile_doctor
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.parametrize("private_on_path", [False, True])
 @pytest.mark.parametrize("shell", ["bash", "zsh"])
 @pytest.mark.parametrize("state", ["missing", "broken-rustc", "broken-cargo", "old", "malformed", "minimum", "current"])
-def test_shell_selects_only_a_usable_private_rust_toolchain(tmp_path: Path, shell: str, state: str) -> None:
+def test_shell_selects_only_a_usable_private_rust_toolchain(tmp_path: Path, shell: str, state: str, *, private_on_path: bool) -> None:
     prefix = tmp_path / "private prefix"
     private_bin = prefix / "cargo/bin"
     private_bin.mkdir(parents=True)
@@ -33,11 +36,12 @@ def test_shell_selects_only_a_usable_private_rust_toolchain(tmp_path: Path, shel
     executable = shutil.which(shell)
     assert executable is not None
     original_path = f"{site_cargo / 'bin'}{os.pathsep}/usr/bin{os.pathsep}/bin"
+    inherited_path = f"{original_path}{os.pathsep}{private_bin}" if private_on_path else original_path
     result = subprocess.run(  # noqa: S603 - real shells with isolated home and Rust stand-ins.
         [executable, "-f", "-c", '. "$1"; printf "%s\\n" "$PATH" "$CARGO_HOME" "$RUSTUP_HOME" "$RUSTUP_AUTO_INSTALL"', shell, str(ROOT / "zsh/.dotfiles-env")],
         env={
             "HOME": str(tmp_path / "home"),
-            "PATH": original_path,
+            "PATH": inherited_path,
             "DOTFILES_REVIEW_PREFIX": str(prefix),
             "CARGO_HOME": str(site_cargo),
             "RUSTUP_HOME": str(site_rust),
@@ -53,11 +57,11 @@ def test_shell_selects_only_a_usable_private_rust_toolchain(tmp_path: Path, shel
     if state in {"minimum", "current"}:
         assert result.stdout.splitlines() == [f"{private_bin}{os.pathsep}{original_path}", str(prefix / "cargo"), str(prefix / "rustup"), "1"]
     else:
-        assert result.stdout.splitlines() == [original_path, str(site_cargo), str(site_rust), "1"]
+        assert result.stdout.splitlines() == [inherited_path, str(site_cargo), str(site_rust), "1"]
 
 
-@pytest.mark.parametrize("probe_fails", [False, True])
-def test_rust_probe_failure_enters_repair_without_touching_host_tools(tmp_path: Path, *, probe_fails: bool) -> None:
+@pytest.mark.parametrize("failed_probe", [None, "rustc", "cargo"])
+def test_rust_probe_failure_enters_repair_without_touching_host_tools(tmp_path: Path, failed_probe: str | None) -> None:
     checkout = tmp_path / "checkout with spaces"
     scripts, profiles, binaries = checkout / "bin", checkout / "profiles", tmp_path / "tools"
     for directory in (scripts, profiles, binaries):
@@ -71,7 +75,10 @@ from pathlib import Path
 name = Path(sys.argv[0]).name
 if name == "rustc":
     print("rustc 1.85.0 (fixture)")
-    sys.exit({3 if probe_fails else 0})
+    sys.exit({3 if failed_probe == "rustc" else 0})
+if name == "cargo":
+    print("cargo 1.85.0 (fixture)")
+    sys.exit({3 if failed_probe == "cargo" else 0})
 if name == "curl":
     output = Path(sys.argv[sys.argv.index("-o") + 1])
     if sys.argv[-3].endswith(".sha256"):
@@ -102,9 +109,16 @@ elif name == "sha256sum":
         timeout=10,
     )
     assert result.returncode == 0, result.stderr
-    assert marker.exists() is probe_fails
-    if probe_fails:
+    assert marker.exists() is (failed_probe is not None)
+    if failed_probe is not None:
         assert marker.read_text() == "repaired"
+
+
+def test_doctor_checks_interactive_bash_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / ".bash_profile").write_text('case "$-" in *i*) PATH=/missing-interactive-tools ;; esac\n')
+    monkeypatch.setenv("HOME", str(tmp_path))
+    with pytest.raises(ValueError, match="Fresh bash"):
+        profile_doctor.check_shell("bash", {"git": ""})
 
 
 def test_shell_check_detects_syntax_error_after_first_file(tmp_path: Path) -> None:

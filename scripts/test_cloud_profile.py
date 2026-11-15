@@ -153,6 +153,10 @@ def test_invalid_uv_pin_is_a_boundary_error(checkout: Path, tmp_path: Path, meta
 def test_cloud_launcher_ignores_ambient_python_home(tmp_path: Path) -> None:
     binaries = tmp_path / "bin"
     binaries.mkdir()
+    # Isolate platform selection so every review host exercises Python isolation.
+    uname = binaries / "uname"
+    uname.write_text('#!/bin/sh\ncase "$1" in -s) echo Darwin ;; -m) echo x86_64 ;; *) exit 2 ;; esac\n')
+    uname.chmod(0o700)
     uv = binaries / "uv"
     uv.write_text(f"#!/bin/sh\nprintf '%s\\n' {shlex.quote(sys.executable)}\n")
     uv.chmod(0o700)

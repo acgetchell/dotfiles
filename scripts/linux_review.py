@@ -95,8 +95,8 @@ def command_output(argv: list[str]) -> str:
     return result.stdout.strip() if result.returncode == 0 else "unavailable"
 
 
-def source_identity(repository: Path | None = None) -> SourceIdentity:
-    """Bind local evidence to HEAD and all nonignored checkout bytes without Git writes."""
+def source_identity(repository: Path | None = None, *, include_untracked: bool = True) -> SourceIdentity:
+    """Bind evidence to HEAD and selected checkout bytes without Git writes."""
     repository = repository or REPOSITORY
     git = shutil.which("git")
     if git is None:
@@ -104,7 +104,11 @@ def source_identity(repository: Path | None = None) -> SourceIdentity:
         raise ValueError(msg)
     try:
         result = subprocess.run(  # noqa: S603 - fixed, read-only Git enumeration; preserve raw filename bytes.
-            [git, "ls-files", "--cached", "--others", "--exclude-standard", "-z"], check=True, capture_output=True, timeout=10, cwd=repository
+            [git, "ls-files", "--cached", *(["--others", "--exclude-standard"] if include_untracked else []), "-z"],
+            check=True,
+            capture_output=True,
+            timeout=10,
+            cwd=repository,
         )
         head = subprocess.run(  # noqa: S603 - read HEAD from the same checkout as the file enumeration.
             [git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True, timeout=10, cwd=repository

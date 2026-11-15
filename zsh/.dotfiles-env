@@ -20,7 +20,13 @@ if [ -x "$DOTFILES_REVIEW_PREFIX/cargo/bin/rustc" ] && [ -x "$DOTFILES_REVIEW_PR
 ); then
   RUSTUP_HOME="$DOTFILES_REVIEW_PREFIX/rustup"
   CARGO_HOME="$DOTFILES_REVIEW_PREFIX/cargo"
-  case ":$PATH:" in *":$CARGO_HOME/bin:"*) ;; *) PATH="$CARGO_HOME/bin:$PATH" ;; esac
+  # Move every existing occurrence out before selecting the private toolchain.
+  dotfiles_path=":$PATH:"
+  while [ "$dotfiles_path" != "${dotfiles_path#*":$CARGO_HOME/bin:"}" ]; do
+    dotfiles_path="${dotfiles_path%%":$CARGO_HOME/bin:"*}:${dotfiles_path#*":$CARGO_HOME/bin:"}"
+  done
+  PATH="$CARGO_HOME/bin${dotfiles_path%:}"
+  unset dotfiles_path
   export RUSTUP_HOME CARGO_HOME
 fi
 export PATH DOTFILES_REVIEW_PREFIX
