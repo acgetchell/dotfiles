@@ -46,8 +46,8 @@ class SourceDiscovery:
         ):
             msg = "source discovery paths must be literal canonical repository-relative paths (or '.')"
             raise ValueError(msg)
-        if any("\0" in pattern or "\\" in pattern for pattern in self.globs):
-            msg = "source discovery globs must be NUL-free POSIX patterns"
+        if any(not pattern or "\0" in pattern or "\\" in pattern for pattern in self.globs):
+            msg = "source discovery globs must be nonempty NUL-free POSIX patterns"
             raise ValueError(msg)
         if self.selected_paths != tuple(sorted(set(self.selected_paths))):
             msg = "source discovery requires sorted unique selected paths"
@@ -127,6 +127,12 @@ def bind_discovery(command: str, dispatch: dict[str, Any]) -> tuple[SourceDiscov
         return None
     paths = tuple(args[index + 1] for index in range(0, len(args), 2) if args[index] == "--path")
     globs = tuple(args[index + 1] for index in range(0, len(args), 2) if args[index] == "--glob")
+    try:
+        SourceDiscovery(paths or (".",), globs, ()).verify()
+    except ValueError:
+        # Failed selector attempts remain in the ledger without being bound.
+        # Capture and integrity failures below must still reject compilation.
+        return None
     capture_path = context["capture_path"]
     if not isinstance(capture_path, str):
         msg = "source discovery capture_path must be a string"

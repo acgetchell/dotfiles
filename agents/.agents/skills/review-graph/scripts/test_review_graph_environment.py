@@ -302,8 +302,14 @@ def test_clean_external_helper_captures_and_bootstraps_real_repository(tmp_path:
     _git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
     uv = shutil.which("uv")
     assert uv is not None
+    cache = os.environ.get("UV_CACHE_DIR")
+    if cache is None:
+        selected = _run([uv, "cache", "dir"], Path.cwd(), dict(os.environ))
+        assert selected.returncode == 0, selected.stderr
+        cache = selected.stdout.strip()
+    assert cache
     environment = {key: value for key, value in os.environ.items() if not key.startswith(("UV_", "PYTHON")) and key not in SELECTORS}
-    environment.update(UV_CACHE_DIR=str(Path(os.environ.get("UV_CACHE_DIR", SCRIPTS.parents[4] / ".uv-cache")).resolve()), UV_OFFLINE="1")
+    environment.update(UV_CACHE_DIR=str(Path(cache).resolve()), UV_OFFLINE="1")
     helper = tmp_path / "external helper"
     created = _run([uv, "venv", "--no-project", "--no-config", "--python", str(Path(sys.executable).resolve()), str(helper)], repository, environment)
     assert created.returncode == 0, created.stderr

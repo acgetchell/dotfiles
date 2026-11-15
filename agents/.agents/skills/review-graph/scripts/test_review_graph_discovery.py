@@ -13,6 +13,7 @@ from review_graph_discovery import SourceDiscovery, bind_discovery
 from review_graph_eligibility import reuse_eligibility
 from review_graph_read_provenance import bind_runtime_reads
 from review_graph_reuse import source_snapshot
+from review_graph_runtime import compile_review
 from test_review_graph_continuity_e2e import _frozen_run
 from test_review_graph_runtime import _compact_audit_payload
 from test_review_graph_sessions import _cli
@@ -136,6 +137,29 @@ def test_unknown_or_compound_operations_remain_in_original_ledger(discovered_aud
     diagnostic = reuse_eligibility({**payload, "runtime_inputs": bound.inputs, "protocol_commands": bound.commands}, str(repository))
     assert diagnostic["reason_counts"] == {"unclassified-command": 1}
     assert diagnostic["blockers"][0]["command"] == command
+
+
+@pytest.mark.parametrize("selector", [("--path", "../outside"), ("--path", "tests//src"), ("--path", "*.py"), ("--glob", r"bad\pattern"), ("--glob", "")])
+@pytest.mark.parametrize("status", ["blocked", "no-findings"])
+def test_failed_discovery_preserves_compilable_ledger(
+    discovered_audit: tuple[Path, dict[str, Any], dict[str, Any], str], selector: tuple[str, str], status: str
+) -> None:
+    repository, dispatch, payload, successful = discovered_audit
+    arguments = [*dispatch["source_discovery"]["command"], *selector]
+    failed = shlex.join(arguments)
+    result = subprocess.run(arguments, cwd=repository, check=False, capture_output=True, timeout=60)  # noqa: S603 - exact frozen fixture command with rejected selectors.
+    assert result.returncode == 2, result.stderr
+    assert b"source discovery" in result.stderr
+    assert json.loads(_shell(successful, repository))["selected_paths"] == ["tool.py"]
+    payload.update(status=status, limitations=["The first discovery selector was rejected."], commands_executed=[failed, successful])
+    state = dispatch["source_state"]
+    _content, metadata = compile_review({"dispatch": {**dispatch, "before_state": state, "after_state": state}, "payload": payload})
+    record = metadata["normalized_record"]
+    assert record["commands_executed"] == [failed, successful]
+    assert record["protocol_commands"] == [successful]
+    diagnostic = reuse_eligibility(record, str(repository))
+    assert diagnostic["reason_counts"] == {"unclassified-command": 1}
+    assert diagnostic["blockers"][0]["command"] == failed
 
 
 def test_mixed_protocol_reads_preserve_hidden_external_dependencies(discovered_audit: tuple[Path, dict[str, Any], dict[str, Any], str], tmp_path: Path) -> None:
