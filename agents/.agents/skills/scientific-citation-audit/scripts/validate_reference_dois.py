@@ -24,7 +24,16 @@ from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from bibliography_context import collect_claims, collect_entry, mask_images, publication_years, reference_definition, reference_definitions, reference_uses
+from bibliography_context import (
+    collect_claims,
+    collect_entry,
+    inline_links,
+    mask_images,
+    publication_years,
+    reference_definition,
+    reference_definitions,
+    reference_uses,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
@@ -37,6 +46,7 @@ _CONTRIBUTOR_ROLE = re.compile(
     r"|\(\s*(?:translators?|editors?|compilers?|illustrators?|trans\.?|eds?\.?)\s*\)",
     re.IGNORECASE,
 )
+_DOI_URL = re.compile(r"https://doi\.org/(\S+)", re.IGNORECASE)
 
 
 class AuditStatus(StrEnum):
@@ -101,10 +111,12 @@ class DoiEntry:
             # Parsed titles are literal text. Keep a caller's extracted pointer
             # suffix instead of restoring the complete citation instructions.
             text = entry if self.claims is not None else definition[2]
-        else:
-            text = mask_images(entry, include_links=True) if self.claims is None else entry
+        elif self.claims is None:
+            text = mask_images(entry, include_links=True)
             text = re.sub(r"\[([^\]]*)\]\([^\s]+\)", r"\1", text)
-        text = text.replace(f"https://doi.org/{self.doi.value}", "").replace(self.doi.value, "")
+        else:
+            text = entry
+        text = re.sub(r"(?i:https://doi\.org/)" + re.escape(self.doi.value), "", text).replace(self.doi.value, "")
         text = re.sub(r"CITATION\.cff", "", text, flags=re.IGNORECASE)
         # A deliberately small vocabulary: unknown names, dates, and titles must
         # go through the ordinary bibliography checks, never a canonical bypass.
@@ -340,8 +352,8 @@ def extract_entries(markdown: str) -> list[DoiEntry]:
 
     reference_content: dict[int, list[str]] = {}
     for use in reference_uses(lines, parsed):
-        if use.destination.startswith("https://doi.org/"):
-            reference_content.setdefault(use.line, []).append(use.destination.removeprefix("https://doi.org/"))
+        if match := _DOI_URL.match(use.destination):
+            reference_content.setdefault(use.line, []).append(match[1])
 
     for idx, line in enumerate(lines):
         if idx in definition_content:
@@ -368,48 +380,37 @@ def extract_entries(markdown: str) -> list[DoiEntry]:
 
 def doi_candidates_from_line(line: str) -> list[str]:
     """Extract raw DOI candidates from one Markdown line."""
-    candidates: list[str] = []
-    candidates.extend(re.findall(r"DOI:\s*\[([^\]]+)\]", line, flags=re.IGNORECASE))
-    candidates.extend(re.findall(r"DOI:\s*<https://doi\.org/([^>]+)>", line, flags=re.IGNORECASE))
-    candidates.extend(markdown_doi_link_destinations(line))
-    if not candidates and "doi.org/" in line:
+    structured = [
+        *re.finditer(r"DOI:\s*\[([^\]]+)\]", line, flags=re.IGNORECASE),
+        *re.finditer(r"DOI:\s*<https://doi\.org/([^>]+)>", line, flags=re.IGNORECASE),
+    ]
+    candidates: list[str] = [match[1] for match in structured]
+    inline, line = extract_inline_dois(line)
+    candidates.extend(inline)
+    for match in sorted(structured, key=lambda match: match.start(), reverse=True):
+        line = line[: match.start()] + " " * (match.end() - match.start()) + line[match.end() :]
+    if "doi.org/" in line.casefold():
         candidates.extend(raw_doi_urls(line))
     return candidates
 
 
-def markdown_doi_link_destinations(line: str) -> list[str]:
-    """Extract DOI destinations from inline Markdown links with balanced parentheses."""
+def extract_inline_dois(line: str) -> tuple[list[str], str]:
+    """Extract inline DOI occurrences and mask consumed links in the remainder."""
     destinations: list[str] = []
-    marker = "](https://doi.org/"
-    start = 0
-    while True:
-        marker_index = line.find(marker, start)
-        if marker_index == -1:
-            return destinations
-        url_start = marker_index + len("](")
-        cursor = url_start
-        depth = 1
-        while cursor < len(line):
-            char = line[cursor]
-            if char == "(":
-                depth += 1
-            elif char == ")":
-                depth -= 1
-                if depth == 0:
-                    destination = line[url_start:cursor]
-                    if destination.startswith("https://doi.org/"):
-                        destinations.append(destination.removeprefix("https://doi.org/"))
-                    start = cursor + 1
-                    break
-            cursor += 1
+    links = inline_links(line)
+    for link in links:
+        if match := _DOI_URL.match(link.destination):
+            destinations.append(match[1])
         else:
-            return destinations
+            destinations.extend(raw_doi_urls(link.text))
+    for link in sorted(links, key=lambda link: link.start, reverse=True):
+        line = line[: link.start] + " " * (link.end - link.start) + line[link.end :]
+    return destinations, line
 
 
 def raw_doi_urls(line: str) -> list[str]:
     """Extract DOI labels from raw URLs outside structured Markdown links."""
-    raw_values = re.findall(r"https://doi\.org/(\S+)", line, flags=re.IGNORECASE)
-    return [trim_raw_url_doi(value) for value in raw_values]
+    return [trim_raw_url_doi(match[1]) for match in _DOI_URL.finditer(line)]
 
 
 def trim_raw_url_doi(value: str) -> str:

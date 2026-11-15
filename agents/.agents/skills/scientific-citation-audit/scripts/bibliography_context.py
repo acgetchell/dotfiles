@@ -2,6 +2,7 @@
 
 import re
 from dataclasses import dataclass
+from string import punctuation
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -10,6 +11,7 @@ if TYPE_CHECKING:
 _BOUNDARY = re.compile(r"^(?:\s*$| {0,3}#{1,6}(?:[ \t]|$))")
 _LIST_ITEM = re.compile(r"^\s*(?:[-+*]|\d+[.)])\s+")
 _LINK_LABEL = re.compile(r"^ {0,3}\[(?!\^)((?:\\.|[^\[\]\\]){1,999})\]:[ \t]*(?:\n[ \t]*)?")
+_BACKSLASH_ESCAPE = re.compile(r"\\([" + re.escape(punctuation) + r"])")
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +33,16 @@ class ReferenceUse:
 
     destination: str
     line: int
+
+
+@dataclass(frozen=True, slots=True)
+class InlineLink:
+    """An inline link or image with its complete source span and destination."""
+
+    destination: str
+    text: str
+    start: int
+    end: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -334,6 +346,22 @@ def _link_matches(text: str, definitions: dict[str, str]) -> list[_LinkMatch]:
     return matches
 
 
+def inline_links(text: str) -> tuple[InlineLink, ...]:
+    """Resolve inline destinations using the same boundaries as visible claims."""
+    links = []
+    for match in _link_matches(text, {}):
+        start = match.start + int(match.image) + len(match.text) + len("[](")
+        while start < len(text) and text[start].isspace():
+            start += 1
+        end = _destination_end(text, start, inline=True)
+        destination = text[start:end] if end is not None else ""
+        if destination.startswith("<"):
+            destination = destination[1:-1]
+        destination = _BACKSLASH_ESCAPE.sub(r"\1", destination)
+        links.append(InlineLink(destination, match.text, match.start, match.end))
+    return tuple(links)
+
+
 def _reference_matches(text: str, definitions: dict[str, str]) -> list[_LinkMatch]:
     """Keep resolved references outside image descriptions in source order."""
     matches = _link_matches(text, definitions)
@@ -379,7 +407,8 @@ def collect_claims(lines: Sequence[str], doi_idx: int, parsed: tuple[ReferenceDe
         if definition.start <= doi_idx < definition.end:
             return CitationClaims(definition.title)
     text = mask_images(collect_entry(lines, doi_idx, parsed), parsed, include_links=True)
-    for match in reversed(_reference_matches(text, _definition_destinations(parsed))):
+    matches = (match for match in _link_matches(text, _definition_destinations(parsed)) if not match.image)
+    for match in sorted(matches, key=lambda match: match.start, reverse=True):
         visible = text[match.start + 1 : match.start + 1 + len(match.text)]
         text = text[: match.start] + visible + text[match.end :]
     return CitationClaims(text)
