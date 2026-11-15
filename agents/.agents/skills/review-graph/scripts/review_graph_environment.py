@@ -3,6 +3,7 @@
 import argparse
 import base64
 import hashlib
+import importlib
 import importlib.metadata
 import importlib.util
 import json
@@ -12,6 +13,28 @@ from typing import Any
 
 ORIGIN_FILE = "python-origin.json"
 _PACKAGE = "research_repo_tools"
+HELPER_VERSION = "0.2.7"
+REQUIRED_APIS = {
+    "evidence": ("sha256",),
+    "git_inspect": ("git_diff_paths_bytes", "git_status_bytes"),
+    "process": ("ExecutableNotFoundError", "format_exception_diagnostics", "run_command_bytes"),
+}
+
+
+def check_helper_compatibility() -> None:
+    """Resolve every shared capture/bootstrap API before creating graph resources."""
+    try:
+        for module, names in REQUIRED_APIS.items():
+            imported = importlib.import_module(f"{_PACKAGE}.{module}")
+            for name in names:
+                if not callable(getattr(imported, name, None)):
+                    raise TypeError(f"missing callable {_PACKAGE}.{module}.{name}")
+    except (ImportError, TypeError) as error:
+        msg = (
+            f"incompatible review helper: {error}; create a new isolated packaged helper with research-repo-tools=={HELPER_VERSION} "
+            "using review-graph/references/python-environment.md. Preserve existing frozen runs and their original helper."
+        )
+        raise ValueError(msg) from error
 
 
 def _installed_package() -> tuple[importlib.metadata.Distribution, Path]:
@@ -107,6 +130,7 @@ def main() -> int:
     parser.add_argument("--helper-version", required=True)
     args = parser.parse_args()
     try:
+        check_helper_compatibility()
         print(json.dumps(capture_python_origin(args.repository, args.helper_version), sort_keys=True))
     except (OSError, ValueError) as error:
         print(f"review helper origin: {error}", file=sys.stderr)

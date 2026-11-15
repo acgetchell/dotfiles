@@ -49,6 +49,7 @@ from review_graph_coverage import (
     reused_paths,
     validate_coverage_units,
 )
+from review_graph_discovery import SourceDiscovery, discovery_context
 from review_graph_doi import captured_doi_inputs, captured_software_inputs, inspect_canonical_recheck
 from review_graph_eligibility import compact_eligibility, reuse_eligibility
 from review_graph_executor import executor_permissions, remedied_features
@@ -147,7 +148,7 @@ from review_graph_plan import (
 from review_graph_preflight import inspect_executor_executables
 from review_graph_provenance import independent_scope_body, metadata_transition_reference, review_scope_body, worker_payload_reference
 from review_graph_read_provenance import MissingReadProvenanceError, bind_runtime_reads, normalized_read_provenance
-from review_graph_reads import source_read_operands
+from review_graph_reads import bound_read_operands
 from review_graph_receipts import artifact_reference, stage_receipt
 from review_graph_repair_followup import repair_origin, verify_followup_finding, verify_followup_origin
 from review_graph_requirement_delta import reassessment_candidates, reconcile_requirements, verify_reassessment_candidates
@@ -980,7 +981,8 @@ def _review_scope_coverage_blockers(dispatch: dict[str, Any], payload: dict[str,
 def _compiled_audit_inputs(dispatch: dict[str, Any], payload: dict[str, Any]) -> AuditInputIdentity | None:
     if dispatch["mode"] not in {"audit", "independent-review"}:
         return None
-    runtime_inputs, protocol_commands = bind_runtime_reads(dispatch, payload)
+    bound = bind_runtime_reads(dispatch, payload)
+    runtime_inputs, protocol_commands, discoveries = bound.inputs, bound.commands, bound.discoveries
     context = _reconciled_coverage(dispatch, payload)
     inherited = reused_paths(context)
     if inherited and context is not None:
@@ -988,6 +990,7 @@ def _compiled_audit_inputs(dispatch: dict[str, Any], payload: dict[str, Any]) ->
         _kind, original, _evidence, _content, _record = _load_evidence_source(proof, require_normalized=True)
         if isinstance(original, ReviewEvidenceExpectation) and original.audit_input_identity is not None:
             runtime_inputs = tuple(sorted(set(runtime_inputs) | set(original.audit_input_identity.runtime_inputs)))
+            discoveries = tuple(dict.fromkeys((*discoveries, *original.audit_input_identity.source_discoveries)))
     instruction_paths = _text_list(dispatch, "instruction_paths")
     instruction_digests = tuple((path, _file_identity_digest(path)) for path in instruction_paths)
     if "instruction_digests" in dispatch and instruction_digests != _string_pairs(dispatch, "instruction_digests"):
@@ -1001,9 +1004,10 @@ def _compiled_audit_inputs(dispatch: dict[str, Any], payload: dict[str, Any]) ->
         retained_input_texts(Path(dispatch["repository_root"]), instruction_paths, payload) if "repository_root" in dispatch else (),
         runtime_inputs,
         protocol_commands,
-        tuple(sorted({path for command in payload.get("commands_executed", []) for path in source_read_operands(command) or ()})),
+        tuple(sorted({path for command in payload.get("commands_executed", []) for path in bound_read_operands(command, protocol_commands)})),
         inherited,
         reused_dependency_paths(context),
+        discoveries,
     )
 
 
@@ -1901,6 +1905,7 @@ def _audit_input_identity(raw: object) -> AuditInputIdentity | None:
         _string_tuple(raw, "command_read_paths") if "command_read_paths" in raw else (),
         _string_tuple(raw, "inherited_paths") if "inherited_paths" in raw else (),
         _string_tuple(raw, "inherited_dependency_paths") if "inherited_dependency_paths" in raw else (),
+        tuple(SourceDiscovery.parse(item) for item in raw.get("source_discoveries", [])),
     )
 
 
@@ -4576,6 +4581,7 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         if node.mode in {"audit", "independent-review"}:
             if observations := audit_observations(common, worker_payload_contract_path):
                 common["audit_observations"] = observations
+                common["source_discovery"] = discovery_context(common)
             common["fresh_context_forbidden_artifacts"] = sorted(
                 {
                     *forbidden_artifacts(node.node_id, isolation_entries),

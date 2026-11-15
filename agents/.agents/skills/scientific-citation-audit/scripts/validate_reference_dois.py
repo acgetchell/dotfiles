@@ -24,10 +24,21 @@ from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from bibliography_context import collect_entry, publication_years
+from bibliography_context import (
+    collect_claims,
+    collect_entry,
+    inline_links,
+    mask_images,
+    publication_years,
+    reference_definition,
+    reference_definitions,
+    reference_uses,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
+
+    from bibliography_context import CitationClaims, ReferenceDefinition
 
 STOPWORDS = {"a", "an", "and", "are", "as", "by", "for", "from", "in", "into", "is", "it", "of", "on", "or", "the", "to", "using", "with"}
 _CONTRIBUTOR_ROLE = re.compile(
@@ -35,6 +46,8 @@ _CONTRIBUTOR_ROLE = re.compile(
     r"|\(\s*(?:translators?|editors?|compilers?|illustrators?|trans\.?|eds?\.?)\s*\)",
     re.IGNORECASE,
 )
+_DOI_URL = re.compile(r"https://doi\.org/(\S+)", re.IGNORECASE)
+_DOI_AUTOLINK = re.compile(r"<https://doi\.org/([^<>\x00-\x20]+)>", re.IGNORECASE)
 
 
 class AuditStatus(StrEnum):
@@ -80,13 +93,31 @@ class DoiEntry:
     line: int
     entry: str
     badge_only: bool = False
+    claims: CitationClaims | None = None
+
+    @property
+    def bibliographic_claims(self) -> str:
+        """Use parsed visible claims while retaining raw entries for provenance."""
+        return self.entry if self.claims is None else self.claims.text
 
     @property
     def context_only(self) -> bool:
         """Recognize links and citation pointers without discarding unknown prose."""
-        text = re.sub(r"\[!\[[^\]]*\]\([^\n]*?\)\]\(https?://[^\s]+\)", "", self.entry)
-        text = re.sub(r"\[([^\]]*)\]\([^\s]+\)", r"\1", text)
-        text = text.replace(f"https://doi.org/{self.doi.value}", "").replace(self.doi.value, "")
+        return self._context_only(self.bibliographic_claims, ())
+
+    def _context_only(self, entry: str, pointer_extensions: tuple[str, ...]) -> bool:
+        """Strip link syntax while retaining words that can assert an identity."""
+        definition = reference_definition(self.entry)
+        if definition is not None:
+            # Parsed titles are literal text. Keep a caller's extracted pointer
+            # suffix instead of restoring the complete citation instructions.
+            text = entry if self.claims is not None else definition[2]
+        elif self.claims is None:
+            text = mask_images(entry, include_links=True)
+            text = re.sub(r"\[([^\]]*)\]\([^\s]+\)", r"\1", text)
+        else:
+            text = entry
+        text = re.sub(r"(?i:https://doi\.org/)" + re.escape(self.doi.value), "", text).replace(self.doi.value, "")
         text = re.sub(r"CITATION\.cff", "", text, flags=re.IGNORECASE)
         # A deliberately small vocabulary: unknown names, dates, and titles must
         # go through the ordinary bibliography checks, never a canonical bypass.
@@ -127,7 +158,18 @@ class DoiEntry:
             "versions",
             "are",
         }
-        return set(re.findall(r"\w+", text.casefold())) <= pointer_words
+        return set(re.findall(r"\w+", text.casefold())) <= pointer_words.union(pointer_extensions)
+
+    def canonical_pointer_context(self, citation: SoftwareCitation) -> bool:
+        """Recognize citation instructions only when their named software agrees."""
+        claims = self.bibliographic_claims
+        request = re.match(r"If you use (.+?) in your work, cite the software using\s+", claims, flags=re.IGNORECASE)
+        if request is None or identity_text(request[1]) not in {identity_text(citation.title), identity_text(citation.title.partition(":")[0])}:
+            return False
+        return self._context_only(
+            claims[request.end() :],
+            ("include", "used", "so", "others", "can", "identify", "same", "covers", "specific", "from", "corresponding", "record", "when", "an", "exact"),
+        )
 
 
 def identity_text(value: str) -> str:
@@ -289,14 +331,43 @@ def parse_unit_interval(raw: str) -> float:
     return value
 
 
+def _definition_content(parsed: tuple[ReferenceDefinition, ...]) -> dict[int, list[str]]:
+    """Keep destination and title fragments on their physical source lines."""
+    definition_content: dict[int, list[str]] = {}
+    for definition in parsed:
+        for idx in range(definition.start, definition.end):
+            definition_content[idx] = []
+        definition_content[definition.destination_line].append(definition.destination)
+        for offset, title_line in enumerate(definition.title.splitlines()):
+            definition_content[definition.title_line + offset].append(title_line)
+    return definition_content
+
+
 def extract_entries(markdown: str) -> list[DoiEntry]:
     """Extract DOI labels and nearby bibliography entries from Markdown text."""
     lines = markdown.splitlines()
     entries: list[DoiEntry] = []
     seen: set[tuple[str, int]] = set()
+    parsed = reference_definitions(lines)
+    definition_content = _definition_content(parsed)
+    inline_content, remainder = extract_inline_dois("\n".join(lines), parsed)
+    residual_lines = remainder.split("\n")
+
+    reference_content: dict[int, list[str]] = {}
+    for use in reference_uses(lines, parsed):
+        if match := _DOI_URL.match(use.destination):
+            reference_content.setdefault(use.line, []).append(match[1])
 
     for idx, line in enumerate(lines):
-        candidates = doi_candidates_from_line(line)
+        if idx in definition_content:
+            candidates = [raw for text in definition_content[idx] for raw in doi_candidates_from_line(text)]
+        else:
+            candidates = [
+                *(match[1] for match in _structured_doi_matches(line)),
+                *doi_candidates_from_line(residual_lines[idx]),
+                *inline_content.get(idx, []),
+                *reference_content.get(idx, []),
+            ]
         for raw in candidates:
             try:
                 doi = Doi.parse(raw)
@@ -306,59 +377,58 @@ def extract_entries(markdown: str) -> list[DoiEntry]:
             if key in seen:
                 continue
             seen.add(key)
-            paragraph = collect_entry(lines, idx)
-            # Remove linked images, not ordinary citation links or their labels.
-            without_badges = re.sub(r"\[!\[[^\]]*\]\([^\n]*?\)\]\(https?://[^\s]+\)", "", paragraph)
+            paragraph = collect_entry(lines, idx, parsed)
+            # Identify image-only badges while preserving ordinary citation text.
+            without_badges = mask_images(paragraph, parsed, include_links=True)
             badge_only = without_badges != paragraph and not re.search(r"\w", without_badges)
-            entries.append(DoiEntry(doi=doi, line=idx + 1, entry=paragraph, badge_only=badge_only))
+            entries.append(DoiEntry(doi=doi, line=idx + 1, entry=paragraph, badge_only=badge_only, claims=collect_claims(lines, idx, parsed)))
 
     return entries
 
 
+def _structured_doi_matches(line: str) -> list[re.Match[str]]:
+    """Retain explicit DOI labels even when their inline links are consumed."""
+    return [*re.finditer(r"DOI:\s*\[([^\]]+)\]", line, flags=re.IGNORECASE), *re.finditer(r"DOI:\s*<https://doi\.org/([^>]+)>", line, flags=re.IGNORECASE)]
+
+
 def doi_candidates_from_line(line: str) -> list[str]:
     """Extract raw DOI candidates from one Markdown line."""
-    candidates: list[str] = []
-    candidates.extend(re.findall(r"DOI:\s*\[([^\]]+)\]", line, flags=re.IGNORECASE))
-    candidates.extend(re.findall(r"DOI:\s*<https://doi\.org/([^>]+)>", line, flags=re.IGNORECASE))
-    candidates.extend(markdown_doi_link_destinations(line))
-    if not candidates and "doi.org/" in line:
+    structured = _structured_doi_matches(line)
+    candidates: list[str] = [match[1] for match in structured]
+    inline, line = extract_inline_dois(line)
+    candidates.extend(raw for values in inline.values() for raw in values)
+    for match in sorted(structured, key=lambda match: match.start(), reverse=True):
+        line = line[: match.start()] + " " * (match.end() - match.start()) + line[match.end() :]
+    if "doi.org/" in line.casefold():
         candidates.extend(raw_doi_urls(line))
     return candidates
 
 
-def markdown_doi_link_destinations(line: str) -> list[str]:
-    """Extract DOI destinations from inline Markdown links with balanced parentheses."""
-    destinations: list[str] = []
-    marker = "](https://doi.org/"
-    start = 0
-    while True:
-        marker_index = line.find(marker, start)
-        if marker_index == -1:
-            return destinations
-        url_start = marker_index + len("](")
-        cursor = url_start
-        depth = 1
-        while cursor < len(line):
-            char = line[cursor]
-            if char == "(":
-                depth += 1
-            elif char == ")":
-                depth -= 1
-                if depth == 0:
-                    destination = line[url_start:cursor]
-                    if destination.startswith("https://doi.org/"):
-                        destinations.append(destination.removeprefix("https://doi.org/"))
-                    start = cursor + 1
-                    break
-            cursor += 1
+def extract_inline_dois(text: str, parsed: tuple[ReferenceDefinition, ...] = ()) -> tuple[dict[int, list[str]], str]:
+    """Bind inline DOI occurrences to physical lines before masking consumed links."""
+    destinations: dict[int, list[str]] = {}
+    links = inline_links(text, parsed)
+    for link in links:
+        if match := _DOI_URL.match(link.destination):
+            destinations.setdefault(link.line, []).append(match[1])
         else:
-            return destinations
+            for offset, label_line in enumerate(mask_images(link.text, parsed).split("\n")):
+                destinations.setdefault(link.text_line + offset, []).extend(raw_doi_urls(label_line))
+    for link in sorted(links, key=lambda link: link.start, reverse=True):
+        text = text[: link.start] + re.sub(r"[^\n]", " ", text[link.start : link.end]) + text[link.end :]
+    return destinations, text
 
 
 def raw_doi_urls(line: str) -> list[str]:
     """Extract DOI labels from raw URLs outside structured Markdown links."""
-    raw_values = re.findall(r"https://doi\.org/(\S+)", line, flags=re.IGNORECASE)
-    return [trim_raw_url_doi(value) for value in raw_values]
+    values: list[str] = []
+    cursor = 0
+    for autolink in _DOI_AUTOLINK.finditer(line):
+        values.extend(trim_raw_url_doi(match[1]) for match in _DOI_URL.finditer(line, cursor, autolink.start()))
+        values.append(autolink[1])
+        cursor = autolink.end()
+    values.extend(trim_raw_url_doi(match[1]) for match in _DOI_URL.finditer(line, cursor))
+    return values
 
 
 def trim_raw_url_doi(value: str) -> str:
@@ -498,7 +568,7 @@ def validate_entry(
 
     publication_dates = {year for field, year in metadata.date_provenance if field in PUBLICATION_DATE_FIELDS}
     conflict = "resolver publication date fields disagree; inspect primary publication records" if len(publication_dates) > 1 else ""
-    if entry.context_only:
+    if entry.context_only or (citation is not None and entry.canonical_pointer_context(citation)):
         result = DoiResult(
             doi=entry.doi.value,
             line=entry.line,
@@ -515,11 +585,12 @@ def validate_entry(
         )
         return reconcile_software(result, metadata, raw, citation) if citation is not None else result
 
-    resolved_title_score = title_score(metadata.title, entry.entry)
-    resolved_author_score = author_score(metadata.author_families, entry.entry, metadata.title)
+    claims = entry.bibliographic_claims
+    resolved_title_score = title_score(metadata.title, claims)
+    resolved_author_score = author_score(metadata.author_families, claims, metadata.title)
     problems: list[str] = []
     fields: list[str] = []
-    local_years = publication_years(entry.entry, entry.doi.value)
+    local_years = publication_years(claims, entry.doi.value)
     if resolved_title_score < min_title_score:
         problems.append("resolved title has low overlap with local entry")
         fields.append("title")

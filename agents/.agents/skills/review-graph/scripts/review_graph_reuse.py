@@ -6,6 +6,7 @@ from pathlib import PurePosixPath
 from typing import Any, Literal, override
 
 from research_repo_tools.evidence import sha256
+from review_graph_discovery import SourceDiscovery  # noqa: TC002 - keep saved dataclass annotations available for runtime consumers.
 from review_graph_git_objects import GitPathIdentity, git_object_id, source_tree_id
 from review_graph_integrity import canonical_json
 from review_graph_read_provenance import verify_runtime_inputs
@@ -184,6 +185,12 @@ class AuditInputIdentity:
     command_read_paths: tuple[str, ...] = ()
     inherited_paths: tuple[str, ...] = ()
     inherited_dependency_paths: tuple[str, ...] = ()
+    source_discoveries: tuple[SourceDiscovery, ...] = ()
+
+    def verify_discoveries(self, origin: ReviewSourceSnapshot, target: ReviewSourceSnapshot) -> None:
+        """Keep every captured selection dependency unchanged across reuse."""
+        for discovery in self.source_discoveries:
+            discovery.verify_reuse(origin, target)
 
 
 def audit_inputs_document(inputs: AuditInputIdentity) -> dict[str, Any]:
@@ -191,7 +198,7 @@ def audit_inputs_document(inputs: AuditInputIdentity) -> dict[str, Any]:
     document = asdict(inputs)
     if not inputs.retained_inputs:
         document.pop("retained_inputs")
-    for field in ("runtime_inputs", "protocol_commands", "command_read_paths", "inherited_paths", "inherited_dependency_paths"):
+    for field in ("runtime_inputs", "protocol_commands", "command_read_paths", "inherited_paths", "inherited_dependency_paths", "source_discoveries"):
         if not getattr(inputs, field):
             document.pop(field)
     return document
@@ -571,6 +578,7 @@ def verify_reuse_inputs(  # noqa: C901 - fail-closed source, metadata, instructi
     if origin.source_state != transition.source_state or target.source_state != transition.target_state or boundary != target.boundary:
         msg = "audit reuse changes source identity, capture boundary, or Git state"
         raise ValueError(msg)
+    inputs.verify_discoveries(origin, target)
     if (
         not inputs.owned_paths
         or set(inputs.inspected_paths) | set(inputs.inherited_paths) != set(inputs.owned_paths)

@@ -442,11 +442,17 @@ def _source_row(row: dict[str, Any], markdown: Path, original: dict[str, Any], r
         raise _reject(msg)
     lines = content.decode("utf-8").splitlines()
     index = row["line"] - 1
-    if index >= len(lines) or row["doi"].casefold() not in lines[index].casefold():
+    parser = _bibliography_parser()
+    parsed = parser["reference_definitions"](lines)
+    destinations = [use.destination for use in parser["reference_uses"](lines, parsed) if use.line == index]
+    destinations.extend(link.destination for link in parser["inline_links"]("\n".join(lines), parsed) if link.line == index)
+    if not 0 <= index < len(lines) or (
+        row["doi"].casefold() not in lines[index].casefold()
+        and f"https://doi.org/{row['doi']}".casefold() not in {destination.rstrip(".,;").casefold() for destination in destinations}
+    ):
         msg = "DOI occurrence is absent from captured bibliography line"
         raise _reject(msg)
-    parser = _bibliography_parser()
-    entry = parser["collect_entry"](lines, index)
+    entry = parser["collect_claims"](lines, index, parsed).text
     years = list(parser["publication_years"](entry, row["doi"]))
     if "local_years" in row and row["local_years"] != years:
         msg = "local publication year differs from captured bibliography context"

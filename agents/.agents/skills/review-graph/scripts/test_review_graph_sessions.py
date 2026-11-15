@@ -79,6 +79,8 @@ def test_bootstrap_freezes_resources_and_recovers_signed_dispatch_publication(tm
     subprocess.run(shlex.split(observations["before"]["capture_command"]), check=True, capture_output=True)  # noqa: S603 - frozen framework capture.
     # Simulate a concurrent update, including an incompatible schema/catalog.
     (live / "review-graph/scripts/review_graph_runtime.py").write_text("raise RuntimeError('changed live runtime')\n")
+    environment = live / "review-graph/scripts/review_graph_environment.py"
+    environment.write_text(environment.read_text() + "\ndef check_helper_compatibility():\n    raise ValueError('updated live helper contract')\n")
     (live / "review-graph/references/schemas/runtime-operation-inputs-v1.schema.json").write_text("{}")
     (live / "review-graph/references/routing-catalog.json").write_text("{}")
     (live / "python-cli-review/SKILL.md").write_text("changed live skill")
@@ -244,6 +246,8 @@ def test_blocked_starter_resume_retains_original_runtime_and_plan(tmp_path: Path
     choices["execution_prerequisites"]["sandbox_permissions"] = "require_escalated"
     choices_path.write_text(json.dumps(choices))
     (live / "review-graph/scripts/review_graph_runtime.py").write_text("raise RuntimeError('live update')\n")
+    environment = live / "review-graph/scripts/review_graph_environment.py"
+    environment.write_text(environment.read_text() + "\ndef check_helper_compatibility():\n    raise ValueError('updated live helper contract')\n")
     (live / "review-graph/references/schemas/runtime-operation-inputs-v1.schema.json").write_text("{}")
     resumed_path = tmp_path / "resumed.json"
     _cli(bootstrap, *arguments, "--resume-from", str(output), "--output", str(resumed_path))

@@ -36,10 +36,36 @@ Each actual shell execution needs its exact text, including newlines, in one
 retain a newline-separated entry, for example
 `"sed -n '350,696p' docs/dev/testing.md\nsed -n '1,260p' docs/dev/tooling_adoption.md"`.
 The runtime recognizes a list only when every physical line is a supported
-bounded reader with explicit file operands. Shell control flow, pipelines,
-substitution, Python, prose, and mixed read/protocol executions remain
-unclassified. Never split a past execution into invented individual executions.
-Run Git and framework operations separately when authoring new executions.
+bounded reader with explicit file operands or an exact generated instruction,
+capture, discovery, or publication operation. The complete original execution
+remains one ledger entry; source reads inside it retain their own dependencies.
+Shell control flow, pipelines, substitution, arbitrary Python, unknown flags,
+and prose remain unclassified. Never split a past execution into invented
+individual executions. Run Git separately when authoring new executions.
+
+Use the dispatch's `source_discovery.command` after executing
+`audit_observations.before.capture_command`. Append repeated `--path` values for
+literal repository-relative files or directory roots, and optional repeated
+`--glob` patterns. For example, append `--path tests --path src --glob '*.py'`.
+The helper selects only the capture's tracked/nonignored paths; it never reads
+live ignore files, ripgrep configuration, external directories, or source bytes.
+Globs use case-sensitive `fnmatchcase` over the whole POSIX path (`*` can cross
+`/`); multiple globs are alternatives. With no selectors it lists all captured
+paths. Empty results are retained. Listing a path does not establish inspection:
+read the selected files and record actual content dependencies separately.
+
+The compiler binds the capture identity, complete query and selected membership.
+Reuse requires the same query to select the same paths in both captures, so a
+newly added match also requires a recheck. Ordinary `rg --files` and its glob or
+configuration variants remain conservative; use the supplied helper for new
+executions and preserve existing ledgers without relabeling them.
+
+Generated publication commands accept stdin, including the exact command plus
+`< /absolute/external/payload.json` (shell-quote the path). The file must contain
+the submitted payload and is bound by its exact bytes. Own-node payload reads
+are also bound when they match that payload; unrelated external files remain
+unbound. Changed instruction manifests, capture receipts, canonical dispatches,
+execution views, or publication contracts cannot certify these operations.
 
 Publication and compilation expose `reuse_eligibility`: reason counts and
 bounded samples identify unclassified entries and unbound external reads before

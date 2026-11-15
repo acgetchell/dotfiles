@@ -135,6 +135,13 @@ def source_read_operands(command: str) -> tuple[str, ...] | None:
     return tuple(path for item in operands if item is not None for path in item)
 
 
+def bound_read_operands(command: str, protocol_commands: tuple[str, ...] | list[str]) -> tuple[str, ...]:
+    """Retain reader dependencies inside an entirely compiler-classified execution."""
+    if command not in protocol_commands:
+        return source_read_operands(command) or ()
+    return tuple(path for line in command.split("\n") for path in source_read_operands(line) or ())
+
+
 def _single_source_read_operands(command: str) -> tuple[str, ...] | None:  # noqa: C901, PLR0912, PLR0911 - finite command grammars fail closed.
     """Return explicit operands only for supported, read-only command forms."""
     words = shell_words(command)

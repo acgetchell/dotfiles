@@ -1,18 +1,21 @@
 """Offline helper isolation with a same-version editable consumer and a real wheel."""
 
+import ast
 import base64
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
+import tomllib
 import venv
 import zipfile
 from pathlib import Path
 
 import pytest
-from review_graph_environment import ORIGIN_FILE, capture_python_origin
+from review_graph_environment import HELPER_VERSION, ORIGIN_FILE, REQUIRED_APIS, capture_python_origin
 from review_graph_session import freeze_runtime
 from test_review_graph_runtime import _baseline_mutation_fixture
 
@@ -271,3 +274,98 @@ def test_bootstrap_checks_origin_before_fanout_and_preserves_flags(tmp_path: Pat
     assert rejected.returncode == 2
     assert "helper origin policy cannot change" in rejected.stderr
     assert output.read_bytes() == original
+
+
+def test_documented_helper_matches_dependency_policy_and_all_runtime_imports() -> None:
+    repository = SCRIPTS.parents[4]
+    policy = tomllib.loads((repository / "pyproject.toml").read_text())
+    pins = [
+        item for group in ("dev", "tooling") for item in policy["dependency-groups"][group] if isinstance(item, str) and item.startswith("research-repo-tools")
+    ]
+    assert pins
+    assert all(pin.endswith("==" + HELPER_VERSION) for pin in pins)
+    guide = (SCRIPTS.parent / "references/python-environment.md").read_text()
+    assert set(re.findall(r"research-repo-tools==([\d.]+)", guide)) == {HELPER_VERSION}
+    assert set(re.findall(r"--helper-version ([\d.]+)", guide)) == {HELPER_VERSION}
+    assert f"Dotfiles pins version {HELPER_VERSION}." in guide
+    for path in SCRIPTS.glob("*.py"):
+        if path.name.startswith("test"):
+            continue
+        for node in ast.walk(ast.parse(path.read_bytes())):
+            if isinstance(node, ast.ImportFrom) and node.module is not None and node.module.startswith("research_repo_tools."):
+                assert {alias.name for alias in node.names} <= set(REQUIRED_APIS[node.module.removeprefix("research_repo_tools.")]), path
+
+
+@pytest.mark.parametrize("supported", [True, False])
+def test_clean_external_helper_captures_and_bootstraps_real_repository(tmp_path: Path, supported: bool) -> None:
+    """Install the documented registry package from the cache populated by locked setup."""
+    _git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
+    uv = shutil.which("uv")
+    assert uv is not None
+    cache = os.environ.get("UV_CACHE_DIR")
+    if cache is None:
+        selected = _run([uv, "cache", "dir"], Path.cwd(), dict(os.environ))
+        assert selected.returncode == 0, selected.stderr
+        cache = selected.stdout.strip()
+    assert cache
+    environment = {key: value for key, value in os.environ.items() if not key.startswith(("UV_", "PYTHON")) and key not in SELECTORS}
+    environment.update(UV_CACHE_DIR=str(Path(cache).resolve()), UV_OFFLINE="1")
+    helper = tmp_path / "external helper"
+    created = _run([uv, "venv", "--no-project", "--no-config", "--python", str(Path(sys.executable).resolve()), str(helper)], repository, environment)
+    assert created.returncode == 0, created.stderr
+    python = helper / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    if supported:
+        # Locked setup caches registry artifacts, but not the index metadata
+        # needed by an offline pip resolution. Use the documented locked-cache
+        # route, with only published tooling dependencies in the new helper.
+        installed = _run(
+            [uv, "sync", "--locked", "--project", str(SCRIPTS.parents[4]), "--only-group", "tooling", "--no-default-groups", "--link-mode", "copy"],
+            repository,
+            {**environment, "UV_PROJECT_ENVIRONMENT": str(helper)},
+        )
+    else:
+        installed = _run(
+            [uv, "pip", "install", "--no-config", "--python", str(python), "--link-mode", "copy", str(_wheel(tmp_path / "old-wheel"))], repository, environment
+        )
+    assert installed.returncode == 0, installed.stderr
+    capture, planning, output = (tmp_path / name for name in ("real-capture.json", "planning.json", "bootstrap.json"))
+    planning.write_text(json.dumps(template))
+    result = _run(
+        [str(python), "-E", "-s", str(SCRIPTS / "capture_scope.py"), "--repo", str(repository), "--mode", "baseline", "--output", str(capture)],
+        repository,
+        environment,
+    )
+    if not supported:
+        assert result.returncode == 2
+        assert "incompatible review helper" in result.stderr
+        assert f"research-repo-tools=={HELPER_VERSION}" in result.stderr
+        assert not capture.exists()
+        return
+    assert result.returncode == 0, result.stderr
+    captured = json.loads(capture.read_bytes())
+    assert {"tool.py", "state.rs"} <= set(captured["captured_scope_paths"])
+    result = _run(
+        [
+            str(python),
+            "-E",
+            "-s",
+            str(SCRIPTS / "review_graph_bootstrap.py"),
+            "--helper-version",
+            HELPER_VERSION,
+            "--capture",
+            str(capture),
+            "--input",
+            str(planning),
+            "--output",
+            str(output),
+        ],
+        repository,
+        environment,
+    )
+    assert result.returncode == 0, result.stderr
+    bundle = json.loads(output.read_bytes())
+    origin = json.loads((Path(bundle["runtime_snapshot"]["path"]).parent / ORIGIN_FILE).read_bytes())
+    assert origin["version"] == HELPER_VERSION
+    assert origin["executable"] == str(python)
+    dispatched = _run(json.loads(result.stdout)["next_command"], repository, environment)
+    assert dispatched.returncode == 0, dispatched.stderr

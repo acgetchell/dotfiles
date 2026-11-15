@@ -1,25 +1,29 @@
 # Review Graph Python Environment
 
 Run the graph scripts with Python 3.15 or newer and the published
-`research-repo-tools` package. Dotfiles pins version 0.2.3. Consuming repositories
+`research-repo-tools` package. Dotfiles pins version 0.2.7. Consuming repositories
 can declare the same tooling dependency in an environment supporting Python
 3.15. Use the consumer's migration recipes when upgrading an existing pin;
 reconcile its Python selector and requirement before adding the dependency:
 
 ```sh
-uv add --group dev 'research-repo-tools==0.2.3'
+uv add --group dev 'research-repo-tools==0.2.7'
 uv run --locked python "$SKILLS_ROOT/review-graph/scripts/capture_scope.py" --help
 ```
 
 For a repository without that dependency, supply it for the invocation:
 
 ```sh
-uv run --python 3.15 --with 'research-repo-tools==0.2.3' \
+uv run --python 3.15 --with 'research-repo-tools==0.2.7' \
   python "$SKILLS_ROOT/review-graph/scripts/review_graph_runtime.py" --help
 ```
 
-The graph imports supported `research_repo_tools.evidence` and
-`research_repo_tools.process` APIs directly. Graph-specific JSON encoding,
+The graph imports supported `research_repo_tools.evidence`,
+`research_repo_tools.git_inspect`, and `research_repo_tools.process` APIs directly.
+Capture, bootstrap, and the helper probe check these APIs before setup or fanout;
+an incompatible helper reports the documented replacement pin. Create a new
+helper before a new run; never upgrade an existing frozen run in place.
+Graph-specific JSON encoding,
 algorithm-prefixed identities, streaming scope fingerprints, journals, and
 immutable publication remain graph-owned contracts. Shared JSON serialization
 has a different byte format and cannot replace existing signed identities.
@@ -70,10 +74,13 @@ an approved external proof store with a new helper directory:
   export UV_CACHE_DIR="$PROOF_STORE/helper-cache"
   uv venv --no-project --no-config --python 3.15 "$PROOF_STORE/helper"
   uv pip install --no-config --python "$PROOF_STORE/helper/bin/python" \
-    --link-mode copy 'research-repo-tools==0.2.3'
+    --link-mode copy 'research-repo-tools==0.2.7'
+  "$PROOF_STORE/helper/bin/python" -E -s \
+    "$SKILLS_ROOT/review-graph/scripts/capture_scope.py" \
+    --repo "$PWD" --mode baseline --output "$PROOF_STORE/initial.capture.json"
   "$PROOF_STORE/helper/bin/python" -E -s \
     "$SKILLS_ROOT/review-graph/scripts/review_graph_bootstrap.py" \
-    --helper-version 0.2.3 \
+    --helper-version 0.2.7 \
     --capture "$PROOF_STORE/initial.capture.json" --input "$PROOF_STORE/planning.json" \
     --output "$PROOF_STORE/bootstrap.json"
 )
@@ -91,6 +98,18 @@ Use the appropriate `Scripts/python.exe` path on Windows. See the
 [uv commands](https://docs.astral.sh/uv/reference/cli/) and
 [environment selectors](https://docs.astral.sh/uv/reference/environment/).
 
+For offline regression checks from a prepared dotfiles checkout, replace the
+`uv pip install` step with the following command, setting `DOTFILES_ROOT` to
+that checkout. This installs only its locked, published tooling dependencies
+into the new helper. Set `UV_CACHE_DIR` to the cache containing those locked artifacts;
+offline `uv pip install` also needs registry index metadata that locked setup
+does not populate.
+
+```sh
+UV_OFFLINE=1 UV_PROJECT_ENVIRONMENT="$PROOF_STORE/helper" uv sync --locked \
+  --project "$DOTFILES_ROOT" --only-group tooling --no-default-groups --link-mode copy
+```
+
 Before creating a snapshot, bootstrap verifies the package import against its
 installed distribution's SHA-256 RECORD and rejects editable or shadowed imports.
 `--helper-version` additionally requires the exact version, a virtual environment
@@ -102,7 +121,7 @@ dispatch command. After setup, a read-only probe is:
 ```sh
 "$PROOF_STORE/helper/bin/python" -E -s \
   "$SKILLS_ROOT/review-graph/scripts/review_graph_environment.py" \
-  --repository "$PWD" --helper-version 0.2.3
+  --repository "$PWD" --helper-version 0.2.7
 ```
 
 Omit `--python-runner` to retain that helper interpreter directly. Keep its
