@@ -66,7 +66,10 @@ Use `tmp_path` for writes and `monkeypatch` at stable seams. Keep fixtures small
 
 ## Evidence Cost
 
-Choose the smallest stable boundary that proves the contract. Preserve real integration evidence where Git, files, subprocesses, or provenance own the risk. For runtime concerns or substantial fixture/selection changes, read [runtime and selection](references/runtime-and-selection.md).
+Reuse existing behavioral coverage before adding tests. Choose the smallest
+stable owning boundary, preserving real integration evidence. Route pruning to
+`python-simplification-review`; for expensive setup or selection changes, read
+[runtime and selection](references/runtime-and-selection.md).
 
 ## Async, Concurrency, And Subprocess Evidence
 

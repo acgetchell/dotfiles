@@ -6,7 +6,8 @@
 
 set -euo pipefail
 
-DOTFILES_DIR="${DOTFILES_DIR:-$HOME/projects/dotfiles}"
+[[ "$(uname -s)" == Darwin ]] || { echo "macOS verification requires Darwin; use the selected profile's doctor." >&2; exit 2; }
+DOTFILES_DIR="${DOTFILES_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)}"
 
 pass() { printf "  \033[32m✓\033[0m %s\n" "$1"; }
 fail() { printf "  \033[31m✗\033[0m %s\n" "$1"; FAILED=1; }

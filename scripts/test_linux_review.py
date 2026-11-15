@@ -392,6 +392,22 @@ def test_check_cannot_download_missing_tools(linux_boundary: dict[str, str]) -> 
     assert not Path(linux_boundary["DOWNLOAD_LOG"]).exists()
 
 
+def test_source_skills_need_no_installation_links(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = tmp_path / "checkout skills"
+    skill = source / "example"
+    skill.mkdir(parents=True)
+    marker = skill / "SKILL.md"
+    marker.write_text("original source")
+    alias = tmp_path / "source alias"
+    alias.symlink_to(source, target_is_directory=True)
+    monkeypatch.setattr(linux_review, "SKILLS", source)
+    for destination in (source, alias):
+        linux_review.install_skills(destination)
+    assert not skill.is_symlink()
+    assert marker.read_text() == "original source"
+    assert list(source.iterdir()) == [skill]
+
+
 def test_skill_links_are_idempotent_and_collisions_preserve_existing_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     source = tmp_path / "checkout-skills"
     source.mkdir()

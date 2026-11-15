@@ -65,6 +65,9 @@ def test_update_orders_managers_and_stops_after_failures(tmp_path: Path, *, over
     checkout.mkdir()
     shutil.copy2(REPOSITORY / "justfile", checkout)
     shutil.copy2(REPOSITORY / "pyproject.toml", checkout)
+    (checkout / "bin").mkdir()
+    for script in ("setup-profile.sh", "platform-profile.sh"):
+        shutil.copy2(REPOSITORY / "bin" / script, checkout / "bin" / script)
     manifest = checkout / "pyproject.toml"
     uv_version = tomllib.loads(manifest.read_text())["tool"]["uv"]["required-version"].removeprefix("==")
     if not overrides:
@@ -83,9 +86,14 @@ from pathlib import Path
 name = Path(sys.argv[0]).name
 args = sys.argv[1:]
 manifest = Path({str(checkout / "pyproject.toml")!r})
-if name == "uv" and args == ["--version"]:
+if name == "uname":
+    # Exercise the macOS manager contract on every test host through the real dispatcher.
+    print({{"-s": "Darwin", "-m": "x86_64"}}[args[0]])
+elif name == "uv" and args == ["--version"]:
     print("uv " + tomllib.loads(manifest.read_text())["tool"]["uv"]["required-version"].removeprefix("=="))
-elif name == "brew" and args == ["--prefix", "uv"]:
+elif name == "cargo-install-update" and args == ["--version"]:
+    print("cargo-install-update 22.1.1")
+elif name == "brew" and args in (["--prefix", "uv"], ["--prefix", "icu4c"]):
     print({str(tmp_path)!r})
 else:
     with Path({str(log)!r}).open("a", encoding="utf-8") as stream:
@@ -95,7 +103,7 @@ else:
     if name == "uv" and args[-2:] == ["deps", "update-uv"]:
         manifest.write_text(manifest.read_text().replace({f'required-version = "=={uv_version}"'!r}, {f'required-version = "=={upgraded_uv}"'!r}))
 """
-    for name in ("brew", "uv", "cargo", "cargo-install-update"):
+    for name in ("brew", "uv", "cargo", "cargo-install-update", "uname"):
         executable = binaries / name
         executable.write_text(body, encoding="utf-8")
         executable.chmod(0o755)
@@ -103,6 +111,7 @@ else:
     assert just is not None
     environment = {**os.environ, "PATH": f"{binaries}{os.pathsep}{os.environ['PATH']}"}
     result = subprocess.run([just, "update"], cwd=checkout, env=environment, check=False, capture_output=True, text=True, timeout=30)  # noqa: S603
+    assert log.is_file(), result.stderr
     calls = [json.loads(line) for line in log.read_text().splitlines()]
     stages = [
         call[call.index("deps") + 1] if "deps" in call else call[-1] if "research-repo-tools" in call else "brew" if call[0] == "brew" else call[1]
@@ -125,3 +134,67 @@ else:
         assert "--inexact" in call
     if "install-update" in stages:
         assert ["cargo", "install-update", "-a", "--locked"] in calls
+
+
+@pytest.mark.parametrize("state", ["missing", "broken", "repair-fails"])
+def test_cargo_update_repairs_its_updater_before_upgrading_tools(tmp_path: Path, state: str) -> None:
+    for name in ("justfile", "pyproject.toml"):
+        shutil.copy2(REPOSITORY / name, tmp_path)
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+    (tmp_path / "lib/pkgconfig").mkdir(parents=True)
+    site_pkgconfig = tmp_path / "site-pkgconfig"
+    log = tmp_path / "cargo-calls.jsonl"
+    updater = binaries / "cargo-install-update"
+    if state != "missing":
+        updater.write_text("#!/bin/sh\nexit 134\n")
+        updater.chmod(0o700)
+    body = f"""#!{sys.executable}
+import json, os, sys
+from pathlib import Path
+name, args = Path(sys.argv[0]).name, sys.argv[1:]
+if name == "brew":
+    print({str(tmp_path)!r})
+elif name == "cargo":
+    with Path({str(log)!r}).open("a") as stream:
+        stream.write(json.dumps({{"argv": args, "pkg_config_path": os.environ.get("PKG_CONFIG_PATH")}}) + "\\n")
+    if args[0] == "install":
+        if {state!r} == "repair-fails":
+            sys.exit(23)
+        updater = Path({str(updater)!r})
+        updater.write_text("#!/bin/sh\\necho cargo-install-update repaired\\n")
+        updater.chmod(0o700)
+"""
+    for name in ("brew", "uv", "cargo"):
+        executable = binaries / name
+        executable.write_text(body)
+        executable.chmod(0o700)
+    just = shutil.which("just")
+    assert just is not None
+    pin = subprocess.run(  # noqa: S603 - resolve the consumer's actual updater pin.
+        [just, "--evaluate", "cargo_update_version"], cwd=tmp_path, capture_output=True, text=True, check=True, timeout=10
+    ).stdout.strip()
+    (binaries / "just").symlink_to(just)
+    result = subprocess.run(  # noqa: S603 - real update recipe with isolated manager stand-ins.
+        [just, "update-cargo-tools"],
+        cwd=tmp_path,
+        env={**os.environ, "PATH": f"{binaries}{os.pathsep}/usr/bin{os.pathsep}/bin", "PKG_CONFIG_PATH": str(site_pkgconfig)},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert log.is_file(), result.stderr
+    events = [json.loads(line) for line in log.read_text().splitlines()]
+    calls = [event["argv"] for event in events]
+    assert events[0]["pkg_config_path"] == str(site_pkgconfig)
+    assert calls[0] == ["install", "--locked", "--force", "cargo-update", "--version", pin, "--features", "vendored-openssl"]
+    if state == "repair-fails":
+        assert result.returncode != 0
+        assert len(calls) == 1
+        assert updater.read_text() == "#!/bin/sh\nexit 134\n"
+    else:
+        assert result.returncode == 0, result.stderr
+        assert calls == [calls[0], ["install-update", "-a", "--locked"]]
+        assert events[1]["pkg_config_path"] == f"{site_pkgconfig}{os.pathsep}{tmp_path / 'lib/pkgconfig'}"
+        assert "repaired" in updater.read_text()

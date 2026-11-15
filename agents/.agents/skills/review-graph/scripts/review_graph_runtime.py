@@ -6995,11 +6995,18 @@ def _historical_validation_evidence(evidence: dict[str, Any], plan: GraphPlan, n
     """Verify an old attempt against the recovery's immutable prior journal."""
     if node.mode != "validation":
         return False
-    recovery = next(
-        (item for item in plan.validation_recoveries if item["node_id"] == node.node_id and item.get("previous_evidence_id") == evidence["evidence_id"]), None
-    )
-    if recovery is None:
-        return False
+    candidates = [
+        item
+        for item in plan.validation_recoveries
+        if item["node_id"] == node.node_id
+        and (item.get("previous_evidence_id") == evidence["evidence_id"] or ("canonical_doi_source" in evidence and item.get("checks_started") is False))
+    ]
+    candidates.sort(key=lambda item: item.get("previous_evidence_id") != evidence["evidence_id"])
+    return any(_preserved_validation_evidence(evidence, recovery, node) for recovery in candidates)
+
+
+def _preserved_validation_evidence(evidence: dict[str, Any], recovery: dict[str, Any], node: WorkerNode) -> bool:
+    """Match full evidence bytes within one verified historical attempt."""
     saved = {}
     for filename in ("lifecycle.json", "execution.jsonl"):
         matches = [item for item in recovery["preserved_files"] if Path(item["path"]).name == filename]
@@ -7060,8 +7067,9 @@ def _journal_evidence(raw: object, *, plan: GraphPlan, node: WorkerNode, status:
     _sha256_digest(evidence["artifact_digest"], "journal artifact_digest")
     _sha256_digest(evidence["normalized_record_digest"], "journal normalized_record_digest")
     expected_evidence_id = _expected_evidence_id(node, plan)
-    historical = evidence["evidence_id"] != expected_evidence_id
-    if historical and not (superseded and _historical_validation_evidence(record, plan, node)):
+    changed_identity = evidence["evidence_id"] != expected_evidence_id
+    historical = superseded and (changed_identity or "canonical_doi_source" in record) and _historical_validation_evidence(record, plan, node)
+    if changed_identity and not historical:
         msg = f"journal evidence ID differs from plan for {node.node_id}"
         raise ValueError(msg)
     valid_statuses = {"passed", "failed", "blocked", "reused", "not-applicable"} if node.mode == "validation" else _REVIEW_STATUSES
@@ -7860,7 +7868,8 @@ def _software_doi_recheck_ids(document: dict[str, Any], records: list[dict[str, 
     recheck_ids: set[str] = set()
     for recheck in doi_rechecks:
         requirement_id = _required_text(recheck, "requirement_id")
-        original = next((record for record in records if record["evidence_id"] == recheck["evidence_id"]), None)
+        evidence_id = _required_text(recheck, "evidence_id")
+        original = next((record for record in records if record["evidence_id"] == evidence_id), None)
         addition = next((item for item in additions if item.requirement_id == requirement_id), None)
         if original is None or addition is None or requirement_id in recheck_ids or len(addition.commands) != 1 or len(addition.working_directories) != 1:
             msg = "software DOI recheck requires accepted original evidence and one new canonical command"

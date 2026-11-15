@@ -311,8 +311,13 @@ def test_restoring_unowned_file_to_head_rebinds_paths_without_reexecuting_audit(
                 executed_validators.append(dispatched["node_id"])
     else:
         pytest.fail("repair graph did not complete within its node bound")
-    assert len(executed_audits) == result["audit_reuse_counts"]["scheduled_audits"] == 3
-    assert all(node.skill_id != entry["dispatch"]["skill_id"] for node in current.actual_worker_nodes if node.node_id in executed_audits)
+    assert len(executed_audits) == result["audit_reuse_counts"]["scheduled_audits"] == 4
+    assert {node.skill_id for node in current.actual_worker_nodes if node.node_id in executed_audits} == {
+        "python-api-design",
+        "python-parse-dont-validate",
+        "python-scientific-review",
+        "python-simplification-review",
+    }
     assert executed_validators == [current.coalesced_validation_units[0].node_id]
     assert all(Path(entry[key]).read_bytes() == value for key, value in saved.items())
 

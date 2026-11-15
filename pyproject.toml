@@ -251,8 +251,8 @@ dev = [
   "pytest==9.2.0",
   "pytest-xdist==3.8.0",
   "research-repo-tools[semgrep]==0.2.7",
-  "ruff==0.17.4",
-  "ty==0.0.100",
+  "ruff==0.17.5",
+  "ty==0.0.104",
   "yamllint==1.38.0",
   "zizmor==1.32.0",
 ]

@@ -11,11 +11,11 @@ export PATH := semgrep_bin + (if os() == "windows" { ";" } else { ":" }) + env_v
 python_fixture_paths := "tests/semgrep"
 python_primary_paths := "agents/.agents/skills scripts"
 review_contract_tests := "agents/.agents/skills/review-graph/scripts/test_review_graph_contracts.py"
-cargo_update_version := "22.1.1"
+cargo_update_version := "22.1.5"
 cargo_version_pattern := '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?'
 dprint_version := "0.64.3"
 just_version := "1.59.0"
-rumdl_version := "0.3.2"
+rumdl_version := "0.3.4"
 # Bootstrap without Python; pyproject.toml is the single uv pin authority.
 uv_version := `sed -nE 's/^required-version = "==([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' pyproject.toml`
 
@@ -307,10 +307,44 @@ release-dependencies:
 
 alias security-check := security
 
-setup:
-    DOTFILES_DIR="$PWD" bin/bootstrap.sh
-    just python-sync
-    just tools-sync
+setup profile="auto":
+    bash bin/setup-profile.sh {{ quote(profile) }} setup
+
+# Reconcile the selected platform; Linux preserves the checked-in pins.
+update profile="auto":
+    bash bin/setup-profile.sh {{ quote(profile) }} update
+
+profile-doctor profile="auto":
+    bash bin/setup-profile.sh {{ quote(profile) }} doctor
+
+# Separate, explicit privileged host provisioning on supported Linux hosts.
+linux-host-plan:
+    bash bin/linux-host.sh plan
+
+# Skills-only installation; no shell, Git, desktop, or global instruction changes.
+skills-helper-setup helper=(env_var("HOME") / ".local/share/dotfiles-review/helper"): _ensure-uv
+    uv run --locked --only-group tooling --inexact python scripts/skills_install.py helper-setup --helper {{ quote(helper) }}
+
+skills-install destination=(env_var("HOME") / ".agents/skills") helper=(env_var("HOME") / ".local/share/dotfiles-review/helper"): _ensure-uv
+    uv run --locked --only-group tooling --inexact python scripts/skills_install.py install --destination {{ quote(destination) }} --helper {{ quote(helper) }}
+
+skills-check destination=(env_var("HOME") / ".agents/skills") helper=(env_var("HOME") / ".local/share/dotfiles-review/helper"): _ensure-uv
+    uv run --locked --only-group tooling --inexact python scripts/skills_install.py check --destination {{ quote(destination) }} --helper {{ quote(helper) }}
+
+# Connected provisioning for an explicit inventory of locked repository environments.
+cloud-provision inventory="profiles/cloud.toml": _ensure-uv
+    bash bin/cloud-profile.sh provision --inventory {{ quote(inventory) }}
+
+# Offline recovery uses retained caches and never changes repository pins or Git state.
+cloud-startup inventory="profiles/cloud.toml": _ensure-uv
+    bash bin/cloud-profile.sh startup --inventory {{ quote(inventory) }}
+
+cloud-doctor inventory="profiles/cloud.toml": _ensure-uv
+    bash bin/cloud-profile.sh doctor --inventory {{ quote(inventory) }}
+
+# Disposable container tests, with a separate network-disabled restoration phase.
+docker-rebuild: _ensure-uv
+    uv run --locked --no-sync python scripts/docker_rebuild.py
 
 # Linux review tooling only; directories are configured with DOTFILES_REVIEW_*.
 linux-setup:
@@ -347,7 +381,7 @@ _shared-deps action: _ensure-brew
     PATH="$(dirname "$uv_executable"):$PATH" "$uv_executable" run --locked --no-config --only-group tooling --inexact research-repo-tools deps {{ quote(action) }} {{ if action == "update-python" { "--all-projects" } else { "" } }}
 
 # Update Homebrew, Python pins/environment, and all installed Cargo tools.
-update: update-dependencies update-cargo-tools
+update-macos: update-dependencies update-cargo-tools
     # Re-evaluate the uv pin after Homebrew and the shared updater reconcile it.
     just update-security-tools
     @echo "Repository dependencies and tools updated."
@@ -357,10 +391,14 @@ update-cargo-tools: _preflight-stable-uv
     #!/usr/bin/env bash
     set -euo pipefail
 
-    if ! command -v cargo-install-update >/dev/null 2>&1; then
-        echo "'cargo-install-update' not found. Install it with:"
-        echo "   Run bin/bootstrap.sh or cargo install --locked cargo-update --version {{ cargo_update_version }}"
-        exit 1
+    if ! command -v cargo-install-update >/dev/null 2>&1 || ! cargo-install-update --version >/dev/null 2>&1; then
+        echo "Rebuilding missing or unusable cargo-update with bundled OpenSSL."
+        cargo install --locked --force cargo-update --version {{ cargo_update_version }} --features vendored-openssl
+    fi
+
+    # Homebrew keeps ICU keg-only; expose it to native builds such as Tectonic.
+    if icu_prefix="$(brew --prefix icu4c 2>/dev/null)" && [[ -d "$icu_prefix/lib/pkgconfig" ]]; then
+        export PKG_CONFIG_PATH="${PKG_CONFIG_PATH:+$PKG_CONFIG_PATH:}$icu_prefix/lib/pkgconfig"
     fi
 
     cargo install-update -a --locked
@@ -385,7 +423,7 @@ update-python-dependencies: _preflight-stable-uv
     just _shared-deps update-python
 
 shell-check:
-    bash -n bin/bootstrap.sh bin/linux-review.sh bin/macos-defaults.sh bin/resolve-just-version.sh bin/restow-agents.sh bin/verify.sh
+    for script in bin/*.sh bash/.bashrc bash/.bash_profile zsh/.dotfiles-env; do bash -n "$script" || exit; done
 
 skill-check skill: _ensure-uv
     uv run --locked python scripts/skill_validate.py "{{ skill }}"

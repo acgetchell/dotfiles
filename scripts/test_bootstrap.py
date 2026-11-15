@@ -85,7 +85,7 @@ def test_bootstrap_installs_updater_by_package_and_checks_its_executable(tmp_pat
         binaries,
         "cargo",
         'printf "%s\\n" "$*" >> "$INSTALL_LOG"\n'
-        '[[ "$*" == "install --locked --force cargo-update --version 22.1.1" ]]\n'
+        '[[ "$*" == "install --locked --force cargo-update --version 22.1.1 --features vendored-openssl" ]]\n'
         "printf '#!/bin/bash\\necho cargo-install-update 22.1.1\\n' > \"$FAKE_PREFIX/bin/cargo-install-update\"\n"
         'chmod +x "$FAKE_PREFIX/bin/cargo-install-update"',
     )
@@ -122,7 +122,7 @@ def test_bootstrap_installs_updater_by_package_and_checks_its_executable(tmp_pat
     if installed_version == "22.1.1":
         assert not install_log.exists()
     else:
-        assert install_log.read_text(encoding="utf-8").splitlines() == ["install --locked --force cargo-update --version 22.1.1"]
+        assert install_log.read_text(encoding="utf-8").splitlines() == ["install --locked --force cargo-update --version 22.1.1 --features vendored-openssl"]
     manifest = tmp_path / ".agents" / "skills" / "bootstrap-test" / "SKILL.md"
     assert manifest.is_file()
     assert not manifest.is_symlink()

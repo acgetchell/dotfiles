@@ -5,7 +5,8 @@
 
 set -euo pipefail
 
-DOTFILES_DIR="${DOTFILES_DIR:-$HOME/projects/dotfiles}"
+[[ "$(uname -s)" == Darwin ]] || { echo "macOS bootstrap requires Darwin; use the linux-cloud profile or bin/linux-review.sh." >&2; exit 2; }
+DOTFILES_DIR="${DOTFILES_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)}"
 
 if [[ ! -d "$DOTFILES_DIR" ]]; then
   echo "==> Dotfiles directory not found at $DOTFILES_DIR" >&2
@@ -79,7 +80,12 @@ if command -v cargo >/dev/null 2>&1; then
     fi
     if [[ "$installed_version" != "$version" ]]; then
       echo "==> Installing $tool $version"
-      cargo install --locked --force "$tool" --version "$version"
+      if [[ "$tool" == cargo-update ]]; then
+        # Keep the updater usable after Homebrew replaces an OpenSSL major version.
+        cargo install --locked --force "$tool" --version "$version" --features vendored-openssl
+      else
+        cargo install --locked --force "$tool" --version "$version"
+      fi
     else
       echo "==> $tool already installed: $installed_version"
     fi

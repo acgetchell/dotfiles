@@ -1,6 +1,6 @@
 """Record a portable review environment and run explicit, credential-free checks."""
 
-__lazy_modules__ = ("argparse", "hashlib", "platform", "re", "shutil", "subprocess", "tempfile", "time", "tomllib")
+__lazy_modules__ = ("argparse", "hashlib", "platform", "re", "shutil", "skills_install", "subprocess", "tempfile", "time", "tomllib")
 
 import argparse
 import hashlib
@@ -16,6 +16,8 @@ import time
 import tomllib
 from pathlib import Path
 from typing import TypedDict
+
+from skills_install import inspect_links, link_skills
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 SKILLS = REPOSITORY / "agents/.agents/skills"
@@ -93,29 +95,33 @@ def command_output(argv: list[str]) -> str:
     return result.stdout.strip() if result.returncode == 0 else "unavailable"
 
 
-def source_identity() -> SourceIdentity:
+def source_identity(repository: Path | None = None) -> SourceIdentity:
     """Bind local evidence to HEAD and all nonignored checkout bytes without Git writes."""
+    repository = repository or REPOSITORY
     git = shutil.which("git")
     if git is None:
         msg = "Source identity unavailable; Git is required."
         raise ValueError(msg)
     try:
         result = subprocess.run(  # noqa: S603 - fixed, read-only Git enumeration; preserve raw filename bytes.
-            [git, "ls-files", "--cached", "--others", "--exclude-standard", "-z"], check=True, capture_output=True, timeout=10, cwd=REPOSITORY
+            [git, "ls-files", "--cached", "--others", "--exclude-standard", "-z"], check=True, capture_output=True, timeout=10, cwd=repository
+        )
+        head = subprocess.run(  # noqa: S603 - read HEAD from the same checkout as the file enumeration.
+            [git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True, timeout=10, cwd=repository
         )
     except OSError, subprocess.SubprocessError:
-        msg = "Source identity unavailable; Git file enumeration failed."
+        msg = "Source identity unavailable; Git file enumeration or HEAD read failed."
         raise ValueError(msg) from None
     if result.stdout and not result.stdout.endswith(b"\0"):
         msg = "Source identity unavailable; Git file listing is incomplete."
         raise ValueError(msg)
-    commit = command_output([git, "rev-parse", "HEAD"])
+    commit = head.stdout.strip()
     if not commit or commit == "unavailable":
         msg = "Source identity unavailable; Git HEAD could not be read."
         raise ValueError(msg)
     digest = hashlib.sha256(b"dotfiles/linux-source/v2\0")
     for name in sorted(set(result.stdout.split(b"\0")) - {b""}):
-        path = REPOSITORY / os.fsdecode(name)
+        path = repository / os.fsdecode(name)
         digest.update(name + b"\0")
         if path.is_symlink():
             kind = b"symlink"
@@ -226,26 +232,13 @@ def verify_rust_version(identity: str) -> None:
 
 def install_skills(destination: Path) -> None:
     """Link complete skill directories, refusing to replace unrelated installations."""
-    destination.mkdir(parents=True, exist_ok=True)
-    sources = sorted(path.parent for path in SKILLS.glob("*/SKILL.md"))
-    for source in sources:
-        target = destination / source.name
-        if (target.exists() or target.is_symlink()) and (not target.is_symlink() or target.resolve() != source.resolve()):
-            msg = f"Skill collision: {source.name}; select an isolated DOTFILES_REVIEW_SKILLS_DIR or resolve the existing installation."
-            raise ValueError(msg)
-    for source in sources:
-        target = destination / source.name
-        if not target.is_symlink():
-            target.symlink_to(source.resolve(), target_is_directory=True)
+    if destination.resolve() != SKILLS.resolve():
+        link_skills(SKILLS, destination)
 
 
 def verify_skills(destination: Path) -> None:
     """Require discoverable directory links from this checkout."""
-    for source in sorted(path.parent for path in SKILLS.glob("*/SKILL.md")):
-        target = destination / source.name
-        if not target.is_symlink() or target.resolve() != source.resolve() or (target / "SKILL.md").is_symlink():
-            msg = f"Skill unavailable: {source.name}; rerun connected setup with this skill directory."
-            raise ValueError(msg)
+    inspect_links(SKILLS, destination, installed=True)
 
 
 def run_timed(argv: list[str], output: Path) -> int:
@@ -315,7 +308,7 @@ def main(argv: list[str] | None = None) -> int:
             # Warm the pinned formatter plugin before publishing setup success.
             code = run_timed([str(shutil.which("just")), "yaml-fmt-check"], output)
         else:
-            if destination != SKILLS:
+            if destination.resolve() != SKILLS.resolve():
                 verify_skills(destination)
             if args.mode == "probe":
                 report["typesafe"] = result = probe()

@@ -1,0 +1,10 @@
+schema_version = 1
+
+# Paths are relative to this inventory. Copy it for a site's explicit checkout list.
+[[repository]]
+name = "dotfiles"
+path = ".."
+groups = ["dev"]
+review-environment = true
+# Optional tool families are explicit pairs of connected install and read-only check recipes.
+# tools = [["tools-sync", "tools-check"]]

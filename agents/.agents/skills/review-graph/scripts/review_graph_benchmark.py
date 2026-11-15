@@ -110,6 +110,7 @@ def benchmark_fixture(root: Path, *, scale: int = 1) -> dict[str, Any]:
         {"catalog_id": catalog_id, "disposition": "not-applicable", "reason": reason, "applicability_evidence": [reason]}
         for catalog_id, reason in (
             ("python.api-design", "Synthetic fixture helpers have no material public or cross-module caller contract"),
+            ("python.simplification", "Repeated modules are intentional benchmark scaling payload; no pruning or suite reduction is requested"),
             ("docs.citations", "Fixture contains no citations or bibliography"),
             ("docs.rust-api", "Fixture contains no Rust APIs"),
             ("docs.scientific-crate", "Fixture is a Python package with no Cargo/release metadata"),

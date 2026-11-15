@@ -21,6 +21,7 @@ from review_graph_runtime import (
     JournalEventRequest,
     _graph_plan,
     _journal_evidence,
+    _software_doi_recheck_ids,
     append_journal_event,
     build_synthesis_bundle,
     capture_workspace_snapshot,
@@ -32,10 +33,12 @@ from review_graph_runtime import (
     read_execution_journal,
     reconcile_validation_requirements,
     recover_validation_execution,
+    recover_validation_launch,
 )
 from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
 from review_graph_synthesis import validate_synthesis
 from test_capture_scope import _capture, _commit_all, _init_repo
+from test_review_graph_repairs import _block_validator
 from test_review_graph_runtime import ROUTING_CATALOG, SCHEMA_ROOT, SKILL_ROOT, _compile_repair_fixture_entry, _json_plan, _sparse_plan_document
 from test_review_graph_transitions import _synthesis_payload
 from test_support_review_graph import _prepare_all_fixture_timing
@@ -644,7 +647,7 @@ def _compile_validator(entry: dict[str, Any], lifecycle: dict[str, Any], journal
     return source
 
 
-def _doi_recovery_fixture(tmp_path: Path) -> tuple[dict[str, Any], Namespace, dict[str, Any], dict[str, Any]]:
+def _doi_recovery_fixture(tmp_path: Path, *, checks_started: bool = True) -> tuple[dict[str, Any], Namespace, dict[str, Any], dict[str, Any]]:
     plan, binding, original, verified = _bound_doi_fixture(tmp_path, failed_followup=True)
     # Early validators keep their superseded events in the migrated journal.
     plan = replace(plan, pre_review_validation_nodes=(*plan.pre_review_validation_nodes, binding.node_id))
@@ -665,8 +668,12 @@ def _doi_recovery_fixture(tmp_path: Path) -> tuple[dict[str, Any], Namespace, di
     _compile_validator(entries[binding.original.node_id], lifecycle, args.journal, original)
     entry = entries[binding.node_id]
     verified["evidence_id"] = entry["dispatch"]["evidence_id"]
-    _compile_validator(entry, lifecycle, args.journal, verified)
     after = capture_workspace_snapshot(entry["dispatch"])
+    if checks_started:
+        _compile_validator(entry, lifecycle, args.journal, verified)
+    else:
+        blocked = {**entry, "dispatch": {**entry["dispatch"], "workspace_before": after["records"], "workspace_after": after["records"]}}
+        _block_validator(blocked, lifecycle, args.journal)
     for phase, snapshot in (("before", {**after, "records": []}), ("after", after)):
         (tmp_path / f"{phase}.json").write_text(json.dumps(snapshot))
     request = {
@@ -689,35 +696,47 @@ def _doi_recovery_fixture(tmp_path: Path) -> tuple[dict[str, Any], Namespace, di
             "workspace_after": str(tmp_path / "after.json"),
         },
     }
+    if not checks_started:
+        request.update(checks_started=False, failure_kind="cache-access", permission_change="none", environment="accessible uv cache")
+        del request["failure_evidence"], request["executor_permissions"]
     return request, args, entry, verified
 
 
-def test_doi_execution_recovery_verifies_superseded_sources_against_retained_attempt(tmp_path: Path) -> None:
-    request, args, entry, verified = _doi_recovery_fixture(tmp_path)
+@pytest.mark.parametrize("checks_started", [False, True])
+def test_doi_recovery_verifies_superseded_sources_against_retained_attempt(tmp_path: Path, checks_started: bool) -> None:
+    request, args, entry, verified = _doi_recovery_fixture(tmp_path, checks_started=checks_started)
     preserved = {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
     original_events = read_execution_journal(args.journal, plan=_graph_plan(request["plan"]), source_state=tuple(request["source_state"]))[0]
     historical = original_events[-1]["evidence"]
-    recovered = recover_validation_execution(request, args)
+    recover = recover_validation_execution if checks_started else recover_validation_launch
+    recovered = recover(request, args)
     lifecycle = recovered["lifecycle_input"]
     plan = _graph_plan(lifecycle["plan"])
     journal = Path(recovered["journal_path"])
     node = next(node for node in plan.actual_worker_nodes if node.node_id == entry["node_id"])
-    checked = _journal_evidence(historical, plan=plan, node=node, status="accepted", superseded=True)
+    status = "accepted" if checks_started else "blocked"
+    checked = _journal_evidence(historical, plan=plan, node=node, status=status, superseded=True)
     assert checked is not None
     assert checked["evidence_id"] == verified["evidence_id"]
-    with pytest.raises(ValueError, match="evidence ID differs"):
-        _journal_evidence(historical, plan=plan, node=node, status="accepted")
+    diagnostic = "evidence ID differs" if checks_started else "validation evidence differs"
+    with pytest.raises(ValueError, match=diagnostic):
+        _journal_evidence(historical, plan=plan, node=node, status=status)
     altered = deepcopy(historical)
-    altered["canonical_doi_source"]["metadata_path"] = str(tmp_path / "unbound.json")
-    with pytest.raises(ValueError, match="evidence ID differs"):
-        _journal_evidence(altered, plan=plan, node=node, status="accepted", superseded=True)
+    unbound = tmp_path / "unbound.json"
+    unbound.write_bytes(Path(historical["canonical_doi_source"]["metadata_path"]).read_bytes())
+    altered["canonical_doi_source"]["metadata_path"] = str(unbound)
+    with pytest.raises(ValueError, match=diagnostic):
+        _journal_evidence(altered, plan=plan, node=node, status=status, superseded=True)
     entries = json.loads(Path(recovered["dispatches_path"]).read_bytes())
     _prepare_all_fixture_timing(entries)
     events = read_execution_journal(journal, plan=plan, source_state=tuple(lifecycle["source_state"]))[0]
     ready = next_ready_nodes({**lifecycle, "current_source_state": lifecycle["source_state"]}, journal_events=events, dispatch_set=entries)
     assert ready["ready_node_ids"] == [entry["node_id"]]
     retry = ready["ready_dispatches"][0]
-    assert retry["dispatch"]["evidence_id"] != verified["evidence_id"]
+    if checks_started:
+        assert retry["dispatch"]["evidence_id"] != verified["evidence_id"]
+    else:
+        assert retry["dispatch"]["evidence_id"] == verified["evidence_id"]
     verified.update(status="passed", evidence_id=retry["dispatch"]["evidence_id"])
     verified["executions"][0].update(result="passed", exit_code=0, evidence="Canonical report completed on the permitted executor")
     _compile_validator(retry, lifecycle, journal, verified)
@@ -730,6 +749,30 @@ def test_doi_execution_recovery_verifies_superseded_sources_against_retained_att
     old_artifact.write_bytes(old_artifact.read_bytes() + b"\nchanged historical result\n")
     with pytest.raises(ValueError, match=r"digest|identity|result"):
         read_execution_journal(journal, plan=plan, source_state=tuple(lifecycle["source_state"]))
+
+
+def test_historical_doi_evidence_is_not_shadowed_by_another_launch_recovery(tmp_path: Path) -> None:
+    older = tmp_path / "older"
+    older.mkdir()
+    launch_request, launch_args, _entry, _verified = _doi_recovery_fixture(older, checks_started=False)
+    launch = recover_validation_launch(launch_request, launch_args)
+    current = tmp_path / "current"
+    current.mkdir()
+    request, args, entry, _verified = _doi_recovery_fixture(current)
+    original = read_execution_journal(args.journal, plan=_graph_plan(request["plan"]), source_state=tuple(request["source_state"]))[0][-1]["evidence"]
+    recovered = recover_validation_execution(request, args)
+    plan = _graph_plan(recovered["lifecycle_input"]["plan"])
+    older_recoveries = _graph_plan(launch["lifecycle_input"]["plan"]).validation_recoveries
+    plan = replace(plan, validation_recoveries=(*older_recoveries, *plan.validation_recoveries))
+    node = next(node for node in plan.actual_worker_nodes if node.node_id == entry["node_id"])
+    assert _journal_evidence(original, plan=plan, node=node, status="accepted", superseded=True) is not None
+
+
+@pytest.mark.parametrize("fields", [{}, {"evidence_id": None}, {"evidence_id": ""}, {"evidence_id": False}])
+def test_doi_recheck_request_rejects_missing_or_invalid_evidence_id(fields: dict[str, Any]) -> None:
+    request = {"software_doi_rechecks": [{"requirement_id": "canonical", **fields}]}
+    with pytest.raises(ValueError, match="evidence_id"):
+        _software_doi_recheck_ids(request, [{"evidence_id": "accepted-original"}], ())
 
 
 def _followup_planning(original: dict[str, Any], verified: dict[str, Any], *, early: bool, later_check: bool) -> tuple[dict[str, Any], dict[str, Any]]:

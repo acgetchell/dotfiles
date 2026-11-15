@@ -665,6 +665,20 @@
       "semantic_triggers": ["Tests, fixtures, pytest configuration, coverage, properties, async/subprocess evidence, or regression durability are material."]
     },
     {
+      "catalog_id": "python.simplification",
+      "router_id": "python-review-orchestrator",
+      "rule_id": "python-simplification",
+      "layer": "surface",
+      "surface": "python",
+      "skill_id": "python-simplification-review",
+      "skill_path": "$SKILLS_ROOT/python-simplification-review/SKILL.md",
+      "target_kind": "leaf",
+      "default_priority": "optional-hygiene",
+      "synthesis_dependency": "python-synthesis",
+      "path_patterns": ["**/*.py", "**/*.pyi"],
+      "semantic_triggers": ["Pruning or suite reduction is requested, or redundant code, tests, fixtures, wrappers, compatibility paths, or accidental complexity are material."]
+    },
+    {
       "catalog_id": "python.synthesis",
       "router_id": "python-review-orchestrator",
       "rule_id": "python-production-synthesis",
