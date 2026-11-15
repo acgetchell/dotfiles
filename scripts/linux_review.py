@@ -95,6 +95,51 @@ def command_output(argv: list[str]) -> str:
     return result.stdout.strip() if result.returncode == 0 else "unavailable"
 
 
+def _gitlinks(git: str, repository: Path) -> dict[bytes, bytes]:
+    """Retain the parent's recorded submodule commits, including index stages."""
+    listing = subprocess.run(  # noqa: S603 - fixed read-only index metadata; preserve raw path bytes.
+        [git, "ls-files", "--stage", "-z"], check=True, capture_output=True, timeout=10, cwd=repository
+    ).stdout
+    if listing and not listing.endswith(b"\0"):
+        msg = "Source identity unavailable; Git index listing is incomplete."
+        raise ValueError(msg)
+    links: dict[bytes, bytes] = {}
+    for record in listing.split(b"\0"):
+        if record.startswith(b"160000 "):
+            header, separator, name = record.partition(b"\t")
+            if not separator or not name or re.fullmatch(rb"160000 (?:[0-9a-f]{40}|[0-9a-f]{64}) [0-3]", header) is None:
+                msg = "Source identity unavailable; malformed Git submodule index entry."
+                raise ValueError(msg)
+            links[name] = links.get(name, b"") + record + b"\0"
+    return links
+
+
+def _source_content(path: Path, *, gitlink: bytes | None, include_untracked: bool) -> tuple[bytes, bytes]:
+    """Read one worktree entry, preserving links and checked-out submodule state."""
+    if path.is_symlink():
+        kind, content = b"symlink", os.fsencode(path.readlink())
+    elif path.is_file():
+        kind = b"executable" if path.stat().st_mode & 0o111 else b"regular"
+        content = path.read_bytes()
+    elif path.is_dir() and gitlink is not None:
+        if (path / ".git").exists():
+            nested = source_identity(path, include_untracked=include_untracked)
+            kind, content = b"submodule", (nested["commit"] + "\0" + nested["content_digest"]).encode()
+        elif not any(path.iterdir()):
+            kind, content = b"uninitialized-submodule", b""
+        else:
+            msg = f"Source identity unavailable; nonempty submodule has no repository metadata: {path.name!r}"
+            raise ValueError(msg)
+    elif path.exists():
+        msg = f"Source identity unavailable; unsupported file kind: {path.name!r}"
+        raise ValueError(msg)
+    else:
+        kind, content = b"missing", b""
+    if gitlink is not None:
+        kind, content = b"gitlink-" + kind, gitlink + content
+    return kind, content
+
+
 def source_identity(repository: Path | None = None, *, include_untracked: bool = True) -> SourceIdentity:
     """Bind evidence to HEAD and selected checkout bytes without Git writes."""
     repository = repository or REPOSITORY
@@ -113,6 +158,7 @@ def source_identity(repository: Path | None = None, *, include_untracked: bool =
         head = subprocess.run(  # noqa: S603 - read HEAD from the same checkout as the file enumeration.
             [git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True, timeout=10, cwd=repository
         )
+        gitlinks = _gitlinks(git, repository)
     except OSError, subprocess.SubprocessError:
         msg = "Source identity unavailable; Git file enumeration or HEAD read failed."
         raise ValueError(msg) from None
@@ -127,17 +173,7 @@ def source_identity(repository: Path | None = None, *, include_untracked: bool =
     for name in sorted(set(result.stdout.split(b"\0")) - {b""}):
         path = repository / os.fsdecode(name)
         digest.update(name + b"\0")
-        if path.is_symlink():
-            kind = b"symlink"
-            content = os.fsencode(path.readlink())
-        elif path.is_file():
-            kind = b"executable" if path.stat().st_mode & 0o111 else b"regular"
-            content = path.read_bytes()
-        elif path.exists():
-            msg = f"Source identity unavailable; unsupported file kind: {os.fsdecode(name)!r}"
-            raise ValueError(msg)
-        else:
-            kind, content = b"missing", b""
+        kind, content = _source_content(path, gitlink=gitlinks.get(name), include_untracked=include_untracked)
         digest.update(kind + b"\0" + str(len(content)).encode() + b"\0" + content)
     return {"commit": commit, "content_digest": f"sha256:{digest.hexdigest()}"}
 
