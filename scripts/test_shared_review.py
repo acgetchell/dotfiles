@@ -10,9 +10,10 @@ from pathlib import Path
 import pytest
 
 REPOSITORY = Path(__file__).resolve().parents[1]
+GIT_LOCATION_VARIABLES = frozenset({"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR", "GIT_ALTERNATE_OBJECT_DIRECTORIES"})
 
 
-def _consumer(tmp_path: Path, git: str) -> tuple[Path, str]:
+def _consumer(tmp_path: Path, git: str, environment: dict[str, str]) -> tuple[Path, str]:
     """Give the real recipes their own refs, including on detached CI checkouts."""
     root = tmp_path / "review consumer ü"
     root.mkdir()
@@ -28,19 +29,25 @@ def _consumer(tmp_path: Path, git: str) -> tuple[Path, str]:
         ["checkout", "--detach", "--quiet"],
     ):
         subprocess.run(  # noqa: S603 - isolated fixture repository; never mutate the actual checkout.
-            [git, "-C", str(root), "-c", f"core.hooksPath={hooks}", *arguments], capture_output=True, text=True, check=True, timeout=30
+            [git, "-C", str(root), "-c", f"core.hooksPath={hooks}", *arguments], env=environment, capture_output=True, text=True, check=True, timeout=30
         )
     head = subprocess.run(  # noqa: S603 - read the fixture's actual commit for the remote freshness response.
-        [git, "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True, check=True, timeout=30
+        [git, "-C", str(root), "rev-parse", "HEAD"], env=environment, capture_output=True, text=True, check=True, timeout=30
     ).stdout.strip()
     return root, head
 
 
 @pytest.mark.parametrize(("recipe", "stale"), [(["review"], False), (["review", "main"], False), (["review-uncommitted"], False), (["review"], True)])
-def test_review_recipe_preserves_scope_and_shared_exit_status(tmp_path: Path, recipe: list[str], stale: bool) -> None:
+def test_review_recipe_preserves_scope_and_shared_exit_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, recipe: list[str], stale: bool) -> None:
+    caller_index = tmp_path / "caller-index"
+    caller_index.write_bytes(b"preserve the caller's index")
+    monkeypatch.setenv("GIT_INDEX_FILE", str(caller_index))
+    # Git location overrides take precedence over -C, including in nested uv/just
+    # commands. Keep every operation confined to the fixture repository.
+    environment = {key: value for key, value in os.environ.items() if key.upper() not in GIT_LOCATION_VARIABLES}
     real_git = shutil.which("git")
     assert real_git is not None
-    root, head = _consumer(tmp_path, real_git)
+    root, head = _consumer(tmp_path, real_git, environment)
     log = tmp_path / "review.json"
     executable = tmp_path / "coderabbit"
     executable.write_text(
@@ -71,7 +78,7 @@ def test_review_recipe_preserves_scope_and_shared_exit_status(tmp_path: Path, re
     just = shutil.which("just")
     assert just is not None
     environment = {
-        **os.environ,
+        **environment,
         "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
         "UV_PROJECT_ENVIRONMENT": sys.prefix,
         "UV_CACHE_DIR": str(tmp_path / ".uv-cache"),
@@ -80,6 +87,7 @@ def test_review_recipe_preserves_scope_and_shared_exit_status(tmp_path: Path, re
 
     result = subprocess.run([just, *recipe], cwd=root, env=environment, capture_output=True, text=True, check=False, timeout=30)  # noqa: S603
 
+    assert caller_index.read_bytes() == b"preserve the caller's index"
     assert result.returncode != 0
     git_calls = [json.loads(line) for line in git_log.read_text().splitlines()] if git_log.exists() else []
     assert any("ls-remote" in call for call in git_calls) is (recipe == ["review"])
