@@ -17,22 +17,31 @@ def test_review_recipe_preserves_scope_and_shared_exit_status(tmp_path: Path, re
     log = tmp_path / "review.json"
     executable = tmp_path / "coderabbit"
     executable.write_text(
-        f"#!{sys.executable}\nimport json, sys\nfrom pathlib import Path\nPath({str(log)!r}).write_text(json.dumps(sys.argv[1:]))\nraise SystemExit(23)\n",
+        f"#!{sys.executable}\nimport json, sys\nfrom pathlib import Path\n"
+        'if sys.argv[1:] == ["--version"]:\n    print("0.7.7")\n    raise SystemExit(0)\n'
+        f"Path({str(log)!r}).write_text(json.dumps(sys.argv[1:]))\nraise SystemExit(23)\n",
         encoding="utf-8",
     )
     executable.chmod(0o755)
     # Model read-only Git inspection, including remote freshness for the default
     # base. Explicit local overrides retain their offline behavior.
     git_log = tmp_path / "git.jsonl"
+    real_git = shutil.which("git")
+    assert real_git is not None
     git = tmp_path / "git"
     git.write_text(
-        f"#!{sys.executable}\nimport json, sys\nfrom pathlib import Path\n"
+        f"#!{sys.executable}\nimport json, subprocess, sys\nfrom pathlib import Path\n"
         f"with Path({str(git_log)!r}).open('a') as stream:\n    stream.write(json.dumps(sys.argv[1:]) + '\\n')\n"
         'if sys.argv[1:] == ["--no-pager", "ls-remote", "--exit-code", "origin", "refs/heads/main"]:\n'
         f'    print({"b" if stale else "a"!r} * 40 + "\\trefs/heads/main")\n'
         'elif sys.argv[1:-1] == ["--no-pager", "rev-parse", "--verify", "--end-of-options"] and '
         'sys.argv[-1] in {"main^{commit}", "refs/remotes/origin/main^{commit}"}:\n'
         '    print("a" * 40)\n'
+        # v0.2.9 binds the real worktree/index/config before dispatch. Delegate
+        # only its read-only inventory, retaining the modeled remote freshness.
+        'elif any(command in sys.argv[1:] for command in ("rev-parse", "ls-files", "ls-tree", "merge-base")) or '
+        '("config" in sys.argv[1:] and "--list" in sys.argv[1:]):\n'
+        f"    raise SystemExit(subprocess.run([{real_git!r}, *sys.argv[1:]], check=False).returncode)\n"
         'else:\n    raise SystemExit("unexpected Git operation")\n',
         encoding="utf-8",
     )
@@ -57,3 +66,6 @@ def test_review_recipe_preserves_scope_and_shared_exit_status(tmp_path: Path, re
     assert ("--uncommitted" in arguments) == (recipe[0] == "review-uncommitted")
     assert str(REPOSITORY / "AGENTS.md") in arguments
     assert str(REPOSITORY / ".coderabbit.yaml") in arguments
+    assert "--agent" in arguments
+    assert "--include-untracked" in arguments
+    assert "--use-credits" not in arguments

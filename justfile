@@ -11,6 +11,8 @@ export PATH := semgrep_bin + (if os() == "windows" { ";" } else { ":" }) + env_v
 python_fixture_paths := "tests/semgrep"
 python_primary_paths := "agents/.agents/skills scripts"
 review_contract_tests := "agents/.agents/skills/review-graph/scripts/test_review_graph_contracts.py"
+# Match Dependabot's workflow-only inventory; no local composite actions exist.
+actions_inputs := quote(".github/workflows")
 cargo_update_version := "22.1.5"
 cargo_version_pattern := '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?'
 dprint_version := "0.64.3"
@@ -83,9 +85,13 @@ _ensure-semgrep:
 action-lint: _ensure-actionlint
     uv run --locked --group dev research-repo-tools files run --include '.github/workflows/*.yml' --include '.github/workflows/*.yaml' -- actionlint
 
+# Read-only pin consistency in the provisioned environment, without network or sync.
+actions-check: _ensure-uv
+    uv run --locked --no-sync --no-python-downloads --offline research-repo-tools actions check --policy .github/action-updates.toml {{ actions_inputs }}
+
 # One allowlist for both local validation and the GitHub settings payload.
 workflow-allowlist-check: _ensure-uv
-    uv run --locked --group dev research-repo-tools actions allowlist --policy .github/settings/actions-selected.json .github/workflows
+    uv run --locked --group dev research-repo-tools actions allowlist --policy .github/settings/actions-selected.json {{ actions_inputs }}
 
 brew-check: _ensure-brew
     HOMEBREW_NO_AUTO_UPDATE=1 brew bundle check --file="$PWD/Brewfile"
@@ -140,7 +146,7 @@ fix: justfile-fmt python-fix yaml-fix markdown-fix
 git-config-check:
     git config --file git/.gitconfig --list >/dev/null
 
-github-actions-check: action-lint workflow-allowlist-check zizmor
+github-actions-check: action-lint actions-check workflow-allowlist-check zizmor
     @echo "GitHub Actions checks complete!"
 
 justfile-fmt: _ensure-just

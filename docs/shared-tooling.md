@@ -1,6 +1,6 @@
 # Shared tooling adoption
 
-The exact published `research-repo-tools==0.2.7` package owns reusable mechanics.
+The exact published `research-repo-tools==0.2.9` package owns reusable mechanics.
 Dotfiles retains policy, machine provisioning, fixtures, and its skill protocols.
 No sibling checkout or unreleased code is needed.
 
@@ -13,21 +13,18 @@ generic parsing, process and publication mechanics upstream, and keep review
 protocols, scientific acceptance and repository policy with their consumer.
 
 The [RRT v0.2.9 tracker](https://github.com/acgetchell/research-repo-tools/issues/236)
-owns planned selective setup, executable workflow examples, retained release
-handoffs, bounded verification/recovery and isolated-runtime work. These are
-adoption candidates when the supplying release is published and verified, not
-commands available through this repository's current pin. Update the pin and
-lock through the existing migration recipes, then replace superseded adapters
-and retain consumer integration and native-platform checks. Do not duplicate
-upstream implementation while waiting or require unrelated dotfiles fixes to
-wait for that release.
+records the published selective setup, executable workflow examples, retained
+release handoffs, bounded verification/recovery and isolated-runtime work.
+The package is now pinned here. Adoption of additional capabilities remains
+separate from the package upgrade; retain consumer integration and native-platform
+checks when replacing an adapter.
 
 The JIT benchmark uses `evidence.fingerprint_files` for its selected regular
 files. Linux environment evidence needs file kinds, executable modes, symlink
-targets and missing tracked paths; its local framing remains until a compatible
-shared API is published. That separate capability is tracked in
-[RRT #239](https://github.com/acgetchell/research-repo-tools/issues/239), outside
-the current v0.2.9 scope. The review graph's native Git-object identities and
+targets and missing tracked paths; its local framing remains pending a separately
+scoped migration to the API delivered by
+[RRT #239](https://github.com/acgetchell/research-repo-tools/issues/239) in v0.2.9.
+The review graph's native Git-object identities and
 reuse policy remain its own protocol contract.
 
 ## Current adoption
@@ -38,7 +35,7 @@ reuse policy remain its own protocol contract.
 | Python migration | `shared-python-plan VERSION` and `shared-python-update VERSION` run the target release through isolated uvx |
 | File selection | Shared inventory and bounded batches for Python, Markdown, YAML, actionlint, and Semgrep |
 | Python lint/type policy | Complete configured Ruff and ty checks over tracked/nonignored `.py` and `.pyi`, including fixtures; fixers retain the narrower safe scope |
-| Workflow auditing | One locked Python zizmor pin and explicit persona; SHA pinning, offline local gate, required-online hosted audit, guarded SARIF upload; shared Actions allowlist command reads the committed settings |
+| Workflow auditing | One locked Python zizmor pin and explicit persona; SHA pinning, offline local gate, required-online hosted audit, guarded SARIF upload; shared Actions allowlist and offline pin consistency checks |
 | Dependency/secret scanning | Managed OSV/Gitleaks, the root lock, full reachable history and current files, redacted reports; required CI `verify` includes the gate |
 | Scanner lifecycle | `tools-sync`, `tools-check`, `update-security-tools`, and preview-first `clean`; package-owned cache store |
 | Dependency/tool updates | Shared `deps update-python --all-projects` for the single root environment; Homebrew uv pin reconciliation; machine Cargo tools retain their existing owner |
@@ -46,11 +43,11 @@ reuse policy remain its own protocol contract.
 | Notebooks | Published inspection/advice/lint/cleanup/execution in the Jupyter skill; its consumer template prohibits dependency installs inside cells |
 | Reviews | Shared opt-in CodeRabbit wrapper defaults to verified `origin/main`; no review is sent merely by running CI |
 | Review-graph helpers | Public exact-byte hashing, subprocess, and index-preserving status/diff APIs; graph serialization and immutable publication retain their protocol contracts |
-| Dependabot | SHA-pinned v0.2.7 reusable workflow, byte-identical to the previously reviewed workflow; hosted rollout is tracked in [the rollout guide](../.github/DEPENDABOT.md) |
+| Dependabot | SHA-pinned v0.2.9 reusable workflow, byte-identical to the previously reviewed workflow; hosted rollout is tracked in [the rollout guide](../.github/DEPENDABOT.md) |
 
 ## Python authority and upgrades
 
-The current supplier is published v0.2.7. CI synchronizes the root environment,
+The current supplier is published v0.2.9. CI synchronizes the root environment,
 runs the early guards and static policy checks, then runs the serialized Semgrep
 lane alongside the remaining Python tests. `DOTFILES_TEST_WORKERS=0 just --jobs 1 ci`
 provides the complete serial fallback. There are no managed Cargo tools here, so
@@ -138,8 +135,8 @@ installed by ordinary validation.
 
 ## Scope decisions
 
-`just github-actions-check` combines actionlint, `workflow-allowlist-check`, and
-zizmor. The installed `research-repo-tools actions allowlist` command reads `.github/settings/actions-selected.json`
+`just github-actions-check` combines actionlint, `actions-check`,
+`workflow-allowlist-check`, and zizmor. The installed `research-repo-tools actions allowlist` command reads `.github/settings/actions-selected.json`
 for both action steps and reusable-workflow jobs. It supports the current exact
 `owner/repo[/path]@*` entries and rejects unsupported policy forms rather than
 silently widening access. Local and container actions remain outside this
@@ -149,6 +146,23 @@ blanket `persist-credentials: false` policy, which remains in Semgrep. The share
 allowlist command covers reusable-workflow calls independently of zizmor's
 `forbidden-uses` audit.
 
+`just actions-check` invokes the installed v0.2.9 checker with no environment sync,
+Python download, or network access. `.github/action-updates.toml` requires the
+`astral-sh/setup-uv` full SHAs and version comments in CI and zizmor to match.
+Both shared Actions checks scan `actions_inputs = .github/workflows`, matching
+Dependabot's workflow-only update inventory. There are no local composites.
+Dependabot owns the coupled workflow bumps; the policy's empty `[actions]` table
+deliberately selects no competing updater or explicit version tag. Add any future
+composite metadata paths to the checker scope and approval policy together.
+
+The Python package group is maintainer-owned: use `shared-python-plan` and
+`shared-python-update` to move both exact RRT requirements and `uv.lock`, then
+reconcile `[sources.tooling]` in `dependency-sources.toml`. The reusable approval
+workflow is an independent SHA-pinned dependency. Its v0.2.9 workflow blob
+`23a810c620d0692b28c9bc535e3be699364ffcdb` matches the v0.2.7 blob, preserving
+the approval behavior on this upgrade. Required checks and reviews still gate
+merge; local validation does not establish hosted acceptance for the new pin.
+
 The published checker replaces `scripts/check_workflow_allowlist.py` as part of
 [dotfiles #105](https://github.com/acgetchell/dotfiles/issues/105). Generic YAML
 parsing and malformed-policy regressions live in the
@@ -156,7 +170,7 @@ parsing and malformed-policy regressions live in the
 Dotfiles retains installed-package consumer tests for its actual workflows,
 unapproved action and reusable-call mutations with file/line diagnostics,
 committed policy authority, and recipe/CI wiring. The shared Dependabot workflow's
-v0.2.7 commit pin is independent of this Python package migration.
+commit pin is independent of the Python package migration.
 
 Semgrep retains version-comment, locked-command, explicit checkout, bootstrap,
 portability, safe skill YAML loading, selective Python runtime settings, and

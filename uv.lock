@@ -327,14 +327,14 @@ dev = [
     { name = "pytest", marker = "python_full_version >= '3.15'", specifier = "==9.2.0" },
     { name = "pytest-xdist", marker = "python_full_version >= '3.15'", specifier = "==3.8.0" },
     { name = "pyyaml", marker = "python_full_version >= '3.15'", specifier = ">=6.0" },
-    { name = "research-repo-tools", marker = "python_full_version >= '3.15'", specifier = "==0.2.7" },
-    { name = "research-repo-tools", extras = ["semgrep"], marker = "python_full_version >= '3.15'", specifier = "==0.2.7" },
+    { name = "research-repo-tools", marker = "python_full_version >= '3.15'", specifier = "==0.2.9" },
+    { name = "research-repo-tools", extras = ["semgrep"], marker = "python_full_version >= '3.15'", specifier = "==0.2.9" },
     { name = "ruff", marker = "python_full_version >= '3.15'", specifier = "==0.17.5" },
     { name = "ty", marker = "python_full_version >= '3.15'", specifier = "==0.0.104" },
     { name = "yamllint", marker = "python_full_version >= '3.15'", specifier = "==1.38.0" },
     { name = "zizmor", marker = "python_full_version >= '3.15'", specifier = "==1.32.0" },
 ]
-tooling = [{ name = "research-repo-tools", marker = "python_full_version >= '3.15'", specifier = "==0.2.7" }]
+tooling = [{ name = "research-repo-tools", marker = "python_full_version >= '3.15'", specifier = "==0.2.9" }]
 
 [[package]]
 name = "exceptiongroup"
@@ -1005,16 +1005,16 @@ wheels = [
 
 [[package]]
 name = "research-repo-tools"
-version = "0.2.7"
+version = "0.2.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "packaging" },
     { name = "pyyaml" },
     { name = "rust-just" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/df/2e/81c711e45ae64be36d9ed4335df0d66608bfbf3b49202fd444535aa26e00/research_repo_tools-0.2.7.tar.gz", hash = "sha256:4c8c479e7660a056e76bbfe0a261b623d56ab86cfe79586446eff3d8f1704a45", size = 1406715, upload-time = "2026-11-09T20:00:31.202Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/47/f7/9f382b8d14fa3d37be4f8323f32a7a0c5ecaa2094de65aa9b2477cde4c3d/research_repo_tools-0.2.9.tar.gz", hash = "sha256:e115f5425996337275345b9ddd117f82f5c179b3fcd2fcaf3aeb04650343e9c7", size = 1597302, upload-time = "2026-11-16T17:32:48.987Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b0/8d/756865f5d7ffa2ea4525195bbbc6071c763cde819d5d48ceea341fde5737/research_repo_tools-0.2.7-py3-none-any.whl", hash = "sha256:3f3809cb137fc458bd7bcf71b1a47c8a5c514d8693599f845aae519695e11530", size = 587519, upload-time = "2026-11-09T20:00:29.606Z" },
+    { url = "https://files.pythonhosted.org/packages/14/9b/8835593f20750ed4bc857ee0076297696cdd8772107beae4a5f9627e6943/research_repo_tools-0.2.9-py3-none-any.whl", hash = "sha256:6cc53318bf2cecafe2594993efa540d3e7f704d38e5a56e6e5d7f2e7e5103e5e", size = 676507, upload-time = "2026-11-16T17:32:47.313Z" },
 ]
 
 [package.optional-dependencies]

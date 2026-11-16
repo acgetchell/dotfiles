@@ -4,9 +4,13 @@ This records the command graph, validator ownership and measured results for
 [the v0.2.7 integration issue](https://github.com/acgetchell/dotfiles/issues/263)
 and [PR #265](https://github.com/acgetchell/dotfiles/pull/265). The command owners
 remain the [Justfile](../justfile), [CI workflow](../.github/workflows/ci.yml),
-and [Linux launcher](../scripts/linux_review.py). The shared package is the
+and [Linux launcher](../scripts/linux_review.py). These measurements used the
 published `research-repo-tools==0.2.7`; no managed Cargo tools are declared here,
 so shared Cargo compilation caching is not applicable.
+
+The current [adoption](shared-tooling.md) pins v0.2.9 and adds `actions-check`
+to `github-actions-check`. The graph and measurements below retain their v0.2.7
+scope; they do not establish hosted acceptance for the later upgrade.
 
 ## Command and dependency graph
 

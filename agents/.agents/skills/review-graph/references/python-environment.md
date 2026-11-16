@@ -1,20 +1,20 @@
 # Review Graph Python Environment
 
 Run the graph scripts with Python 3.15 or newer and the published
-`research-repo-tools` package. Dotfiles pins version 0.2.7. Consuming repositories
+`research-repo-tools` package. Dotfiles pins version 0.2.9. Consuming repositories
 can declare the same tooling dependency in an environment supporting Python
 3.15. Use the consumer's migration recipes when upgrading an existing pin;
 reconcile its Python selector and requirement before adding the dependency:
 
 ```sh
-uv add --group dev 'research-repo-tools==0.2.7'
+uv add --group dev 'research-repo-tools==0.2.9'
 uv run --locked python "$SKILLS_ROOT/review-graph/scripts/capture_scope.py" --help
 ```
 
 For a repository without that dependency, supply it for the invocation:
 
 ```sh
-uv run --python 3.15 --with 'research-repo-tools==0.2.7' \
+uv run --python 3.15 --with 'research-repo-tools==0.2.9' \
   python "$SKILLS_ROOT/review-graph/scripts/review_graph_runtime.py" --help
 ```
 
@@ -74,13 +74,13 @@ an approved external proof store with a new helper directory:
   export UV_CACHE_DIR="$PROOF_STORE/helper-cache"
   uv venv --no-project --no-config --python 3.15 "$PROOF_STORE/helper"
   uv pip install --no-config --python "$PROOF_STORE/helper/bin/python" \
-    --link-mode copy 'research-repo-tools==0.2.7'
+    --link-mode copy 'research-repo-tools==0.2.9'
   "$PROOF_STORE/helper/bin/python" -E -s \
     "$SKILLS_ROOT/review-graph/scripts/capture_scope.py" \
     --repo "$PWD" --mode baseline --output "$PROOF_STORE/initial.capture.json"
   "$PROOF_STORE/helper/bin/python" -E -s \
     "$SKILLS_ROOT/review-graph/scripts/review_graph_bootstrap.py" \
-    --helper-version 0.2.7 \
+    --helper-version 0.2.9 \
     --capture "$PROOF_STORE/initial.capture.json" --input "$PROOF_STORE/planning.json" \
     --output "$PROOF_STORE/bootstrap.json"
 )
@@ -121,7 +121,7 @@ dispatch command. After setup, a read-only probe is:
 ```sh
 "$PROOF_STORE/helper/bin/python" -E -s \
   "$SKILLS_ROOT/review-graph/scripts/review_graph_environment.py" \
-  --repository "$PWD" --helper-version 0.2.7
+  --repository "$PWD" --helper-version 0.2.9
 ```
 
 Omit `--python-runner` to retain that helper interpreter directly. Keep its
