@@ -42,18 +42,21 @@ dotfiles/
 | macOS | Desktop dotfiles, Homebrew, Stow, full repository checks | Existing native CI; new Linux installer is separate |
 | Linux x86_64, glibc >= 2.34 | User-space review tools and full portable checks | Ubuntu 24.04 CI and Debian 13.6 cloud checks passed; other distributions unverified |
 | Linux aarch64, glibc >= 2.34 | Same provisioning candidate | Native validation unverified |
-| Cara's cloud computer | Debian 13.6 x86_64 portable review environment | Setup, repeat setup, full checks, scripted smoke, and fresh restore verified; actual coordinator/worker review outstanding |
+| Cara's cloud computer | Debian 13.6 x86_64 portable review environment | Historical setup/restore and actual review accepted in #123; current rebuild lifecycle needs fresh provider evidence |
 | HPC | Site modules, scratch, authorized execution placement | Cluster configuration and native execution unverified |
 | Windows | Portable timing helper and isolated scanner engine smoke | Native timing CI; scanner engine smoke configured but native evidence pending; full tooling setup unsupported |
 
-Linux support covers development/review tooling. The macOS shell, Git dotfile,
-desktop preferences, and Homebrew setup have not been ported to Linux.
+The [rebuild profiles](docs/rebuild-profiles.md) add portable Bash, Zsh, Git,
+skills-only installation, and cached repository restoration on Ubuntu 24.04 and
+Debian 13 x86_64. Homebrew and desktop preferences remain macOS-specific.
 See the [Linux/cloud/HPC guide](docs/linux-review-environment.md) for prerequisites,
 offline execution, evidence, and separate cloud/cluster verification.
 The guide records the [2026-10-05 verification evidence](docs/linux-review-environment.md#evidence-and-verification-status)
-and the remaining actual-cloud review criterion, transferred from
+and the actual-cloud review criterion, transferred from
 [#95](https://github.com/acgetchell/dotfiles/issues/95) to
-[#123](https://github.com/acgetchell/dotfiles/issues/123). Scripted graph smoke
+[#123](https://github.com/acgetchell/dotfiles/issues/123), which was closed after
+the accepted RRT #91 cloud review. That historical closeout does not validate
+the new rebuild lifecycle. Scripted graph smoke
 does not establish a completed multi-agent review. TypeSafe access is not an
 environment acceptance requirement following the no-go decision in
 [#74](https://github.com/acgetchell/dotfiles/issues/74) and skill removal in
@@ -205,6 +208,11 @@ The `cup` shell alias runs the same Cargo command; `just update-cargo-tools` add
 reconciles the repository-owned `justfile` pins (`cargo-update`, `dprint`, `just`, and `rumdl`).
 The Cargo tool update requires
 `cargo-install-update` from the `cargo-update` package, installed by bootstrap and checked by `bin/verify.sh`.
+Bootstrap builds it with bundled OpenSSL so Homebrew library replacements do not
+break it. `just update-cargo-tools` rebuilds a missing or unusable updater with
+that same feature before updating tools; a failed rebuild stops the update.
+It also appends Homebrew's keg-only ICU location to the native build search path
+for tools such as Tectonic, preserving caller-supplied `PKG_CONFIG_PATH` entries.
 The owned pin mapping lives in `[tool.research-repo-tools.deps.tools]` in `pyproject.toml`.
 Cargo pins use the shared package's SemVer contract, including prerelease/build suffixes;
 the bootstrap and version checks preserve those suffixes. The exact uv pin lives only in

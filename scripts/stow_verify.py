@@ -187,14 +187,14 @@ def default_dotfiles_dir() -> Path:
     env_value = os.environ.get("DOTFILES_DIR", "")
     if env_value:
         return Path(env_value)
-    return Path.home() / "projects" / "dotfiles"
+    return Path(__file__).resolve().parents[1]
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description=__doc__, suggest_on_error=True, color=False)
     parser.add_argument(
-        "--dotfiles-dir", type=Path, default=default_dotfiles_dir(), help="dotfiles repository root (default: $DOTFILES_DIR or ~/projects/dotfiles)"
+        "--dotfiles-dir", type=Path, default=default_dotfiles_dir(), help="dotfiles repository root (default: $DOTFILES_DIR or this script's checkout)"
     )
     parser.add_argument("--home", type=Path, default=Path.home(), help="home directory to inspect (default: current user home)")
     return parser.parse_args(argv)

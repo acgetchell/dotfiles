@@ -1,0 +1,33 @@
+# Portable shell environment shared by Bash and Zsh.
+# User overrides are sourced by each shell after this file.
+DOTFILES_REVIEW_PREFIX="${DOTFILES_REVIEW_PREFIX:-$HOME/.local/share/dotfiles-review}"
+for dotfiles_bin in "$HOME/.local/bin" "${CARGO_HOME:-$HOME/.cargo}/bin" "$DOTFILES_REVIEW_PREFIX/bin"; do
+  if [ -d "$dotfiles_bin" ]; then
+    case ":$PATH:" in *":$dotfiles_bin:"*) ;; *) PATH="$dotfiles_bin:$PATH" ;; esac
+  fi
+done
+# Probe privately without installing a missing toolchain or changing caller state.
+if [ -x "$DOTFILES_REVIEW_PREFIX/cargo/bin/rustc" ] && [ -x "$DOTFILES_REVIEW_PREFIX/cargo/bin/cargo" ] && (
+  export RUSTUP_HOME="$DOTFILES_REVIEW_PREFIX/rustup" CARGO_HOME="$DOTFILES_REVIEW_PREFIX/cargo" RUSTUP_AUTO_INSTALL=0
+  "$CARGO_HOME/bin/cargo" --version >/dev/null 2>&1 || exit 1
+  dotfiles_rust_identity="$("$CARGO_HOME/bin/rustc" --version 2>/dev/null)" || exit 1
+  printf '%s\n' "$dotfiles_rust_identity" | awk '
+    $1 == "rustc" && $2 ~ /^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$/ {
+      split($2, version, "."); ready = version[1] > 1 || (version[1] == 1 && version[2] >= 85)
+    }
+    END { exit !ready }
+  '
+); then
+  RUSTUP_HOME="$DOTFILES_REVIEW_PREFIX/rustup"
+  CARGO_HOME="$DOTFILES_REVIEW_PREFIX/cargo"
+  # Move every existing occurrence out before selecting the private toolchain.
+  dotfiles_path=":$PATH:"
+  while [ "$dotfiles_path" != "${dotfiles_path#*":$CARGO_HOME/bin:"}" ]; do
+    dotfiles_path="${dotfiles_path%%":$CARGO_HOME/bin:"*}:${dotfiles_path#*":$CARGO_HOME/bin:"}"
+  done
+  PATH="$CARGO_HOME/bin${dotfiles_path%:}"
+  unset dotfiles_path
+  export RUSTUP_HOME CARGO_HOME
+fi
+export PATH DOTFILES_REVIEW_PREFIX
+unset dotfiles_bin

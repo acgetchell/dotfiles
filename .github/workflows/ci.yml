@@ -111,7 +111,7 @@ jobs:
   linux-review:
     name: Linux portable review
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -159,12 +159,17 @@ jobs:
       - name: Run timed graph publication and final proof smoke
         run: bash bin/linux-review.sh smoke
 
+      - name: Exercise clean Linux rebuild and disconnected startup
+        run: bash bin/linux-review.sh exec just docker-rebuild
+
       - name: Publish platform, timing, and graph evidence
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux-review-${{ github.sha }}
-          path: target/linux-review/
+          path: |
+            target/linux-review/
+            target/rebuild/
           retention-days: 14
           if-no-files-found: warn
 

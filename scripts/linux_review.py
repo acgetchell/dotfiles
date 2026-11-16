@@ -1,6 +1,6 @@
 """Record a portable review environment and run explicit, credential-free checks."""
 
-__lazy_modules__ = ("argparse", "hashlib", "platform", "re", "shutil", "subprocess", "tempfile", "time", "tomllib")
+__lazy_modules__ = ("argparse", "hashlib", "platform", "re", "shutil", "skills_install", "subprocess", "tempfile", "time", "tomllib")
 
 import argparse
 import hashlib
@@ -16,6 +16,8 @@ import time
 import tomllib
 from pathlib import Path
 from typing import TypedDict
+
+from skills_install import inspect_links, link_skills
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 SKILLS = REPOSITORY / "agents/.agents/skills"
@@ -93,41 +95,85 @@ def command_output(argv: list[str]) -> str:
     return result.stdout.strip() if result.returncode == 0 else "unavailable"
 
 
-def source_identity() -> SourceIdentity:
-    """Bind local evidence to HEAD and all nonignored checkout bytes without Git writes."""
+def _gitlinks(git: str, repository: Path) -> dict[bytes, bytes]:
+    """Retain the parent's recorded submodule commits, including index stages."""
+    listing = subprocess.run(  # noqa: S603 - fixed read-only index metadata; preserve raw path bytes.
+        [git, "ls-files", "--stage", "-z"], check=True, capture_output=True, timeout=10, cwd=repository
+    ).stdout
+    if listing and not listing.endswith(b"\0"):
+        msg = "Source identity unavailable; Git index listing is incomplete."
+        raise ValueError(msg)
+    links: dict[bytes, bytes] = {}
+    for record in listing.split(b"\0"):
+        if record.startswith(b"160000 "):
+            header, separator, name = record.partition(b"\t")
+            if not separator or not name or re.fullmatch(rb"160000 (?:[0-9a-f]{40}|[0-9a-f]{64}) [0-3]", header) is None:
+                msg = "Source identity unavailable; malformed Git submodule index entry."
+                raise ValueError(msg)
+            links[name] = links.get(name, b"") + record + b"\0"
+    return links
+
+
+def _source_content(path: Path, *, gitlink: bytes | None, include_untracked: bool) -> tuple[bytes, bytes]:
+    """Read one worktree entry, preserving links and checked-out submodule state."""
+    if path.is_symlink():
+        kind, content = b"symlink", os.fsencode(path.readlink())
+    elif path.is_file():
+        kind = b"executable" if path.stat().st_mode & 0o111 else b"regular"
+        content = path.read_bytes()
+    elif path.is_dir() and gitlink is not None:
+        if (path / ".git").exists():
+            nested = source_identity(path, include_untracked=include_untracked)
+            kind, content = b"submodule", (nested["commit"] + "\0" + nested["content_digest"]).encode()
+        elif not any(path.iterdir()):
+            kind, content = b"uninitialized-submodule", b""
+        else:
+            msg = f"Source identity unavailable; nonempty submodule has no repository metadata: {path.name!r}"
+            raise ValueError(msg)
+    elif path.exists():
+        msg = f"Source identity unavailable; unsupported file kind: {path.name!r}"
+        raise ValueError(msg)
+    else:
+        kind, content = b"missing", b""
+    if gitlink is not None:
+        kind, content = b"gitlink-" + kind, gitlink + content
+    return kind, content
+
+
+def source_identity(repository: Path | None = None, *, include_untracked: bool = True) -> SourceIdentity:
+    """Bind evidence to HEAD and selected checkout bytes without Git writes."""
+    repository = repository or REPOSITORY
     git = shutil.which("git")
     if git is None:
         msg = "Source identity unavailable; Git is required."
         raise ValueError(msg)
     try:
         result = subprocess.run(  # noqa: S603 - fixed, read-only Git enumeration; preserve raw filename bytes.
-            [git, "ls-files", "--cached", "--others", "--exclude-standard", "-z"], check=True, capture_output=True, timeout=10, cwd=REPOSITORY
+            [git, "ls-files", "--cached", *(["--others", "--exclude-standard"] if include_untracked else []), "-z"],
+            check=True,
+            capture_output=True,
+            timeout=10,
+            cwd=repository,
         )
+        head = subprocess.run(  # noqa: S603 - read HEAD from the same checkout as the file enumeration.
+            [git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True, timeout=10, cwd=repository
+        )
+        gitlinks = _gitlinks(git, repository)
     except OSError, subprocess.SubprocessError:
-        msg = "Source identity unavailable; Git file enumeration failed."
+        msg = "Source identity unavailable; Git file enumeration or HEAD read failed."
         raise ValueError(msg) from None
     if result.stdout and not result.stdout.endswith(b"\0"):
         msg = "Source identity unavailable; Git file listing is incomplete."
         raise ValueError(msg)
-    commit = command_output([git, "rev-parse", "HEAD"])
+    commit = head.stdout.strip()
     if not commit or commit == "unavailable":
         msg = "Source identity unavailable; Git HEAD could not be read."
         raise ValueError(msg)
     digest = hashlib.sha256(b"dotfiles/linux-source/v2\0")
     for name in sorted(set(result.stdout.split(b"\0")) - {b""}):
-        path = REPOSITORY / os.fsdecode(name)
+        path = repository / os.fsdecode(name)
         digest.update(name + b"\0")
-        if path.is_symlink():
-            kind = b"symlink"
-            content = os.fsencode(path.readlink())
-        elif path.is_file():
-            kind = b"executable" if path.stat().st_mode & 0o111 else b"regular"
-            content = path.read_bytes()
-        elif path.exists():
-            msg = f"Source identity unavailable; unsupported file kind: {os.fsdecode(name)!r}"
-            raise ValueError(msg)
-        else:
-            kind, content = b"missing", b""
+        kind, content = _source_content(path, gitlink=gitlinks.get(name), include_untracked=include_untracked)
         digest.update(kind + b"\0" + str(len(content)).encode() + b"\0" + content)
     return {"commit": commit, "content_digest": f"sha256:{digest.hexdigest()}"}
 
@@ -226,26 +272,13 @@ def verify_rust_version(identity: str) -> None:
 
 def install_skills(destination: Path) -> None:
     """Link complete skill directories, refusing to replace unrelated installations."""
-    destination.mkdir(parents=True, exist_ok=True)
-    sources = sorted(path.parent for path in SKILLS.glob("*/SKILL.md"))
-    for source in sources:
-        target = destination / source.name
-        if (target.exists() or target.is_symlink()) and (not target.is_symlink() or target.resolve() != source.resolve()):
-            msg = f"Skill collision: {source.name}; select an isolated DOTFILES_REVIEW_SKILLS_DIR or resolve the existing installation."
-            raise ValueError(msg)
-    for source in sources:
-        target = destination / source.name
-        if not target.is_symlink():
-            target.symlink_to(source.resolve(), target_is_directory=True)
+    if destination.resolve() != SKILLS.resolve():
+        link_skills(SKILLS, destination)
 
 
 def verify_skills(destination: Path) -> None:
     """Require discoverable directory links from this checkout."""
-    for source in sorted(path.parent for path in SKILLS.glob("*/SKILL.md")):
-        target = destination / source.name
-        if not target.is_symlink() or target.resolve() != source.resolve() or (target / "SKILL.md").is_symlink():
-            msg = f"Skill unavailable: {source.name}; rerun connected setup with this skill directory."
-            raise ValueError(msg)
+    inspect_links(SKILLS, destination, installed=True)
 
 
 def run_timed(argv: list[str], output: Path) -> int:
@@ -315,7 +348,7 @@ def main(argv: list[str] | None = None) -> int:
             # Warm the pinned formatter plugin before publishing setup success.
             code = run_timed([str(shutil.which("just")), "yaml-fmt-check"], output)
         else:
-            if destination != SKILLS:
+            if destination.resolve() != SKILLS.resolve():
                 verify_skills(destination)
             if args.mode == "probe":
                 report["typesafe"] = result = probe()

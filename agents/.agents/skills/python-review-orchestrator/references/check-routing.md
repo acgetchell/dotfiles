@@ -30,6 +30,7 @@ behavior:
 | `python-scientific-review` | Mathematical, numerical, statistical, geometric, stochastic, dataframe-computation, or scientific-oracle behavior changed | Plot formatting or generic file plumbing only |
 | `python-support-scripts` | Release, changelog, benchmark, CI, fixture, diagnostic, generated-artifact, or development subprocess behavior changed | User application or scientific algorithm code |
 | `python-test-quality` | Test artifacts changed, coverage/test review was requested, or durable evidence is itself at risk | Tests are unchanged and focused specialist validation is sufficient |
+| `python-simplification-review` | Pruning or suite reduction is requested; redundant code, tests, fixtures, wrappers, compatibility paths, or accidental complexity are material | No concrete deletion or consolidation opportunity and no simplification request |
 | `python-production-review` | Always in orchestrated mode; also owns ordinary reusable modules and residual integration concerns | Never skip final synthesis during orchestration |
 
 Select `project-tooling-review` outside this skill when recipes, workflows, validation configuration, installers, or tool versions changed. Select documentation review for suite-wide docs consistency. Shared ownership does not justify loading unrelated Python specialists.
@@ -54,6 +55,9 @@ selected skill names.
 - Public library interface or stub change: API design, then production; add
   parsing for input invariants and portability for distribution/runtime concerns.
 - Tests-only change: test quality plus the domain specialist only when the tests encode a domain assumption that could hide a production bug.
+- Code or test-suite pruning: simplification; add test quality when evidence
+  design or fixture isolation changes, and the domain owner when equivalence is
+  uncertain. Reuse their evidence when deciding what can be removed.
 - Ordinary reusable module: production; add a focused specialist only for a matching concern.
 
 ## Focused Validators

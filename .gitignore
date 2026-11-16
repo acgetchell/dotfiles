@@ -30,4 +30,6 @@ dist/
 Brewfile.local
 *.gitconfig.local
 *.zshrc.local
+*.bashrc.local
+*.bash_profile.local
 codex/.codex/config.toml

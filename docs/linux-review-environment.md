@@ -197,7 +197,7 @@ operation described in [the settings guide](../.github/DEPENDABOT.md).
 | Target | Status for this implementation | Remaining evidence |
 | --- | --- | --- |
 | Native Ubuntu 24.04 x86_64 CI | Passed [run 37267493289](https://github.com/acgetchell/dotfiles/actions/runs/37267493289): fresh/repeated setup, offline suite, scripted smoke, artifact publication | New changes still require their own CI |
-| Cara's cloud computer: Debian 13.6 x86_64, glibc 2.41 | Setup, repeat setup, full portable suite, scripted smoke, and fresh restore verified on 2026-10-05 | Actual coordinator/worker end-to-end review and its final proof remain outstanding in [#123](https://github.com/acgetchell/dotfiles/issues/123) |
+| Cara's cloud computer: Debian 13.6 x86_64, glibc 2.41 | Setup, repeat setup, full portable suite, scripted smoke, and fresh restore verified on 2026-10-05; actual RRT #91 review accepted in [#123](https://github.com/acgetchell/dotfiles/issues/123) | New rebuild lifecycle and later review baselines need fresh evidence |
 | HPC system | Unverified; site execution path not provided | Discovered modules/scheduler/allocation policy, authorized native smoke/check job receipt and artifacts |
 | Other Linux distributions and aarch64 | Unverified | Native setup, repeated setup, checks, and smoke on each claimed target |
 
@@ -228,10 +228,16 @@ The stale home link for the removed TypeSafe skill was deliberately retained
 and was not counted among the 66 current skills.
 
 The approved [#95 closeout](https://github.com/acgetchell/dotfiles/issues/95)
-separates completed portable-environment work from the remaining real cloud
+separates completed portable-environment work from the then-remaining real cloud
 review. Its TypeSafe probe criterion is superseded by the no-go decision;
-actual coordinator/worker review remains in
-[#123](https://github.com/acgetchell/dotfiles/issues/123). HPC remains explicitly
+actual coordinator/worker review was accepted in
+[#123](https://github.com/acgetchell/dotfiles/issues/123), closed on 2026-10-14.
+The accepted evidence was [RRT #91](https://github.com/acgetchell/research-repo-tools/pull/91),
+reviewed commit `556106ed` and skill baseline `9b2077b`, with a complete 13-node
+proof and passing source/native checks. The original proof still recorded failed
+validation and blocked readiness because of the superseded draft/unmerged
+lifecycle criterion. The closeout did not assert a later Astra baseline or
+validate the [new rebuild lifecycle](rebuild-profiles.md). HPC remains explicitly
 unverified, as permitted by the original issue's acceptance criteria.
 
 Record cloud and HPC results separately, including source identity, artifact URI,

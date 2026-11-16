@@ -53,7 +53,10 @@ def test_callback_probe_with_explicit_cargo_target(tmp_path: Path, monkeypatch: 
 
     report = validate_source(output, source)
 
-    assert (output / "target" / host / "debug/deps").is_dir()
+    # Cargo 1.100 uses debug/build/.../out instead of debug/deps for intermediates.
+    library = library_artifact((output / "validation.txt").read_text())
+    assert library.is_file()
+    assert library.is_relative_to(output / "target" / host / "debug")
     assert len(report["callbacks"]) == 8
     assert all(line.endswith("callbacks=100" if "warmup=true" in line else "callbacks=0") for line in report["callbacks"])
 

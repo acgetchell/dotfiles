@@ -113,7 +113,14 @@ logic may conceal a defect.
 Skip it when tests are unchanged and focused specialist validation is
 sufficient. Still run appropriate focused tests.
 
-### 7. Production Synthesis
+### 7. Simplification
+
+Select `python-simplification-review` when pruning or suite reduction is
+requested, or redundant code, tests, fixtures, wrappers, compatibility paths,
+or accidental complexity are material. Reuse domain and test-quality evidence
+to justify removals; do not create cleanup work solely to fill this pass.
+
+### 8. Production Synthesis
 
 Always load `python-production-review` after selected specialists in
 orchestrated work. Use orchestrated mode without the standalone checklist. It

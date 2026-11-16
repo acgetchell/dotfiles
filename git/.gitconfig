@@ -1,13 +1,12 @@
 [user]
 	email = adam@adamgetchell.org
 	name = Adam Getchell
-# Per-machine overrides (e.g. coderabbit.machineId, work email, signing key).
-# Lives in $HOME, never tracked by this repo.
-[include]
-	path = ~/.gitconfig.local
 [credential "https://github.com"]
 	helper =
-	helper = !/opt/homebrew/bin/gh auth git-credential
+	helper = !gh auth git-credential
 [credential "https://gist.github.com"]
 	helper =
-	helper = !/opt/homebrew/bin/gh auth git-credential
+	helper = !gh auth git-credential
+# Per-machine overrides apply last, including custom credential helpers.
+[include]
+	path = ~/.gitconfig.local

@@ -48,6 +48,7 @@ Route primary ownership as follows:
 - development, release, benchmark, fixture, and CI scripts: `python-support-scripts`
 - notebook structure and reproducibility: `jupyter-notebook-review`
 - test design and durable evidence: `python-test-quality`
+- justified code, test, and fixture pruning: `python-simplification-review`
 - workflow mechanics, validators, and tool versions: `project-tooling-review`
 
 Retain final responsibility for integration among those surfaces and for ordinary reusable Python modules that match none of them.
@@ -97,6 +98,9 @@ Check unsafe deserialization, shell construction, path traversal, broad deletion
 ### Integration And Simplification
 
 Reconcile contracts across modules, installed entry points, generated artifacts, documentation examples, and external consumers. Look for duplicated adapters, obsolete compatibility layers, redundant wrappers, or abstractions that make invariants harder to see. Recommend deletion only when callers and validation evidence support it.
+
+Use `python-simplification-review` for material deletion or consolidation work.
+Reuse its evidence when selected; do not repeat the pruning pass during synthesis.
 
 ## Final Validation
 

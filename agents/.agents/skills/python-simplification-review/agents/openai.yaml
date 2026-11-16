@@ -1,0 +1,6 @@
+interface:
+  display_name: "Python Simplification Review"
+  short_description: "Prune Python code and tests without losing behavior"
+  default_prompt: >-
+    Use $python-simplification-review to simplify this Python code and test suite,
+    removing redundancy while preserving supported behavior and meaningful regression coverage.

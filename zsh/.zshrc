@@ -2,7 +2,15 @@
 # export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH
 
 # Path to your Oh My Zsh installation.
-export ZSH="$HOME/.oh-my-zsh"
+export ZSH="${ZSH:-$HOME/.oh-my-zsh}"
+[[ -r "$HOME/.dotfiles-env" ]] && source "$HOME/.dotfiles-env"
+
+# Initialize Homebrew before deciding which optional plugins are available.
+if [[ "$OSTYPE" == darwin* && -x /opt/homebrew/bin/brew ]]; then
+  eval "$(/opt/homebrew/bin/brew shellenv)"
+elif [[ "$OSTYPE" == darwin* && -x /usr/local/bin/brew ]]; then
+  eval "$(/usr/local/bin/brew shellenv)"
+fi
 
 # Set name of the theme to load --- if set to "random", it will
 # load a random theme each time Oh My Zsh is loaded, in which case,
@@ -25,7 +33,7 @@ HYPHEN_INSENSITIVE="true"
 
 # Uncomment one of the following lines to change the auto-update behavior
 # zstyle ':omz:update' mode disabled  # disable automatic updates
-zstyle ':omz:update' mode auto      # update automatically without asking
+zstyle ':omz:update' mode disabled  # setup/update remain explicit operations
 # zstyle ':omz:update' mode reminder  # just remind me to update when it's time
 
 # Uncomment the following line to change how often to auto-update (in days).
@@ -70,9 +78,18 @@ COMPLETION_WAITING_DOTS="true"
 # Custom plugins may be added to $ZSH_CUSTOM/plugins/
 # Example format: plugins=(rails git textmate ruby lighthouse)
 # Add wisely, as too many plugins slow down shell startup.
-plugins=(git brew macos rust)
+plugins=(git rust)
+if [[ "$OSTYPE" == darwin* ]]; then
+  plugins+=(macos)
+  (( $+commands[brew] )) && plugins+=(brew)
+fi
 
-source $ZSH/oh-my-zsh.sh
+if [[ -r "$ZSH/oh-my-zsh.sh" ]]; then
+  source "$ZSH/oh-my-zsh.sh"
+else
+  # A portable plain Zsh remains usable without the optional theme/plugin layer.
+  autoload -Uz compinit && compinit
+fi
 
 # User configuration
 
@@ -91,15 +108,6 @@ source $ZSH/oh-my-zsh.sh
 # Compilation flags
 # export ARCHFLAGS="-arch $(uname -m)"
 
-# ---- Homebrew (Apple Silicon vs Intel) ----
-# `brew shellenv` exports HOMEBREW_PREFIX, PATH, MANPATH, and INFOPATH for the
-# right architecture, so this works unchanged across Macs.
-if [[ -x /opt/homebrew/bin/brew ]]; then
-  eval "$(/opt/homebrew/bin/brew shellenv)"
-elif [[ -x /usr/local/bin/brew ]]; then
-  eval "$(/usr/local/bin/brew shellenv)"
-fi
-
 # Expose the keg-only rustup proxies and Cargo-installed command-line tools.
 if [[ -n "${HOMEBREW_PREFIX:-}" ]]; then
   export PATH="$HOMEBREW_PREFIX/opt/rustup/bin:${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
@@ -115,7 +123,10 @@ if [[ -d /Library/TeX/texbin && ":$PATH:" != *":/Library/TeX/texbin:"* ]]; then
 fi
 
 # ---- Brewfile location (used by `brew bundle` from any directory) ----
-export HOMEBREW_BUNDLE_FILE="$HOME/projects/dotfiles/Brewfile"
+if [[ "$OSTYPE" == darwin* ]]; then
+  # :A follows the Stow link, so alternate checkout paths work unchanged.
+  export HOMEBREW_BUNDLE_FILE="${${(%):-%x}:A:h:h}/Brewfile"
+fi
 
 # ---- vcpkg (optional) ----
 if [[ -d "$HOME/projects/vcpkg" ]]; then

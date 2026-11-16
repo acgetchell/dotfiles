@@ -392,6 +392,22 @@ def test_check_cannot_download_missing_tools(linux_boundary: dict[str, str]) -> 
     assert not Path(linux_boundary["DOWNLOAD_LOG"]).exists()
 
 
+def test_source_skills_need_no_installation_links(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = tmp_path / "checkout skills"
+    skill = source / "example"
+    skill.mkdir(parents=True)
+    marker = skill / "SKILL.md"
+    marker.write_text("original source")
+    alias = tmp_path / "source alias"
+    alias.symlink_to(source, target_is_directory=True)
+    monkeypatch.setattr(linux_review, "SKILLS", source)
+    for destination in (source, alias):
+        linux_review.install_skills(destination)
+    assert not skill.is_symlink()
+    assert marker.read_text() == "original source"
+    assert list(source.iterdir()) == [skill]
+
+
 def test_skill_links_are_idempotent_and_collisions_preserve_existing_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     source = tmp_path / "checkout-skills"
     source.mkdir()
@@ -609,3 +625,72 @@ def test_source_identity_distinguishes_file_kinds_and_execution_mode(tmp_path: P
     source.mkdir()
     with pytest.raises(ValueError, match="unsupported file kind"):
         linux_review.source_identity()
+
+
+def test_source_identity_preserves_submodule_gitlink_checkout_and_dirty_content(tmp_path: Path) -> None:
+    git = shutil.which("git")
+    assert git is not None
+
+    def run(repository: Path, *arguments: str) -> str:
+        return subprocess.run(  # noqa: S603 - local disposable repositories and explicit fixture commits.
+            [
+                git,
+                "-c",
+                "commit.gpgSign=false",
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "-c",
+                "protocol.file.allow=always",
+                *arguments,
+            ],
+            cwd=repository,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        ).stdout.strip()
+
+    original, parent = tmp_path / "module source", tmp_path / "parent"
+    original.mkdir()
+    parent.mkdir()
+    run(original, "init", "-q")
+    (original / "source.txt").write_text("original source")
+    run(original, "add", "source.txt")
+    run(original, "commit", "-qm", "first")
+    first = run(original, "rev-parse", "HEAD")
+    run(parent, "init", "-q")
+    relative = "modules/child with spaces"
+    run(parent, "submodule", "add", "--quiet", str(original), relative)
+    run(parent, "commit", "-qam", "parent")
+    child = parent / relative
+    before = linux_review.source_identity(parent)
+    tracked = linux_review.source_identity(parent, include_untracked=False)
+    assert before == tracked
+
+    source = child / "source.txt"
+    source.write_text("dirty source")
+    assert linux_review.source_identity(parent) != before
+    source.write_text("original source")
+    assert linux_review.source_identity(parent) == before
+    untracked = child / "untracked.txt"
+    untracked.write_text("new source")
+    assert linux_review.source_identity(parent) != before
+    assert linux_review.source_identity(parent, include_untracked=False) == tracked
+    untracked.unlink()
+
+    run(child, "commit", "--allow-empty", "-qm", "second")
+    second = run(child, "rev-parse", "HEAD")
+    assert linux_review.source_identity(parent) != before
+    run(child, "checkout", "--quiet", "--detach", first)
+    assert linux_review.source_identity(parent) == before
+    run(parent, "update-index", "--cacheinfo", f"160000,{second},{relative}")
+    recorded = linux_review.source_identity(parent)
+    assert recorded["commit"] == before["commit"]
+    assert recorded["content_digest"] != before["content_digest"]
+
+    run(parent, "submodule", "deinit", "--force", "--", relative)
+    uninitialized = linux_review.source_identity(parent)
+    run(parent, "update-index", "--cacheinfo", f"160000,{first},{relative}")
+    assert linux_review.source_identity(parent) != uninitialized
