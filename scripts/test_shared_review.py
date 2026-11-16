@@ -12,8 +12,35 @@ import pytest
 REPOSITORY = Path(__file__).resolve().parents[1]
 
 
+def _consumer(tmp_path: Path, git: str) -> tuple[Path, str]:
+    """Give the real recipes their own refs, including on detached CI checkouts."""
+    root = tmp_path / "review consumer ü"
+    root.mkdir()
+    for name in ("justfile", "pyproject.toml", "uv.lock", ".python-version", "AGENTS.md", ".coderabbit.yaml"):
+        shutil.copy2(REPOSITORY / name, root / name)
+    hooks = tmp_path / "empty-hooks"
+    hooks.mkdir()
+    for arguments in (
+        ["init", "--initial-branch=main"],
+        ["add", "."],
+        ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "Fixture"],
+        ["update-ref", "refs/remotes/origin/main", "HEAD"],
+        ["checkout", "--detach", "--quiet"],
+    ):
+        subprocess.run(  # noqa: S603 - isolated fixture repository; never mutate the actual checkout.
+            [git, "-C", str(root), "-c", f"core.hooksPath={hooks}", *arguments], capture_output=True, text=True, check=True, timeout=30
+        )
+    head = subprocess.run(  # noqa: S603 - read the fixture's actual commit for the remote freshness response.
+        [git, "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True, check=True, timeout=30
+    ).stdout.strip()
+    return root, head
+
+
 @pytest.mark.parametrize(("recipe", "stale"), [(["review"], False), (["review", "main"], False), (["review-uncommitted"], False), (["review"], True)])
 def test_review_recipe_preserves_scope_and_shared_exit_status(tmp_path: Path, recipe: list[str], stale: bool) -> None:
+    real_git = shutil.which("git")
+    assert real_git is not None
+    root, head = _consumer(tmp_path, real_git)
     log = tmp_path / "review.json"
     executable = tmp_path / "coderabbit"
     executable.write_text(
@@ -26,17 +53,12 @@ def test_review_recipe_preserves_scope_and_shared_exit_status(tmp_path: Path, re
     # Model read-only Git inspection, including remote freshness for the default
     # base. Explicit local overrides retain their offline behavior.
     git_log = tmp_path / "git.jsonl"
-    real_git = shutil.which("git")
-    assert real_git is not None
     git = tmp_path / "git"
     git.write_text(
         f"#!{sys.executable}\nimport json, subprocess, sys\nfrom pathlib import Path\n"
         f"with Path({str(git_log)!r}).open('a') as stream:\n    stream.write(json.dumps(sys.argv[1:]) + '\\n')\n"
         'if sys.argv[1:] == ["--no-pager", "ls-remote", "--exit-code", "origin", "refs/heads/main"]:\n'
-        f'    print({"b" if stale else "a"!r} * 40 + "\\trefs/heads/main")\n'
-        'elif sys.argv[1:-1] == ["--no-pager", "rev-parse", "--verify", "--end-of-options"] and '
-        'sys.argv[-1] in {"main^{commit}", "refs/remotes/origin/main^{commit}"}:\n'
-        '    print("a" * 40)\n'
+        f'    print({"b" * 40 if stale else head!r} + "\\trefs/heads/main")\n'
         # v0.2.9 binds the real worktree/index/config before dispatch. Delegate
         # only its read-only inventory, retaining the modeled remote freshness.
         'elif any(command in sys.argv[1:] for command in ("rev-parse", "ls-files", "ls-tree", "merge-base")) or '
@@ -48,9 +70,15 @@ def test_review_recipe_preserves_scope_and_shared_exit_status(tmp_path: Path, re
     git.chmod(0o755)
     just = shutil.which("just")
     assert just is not None
-    environment = {**os.environ, "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}", "UV_OFFLINE": "1"}
+    environment = {
+        **os.environ,
+        "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
+        "UV_PROJECT_ENVIRONMENT": sys.prefix,
+        "UV_CACHE_DIR": str(tmp_path / ".uv-cache"),
+        "UV_OFFLINE": "1",
+    }
 
-    result = subprocess.run([just, *recipe], cwd=REPOSITORY, env=environment, capture_output=True, text=True, check=False, timeout=30)  # noqa: S603
+    result = subprocess.run([just, *recipe], cwd=root, env=environment, capture_output=True, text=True, check=False, timeout=30)  # noqa: S603
 
     assert result.returncode != 0
     git_calls = [json.loads(line) for line in git_log.read_text().splitlines()] if git_log.exists() else []
@@ -64,8 +92,8 @@ def test_review_recipe_preserves_scope_and_shared_exit_status(tmp_path: Path, re
     assert ("--base=origin/main" in arguments) == (recipe == ["review"])
     assert ("--base=main" in arguments) == (recipe == ["review", "main"])
     assert ("--uncommitted" in arguments) == (recipe[0] == "review-uncommitted")
-    assert str(REPOSITORY / "AGENTS.md") in arguments
-    assert str(REPOSITORY / ".coderabbit.yaml") in arguments
+    assert str(root / "AGENTS.md") in arguments
+    assert str(root / ".coderabbit.yaml") in arguments
     assert "--agent" in arguments
     assert "--include-untracked" in arguments
     assert "--use-credits" not in arguments
