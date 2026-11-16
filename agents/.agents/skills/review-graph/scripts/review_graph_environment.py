@@ -13,7 +13,7 @@ from typing import Any
 
 ORIGIN_FILE = "python-origin.json"
 _PACKAGE = "research_repo_tools"
-HELPER_VERSION = "0.2.7"
+HELPER_VERSION = "0.2.9"
 REQUIRED_APIS = {
     "evidence": ("sha256",),
     "git_inspect": ("git_diff_paths_bytes", "git_status_bytes"),

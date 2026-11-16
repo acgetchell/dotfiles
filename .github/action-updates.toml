@@ -1,0 +1,6 @@
+# Dependabot owns workflow updates; no second updater selects versions here.
+[actions]
+
+# CI and zizmor must move together, including every occurrence within CI.
+[consistency]
+actions = ["astral-sh/setup-uv"]

@@ -9539,7 +9539,7 @@ def _capture_source_state(path: Path) -> tuple[str, str, str]:
     return cast("tuple[str, str, str]", state)
 
 
-def _lifecycle_dispatch(document: dict[str, Any], dispatches_path: Path, node_id: str) -> tuple[GraphPlan, dict[str, Any]]:
+def _lifecycle_dispatch(document: dict[str, Any], dispatches_path: Path, node_id: str) -> tuple[GraphPlan, dict[str, Any], list[str]]:
     raw_plan = document.get("plan")
     if not isinstance(raw_plan, dict):
         msg = "lifecycle operation requires a plan object"
@@ -9552,12 +9552,9 @@ def _lifecycle_dispatch(document: dict[str, Any], dispatches_path: Path, node_id
     except KeyError:
         msg = f"dispatch set has no planned node {node_id}"
         raise ValueError(msg) from None
-    dispatch = selected.get("dispatch")
-    if isinstance(dispatch, dict) and dispatch.get("fresh_context") is True:
-        dispatch["fresh_context_forbidden_artifacts"] = sorted(
-            set(dispatch.get("fresh_context_forbidden_artifacts", [])) | set(forbidden_artifacts(node_id, entries))
-        )
-    return plan, selected
+    # Current peer locations constrain acceptance without amending the immutable
+    # dispatch used to bind this worker's publication and protocol reads.
+    return plan, selected, forbidden_artifacts(node_id, entries)
 
 
 def _snapshot_workspace_from_files(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
@@ -9571,7 +9568,7 @@ def _snapshot_workspace_from_files(document: dict[str, Any], args: argparse.Name
         if args.dispatches is None or args.node_id is None:
             msg = "lifecycle workspace snapshots require --dispatches and --node-id"
             raise ValueError(msg)
-        _plan, entry = _lifecycle_dispatch(document, args.dispatches, args.node_id)
+        _plan, entry, _current_artifacts = _lifecycle_dispatch(document, args.dispatches, args.node_id)
         dispatch = entry.get("dispatch")
         expected = _current_metadata_state(document)
     if _capture_source_state(args.current_capture) != expected:
@@ -9656,7 +9653,7 @@ def _verify_audit_captures(dispatch: dict[str, Any], before: Path, after: Path) 
 
 
 def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:  # noqa: C901, PLR0912, PLR0915
-    plan, entry = _lifecycle_dispatch(document, args.dispatches, args.node_id)
+    plan, entry, current_artifacts = _lifecycle_dispatch(document, args.dispatches, args.node_id)
     source_state = _state(document, "source_state")
     before_state = _capture_source_state(args.before_capture)
     after_state = _capture_source_state(args.after_capture)
@@ -9729,6 +9726,12 @@ def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace)
     else:
         msg = f"compile-node does not support result contract {contract}"
         raise ValueError(msg)
+
+    # The compiler enforces the original isolation contract. Also reject reads
+    # of relocated peer artifacts before publishing any evidence or acceptance.
+    isolation_dispatch = {**raw_dispatch, "fresh_context_forbidden_artifacts": current_artifacts}
+    if violations := isolation_violations(isolation_dispatch, payload):
+        raise IsolationViolationError("fresh-context review read another node's worker/report/evidence artifact: " + "; ".join(violations))
 
     artifact_path = Path(_required_text(entry, "artifact_path")).resolve()
     metadata_path = Path(_required_text(entry, "metadata_path")).resolve()

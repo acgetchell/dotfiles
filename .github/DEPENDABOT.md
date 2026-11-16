@@ -1,6 +1,7 @@
 # Dependabot approval rollout
 
-Dotfiles calls the shared [v0.2.7 approval workflow](https://github.com/acgetchell/research-repo-tools/blob/4a8f53f684dee2abb7c5b8a4beab40ef29212b4c/.github/workflows/dependabot-approve.yml).
+Dotfiles calls the shared [v0.2.9 approval workflow](https://github.com/acgetchell/research-repo-tools/blob/aa9e59fac03b11516be45cf32fcb22912061bead/.github/workflows/dependabot-approve.yml).
+Its workflow bytes match the previously reviewed v0.2.7 pin.
 The initial rollout included shared-tools PR #54; its prerequisite pilot
 [PR #52](https://github.com/acgetchell/research-repo-tools/pull/52) merged on
 September 26, 2026. The Python tooling package's registry pin and this workflow's
@@ -42,6 +43,15 @@ fresh approval and stale reviews must be dismissed. Native squash auto-merge
 still waits for strict `verify`, `CodeRabbit`, and `Linux portable review`
 checks and resolved threads.
 The optional approval job must never become an ordinary PR's required check.
+
+`just actions-check` checks every workflow for consistent `astral-sh/setup-uv`
+SHAs and version comments, including both CI occurrences and zizmor. Its scope
+matches Dependabot's root GitHub Actions inventory: `.github/workflows`, with no
+local composite actions. Dependabot remains the sole routine update path for
+this group; `.github/action-updates.toml` declares consistency without selecting
+upstream versions or enabling a second updater. A partial update must reconcile
+all occurrences before the ordinary required checks can pass. If composites are
+introduced, extend the checker inputs and approval file policy together.
 
 ## Deploy and verify settings
 

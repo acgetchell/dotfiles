@@ -37,6 +37,8 @@ def test_shared_updater_reconciles_dotfiles_mapping(tmp_path: Path, monkeypatch:
     configuration = tomllib.loads((REPOSITORY / "pyproject.toml").read_text())
     mapping = configuration["tool"]["research-repo-tools"]["deps"]["tools"]
     assert configuration["dependency-groups"]["tooling"] == [f"research-repo-tools=={version('research-repo-tools')}"]
+    sources = tomllib.loads((REPOSITORY / "dependency-sources.toml").read_text())
+    assert sources["sources"]["tooling"]["version"] == version("research-repo-tools")
     assert {"include-group": "tooling"} in configuration["dependency-groups"]["dev"]
     # Use the real files so stale mappings or incompatible Just syntax fail here.
     shutil.copy2(REPOSITORY / "pyproject.toml", tmp_path)
