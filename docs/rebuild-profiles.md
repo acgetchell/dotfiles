@@ -87,11 +87,16 @@ tools = [["tools-sync", "tools-check"]]
 ```
 
 Each repository must own a current `uv.lock` and an exact
-`[tool.uv] required-version`. The installed uv must match it. Environments use
-the owning checkout's `.venv`; only this dotfiles checkout may select its
-existing private review environment with `review-environment = true`. Optional
-tool recipes must already exist in the owning repository and honor the chosen
-lifecycle: provisioning may install tools, checks must only inspect them.
+`[tool.uv] required-version`. Repositories sharing the dotfiles pin use the
+profile's installed uv. Connected provisioning installs each additional exact
+version from a binary wheel (PyPI by default) and retains the standalone
+executable at `$DOTFILES_REVIEW_PREFIX/uv/<version>/uv`. The prefix defaults to
+`~/.local/share/dotfiles-review`. The same version is reused across checkouts,
+and each checkout's tool recipes see its selected uv first on `PATH`.
+Environments use the owning checkout's `.venv`; only this dotfiles checkout may
+select its existing private review environment with `review-environment = true`.
+Optional tool recipes must already exist in the owning repository and honor the
+chosen lifecycle: provisioning may install tools, checks must only inspect them.
 
 ```sh
 just cloud-provision profiles/cloud.toml
@@ -108,19 +113,29 @@ without synchronizing dependencies. For dotfiles it also checks fresh shells,
 links, pinned tools, and helper provenance. Health probes may write ordinary
 tool/shell caches, locks, and receipts; they are not a zero-write filesystem audit.
 
-Keep the installed interpreter, uv cache, build dependencies, selected tools,
-and checkouts together in the provider snapshot. Missing cache inputs or stale
-locks fail without an online fallback. Correct locks in their owning repository
-and rerun connected provisioning. Startup neither regenerates locks nor changes
-Git state. Source and HEAD identities are checked before and after commands;
-unexpected changes are reported and preserved for inspection, never reset.
+Keep the installed interpreter, profile uv, retained version-specific executables,
+uv cache, build dependencies, selected tools, and checkouts together in the
+provider snapshot. Keep the same `UV_CACHE_DIR` from setup through restore. Use
+an absolute path when the inventory shares one cache across checkouts.
+Startup and doctor check the exact executable version without
+installing tools. Rerun platform setup if the profile's uv is missing or has
+the wrong version. For a missing or invalid retained version, restore its
+executable from the snapshot or rerun connected provisioning after removing any
+invalid executable.
+
+Missing cache inputs or stale locks fail without an online fallback. Correct
+locks in their owning repository and rerun connected provisioning. Startup
+neither regenerates locks nor changes Git state. Source and HEAD identities are
+checked before and after commands; unexpected changes are reported and preserved
+for inspection, never reset.
 
 Cooperating lifecycle commands hold an exclusive lock per environment, including
 through child-process cleanup on failure. Do not run other environment managers
 against that environment concurrently. Each attempt writes a private receipt
 beneath `target/cloud`, including platform, inventory/lock/source identities,
-commands, exit statuses, and output hashes. Raw child output is not copied into
-receipts. Failed attempts remain available and do not imply successful readiness.
+each repository's required uv version and selected executable, commands, exit
+statuses, and output hashes. Raw child output is not copied into receipts.
+Failed attempts remain available and do not imply successful readiness.
 
 ## Disposable Linux rebuild
 
