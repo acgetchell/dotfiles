@@ -118,13 +118,16 @@ uv cache, build dependencies, selected tools, and checkouts together in the
 provider snapshot. Keep the same `UV_CACHE_DIR` from setup through restore. Use
 an absolute path when the inventory shares one cache across checkouts.
 Startup and doctor check the exact executable version without
-installing tools. Restore a missing or invalid executable from the snapshot, or
-remove the invalid executable and rerun connected provisioning. Missing cache
-inputs or stale locks fail without an online fallback. Correct locks in their
-owning repository and rerun connected provisioning. Startup neither regenerates
-locks nor changes Git state. Source and HEAD identities are checked before and
-after commands; unexpected changes are reported and preserved for inspection,
-never reset.
+installing tools. Rerun platform setup if the profile's uv is missing or has
+the wrong version. For a missing or invalid retained version, restore its
+executable from the snapshot or rerun connected provisioning after removing any
+invalid executable.
+
+Missing cache inputs or stale locks fail without an online fallback. Correct
+locks in their owning repository and rerun connected provisioning. Startup
+neither regenerates locks nor changes Git state. Source and HEAD identities are
+checked before and after commands; unexpected changes are reported and preserved
+for inspection, never reset.
 
 Cooperating lifecycle commands hold an exclusive lock per environment, including
 through child-process cleanup on failure. Do not run other environment managers

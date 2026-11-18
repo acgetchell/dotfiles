@@ -1,4 +1,0 @@
-interface:
-  display_name: "PR Push Gate"
-  short_description: "Require CI, security, and local review before PR pushes"
-  default_prompt: "Use $pr-push-gate to validate and review the outgoing changes before pushing this PR."
