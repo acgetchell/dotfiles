@@ -55,6 +55,15 @@ def immutable_tool_pairs(value: object) -> tuple[tuple[str, str], ...]:
     return tuple(result)
 
 
+def review_prefix() -> Path:
+    """Locate persistent tools and the isolated dotfiles review environment."""
+    prefix = Path(os.environ.get("DOTFILES_REVIEW_PREFIX", Path.home() / ".local/share/dotfiles-review"))
+    if not prefix.is_absolute():
+        msg = "DOTFILES_REVIEW_PREFIX must be absolute"
+        raise ValueError(msg)
+    return prefix
+
+
 @dataclass(frozen=True, slots=True)
 class RepositoryProfile:
     """An existing checkout with immutable environment and optional tool selections."""
@@ -88,11 +97,7 @@ class RepositoryProfile:
     def environment(self) -> Path:
         """Use the consumer's own normal environment location."""
         if self.review_environment:
-            prefix = Path(os.environ.get("DOTFILES_REVIEW_PREFIX", Path.home() / ".local/share/dotfiles-review"))
-            if not prefix.is_absolute():
-                msg = "DOTFILES_REVIEW_PREFIX must be absolute"
-                raise ValueError(msg)
-            return prefix / "venv"
+            return review_prefix() / "venv"
         return self.path / ".venv"
 
 
@@ -141,10 +146,11 @@ def load_inventory(path: Path) -> tuple[tuple[RepositoryProfile, ...], str]:
     return repositories, hashlib.sha256(content).hexdigest()
 
 
-def environment_for(profile: RepositoryProfile, *, offline: bool) -> dict[str, str]:
+def environment_for(profile: RepositoryProfile, uv: Path, *, offline: bool) -> dict[str, str]:
     """Remove ambient selectors and make offline behavior explicit at every command."""
     environment = {key: value for key, value in os.environ.items() if key not in (*SELECTORS, "UV_NO_SYNC", "UV_OFFLINE", "UV_PYTHON_DOWNLOADS")}
     environment["UV_PROJECT_ENVIRONMENT"] = str(profile.environment)
+    environment["PATH"] = str(uv.parent) + os.pathsep + environment.get("PATH", os.defpath)
     if offline:
         environment.update(UV_OFFLINE="1", UV_PYTHON_DOWNLOADS="never")
     if profile.review_environment:
@@ -202,7 +208,7 @@ def environment_lock(environment: Path) -> Generator[None]:
             fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
-def execute(argv: list[str], profile: RepositoryProfile, mode: Mode, results: list[dict[str, object]]) -> None:
+def execute(argv: list[str], profile: RepositoryProfile, mode: Mode, results: list[dict[str, object]], *, uv: Path) -> None:
     """Retain command outcomes without leaking child output or credentials into receipts."""
     if os.name != "posix":
         msg = "Cloud lifecycle requires macOS or Linux"
@@ -210,7 +216,7 @@ def execute(argv: list[str], profile: RepositoryProfile, mode: Mode, results: li
     with subprocess.Popen(  # noqa: S603 - fixed uv operations or explicitly selected repository recipes.
         argv,
         cwd=profile.path,
-        env=environment_for(profile, offline=mode != "provision"),
+        env=environment_for(profile, uv, offline=mode != "provision"),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         start_new_session=True,
@@ -237,32 +243,93 @@ def execute(argv: list[str], profile: RepositoryProfile, mode: Mode, results: li
         raise ValueError(f"{profile.name}: {cause} (exit {child.returncode})")
 
 
-def uv_pin(profile: RepositoryProfile) -> str:
+def uv_pin(path: Path, name: str) -> str:
     """Parse the owning repository's exact tool requirement before synchronization."""
-    metadata = tomllib.loads((profile.path / "pyproject.toml").read_text(encoding="utf-8"))
+    metadata = tomllib.loads((path / "pyproject.toml").read_text(encoding="utf-8"))
     tool = metadata.get("tool")
     uv = tool.get("uv") if isinstance(tool, dict) else None
     pin = uv.get("required-version") if isinstance(uv, dict) else None
     if not isinstance(pin, str) or not re.fullmatch(r"==\d+\.\d+\.\d+", pin):
-        raise ValueError(f"{profile.name}: provide its exact [tool.uv] required-version before running this lifecycle")
+        raise ValueError(f"{name}: provide its exact [tool.uv] required-version before running this lifecycle")
     return pin[2:]
+
+
+def profile_uv() -> Path:
+    """Locate the uv executable supplied by platform setup."""
+    executable = shutil.which("uv")
+    if executable is None:
+        msg = "Profile uv is unavailable; run platform setup on a connected host"
+        raise ValueError(msg)
+    return Path(executable).absolute()
+
+
+def checked_uv_version(uv: Path, pin: str, label: str, recovery: str) -> str:
+    """Require an executable that identifies itself as the owning repo's exact uv."""
+    try:
+        version = subprocess.run([str(uv), "--version"], capture_output=True, check=True, timeout=10).stdout.decode("utf-8", errors="replace").strip()  # noqa: S603
+    except (OSError, subprocess.SubprocessError) as error:
+        raise ValueError(f"{label} cannot run; {recovery}") from error
+    if version.split()[:2] != ["uv", pin]:
+        raise ValueError(f"{label} does not match required version {pin}; {recovery}")
+    return version
+
+
+def install_uv(uv: Path, pin: str, profile: RepositoryProfile, results: list[dict[str, object]]) -> str:
+    """Stage a pinned native wheel and publish only its verified standalone executable."""
+    bootstrap = profile_uv()
+    uv.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".install-", dir=uv.parent) as stage:
+        arguments = [
+            "pip",
+            "install",
+            "--no-config",
+            "--no-deps",
+            "--only-binary",
+            ":all:",
+            "--no-python-downloads",
+            "--python",
+            sys.executable,
+            "--link-mode",
+            "copy",
+            "--target",
+            stage,
+            f"uv=={pin}",
+        ]
+        try:
+            execute([str(bootstrap), *arguments], profile, "provision", results, uv=bootstrap)
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            raise ValueError(f"{profile.name}: could not provision uv {pin}; check the connected host's package index and retry") from error
+        staged = Path(stage) / "bin/uv"
+        version = checked_uv_version(staged, pin, f"{profile.name}: downloaded uv", "check the package index and retry connected provisioning")
+        # Readers see a complete executable even when separate inventories provision the same pin.
+        staged.replace(uv)
+    return version
+
+
+def select_uv(profile: RepositoryProfile, mode: Mode, pin: str, results: list[dict[str, object]]) -> tuple[Path, str]:
+    """Use the profile uv for its pin and retained version-specific tools for other pins."""
+    if pin == uv_pin(ROOT, "dotfiles"):
+        uv = profile_uv()
+        return uv, checked_uv_version(uv, pin, f"{profile.name}: profile uv", "run platform setup for the pinned profile uv")
+    uv = review_prefix() / "uv" / pin / "uv"
+    if uv.exists() or uv.is_symlink():
+        recovery = f"restore the retained uv {pin} or remove the invalid executable and run connected cloud-provision"
+        return uv, checked_uv_version(uv, pin, f"{profile.name}: retained uv", recovery)
+    if mode != "provision":
+        raise ValueError(f"{profile.name}: retained uv {pin} is missing; restore it or run connected cloud-provision")
+    return uv, install_uv(uv, pin, profile, results)
 
 
 def run_repository(profile: RepositoryProfile, mode: Mode, report: dict[str, object]) -> None:
     """Check pins and preserve checkout identity across synchronization and tool probes."""
-    uv = shutil.which("uv")
     just = shutil.which("just")
-    if uv is None or (profile.tools and just is None):
-        msg = "Required uv/Just executables are unavailable"
-        raise ValueError(msg)
-    pin = uv_pin(profile)
-    version = subprocess.run([uv, "--version"], capture_output=True, text=True, check=True, timeout=10).stdout.strip()  # noqa: S603
-    if version.split()[1:2] != [pin]:
-        raise ValueError(f"{profile.name}: installed uv does not match required version {pin}")
+    if profile.tools and just is None:
+        raise ValueError(f"{profile.name}: Just is required for the selected tool recipes")
+    pin = uv_pin(profile.path, profile.name)
     results: list[dict[str, object]] = []
     report.update(
         name=profile.name,
-        uv=version,
+        uv_required_version=pin,
         commands=results,
         repository=str(profile.path),
         environment=str(profile.environment),
@@ -272,25 +339,27 @@ def run_repository(profile: RepositoryProfile, mode: Mode, report: dict[str, obj
         before = source_identity(profile.path)
         report["source_before"] = before
         try:
+            uv, version = select_uv(profile, mode, pin, results)
+            report.update(uv=version, uv_executable=str(uv))
             arguments = sync_arguments(profile, mode)
-            execute([uv, *arguments], profile, mode, results)
+            execute([str(uv), *arguments], profile, mode, results, uv=uv)
             if mode == "startup" and "--reinstall-package" in arguments:
                 # A restored setuptools tree can create egg-info during the forced build,
                 # changing uv's source timestamp. Reconcile once without forcing another
                 # rebuild, then require the normal read-only health check to pass.
-                execute([uv, *sync_arguments(profile, "provision"), "--offline", "--no-python-downloads"], profile, mode, results)
+                execute([str(uv), *sync_arguments(profile, "provision"), "--offline", "--no-python-downloads"], profile, mode, results, uv=uv)
             for provision, check in profile.tools:
                 if mode == "provision":
-                    execute([str(just), provision], profile, mode, results)
-                execute([str(just), check], profile, mode, results)
+                    execute([str(just), provision], profile, mode, results, uv=uv)
+                execute([str(just), check], profile, mode, results, uv=uv)
             if mode != "doctor":
-                execute([uv, *sync_arguments(profile, "doctor")], profile, "doctor", results)
+                execute([str(uv), *sync_arguments(profile, "doctor")], profile, "doctor", results, uv=uv)
             if profile.review_environment:
                 bash = shutil.which("bash")
                 if bash is None:
                     msg = "Bash is required for the profile health check"
                     raise ValueError(msg)
-                execute([bash, str(ROOT / "bin/setup-profile.sh"), "auto", "doctor"], profile, mode, results)
+                execute([bash, str(ROOT / "bin/setup-profile.sh"), "auto", "doctor"], profile, mode, results, uv=uv)
         finally:
             after = source_identity(profile.path)
             report["source_after"] = after
@@ -328,7 +397,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         profiles, report["inventory_sha256"] = load_inventory(args.inventory)
         for profile in profiles:
-            uv_pin(profile)
+            uv_pin(profile.path, profile.name)
             sync_arguments(profile, args.mode)
         for profile in profiles:
             entry: dict[str, object] = {"name": profile.name, "status": "failed"}

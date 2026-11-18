@@ -9,6 +9,7 @@ import signal
 import subprocess
 import sys
 import time
+import tomllib
 from contextlib import suppress
 from typing import TYPE_CHECKING
 
@@ -20,12 +21,16 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+PROFILE_UV_PIN = tomllib.loads((cloud_profile.ROOT / "pyproject.toml").read_text())["tool"]["uv"]["required-version"].removeprefix("==")
+
+
 @pytest.fixture
 def checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Create a disposable repository; never mutate the user's repository index."""
     root = tmp_path / "checkout with spaces"
     root.mkdir()
-    (root / "pyproject.toml").write_text('[project]\nname="fixture"\nversion="1.0.0"\n[tool.uv]\nrequired-version="==0.13.8"\n')
+    pin = PROFILE_UV_PIN
+    (root / "pyproject.toml").write_text(f'[project]\nname="fixture"\nversion="1.0.0"\n[tool.uv]\nrequired-version="=={pin}"\n')
     (root / "uv.lock").write_text('version=1\n[[package]]\nname="fixture"\nversion="1.0.0"\n[package.source]\neditable="."\n')
     (root / ".gitignore").write_text(".venv/\n")
     git = shutil.which("git")
@@ -42,10 +47,21 @@ def checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     uv = binaries / "uv"
     uv.write_text(
         f"#!{sys.executable}\nimport json, os, sys, time\nfrom pathlib import Path\n"
-        "if sys.argv[1:] == ['--version']:\n print('uv 0.13.8'); sys.exit(0)\n"
+        f"PIN = {pin!r}\n"
+        "if sys.argv[1:] == ['--version']:\n print('uv', PIN); sys.exit(0)\n"
+        "if sys.argv[1:3] == ['pip', 'install']:\n"
+        " if os.environ.get('UV_OFFLINE') or os.environ.get('FORBID_INSTALL'): sys.exit(9)\n"
+        " assert '--only-binary' in sys.argv and '--no-python-downloads' in sys.argv\n"
+        " requested = sys.argv[-1].removeprefix('uv==')\n"
+        " staged = Path(sys.argv[sys.argv.index('--target')+1]) / 'bin/uv'\n"
+        " staged.parent.mkdir()\n"
+        " staged.write_text(Path(__file__).read_text().replace(f'PIN = {PIN!r}', f'PIN = {requested!r}', 1))\n"
+        " staged.chmod(0o700)\n"
+        " sys.exit(0)\n"
         "with Path(os.environ['OBSERVATIONS']).open('a') as stream:\n"
         " stream.write(json.dumps({'argv':sys.argv[1:], 'offline':os.environ.get('UV_OFFLINE'), "
-        "'downloads':os.environ.get('UV_PYTHON_DOWNLOADS'), 'environment':os.environ.get('UV_PROJECT_ENVIRONMENT')})+'\\n')\n"
+        "'downloads':os.environ.get('UV_PYTHON_DOWNLOADS'), 'environment':os.environ.get('UV_PROJECT_ENVIRONMENT'), "
+        "'uv':PIN})+'\\n')\n"
         "if os.environ.get('MUTATE_SOURCE'):\n Path('pyproject.toml').write_text('changed')\n"
         "if os.environ.get('FAIL_COMMAND'):\n print('offline cache unavailable private-marker',file=sys.stderr); sys.exit(7)\n"
         "if os.environ.get('CHILD_PID'):\n Path(os.environ['CHILD_PID']).write_text(str(os.getpid())); time.sleep(60)\n"
@@ -54,6 +70,100 @@ def checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("PATH", f"{binaries}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("OBSERVATIONS", str(tmp_path / "observations.jsonl"))
     return root
+
+
+@pytest.fixture
+def mixed_inventory(checkout: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path, Path]:
+    """Two separate checkouts with different owning pins and recipe selections."""
+    second = tmp_path / "another checkout"
+    shutil.copytree(checkout, second)
+    metadata = second / "pyproject.toml"
+    metadata.write_text(metadata.read_text().replace(f"=={PROFILE_UV_PIN}", "==0.13.7"))
+    inventory = tmp_path / "inventory.toml"
+    inventory.write_text(
+        f'schema_version=1\n[[repository]]\nname="first"\npath={json.dumps(str(checkout))}\n'
+        f'[[repository]]\nname="second"\npath={json.dumps(str(second))}\ngroups=["tools", "build"]\n'
+        'tools=[["setup-tools", "check-tools"]]\n'
+    )
+    just = tmp_path / "bin/just"
+    just.write_text('#!/bin/sh\nexec uv "$@"\n')
+    just.chmod(0o700)
+    prefix = tmp_path / "persistent tools"
+    monkeypatch.setenv("DOTFILES_REVIEW_PREFIX", str(prefix))
+    return inventory, second, prefix / "uv/0.13.7/uv"
+
+
+def test_mixed_uv_pins_provision_and_restore_offline(
+    checkout: Path, tmp_path: Path, mixed_inventory: tuple[Path, Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    inventory, second, retained = mixed_inventory
+    observations = tmp_path / "observations.jsonl"
+    uv_paths = [str(tmp_path / "bin/uv"), str(retained)]
+    pins = [PROFILE_UV_PIN, "0.13.7"]
+    original_sources = [cloud_profile.source_identity(path) for path in (checkout, second)]
+    original_locks = [(path / "uv.lock").read_bytes() for path in (checkout, second)]
+    for index, mode in enumerate(("provision", "provision", "startup", "startup", "doctor")):
+        if index:
+            monkeypatch.setenv("FORBID_INSTALL", "1")
+            observations.unlink()
+        receipts = tmp_path / f"receipts-{index}"
+        assert cloud_profile.main([mode, "--inventory", str(inventory), "--receipts", str(receipts)]) == 0
+        receipt = json.loads(next(receipts.glob("*/receipt.json")).read_text())
+        reports = receipt["repositories"]
+        assert [entry["uv_executable"] for entry in reports] == uv_paths
+        assert [entry["uv_required_version"] for entry in reports] == pins
+        assert [entry["uv"] for entry in reports] == [f"uv {pin}" for pin in pins]
+        installs = [command["argv"] for report in reports for command in report["commands"] if command["argv"][1:3] == ["pip", "install"]]
+        assert [command[-1] for command in installs] == (["uv==0.13.7"] if index == 0 else [])
+        assert [entry["source_before"] for entry in reports] == [entry["source_after"] for entry in reports] == original_sources
+        assert [entry["lock_sha256"] for entry in reports] == [hashlib.sha256(lock).hexdigest() for lock in original_locks]
+        commands = [json.loads(line) for line in observations.read_text().splitlines()]
+        first = [entry for entry in commands if entry["environment"] == str(checkout / ".venv")]
+        alternate = [entry for entry in commands if entry["environment"] == str(second / ".venv")]
+        assert len(commands) == len(first) + len(alternate)
+        assert {entry["uv"] for entry in first} == {pins[0]}
+        assert {entry["uv"] for entry in alternate} == {pins[1]}
+        assert first[0]["argv"][:4] == ["sync", "--locked", "--group", "dev"]
+        assert alternate[0]["argv"][:6] == ["sync", "--locked", "--group", "tools", "--group", "build"]
+        assert [entry["argv"] for entry in alternate if entry["argv"][0] != "sync"] == (
+            [["setup-tools"], ["check-tools"]] if mode == "provision" else [["check-tools"]]
+        )
+        if mode != "provision":
+            assert all(entry["offline"] == "1" and entry["downloads"] == "never" for entry in commands)
+        if mode == "doctor":
+            assert [entry["argv"][-1] for entry in commands if entry["argv"][0] == "sync"] == ["--check", "--check"]
+    assert [(path / "uv.lock").read_bytes() for path in (checkout, second)] == original_locks
+
+
+@pytest.mark.parametrize("mode", ["startup", "doctor"])
+@pytest.mark.parametrize("retained_state", ["missing", "wrong-version", "non-executable"])
+def test_offline_modes_fail_closed_for_invalid_retained_uv(
+    tmp_path: Path, mixed_inventory: tuple[Path, Path, Path], monkeypatch: pytest.MonkeyPatch, mode: str, retained_state: str
+) -> None:
+    inventory, second, retained = mixed_inventory
+    bootstrap = tmp_path / "bin/uv"
+    # A different PATH entry may even match the second pin. Offline runs still require the retained executable.
+    alternate = tmp_path / "alternate"
+    alternate.mkdir()
+    candidate = alternate / "uv"
+    candidate.write_text(bootstrap.read_text().replace(f"PIN = {PROFILE_UV_PIN!r}", "PIN = '0.13.7'", 1))
+    candidate.chmod(0o700)
+    monkeypatch.setenv("PATH", f"{os.environ['PATH']}{os.pathsep}{alternate}")
+    if retained_state != "missing":
+        retained.parent.mkdir(parents=True)
+        retained.write_bytes(bootstrap.read_bytes())
+        if retained_state == "wrong-version":
+            retained.chmod(0o700)
+    monkeypatch.setenv("FORBID_INSTALL", "1")
+    receipts = tmp_path / "receipts"
+    assert cloud_profile.main([mode, "--inventory", str(inventory), "--receipts", str(receipts)]) == 2
+    receipt = json.loads(next(receipts.glob("*/receipt.json")).read_text())
+    assert receipt["repositories"][1]["commands"] == []
+    diagnostic = receipt["diagnostic"]
+    assert diagnostic.startswith("second: retained uv")
+    assert "0.13.7" in diagnostic
+    assert "connected cloud-provision" in diagnostic
+    assert not (second / ".venv").exists()
 
 
 @pytest.mark.parametrize("mode", ["provision", "startup", "doctor"])
