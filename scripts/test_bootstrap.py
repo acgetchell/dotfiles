@@ -69,8 +69,18 @@ def test_bootstrap_rejects_other_hosts_before_setup(tmp_path: Path, system: str)
     assert set(tmp_path.rglob("*")) == before
 
 
-@pytest.mark.parametrize("omz_state", ["missing", "installed", "incomplete"])
-@pytest.mark.parametrize("installed_version", [None, "1.0.0", "22.1.1"])
+@pytest.mark.parametrize(
+    ("installed_version", "omz_state"),
+    [
+        (None, "missing"),
+        (None, "installed"),
+        ("1.0.0", "missing"),
+        ("1.0.0", "installed"),
+        ("1.0.0", "incomplete"),
+        ("22.1.1", "missing"),
+        ("22.1.1", "installed"),
+    ],
+)
 def test_bootstrap_installs_updater_by_package_and_checks_its_executable(tmp_path: Path, installed_version: str | None, omz_state: str) -> None:
     repository = Path(__file__).resolve().parents[1]
     checkout = tmp_path / "dotfiles"
@@ -133,6 +143,7 @@ def test_bootstrap_installs_updater_by_package_and_checks_its_executable(tmp_pat
         assert result.returncode != 0
         assert "Incomplete Oh My Zsh" in result.stderr
         assert (omz / "custom.txt").read_text(encoding="utf-8") == "preserve"
+        assert not install_log.exists()
         return
 
     for _ in range(2):

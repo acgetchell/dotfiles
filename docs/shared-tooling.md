@@ -1,6 +1,6 @@
 # Shared tooling adoption
 
-The exact published `research-repo-tools==0.2.9` package owns reusable mechanics.
+The exact published `research-repo-tools==0.3.0` package owns reusable mechanics.
 Dotfiles retains policy, machine provisioning, fixtures, and its skill protocols.
 No sibling checkout or unreleased code is needed.
 
@@ -12,11 +12,11 @@ small local adapter when the required behavior is still being developed. Keep
 generic parsing, process and publication mechanics upstream, and keep review
 protocols, scientific acceptance and repository policy with their consumer.
 
-The [RRT v0.2.9 tracker](https://github.com/acgetchell/research-repo-tools/issues/236)
-records the published selective setup, executable workflow examples, retained
-release handoffs, bounded verification/recovery and isolated-runtime work.
-The package is now pinned here. Adoption of additional capabilities remains
-separate from the package upgrade; retain consumer integration and native-platform
+The [RRT v0.3.0 release](https://github.com/acgetchell/research-repo-tools/releases/tag/v0.3.0)
+tightens archive validation used by dependency provenance. Its
+[`release visibility` command](https://github.com/acgetchell/research-repo-tools/blob/v0.3.0/docs/publishing-api.md)
+can verify an immutable upstream release, its required assets, and the exact
+PyPI version before adoption. Retain consumer integration and native-platform
 checks when replacing an adapter.
 
 The JIT benchmark uses `evidence.fingerprint_files` for its selected regular
@@ -43,11 +43,11 @@ reuse policy remain its own protocol contract.
 | Notebooks | Published inspection/advice/lint/cleanup/execution in the Jupyter skill; its consumer template prohibits dependency installs inside cells |
 | Reviews | Shared opt-in CodeRabbit wrapper defaults to verified `origin/main`; no review is sent merely by running CI |
 | Review-graph helpers | Public exact-byte hashing, subprocess, and index-preserving status/diff APIs; graph serialization and immutable publication retain their protocol contracts |
-| Dependabot | SHA-pinned v0.2.9 reusable workflow, byte-identical to the previously reviewed workflow; hosted rollout is tracked in [the rollout guide](../.github/DEPENDABOT.md) |
+| Dependabot | SHA-pinned v0.3.0 reusable workflow, byte-identical to the previously reviewed workflow. See [the rollout guide](../.github/DEPENDABOT.md). |
 
 ## Python authority and upgrades
 
-The current supplier is published v0.2.9. CI synchronizes the root environment,
+The current supplier is published v0.3.0. CI synchronizes the root environment,
 runs the early guards and static policy checks, then runs the serialized Semgrep
 lane alongside the remaining Python tests. `DOTFILES_TEST_WORKERS=0 just --jobs 1 ci`
 provides the complete serial fallback. There are no managed Cargo tools here, so
@@ -146,7 +146,7 @@ blanket `persist-credentials: false` policy, which remains in Semgrep. The share
 allowlist command covers reusable-workflow calls independently of zizmor's
 `forbidden-uses` audit.
 
-`just actions-check` invokes the installed v0.2.9 checker with no environment sync,
+`just actions-check` invokes the installed v0.3.0 checker with no environment sync,
 Python download, or network access. `.github/action-updates.toml` requires the
 `astral-sh/setup-uv` full SHAs and version comments in CI and zizmor to match.
 Both shared Actions checks scan `actions_inputs = .github/workflows`, matching
@@ -158,8 +158,8 @@ composite metadata paths to the checker scope and approval policy together.
 The Python package group is maintainer-owned: use `shared-python-plan` and
 `shared-python-update` to move both exact RRT requirements and `uv.lock`, then
 reconcile `[sources.tooling]` in `dependency-sources.toml`. The reusable approval
-workflow is an independent SHA-pinned dependency. Its v0.2.9 workflow blob
-`23a810c620d0692b28c9bc535e3be699364ffcdb` matches the v0.2.7 blob, preserving
+workflow is an independent SHA-pinned dependency. Its v0.3.0 workflow blob
+`23a810c620d0692b28c9bc535e3be699364ffcdb` matches the v0.2.9 and v0.2.7 blobs, preserving
 the approval behavior on this upgrade. Required checks and reviews still gate
 merge; local validation does not establish hosted acceptance for the new pin.
 

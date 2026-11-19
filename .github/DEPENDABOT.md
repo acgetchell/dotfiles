@@ -1,7 +1,7 @@
 # Dependabot approval rollout
 
-Dotfiles calls the shared [v0.2.9 approval workflow](https://github.com/acgetchell/research-repo-tools/blob/aa9e59fac03b11516be45cf32fcb22912061bead/.github/workflows/dependabot-approve.yml).
-Its workflow bytes match the previously reviewed v0.2.7 pin.
+Dotfiles calls the shared [v0.3.0 approval workflow](https://github.com/acgetchell/research-repo-tools/blob/33d5670a36607ea2454691cde035b6660d40c7cc/.github/workflows/dependabot-approve.yml).
+Its workflow bytes match the previously reviewed v0.2.9 and v0.2.7 pins.
 The initial rollout included shared-tools PR #54; its prerequisite pilot
 [PR #52](https://github.com/acgetchell/research-repo-tools/pull/52) merged on
 September 26, 2026. The Python tooling package's registry pin and this workflow's

@@ -15,9 +15,9 @@ review_contract_tests := "agents/.agents/skills/review-graph/scripts/test_review
 actions_inputs := quote(".github/workflows")
 cargo_update_version := "22.1.5"
 cargo_version_pattern := '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?'
-dprint_version := "0.64.3"
+dprint_version := "0.65.0"
 just_version := "1.59.0"
-rumdl_version := "0.3.4"
+rumdl_version := "0.3.5"
 # Bootstrap without Python; pyproject.toml is the single uv pin authority.
 uv_version := `sed -nE 's/^required-version = "==([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' pyproject.toml`
 
@@ -328,14 +328,14 @@ linux-host-plan:
     bash bin/linux-host.sh plan
 
 # Skills-only installation; no shell, Git, desktop, or global instruction changes.
-skills-helper-setup helper=(env_var("HOME") / ".local/share/dotfiles-review/helper"): _ensure-uv
-    uv run --locked --only-group tooling --inexact python scripts/skills_install.py helper-setup --helper {{ quote(helper) }}
+skills-helper-setup helper="": _ensure-uv
+    uv run --locked --only-group tooling --inexact python scripts/skills_install.py helper-setup{{ if helper == "" { "" } else { " --helper " + quote(helper) } }}
 
-skills-install destination=(env_var("HOME") / ".agents/skills") helper=(env_var("HOME") / ".local/share/dotfiles-review/helper"): _ensure-uv
-    uv run --locked --only-group tooling --inexact python scripts/skills_install.py install --destination {{ quote(destination) }} --helper {{ quote(helper) }}
+skills-install destination=(env_var("HOME") / ".agents/skills") helper="": _ensure-uv
+    uv run --locked --only-group tooling --inexact python scripts/skills_install.py install --destination {{ quote(destination) }}{{ if helper == "" { "" } else { " --helper " + quote(helper) } }}
 
-skills-check destination=(env_var("HOME") / ".agents/skills") helper=(env_var("HOME") / ".local/share/dotfiles-review/helper"): _ensure-uv
-    uv run --locked --only-group tooling --inexact python scripts/skills_install.py check --destination {{ quote(destination) }} --helper {{ quote(helper) }}
+skills-check destination=(env_var("HOME") / ".agents/skills") helper="": _ensure-uv
+    uv run --locked --only-group tooling --inexact python scripts/skills_install.py check --destination {{ quote(destination) }}{{ if helper == "" { "" } else { " --helper " + quote(helper) } }}
 
 # Connected provisioning for an explicit inventory of locked repository environments.
 cloud-provision inventory="profiles/cloud.toml": _ensure-uv

@@ -46,15 +46,19 @@ The Linux installation accepts absolute `DOTFILES_REVIEW_PREFIX`,
 `DOTFILES_REVIEW_CACHE`, and `DOTFILES_REVIEW_SKILLS_DIR` overrides. Keep them
 consistent across setup and later commands. Defaults are beneath
 `~/.local/share/dotfiles-review`, `~/.cache/dotfiles-review`, and `~/.agents/skills`.
+Setup and doctor select `$DOTFILES_REVIEW_PREFIX/helper-<version>` using the
+locked RRT version. An upgrade creates the newly selected helper alongside
+earlier environments. The old `helper` directory stays available to frozen
+reviews that already reference it.
 
 ## Skills without desktop setup
 
-Prepare a new external helper and choose a separate discovery directory:
+Prepare the versioned helper and choose a discovery directory:
 
 ```sh
-just skills-helper-setup "$HOME/.local/share/dotfiles-review/helper"
-just skills-install "$HOME/.agents/skills" "$HOME/.local/share/dotfiles-review/helper"
-just skills-check "$HOME/.agents/skills" "$HOME/.local/share/dotfiles-review/helper"
+just skills-helper-setup
+just skills-install "$HOME/.agents/skills"
+just skills-check "$HOME/.agents/skills"
 ```
 
 For isolation, replace the destination with an empty directory intended for
@@ -62,8 +66,9 @@ that agent's discovery configuration. An arbitrary directory is not discovered
 automatically. Whole-directory links retain scripts, references, assets, and
 relative paths. Missing helpers, wrong helper origins, existing files,
 conflicting directory links, and stale managed links fail with diagnostics.
-An existing helper is checked rather than upgraded; use a new helper directory
-when its frozen version no longer matches. Unrelated skills are preserved.
+You can pass an explicit helper directory as the last argument to each recipe.
+Setup verifies an existing directory against the current pin before reuse.
+Unrelated skills are preserved.
 
 These checks establish installation and helper provenance. Start a new agent
 session and confirm its loaded skill catalog separately; filesystem checks do
@@ -148,11 +153,12 @@ working files into a temporary build context without Git metadata or untracked
 files. Stage intended new public source files explicitly before running it;
 untracked files such as a private `.env` stay outside the context. It uses a digest-pinned Ubuntu 24.04
 image, an ordinary user with an empty home, and a checkout path containing
-spaces. It runs setup twice, then starts a separate container with networking
+spaces. It seeds the old helper directory with published RRT v0.2.9 and runs
+profile update twice, then starts a separate container with networking
 disabled. No host home or checkout is mounted. Disposable Git fixture metadata
 exists only inside the image so source-preservation checks can run.
 
-The disconnected phase checks shells, skills, helper origin, repeated startup,
+The disconnected phase checks shells, skills, both helper origins, repeated startup,
 deleted editable metadata, changed locked source, stale locks, missing build
 cache, recovery after failure, and preserved skills conflicts. Logs and the
 source/image receipt remain in `target/rebuild`. The image tag is retained for

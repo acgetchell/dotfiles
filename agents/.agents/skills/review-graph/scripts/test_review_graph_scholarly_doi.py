@@ -129,13 +129,7 @@ def _scholarly_fixture(
     return original, verified, resolution, capture
 
 
-@pytest.mark.parametrize("first_doi", ["10.1007/example", "10.12345/paper.2018"])
-@pytest.mark.parametrize("adjacent", [False, True])
-def test_checker_output_reconciles_doi_digits_and_adjacent_items(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, first_doi: str, adjacent: bool) -> None:
-    original, _verified, resolution, _capture = _scholarly_fixture(tmp_path, first_doi=first_doi, adjacent=adjacent)
-    rows = json.loads(Path(original["artifacts"][0]["path"]).read_bytes())
-    source = rows[0]["source"]
-    markdown = base64.b64decode(source["content_base64"]).decode()
+def _checker_report(markdown: str, rows: list[dict[str, Any]], source: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     checker_path = SKILL_ROOT / "scientific-citation-audit" / "scripts" / "validate_reference_dois.py"
     monkeypatch.syspath_prepend(str(checker_path.parent))
     checker = runpy.run_path(str(checker_path))
@@ -148,7 +142,17 @@ def test_checker_output_reconciles_doi_digits_and_adjacent_items(tmp_path: Path,
         for row in rows
     }
     results = checker["validate_entries"](checker["extract_entries"](markdown), 1.0, 0.45, lambda doi, _timeout: resolved[doi.value])
-    reported = [{**result.to_json_object(), "source": source} for result in results]
+    return [{**result.to_json_object(), "source": source} for result in results]
+
+
+@pytest.mark.parametrize("first_doi", ["10.1007/example", "10.12345/paper.2018"])
+@pytest.mark.parametrize("adjacent", [False, True])
+def test_checker_output_reconciles_doi_digits_and_adjacent_items(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, first_doi: str, adjacent: bool) -> None:
+    original, _verified, resolution, _capture = _scholarly_fixture(tmp_path, first_doi=first_doi, adjacent=adjacent)
+    rows = json.loads(Path(original["artifacts"][0]["path"]).read_bytes())
+    source = rows[0]["source"]
+    markdown = base64.b64decode(source["content_base64"]).decode()
+    reported = _checker_report(markdown, rows, source, monkeypatch)
     assert [row["local_years"] for row in reported] == [["2005"], ["2013"]]
     original["artifacts"] = [_save_report(Path(original["artifacts"][0]["path"]), reported)]
     validate_scholarly_doi_resolution(resolution, original, {original["evidence_id"]: original})
@@ -172,19 +176,7 @@ def test_escaped_inline_doi_reconciles_only_its_retained_destination(
     markdown = f"[{claim}]({destination})\n\n" + prior.split("\n\n", 1)[1]
     references = markdown.encode()
     source = {**rows[0]["source"], "digest": "sha256:" + sha256(references).hexdigest(), "content_base64": base64.b64encode(references).decode()}
-    checker_path = SKILL_ROOT / "scientific-citation-audit" / "scripts" / "validate_reference_dois.py"
-    monkeypatch.syspath_prepend(str(checker_path.parent))
-    checker = runpy.run_path(str(checker_path))
-    resolved = {
-        row["doi"]: {
-            "title": row["resolved_title"],
-            "author": [{"family": name} for name in row["resolved_authors"]],
-            "issued": {"date-parts": [[int(row["resolved_year"])]]},
-        }
-        for row in rows
-    }
-    results = checker["validate_entries"](checker["extract_entries"](markdown), 1.0, 0.45, lambda doi, _timeout: resolved[doi.value])
-    reported = [{**result.to_json_object(), "source": source} for result in results]
+    reported = _checker_report(markdown, rows, source, monkeypatch)
     assert [row["status"] for row in reported] == ["MISMATCH", "MISMATCH"]
     assert [row["mismatched_fields"] for row in reported] == [["year"], ["year"]]
     assert [row["line"] for row in reported] == ([2, 4] if style == "wrapped-escaped" else [1, 3])
@@ -228,19 +220,7 @@ def test_reference_use_reconciles_only_its_retained_destination_and_claims(
     markdown = "\n\n".join([*lines, *definitions])
     references = markdown.encode()
     source = {**rows[0]["source"], "digest": "sha256:" + sha256(references).hexdigest(), "content_base64": base64.b64encode(references).decode()}
-    checker_path = SKILL_ROOT / "scientific-citation-audit" / "scripts" / "validate_reference_dois.py"
-    monkeypatch.syspath_prepend(str(checker_path.parent))
-    checker = runpy.run_path(str(checker_path))
-    resolved = {
-        row["doi"]: {
-            "title": row["resolved_title"],
-            "author": [{"family": name} for name in row["resolved_authors"]],
-            "issued": {"date-parts": [[int(row["resolved_year"])]]},
-        }
-        for row in rows
-    }
-    results = checker["validate_entries"](checker["extract_entries"](markdown), 1.0, 0.45, lambda doi, _timeout: resolved[doi.value])
-    reported = [{**result.to_json_object(), "source": source} for result in results]
+    reported = _checker_report(markdown, rows, source, monkeypatch)
     assert [row["status"] for row in reported] == ["MISMATCH", "MISMATCH", "OK", "OK"]
     assert [row["local_years"] for row in reported] == [["2005"], ["2013"], ["2018"], ["2012"]]
     if defect in {"different-target", "unresolved"}:

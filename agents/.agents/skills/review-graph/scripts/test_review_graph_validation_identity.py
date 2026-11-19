@@ -28,7 +28,7 @@ from test_review_graph_runtime import (
     _sparse_plan_document,
 )
 from test_review_graph_transitions import _materialize, _payload
-from test_support_review_graph import _prepare_all_fixture_timing
+from test_support_review_graph import _finalize_fixture_proof, _prepare_all_fixture_timing
 
 
 def _runtime_cli(arguments: list[str]) -> None:
@@ -201,26 +201,7 @@ def test_planned_validation_reference_survives_two_repairs_with_fresh_validation
             sources.extend(_compile_repair_fixture_entry(entry, lifecycle, journal) for entry in ready["ready_dispatches"])
         else:
             pytest.fail("repair graph did not complete within its node bound")
-        output = tmp_path / f"proof-{epoch}.json"
-        assert (
-            runtime.main(
-                [
-                    "finalize-proof",
-                    "--input",
-                    result["lifecycle_input_path"],
-                    "--dispatches",
-                    result["dispatches_path"],
-                    "--journal",
-                    str(journal),
-                    "--current-capture",
-                    result["capture_path"],
-                    "--output",
-                    str(output),
-                ]
-            )
-            == 0
-        )
-        final = json.loads(output.read_bytes())
+        final = _finalize_fixture_proof(result, output=tmp_path / f"proof-{epoch}.json")
         assert final["status"] == "complete", final["blockers"]
         assert final["repository_validation_status"] == "passed"
         accepted = set(final["proof"]["accepted_validation_evidence_ids"])

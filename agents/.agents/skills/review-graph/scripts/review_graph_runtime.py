@@ -7200,7 +7200,14 @@ def _apply_journal_transition(plan: GraphPlan, state: dict[str, str], *, node_id
 
 
 def _validated_journal_record(  # noqa: PLR0913 - bind both chain and historical-attempt position before accepting a record.
-    event: dict[str, Any], *, expected_sequence: int, plan: GraphPlan, source_state: tuple[str, str, str], previous_digest: str | None, superseded: bool
+    event: dict[str, Any],
+    *,
+    expected_sequence: int,
+    plan: GraphPlan,
+    source_state: tuple[str, str, str],
+    previous_digest: str | None,
+    superseded: bool,
+    verified_plan_digests: set[str],
 ) -> tuple[str, str]:
     if set(event) - {"recorded_at_unix_ns"} != _JOURNAL_EVENT_KEYS:
         msg = f"journal event {expected_sequence} has unexpected fields"
@@ -7211,9 +7218,11 @@ def _validated_journal_record(  # noqa: PLR0913 - bind both chain and historical
     if _required_int(event, "schema_version") != 1 or _required_int(event, "sequence") != expected_sequence:
         msg = f"journal event sequence is invalid at record {expected_sequence}"
         raise ValueError(msg)
-    if not graph_plan_digest_matches(plan, _required_text(event, "plan_digest")) or _state(event, "source_state") != source_state:
+    plan_digest = _required_text(event, "plan_digest")
+    if (plan_digest not in verified_plan_digests and not graph_plan_digest_matches(plan, plan_digest)) or _state(event, "source_state") != source_state:
         msg = f"journal event {expected_sequence} belongs to a different plan or source state"
         raise ValueError(msg)
+    verified_plan_digests.add(plan_digest)
     if event.get("previous_event_digest") != previous_digest:
         msg = f"journal event {expected_sequence} breaks the digest chain"
         raise ValueError(msg)
@@ -7241,6 +7250,7 @@ def _fold_execution_journal(plan: GraphPlan, source_state: tuple[str, str, str],
     latest: dict[str, dict[str, Any]] = {}
     last = {event.get("node_id"): event for event in events}
     previous_digest: str | None = None
+    verified_plan_digests: set[str] = set()
     for expected_sequence, event in enumerate(events, start=1):
         node_id, status = _validated_journal_record(
             event,
@@ -7249,6 +7259,7 @@ def _fold_execution_journal(plan: GraphPlan, source_state: tuple[str, str, str],
             source_state=source_state,
             previous_digest=previous_digest,
             superseded=event is not last[event.get("node_id")],
+            verified_plan_digests=verified_plan_digests,
         )
         require_validation_barrier(plan, state, latest, node_id=node_id, status=status)
         affected = _apply_journal_transition(plan, state, node_id=node_id, status=status)

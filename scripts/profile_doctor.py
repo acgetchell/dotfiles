@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 from linux_review import inventory, verify_rust_version
-from skills_install import SKILLS, check_helper, inspect_links
+from skills_install import SKILLS, check_helper, default_helper_directory, inspect_links
 from stow_verify import Report, check_stowed_file
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -55,8 +55,7 @@ def check_profile() -> dict[str, object]:
         raise ValueError("; ".join(links.failures))
     destination = Path(os.environ.get("DOTFILES_REVIEW_SKILLS_DIR", Path.home() / ".agents/skills"))
     inspect_links(SKILLS, destination, installed=True)
-    prefix = Path(os.environ.get("DOTFILES_REVIEW_PREFIX", Path.home() / ".local/share/dotfiles-review"))
-    origin = check_helper(prefix / "helper/bin/python")
+    origin = check_helper(default_helper_directory() / "bin/python")
     return {
         "status": "passed",
         "environment": report,
