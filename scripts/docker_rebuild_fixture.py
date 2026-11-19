@@ -12,6 +12,8 @@ from linux_review import source_identity
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT.parent / "editable fixture"
+LEGACY_HELPER_VERSION = "0.2.9"
+LEGACY_HELPER_RECEIPT = ROOT / "target/legacy-helper-origin.json"
 
 
 def run(argv: list[str], *, cwd: Path = ROOT, environment: dict[str, str] | None = None, expected: int = 0) -> subprocess.CompletedProcess[str]:
@@ -22,8 +24,29 @@ def run(argv: list[str], *, cwd: Path = ROOT, environment: dict[str, str] | None
     return result
 
 
+def legacy_helper_origin() -> str:
+    """Verify the frozen helper through the real graph provenance check."""
+    python = Path(os.environ["DOTFILES_REVIEW_PREFIX"]) / "helper/bin/python"
+    return run(
+        [
+            str(python),
+            "-E",
+            "-s",
+            "agents/.agents/skills/review-graph/scripts/review_graph_environment.py",
+            "--repository",
+            str(ROOT),
+            "--helper-version",
+            LEGACY_HELPER_VERSION,
+        ]
+    ).stdout
+
+
 def prepare(uv: str, git: str) -> None:
     """Provision ordinary published build inputs and retain them for disconnected tests."""
+    legacy = Path(os.environ["DOTFILES_REVIEW_PREFIX"]) / "helper"
+    run([uv, "venv", "--no-project", "--no-config", "--python", sys.executable, str(legacy)])
+    run([uv, "pip", "install", "--no-config", "--python", str(legacy / "bin/python"), "--link-mode", "copy", f"research-repo-tools=={LEGACY_HELPER_VERSION}"])
+    LEGACY_HELPER_RECEIPT.write_text(legacy_helper_origin())
     FIXTURE.mkdir()
     metadata = tomllib.loads((ROOT / "pyproject.toml").read_text())
     setuptools = next(item for item in metadata["dependency-groups"]["build"] if isinstance(item, str) and item.startswith("setuptools=="))
@@ -109,9 +132,11 @@ def verify() -> None:
 
 def verify_skills_only() -> None:
     """Install twice into an isolated discovery root and preserve conflicts."""
-    helper = Path(os.environ["DOTFILES_REVIEW_PREFIX"]) / "helper"
+    if legacy_helper_origin() != LEGACY_HELPER_RECEIPT.read_text():
+        msg = "Profile upgrade changed the frozen helper's origin"
+        raise ValueError(msg)
     destination = ROOT / "target/skills-only"
-    skills = [sys.executable, "scripts/skills_install.py", "install", "--destination", str(destination), "--helper", str(helper)]
+    skills = [sys.executable, "scripts/skills_install.py", "install", "--destination", str(destination)]
     run(skills)
     run(skills)
     collision = destination / "review-graph"

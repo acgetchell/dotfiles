@@ -95,10 +95,16 @@ def helper_version() -> str:
     return value
 
 
+def default_helper_directory() -> Path:
+    """Select a directory for the pinned helper while preserving older runtimes."""
+    prefix = Path(os.environ.get("DOTFILES_REVIEW_PREFIX", Path.home() / ".local/share/dotfiles-review"))
+    return prefix / f"helper-{helper_version()}"
+
+
 def check_helper(helper: Path) -> dict[str, object]:
     """Probe the actual isolated interpreter with the graph's existing origin checks."""
     if not helper.is_absolute() or not helper.is_file():
-        msg = "Isolated helper Python is missing; run just skills-helper-setup with a new external directory"
+        msg = f"Isolated helper Python is missing at {helper}; run just skills-helper-setup or Linux profile setup"
         raise ValueError(msg)
     result = subprocess.run(  # noqa: S603 - explicit interpreter and repository-owned read-only probe.
         [str(helper), "-E", "-s", str(ENVIRONMENT), "--repository", str(ROOT), "--helper-version", helper_version()],
@@ -169,18 +175,18 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=("install", "check", "helper-setup"))
     parser.add_argument("--destination", type=Path, default=Path.home() / ".agents/skills")
-    prefix = Path(os.environ.get("DOTFILES_REVIEW_PREFIX", Path.home() / ".local/share/dotfiles-review"))
-    parser.add_argument("--helper", type=Path, default=prefix / "helper")
+    parser.add_argument("--helper", type=Path, help="override the default versioned helper directory")
     args = parser.parse_args(argv)
     try:
         if sys.platform not in {"darwin", "linux"}:
             msg = "Skills setup supports macOS and Linux; other platforms are unverified"
             raise ValueError(msg)
+        helper = args.helper if args.helper is not None else default_helper_directory()
         if args.mode == "helper-setup":
-            prepare_helper(args.helper)
+            prepare_helper(helper)
             return 0
         # Check runtime and metadata before adding any discovery links.
-        check_helper(args.helper.absolute() / "bin/python")
+        check_helper(helper.absolute() / "bin/python")
         for source in skill_sources(SKILLS):
             valid, diagnostic = validate_skill(source)
             if not valid:

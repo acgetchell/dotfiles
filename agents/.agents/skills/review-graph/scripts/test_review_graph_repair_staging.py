@@ -28,7 +28,7 @@ from test_review_graph_runtime import (
     _run_test_git,
 )
 from test_review_graph_transitions import _materialize, _payload
-from test_support_review_graph import _prepare_all_fixture_timing
+from test_support_review_graph import _finalize_fixture_proof, _prepare_all_fixture_timing
 
 
 def _staged_repair(tmp_path: Path, dependency: str = "source") -> tuple[str, Path, dict[str, Any], dict[str, Any], dict[Path, bytes]]:
@@ -159,26 +159,7 @@ def _finish_repair(tmp_path: Path, result: dict[str, Any]) -> list[str]:
             executed.append(entry["node_id"])
     else:
         pytest.fail("repair plus staging did not complete within its node bound")
-    output = tmp_path / "final.json"
-    assert (
-        runtime.main(
-            [
-                "finalize-proof",
-                "--input",
-                result["lifecycle_input_path"],
-                "--dispatches",
-                result["dispatches_path"],
-                "--journal",
-                str(journal),
-                "--current-capture",
-                result["capture_path"],
-                "--output",
-                str(output),
-            ]
-        )
-        == 0
-    )
-    final = json.loads(output.read_bytes())
+    final = _finalize_fixture_proof(result, output=tmp_path / "final.json")
     assert final["status"] == "complete", final["blockers"]
     assert final["repository_validation_status"] == "passed"
     assert set(final["proof"]["accepted_validation_evidence_ids"]) == {

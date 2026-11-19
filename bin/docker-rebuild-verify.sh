@@ -19,9 +19,11 @@ case "${1:-}" in
     printf 'export DOTFILES_LOCAL_MARKER=preserve\n' > "$HOME/.zshrc.local"
     mkdir -p "$HOME/.agents/skills/unrelated-skill"
     printf 'local skill\n' > "$HOME/.agents/skills/unrelated-skill/SKILL.md"
-    bash bin/setup-profile.sh linux-cloud setup
-    bash bin/setup-profile.sh linux-cloud setup
+    bash bin/linux-rust.sh
+    bash bin/linux-review.sh setup
     "$DOTFILES_REVIEW_PREFIX/venv/bin/python" scripts/docker_rebuild_fixture.py prepare
+    just update linux-cloud
+    just update linux-cloud
     just cloud-provision target/rebuild-inventory.toml
     ;;
   offline)

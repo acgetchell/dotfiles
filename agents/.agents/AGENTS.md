@@ -35,6 +35,20 @@ loading it does not authorize Git mutations, unrelated changes, or a new CI
 matrix. If the skill cannot be loaded, report that limitation instead of silently
 substituting a generic review or claiming that portability was checked.
 
+## Required PR Push Gates
+
+Before an initial or corrective PR push, load and apply
+[pr-push-gate](skills/pr-push-gate/SKILL.md). Do not push until the outgoing
+changes have passed `just security` and `just ci`, and a local CodeRabbit CLI
+review has completed. This includes CI fixes, test-only changes, documentation,
+and small follow-ups. Focused checks, an earlier source state, pending runs,
+or hosted PR reviews do not satisfy these gates.
+
+This policy authorizes the included local review needed for an otherwise
+authorized PR task; it does not authorize paid reviews or Git mutations.
+If any gate is unavailable, failed, incomplete, or awaiting paid consent,
+hold the push and report the blocker. Preserve the paid-review rules below.
+
 ## CodeRabbit Paid Review Consent
 
 - Start CodeRabbit reviews without `--use-credits`, using the repository's

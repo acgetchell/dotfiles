@@ -233,7 +233,7 @@ rules and real fixtures while generic runner tests live upstream.
 The shared runner and native scan recipes select the same locked Semgrep
 installation and published compatibility pins.
 The Jupyter review skill delegates notebook inspection, advice, validation, native
-Ruff/ty lint, cleanup, and execution to published v0.2.9 shared commands. It keeps
+Ruff/ty lint, cleanup, and execution to published v0.3.0 shared commands. It keeps
 only review policy and a tested consumer configuration template; generic notebook
 implementation and regression coverage live upstream. See the
 [shared notebook workflow](agents/.agents/skills/jupyter-notebook-review/references/shared-notebooks.md)
@@ -243,7 +243,7 @@ execution dependencies belong to each consumer's locked notebook environment.
 
 ### Shared tooling and Python upgrades
 
-Dotfiles adopts `research-repo-tools==0.2.9` for Python baseline inheritance,
+Dotfiles adopts `research-repo-tools==0.3.0` for Python baseline inheritance,
 tracked and nonignored file selection, notebook policy, workflow audits, dependency
 and secret scans, managed scanner setup/cleanup, and index-preserving review
 scope inspection. The
@@ -255,8 +255,8 @@ as the sole allowlist. `just actions-check` uses the same workflow-only scope to
 check repeated `astral-sh/setup-uv` SHAs and version comments offline. Both remain
 part of `github-actions-check` and CI; actionlint owns workflow syntax and zizmor
 owns SHA pinning. Dependabot owns workflow updates, including the coupled CI and
-zizmor pins. The reusable approval workflow selects the v0.2.9 commit; its workflow
-bytes match the previously reviewed pin.
+zizmor pins. The reusable approval workflow selects the v0.3.0 commit; its workflow
+bytes match the previously reviewed v0.2.9 pin.
 
 Python 3.15 is inherited from v0.2.3. Preview and apply future upgrades with the published version:
 

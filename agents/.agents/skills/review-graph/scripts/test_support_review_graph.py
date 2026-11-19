@@ -1,12 +1,13 @@
 """Shared structural builders; the test_ prefix excludes them from frozen runtimes."""
 
+import json
 import shutil
 from pathlib import Path
 from typing import Any
 
 from capture_scope import _scope_data
 from research_repo_tools.process import run_command_bytes
-from review_graph_runtime import build_routing_projection_document
+from review_graph_runtime import build_routing_projection_document, main
 from review_graph_timing import timing_documents
 
 SKILL_ROOT = Path(__file__).resolve().parents[2]
@@ -29,6 +30,29 @@ def _prepare_all_fixture_timing(dispatch_set: dict[str, Any]) -> None:
         dispatch = entry["dispatch"]
         if dispatch["mode"] == "validation" and not Path(dispatch["timing_prerequisite"]["manifest_path"]).exists():
             _prepare_fixture_timing(entry)
+
+
+def _finalize_fixture_proof(result: dict[str, Any], *, output: Path) -> dict[str, Any]:
+    """Finalize a continuation through the CLI and read its saved proof."""
+    assert (
+        main(
+            [
+                "finalize-proof",
+                "--input",
+                result["lifecycle_input_path"],
+                "--dispatches",
+                result["dispatches_path"],
+                "--journal",
+                result["journal_path"],
+                "--current-capture",
+                result["capture_path"],
+                "--output",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    return json.loads(output.read_bytes())
 
 
 def _captured_rust_repository(tmp_path: Path, *, branch: bool = False) -> dict[str, Any]:
