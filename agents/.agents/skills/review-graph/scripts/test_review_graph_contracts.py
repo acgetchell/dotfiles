@@ -4,9 +4,11 @@ import json
 from pathlib import Path
 
 import pytest
-from review_graph_plan import expand_compact_routing, load_routing_catalog, validate_routing_ledger
+from review_graph_bootstrap import bootstrap_document
+from review_graph_plan import expand_compact_routing, load_routing_catalog, plan_from_document, validate_routing_ledger
 from review_graph_runtime import build_routing_projection_document
-from test_support_review_graph import ROUTING_CATALOG, SKILL_ROOT, VALIDATOR_CONTRACT, VALIDATOR_SKILL, _assessed_fixture_candidates
+from test_support_review_graph import ROUTING_CATALOG, SKILL_ROOT, VALIDATOR_CONTRACT, VALIDATOR_SKILL, _assessed_fixture_candidates, _sparse_plan_document
+from test_support_review_graph_capture import _capture, _commit_all, _git, _init_repo
 
 pytestmark = pytest.mark.review_contract
 
@@ -110,6 +112,51 @@ def test_partial_assessment_reports_the_remaining_candidate(path: str, router: s
         expand_compact_routing(catalog, consulted_routers=routers, captured_paths=[path], overrides=partial_assessments)
 
     assert str(error.value) == f"semantic applicability decisions required for path-matched candidates: {missing_catalog_id}"
+
+
+def test_markdown_only_capture_routes_fenced_python_to_style_review(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    guide = repo / "guide.md"
+    guide.write_text("Prose.\n")
+    _commit_all(repo)
+    guide.write_text("> - ~~~Python\n>   print(42)\n>   ~~~\n")
+    _git(repo, "add", "guide.md")
+    guide.write_text("````text\n```python\n```\n````\n")
+    template = _sparse_plan_document()
+    template.update(
+        consulted_routers=["review-graph"],
+        routing_overrides=[],
+        concrete_change_target=True,
+        change_target="git diff --cached -- guide.md",
+        scope_mode="staged-only",
+    )
+    template["validation_requirements"][0]["working_directories"] = [str(repo)]
+    for mode, selected in (("staged", True), ("worktree", False)):
+        capture = _capture(repo, mode)
+        document = bootstrap_document(capture, template)
+        projection = build_routing_projection_document(document)
+        assert ("python-review-orchestrator" in projection["consulted_routers"]) == selected
+        if selected:
+            assert next(entry for entry in projection["entries"] if entry["catalog_id"] == "python.style")["matched_paths"] == ["guide.md"]
+            plan = plan_from_document(document, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repo)
+            assert plan.dispatch_allowed, plan.blockers
+            style = next(node for node in plan.actual_worker_nodes if node.skill_id == "python-style-hygiene")
+            assert style.coverage == ("guide.md",)
+
+
+def test_markdown_example_preserves_explicit_style_assessment_for_python_source() -> None:
+    paths = ["guide.md", "tool.py"]
+    routers = ["review-graph", "python-review-orchestrator"]
+    assessments = _assessed_fixture_candidates(paths, routers, {})
+    with pytest.raises(ValueError, match=r"required for path-matched candidates: python\.style$"):
+        expand_compact_routing(
+            load_routing_catalog(ROUTING_CATALOG),
+            consulted_routers=routers,
+            captured_paths=paths,
+            python_example_paths=["guide.md"],
+            overrides=[item for item in assessments if item["catalog_id"] != "python.style"],
+        )
 
 
 def test_sparse_routing_expands_to_exhaustive_catalog_records() -> None:

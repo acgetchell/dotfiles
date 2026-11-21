@@ -38,7 +38,7 @@ def check_helper_compatibility() -> None:
 
 
 def _installed_package() -> tuple[importlib.metadata.Distribution, Path]:
-    """Return the distribution and import origin after verifying the installed package against its recorded hash."""
+    """Return the distribution and import origin after verifying the origin file's SHA-256 against RECORD."""
     spec = importlib.util.find_spec(_PACKAGE)
     if spec is None or spec.origin is None:
         msg = "review runtime requires the installed research-repo-tools dependency"

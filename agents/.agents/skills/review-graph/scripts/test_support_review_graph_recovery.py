@@ -185,7 +185,7 @@ def _compile_aggregate(  # noqa: PLR0913 - preserve the exact modeled fault thro
     started = time.monotonic()
     run = subprocess.run(  # noqa: S603 - fixture-owned aggregate models a denied capability without requiring actual socket access.
         shlex.split(unit["commands"][-1]),
-        cwd=unit["working_directories"][0],
+        cwd=unit["working_directories"][-1],
         env={**os.environ, "FIXTURE_SOCKET_ACCESS": "permitted" if permitted else "denied"},
         capture_output=True,
         check=False,
@@ -213,7 +213,7 @@ def _compile_aggregate(  # noqa: PLR0913 - preserve the exact modeled fault thro
             *preceding,
             {
                 "command": unit["commands"][-1],
-                "working_directory": unit["working_directories"][0],
+                "working_directory": unit["working_directories"][-1],
                 "executor": entry["node_id"],
                 "result": status,
                 "exit_code": run.returncode,

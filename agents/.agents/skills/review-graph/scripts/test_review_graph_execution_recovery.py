@@ -56,7 +56,7 @@ def _fixture(
         {
             **original,
             "requirement_id": "aggregate",
-            "commands": [*(["true"] if extra_command else []), shlex.join([sys.executable, str(script)])],
+            "commands": [*(["true"] if extra_command else []), shlex.join([sys.executable, script.name if extra_command else str(script)])],
             "canonical_recipe": "just ci",
             "isolation_root": str(tmp_path),
             "working_directories": [str(tmp_path)] * (2 if extra_command else 1),
@@ -319,7 +319,9 @@ def test_recovered_history_tampering_blocks_scheduling(tmp_path: Path) -> None:
 
 
 def test_recovery_rejects_unit_with_a_separately_passed_command(tmp_path: Path) -> None:
-    request, args, _failed, _successful = _fixture(tmp_path, extra_command=True)
+    first = tmp_path / "first-command"
+    first.mkdir()
+    request, args, _failed, _successful = _fixture(tmp_path, extra_command=True, unit_overrides={"working_directories": [str(first), str(tmp_path)]})
     with pytest.raises(ValueError, match="never replay separately passed commands"):
         recover_validation_execution(request, args)
     assert not Path(request["artifact_store"]).exists()

@@ -1491,10 +1491,19 @@ def assess_routing_discoveries(decisions: Sequence[RoutingDecision], discoveries
     return Assessment(not blockers, tuple(blockers))
 
 
-def classify_repository_paths(paths: Sequence[str], *, release_readiness: bool = False) -> dict[str, tuple[str, ...]]:  # noqa: C901
+def _python_example_signals(paths: Sequence[str], examples: Sequence[str]) -> set[str]:
+    """Bind each reported Python fence to a Markdown file in the selected scope."""
+    if examples and (set(examples) - set(paths) or any(PurePosixPath(path).suffix.lower() not in {".md", ".markdown"} for path in examples)):
+        msg = "captured Python example paths must be Markdown files in the captured scope"
+        raise ValueError(msg)
+    return {f"{path}: captured Markdown contains a fenced Python example" for path in examples}
+
+
+def classify_repository_paths(paths: Sequence[str], *, release_readiness: bool = False, python_example_paths: Sequence[str] = ()) -> dict[str, tuple[str, ...]]:  # noqa: C901
     """Return conservative repository-surface signals, including shared owners."""
     normalized = tuple(str(PurePosixPath(path)) for path in paths)
     signals: dict[str, set[str]] = {surface: set() for surface in _CLASSIFIER_SURFACES}
+    signals["python"] = _python_example_signals(normalized, python_example_paths)
 
     def add(surface: str, path: str, reason: str) -> None:
         """Record a path and reason once per classified surface."""
@@ -1598,6 +1607,7 @@ def expand_compact_routing(  # noqa: C901, PLR0912, PLR0913, PLR0915
     *,
     consulted_routers: Sequence[str],
     captured_paths: Sequence[str],
+    python_example_paths: Sequence[str] = (),
     overrides: Sequence[Mapping[str, Any]],
     instruction_paths: Sequence[str] = (),
     change_target: str | None = None,
@@ -1610,12 +1620,12 @@ def expand_compact_routing(  # noqa: C901, PLR0912, PLR0913, PLR0915
     Unmatched omissions become not-applicable; repository classifier signals,
     independent review, and required synthesis retain their mandatory defaults.
     """
-    consulted = tuple(dict.fromkeys(consulted_routers))
+    consulted = _routers_for_examples(consulted_routers, python_example_paths)
     if REPOSITORY_ROUTER_ID not in consulted:
         msg = f"compact routing must consult {REPOSITORY_ROUTER_ID}"
         raise ValueError(msg)
     normalized_paths = tuple(str(PurePosixPath(path)) for path in captured_paths)
-    signals = classify_repository_paths(normalized_paths, release_readiness=release_readiness)
+    signals = classify_repository_paths(normalized_paths, release_readiness=release_readiness, python_example_paths=python_example_paths)
     override_ids = tuple(str(item.get("catalog_id", "")) for item in overrides)
     _validate_unique_ids(override_ids, label="compact routing overrides")
     catalog_by_id = {entry.catalog_id: entry for entry in catalog}
@@ -1633,12 +1643,15 @@ def expand_compact_routing(  # noqa: C901, PLR0912, PLR0913, PLR0915
             raise ValueError(msg)
         overrides_by_id[str(item["catalog_id"])] = item
 
+    matches = {entry.catalog_id: _catalog_matched_paths(entry, normalized_paths, signals, python_example_paths) for entry in active_entries}
+    examples_only = bool(python_example_paths) and set(matches.get("python.style", ())).issubset(python_example_paths)
     unresolved = [
         entry.catalog_id
         for entry in active_entries
         if entry.target_kind == "leaf"
         and entry.catalog_id not in overrides_by_id
-        and _catalog_matched_paths(entry, normalized_paths, signals)
+        and matches[entry.catalog_id]
+        and not (entry.catalog_id == "python.style" and examples_only)
         and not (entry.router_id == REPOSITORY_ROUTER_ID and entry.layer == "repository" and entry.surface in signals)
     ]
     if unresolved:
@@ -1651,12 +1664,12 @@ def expand_compact_routing(  # noqa: C901, PLR0912, PLR0913, PLR0915
     decisions: list[RoutingDecision] = []
     for entry in active_entries:
         override = overrides_by_id.get(entry.catalog_id)
-        matched_paths = _catalog_matched_paths(entry, normalized_paths, signals)
+        matched_paths = matches[entry.catalog_id]
         selected_by_classifier = entry.router_id == REPOSITORY_ROUTER_ID and entry.layer == "repository" and entry.surface in signals
         selected_by_projection = entry.target_kind == "leaf" and bool(matched_paths)
         selected_independent = entry.target_kind == "independent" and bool(change_target)
         selected_synthesis = entry.target_kind == "synthesis"
-        default_selected = selected_by_classifier or selected_independent or selected_synthesis
+        default_selected = selected_by_classifier or selected_independent or selected_synthesis or (entry.catalog_id == "python.style" and examples_only)
         disposition = str(override.get("disposition")) if override is not None else ("selected" if default_selected else "not-applicable")
 
         if override is not None:
@@ -1741,7 +1754,14 @@ def _catalog_path_matches(path: str, pattern: str) -> bool:
     return any(fnmatch.fnmatch(path, candidate) for candidate in variants)
 
 
-def _catalog_matched_paths(entry: RoutingCatalogEntry, normalized_paths: Sequence[str], classifier_signals: Mapping[str, Sequence[str]]) -> tuple[str, ...]:
+def _routers_for_examples(routers: Sequence[str], python_example_paths: Sequence[str]) -> tuple[str, ...]:
+    """Include the Python router when capture found a fenced example in Markdown."""
+    return tuple(dict.fromkeys((*routers, "python-review-orchestrator") if python_example_paths else routers))
+
+
+def _catalog_matched_paths(
+    entry: RoutingCatalogEntry, normalized_paths: Sequence[str], classifier_signals: Mapping[str, Sequence[str]], python_example_paths: Sequence[str] = ()
+) -> tuple[str, ...]:
     """Match default paths and guards, excluding file kinds owned elsewhere.
 
     Exclusions affect projection only; explicit semantic overrides remain valid.
@@ -1750,17 +1770,20 @@ def _catalog_matched_paths(entry: RoutingCatalogEntry, normalized_paths: Sequenc
     for classifier_surface, patterns in entry.classifier_guarded_path_patterns:
         if classifier_surface in classifier_signals:
             active_patterns.extend(patterns)
+    examples = set(python_example_paths) if entry.catalog_id in {"repo.python", "python.style"} else set()
     return tuple(
         path
         for path in normalized_paths
-        if any(_catalog_path_matches(path, pattern) for pattern in active_patterns)
+        if (path in examples or any(_catalog_path_matches(path, pattern) for pattern in active_patterns))
         and not any(_catalog_path_matches(path, pattern) for pattern in entry.excluded_path_patterns)
     )
 
 
-def build_routing_projection(catalog: Sequence[RoutingCatalogEntry], *, consulted_routers: Sequence[str], captured_paths: Sequence[str]) -> dict[str, Any]:
+def build_routing_projection(
+    catalog: Sequence[RoutingCatalogEntry], *, consulted_routers: Sequence[str], captured_paths: Sequence[str], python_example_paths: Sequence[str] = ()
+) -> dict[str, Any]:
     """Project the complete consulted catalog into a compact semantic routing view."""
-    consulted = tuple(dict.fromkeys(consulted_routers))
+    consulted = _routers_for_examples(consulted_routers, python_example_paths)
     if REPOSITORY_ROUTER_ID not in consulted:
         msg = f"routing projection must consult {REPOSITORY_ROUTER_ID}"
         raise ValueError(msg)
@@ -1770,12 +1793,12 @@ def build_routing_projection(catalog: Sequence[RoutingCatalogEntry], *, consulte
         msg = "routing projection references unknown routers: " + ", ".join(unknown)
         raise ValueError(msg)
     normalized_paths = _normalized_repository_paths(captured_paths, label="routing projection captured_paths")
-    classifier_signals = classify_repository_paths(normalized_paths)
+    classifier_signals = classify_repository_paths(normalized_paths, python_example_paths=python_example_paths)
     entries: list[dict[str, Any]] = []
     for entry in catalog:
         if entry.router_id not in consulted:
             continue
-        matched_paths = _catalog_matched_paths(entry, normalized_paths, classifier_signals)
+        matched_paths = _catalog_matched_paths(entry, normalized_paths, classifier_signals, python_example_paths)
         entries.append(
             {
                 "catalog_id": entry.catalog_id,
@@ -6136,7 +6159,8 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0913, PLR0915
     exclusions = scope_exclusions(document.get("review_scope_exclusions", []))
     if exhaustive_routing:
         routing_catalog = load_routing_catalog(catalog_path, skill_roots=skill_roots)
-        consulted_routers = _tuple_field(document, "consulted_routers")
+        python_example_paths = _tuple_field(document, "captured_python_example_paths")
+        consulted_routers = _routers_for_examples(_tuple_field(document, "consulted_routers"), python_example_paths)
         concrete_change_target = document.get("concrete_change_target")
         if not isinstance(concrete_change_target, bool):
             msg = "exhaustive routing requires concrete_change_target=true or false"
@@ -6159,6 +6183,7 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 routing_catalog,
                 consulted_routers=consulted_routers,
                 captured_paths=captured_paths,
+                python_example_paths=python_example_paths,
                 overrides=_compact_routing_overrides_from_document(document, repository_root, skill_roots),
                 instruction_paths=global_instruction_paths,
                 change_target=change_target,
@@ -6220,7 +6245,9 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 )
         if captured_paths is not None:
             classifier = assess_repository_classifier_floor(
-                routing_catalog, routing_decisions, classify_repository_paths(captured_paths, release_readiness=release_readiness)
+                routing_catalog,
+                routing_decisions,
+                classify_repository_paths(captured_paths, release_readiness=release_readiness, python_example_paths=python_example_paths),
             )
             if not classifier.feasible:
                 routing_metadata_blockers.extend(classifier.blockers)

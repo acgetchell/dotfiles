@@ -165,6 +165,34 @@ def _publish_worker_bytes(entry: dict[str, Any], payload_bytes: bytes) -> dict[s
     return json.loads(published.stdout)
 
 
+def _compile_passing_validation(dispatch: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:
+    """Compile a passing result for every planned command, including required workspace snapshots."""
+    if dispatch["workspace_policy"]["snapshots_required"]:
+        snapshot = capture_workspace_snapshot(dispatch)["records"]
+        dispatch.update({"workspace_after": snapshot, "workspace_before": snapshot})
+    unit = dispatch["validation_unit"]
+    payload = {
+        "schema_version": 3,
+        "artifacts": [],
+        "executions": [
+            {
+                "artifact_paths": [],
+                "command": command,
+                "elapsed": "0s",
+                "evidence": "command exited successfully",
+                "executor": dispatch["node_id"],
+                "exit_code": 0,
+                "result": "passed",
+                "working_directory": working_directory,
+            }
+            for command, working_directory in zip(unit["commands"], unit["working_directories"], strict=True)
+        ],
+        "limitations": [],
+        "status": "passed",
+    }
+    return compile_validation({"dispatch": dispatch, "payload": payload})
+
+
 def _compile_materialized_evidence(  # noqa: PLR0913
     tmp_path: Path,
     *,
@@ -196,33 +224,13 @@ def _compile_materialized_evidence(  # noqa: PLR0913
         if entry["node_id"] in skip_node_ids:
             continue
         dispatch = entry["dispatch"]
-        dispatch.update({"after_state": ["scope", "worktree", "repository"], "before_state": ["scope", "worktree", "repository"]})
+        dispatch.update(before_state=dispatch["source_state"], after_state=dispatch["source_state"])
         if entry["result_contract"] == "compact-validation":
-            if dispatch["workspace_policy"]["snapshots_required"]:
-                snapshot = capture_workspace_snapshot(dispatch)["records"]
-                dispatch.update({"workspace_after": snapshot, "workspace_before": snapshot})
-            unit = dispatch["validation_unit"]
-            payload = {
-                "schema_version": 3,
-                "artifacts": [],
-                "executions": [
-                    {
-                        "artifact_paths": [],
-                        "command": command,
-                        "elapsed": "0s",
-                        "evidence": "command exited successfully",
-                        "executor": dispatch["node_id"],
-                        "exit_code": 0,
-                        "result": "passed",
-                        "working_directory": working_directory,
-                    }
-                    for command, working_directory in zip(unit["commands"], unit["working_directories"], strict=True)
-                ],
-                "limitations": [],
-                "status": "passed",
-            }
-            content, metadata = compile_validation({"dispatch": dispatch, "payload": payload})
+            content, metadata = _compile_passing_validation(dispatch)
             kind = "validation"
+        elif entry["result_contract"] == "compact-independent-review":
+            content, metadata = runtime.compile_independent_payload({"dispatch": dispatch, "payload": _compact_independent_payload(dispatch)})
+            kind = "review"
         else:
             if handoff_catalog_id is not None and dispatch["skill_id"] == "rust-invariant-state-transitions":
                 handoffs = [

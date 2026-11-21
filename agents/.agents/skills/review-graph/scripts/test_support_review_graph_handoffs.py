@@ -240,7 +240,8 @@ def _handoff(  # noqa: PLR0913 - orthogonal fixture execution and contract contr
     journal = tmp_path / "execution.jsonl"
     lifecycle.update(journal_path=str(journal), dispatches_path=str(dispatches))
     entry = next(item for item in entries["dispatches"] if item["result_contract"] == "compact-validation")
-    payload = _execution_payload(entry, result, 1 if result == "failed" else 0, "1s")
+    exit_code = {"passed": 0, "failed": 1}.get(result)
+    payload = _execution_payload(entry, result, exit_code, "1s" if exit_code is not None else None)
     if failure_kind is not None:
         payload["failure_kind"] = failure_kind
     if dependencies is not None:

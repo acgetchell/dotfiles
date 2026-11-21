@@ -1,6 +1,7 @@
 """Workflow cost, prerequisite, and continuation regressions without Git mutations."""
 
 import json
+import os
 import shutil
 import subprocess
 from argparse import Namespace
@@ -84,6 +85,11 @@ def test_benchmark_replays_committed_schemas_without_wave_telemetry(tmp_path: Pa
     schema_path.write_text(json.dumps(schema), encoding="utf-8")
     git = shutil.which("git")
     assert git is not None
+    # Keep setup and the benchmark's own Git subprocesses in the temporary checkout.
+    git_locations = {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR", "GIT_ALTERNATE_OBJECT_DIRECTORIES"}
+    for name in tuple(os.environ):
+        if name.upper() in git_locations:
+            monkeypatch.delenv(name)
     run_command_bytes(git, ("init", "-q"), cwd=checkout)
     run_command_bytes(git, ("add", "scripts", "references"), cwd=checkout)
     run_command_bytes(git, ("-c", "user.name=Fixture", "-c", "user.email=fixture@example.org", "commit", "-qm", "Baseline"), cwd=checkout)

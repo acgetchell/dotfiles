@@ -2365,6 +2365,18 @@ def test_independent_review_dispatch_excludes_coordinator_context(tmp_path: Path
     assert entry["dispatch"]["planned_path_line_bounds"] == [[STATE_FIXTURE, 3]]
     _assert_compact_dispatches(result["dispatches"])
 
+    bound_state = ("captured-scope", "captured-worktree", "captured-repository")
+    bound_plan = replace(
+        independent_plan, coalesced_validation_units=tuple(replace(unit, source_state=bound_state) for unit in plan.coalesced_validation_units)
+    )
+    _, sources = _compile_materialized_evidence(tmp_path / "evidence", plan=bound_plan)
+    source = _source_by_node(sources)[independent.node_id]
+    assert source["kind"] == "review"
+    assert "## Review Graph Envelope" in Path(source["artifact_path"]).read_text()
+    for item in sources:
+        fingerprints = json.loads(Path(item["metadata_path"]).read_bytes())["evidence"]["fingerprints"]
+        assert fingerprints["before"] == fingerprints["after"] == list(bound_state)
+
 
 def test_exact_overlap_leaves_share_only_trusted_read_only_observations(tmp_path: Path) -> None:
     plan = _sparse_plan()

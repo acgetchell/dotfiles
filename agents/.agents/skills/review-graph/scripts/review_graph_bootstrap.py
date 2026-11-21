@@ -64,6 +64,7 @@ def bootstrap_document(capture: dict[str, Any], template: dict[str, Any]) -> dic
             "branch": capture.get("branch"),
             "capture_mode": capture_mode,
             "captured_path_line_bounds": capture.get("captured_path_line_bounds"),
+            "captured_python_example_paths": capture.get("captured_python_example_paths", []),
             "captured_paths": captured_paths,
             "captured_scope_paths": captured_paths,
             "captured_worktree_fingerprint": capture.get("captured_worktree_fingerprint"),

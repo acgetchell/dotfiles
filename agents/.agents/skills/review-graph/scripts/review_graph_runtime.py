@@ -3662,7 +3662,10 @@ def build_routing_projection_document(
     """Load and project the complete consulted routing catalog."""
     catalog = load_routing_catalog(catalog_path, skill_roots=skill_roots)
     return build_routing_projection(
-        catalog, consulted_routers=_text_list(document, "consulted_routers", required=True), captured_paths=_text_list(document, "captured_paths")
+        catalog,
+        consulted_routers=_text_list(document, "consulted_routers", required=True),
+        captured_paths=_text_list(document, "captured_paths"),
+        python_example_paths=_text_list(document, "captured_python_example_paths"),
     )
 
 

@@ -58,6 +58,9 @@
     "captured_paths": {
       "$ref": "#/$defs/stringArray"
     },
+    "captured_python_example_paths": {
+      "$ref": "#/$defs/stringArray"
+    },
     "captured_path_dispositions": {
       "description": "Assess files outside audit ownership in a whole-repository baseline. Dependency catalog_ids identify selected or exactly reused audit leaves that must prove context reads without claiming owned coverage.",
       "type": "array",

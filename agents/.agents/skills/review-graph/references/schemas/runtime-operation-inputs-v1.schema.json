@@ -1620,6 +1620,9 @@
     "routing-projection": {
       "additionalProperties": true,
       "properties": {
+        "captured_python_example_paths": {
+          "$ref": "#/$defs/stringArray"
+        },
         "captured_paths": {
           "$ref": "#/$defs/stringArray"
         },

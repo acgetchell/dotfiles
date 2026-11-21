@@ -122,7 +122,7 @@ def test_capture_still_reads_both_content_observations(tmp_path: Path, monkeypat
     _commit_all(repo)
     original = capture_scope._captured_path_line_bounds
 
-    def change_between_observations(**kwargs: Any) -> dict[str, int]:
+    def change_between_observations(**kwargs: Any) -> tuple[dict[str, int], list[str]]:
         """Change file bytes between observations while preserving size and modification time."""
         bounds = original(**kwargs)
         metadata = source.stat()

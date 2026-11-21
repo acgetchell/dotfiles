@@ -60,7 +60,7 @@ def _invoke(tmp_path: Path, capture: dict[str, Any], choices: dict[str, Any]) ->
 def _cli(script: Path, *arguments: str, stdin: bytes | None = None) -> subprocess.CompletedProcess[bytes]:
     """Run the session script without writing bytecode and return its captured byte streams."""
     return subprocess.run(  # noqa: S603 - fixed repository scripts with isolated fixture paths.
-        [sys.executable, "-B", str(script), *arguments], input=stdin, capture_output=True, check=True
+        [sys.executable, "-B", str(script), *arguments], input=stdin, capture_output=True, check=True, timeout=60
     )
 
 
@@ -98,12 +98,6 @@ def _frozen_run(
         _run_test_git(git, "-C", str(repository), "commit", "-m", "large baseline")
         capture = _scope_data(git, repository, "baseline", None, ())
         _complete_structural_fixture_routing(template, list(source_snapshot(capture).captured_scope_paths))
-    snapshot = source_snapshot(capture)
-    template.update(
-        authorization="review-and-fix",
-        concrete_change_target=True,
-        change_target=shlex.join(["git", "diff", snapshot.head, "--", *(["."] if large_scope else snapshot.captured_scope_paths)]),
-    )
     requirement = template["validation_requirements"][0]
     isolation = tmp_path / "validator"
     isolation.mkdir()
@@ -145,9 +139,13 @@ def _frozen_run(
         )
         requirement.update(commands=[shlex.join(["sh", str(repository / "enumerate.sh"), str(repository)]) + " > " + shlex.quote(str(log))])
         capture = _scope_data(git, repository, "baseline", None, ())
-        snapshot = source_snapshot(capture)
-        template["change_target"] = shlex.join(["git", "diff", snapshot.head, "--", *snapshot.captured_scope_paths])
-        _complete_structural_fixture_routing(template, list(snapshot.captured_scope_paths))
+        _complete_structural_fixture_routing(template, list(source_snapshot(capture).captured_scope_paths))
+    snapshot = source_snapshot(capture)
+    template.update(
+        authorization="review-and-fix",
+        concrete_change_target=True,
+        change_target=shlex.join(["git", "diff", snapshot.head, "--", *(["."] if large_scope else snapshot.captured_scope_paths)]),
+    )
     if early:
         template["pre_review_validation_requirement_ids"] = [requirement["requirement_id"]]
     capture_path, template_path, bundle_path = (tmp_path / name for name in ("initial-capture.json", "template.json", "bootstrap.json"))
