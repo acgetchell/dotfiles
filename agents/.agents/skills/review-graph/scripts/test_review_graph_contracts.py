@@ -119,6 +119,7 @@ def test_partial_assessment_reports_the_remaining_candidate(path: str, router: s
     [
         ("> - ~~~Python\n>   print(42)\n>   ~~~\n", "````text\n```python\n```\n````\n"),
         ("1.  Example\n\n    ```python\n    print(42)\n    ```\n", "Prose.\n\n    ```python\n    print(42)\n    ```\n"),
+        ("<!--\n~~~text\n-->\n\n~~~python\nprint(42)\n~~~\n", "<!--\n~~~python\nprint(42)\n~~~\n-->\n"),
     ],
 )
 def test_markdown_only_capture_routes_fenced_python_to_style_review(tmp_path: Path, example: str, literal: str) -> None:
@@ -151,6 +152,31 @@ def test_markdown_only_capture_routes_fenced_python_to_style_review(tmp_path: Pa
             assert plan.dispatch_allowed, plan.blockers
             style = next(node for node in plan.actual_worker_nodes if node.skill_id == "python-style-hygiene")
             assert style.coverage == ("guide.md",)
+
+
+@pytest.mark.parametrize("mode", ["staged", "baseline"])
+def test_planner_rejects_missing_or_substituted_python_examples(tmp_path: Path, mode: str) -> None:
+    """Only the Markdown paths with Python examples in the selected Git capture may affect routing."""
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    (repo / "notes.md").write_text("Original notes.\n")
+    _commit_all(repo)
+    (repo / "guide.md").write_text("~~~python\nprint(42)\n~~~\n")
+    (repo / "notes.md").write_text("Updated notes.\n")
+    _git(repo, "add", ".")
+    capture = _capture(repo, mode)
+    assert capture["captured_python_example_paths"] == ["guide.md"]
+    template = _sparse_plan_document()
+    template.update(consulted_routers=["review-graph"], routing_overrides=[], concrete_change_target=mode == "staged")
+    if mode == "staged":
+        template.update(change_target="git diff --cached -- .", scope_mode="staged-only")
+    document = bootstrap_document(capture, template)
+    del document["captured_python_example_paths"]
+    for override in ({}, {"captured_python_example_paths": []}, {"captured_python_example_paths": ["notes.md"]}):
+        with pytest.raises(ValueError, match="captured source manifest does not match independent recapture: captured_python_example_paths"):
+            plan_from_document(document | override, repository_root=repo)
+    with pytest.raises(ValueError, match="captured source manifest does not match independent recapture: captured_scope_paths"):
+        plan_from_document(document | {"captured_paths": [], "captured_path_line_bounds": {}}, repository_root=repo)
 
 
 def test_markdown_example_preserves_explicit_style_assessment_for_python_source() -> None:

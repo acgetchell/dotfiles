@@ -46,8 +46,8 @@ The Linux installation accepts absolute `DOTFILES_REVIEW_PREFIX`,
 `DOTFILES_REVIEW_CACHE`, and `DOTFILES_REVIEW_SKILLS_DIR` overrides. Keep them
 consistent across setup and later commands. Defaults are beneath
 `~/.local/share/dotfiles-review`, `~/.cache/dotfiles-review`, and `~/.agents/skills`.
-Setup and doctor select `$DOTFILES_REVIEW_PREFIX/helper-<version>` using the
-locked RRT version. An upgrade creates the newly selected helper alongside
+Setup and doctor select `$DOTFILES_REVIEW_PREFIX/helper-<rrt-version>-markdown-it-<parser-version>`
+using the locked tooling versions. An upgrade creates the newly selected helper alongside
 earlier environments. The old `helper` directory stays available to frozen
 reviews that already reference it.
 

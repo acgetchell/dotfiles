@@ -21,17 +21,20 @@ REQUIRED_APIS = {
 }
 
 
-def check_helper_compatibility() -> None:
-    """Resolve every shared capture/bootstrap API before creating graph resources."""
+def check_helper_compatibility(*, require_markdown: bool = True) -> None:
+    """Check capture dependencies before setup, allowing origin probes of historical helpers."""
     try:
         for module, names in REQUIRED_APIS.items():
             imported = importlib.import_module(f"{_PACKAGE}.{module}")
             for name in names:
                 if not callable(getattr(imported, name, None)):
                     raise TypeError(f"missing callable {_PACKAGE}.{module}.{name}")
+        if require_markdown and importlib.util.find_spec("markdown_it") is None:
+            msg = "missing Markdown parser (markdown-it-py)"
+            raise ImportError(msg)
     except (ImportError, TypeError) as error:
         msg = (
-            f"incompatible review helper: {error}; create a new isolated packaged helper with research-repo-tools=={HELPER_VERSION} "
+            f"incompatible review helper: {error}; create a new isolated packaged helper with research-repo-tools=={HELPER_VERSION} and markdown-it-py "
             "using review-graph/references/python-environment.md. Preserve existing frozen runs and their original helper."
         )
         raise ValueError(msg) from error
@@ -132,7 +135,7 @@ def main() -> int:
     parser.add_argument("--helper-version", required=True)
     args = parser.parse_args()
     try:
-        check_helper_compatibility()
+        check_helper_compatibility(require_markdown=args.helper_version == HELPER_VERSION)
         print(json.dumps(capture_python_origin(args.repository, args.helper_version), sort_keys=True))
     except (OSError, ValueError) as error:
         print(f"review helper origin: {error}", file=sys.stderr)

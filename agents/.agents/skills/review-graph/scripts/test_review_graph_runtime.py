@@ -1668,11 +1668,12 @@ def test_readme_citations_remain_owned_with_semantic_decisions_in_each_capture_s
 
 
 def test_missing_baseline_validator_explains_the_field_without_changing_review_scope(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    capture = _captured_rust_repository(tmp_path, branch=True)
     template = _sparse_plan_document()
-    template["scope_mode"] = "branch"
-    template["validation_requirements"][0].update({"baseline": False, "requested_scope": "branch"})
+    template.update(scope_mode="branch", concrete_change_target=True, change_target=f"git diff {capture['base_ref']}...HEAD -- {STATE_FIXTURE}")
+    template["validation_requirements"][0].update(baseline=False, requested_scope="branch", working_directories=[capture["repository_root"]])
     capture_path, template_path, output_path = (tmp_path / name for name in ("capture.json", "template.json", "bootstrap.json"))
-    capture_path.write_text(json.dumps(_baseline_capture()), encoding="utf-8")
+    capture_path.write_text(json.dumps(capture), encoding="utf-8")
     template_path.write_text(json.dumps(template), encoding="utf-8")
 
     assert bootstrap_main(["--capture", str(capture_path), "--input", str(template_path), "--output", str(output_path)]) == 2

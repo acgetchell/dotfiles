@@ -374,3 +374,11 @@ def test_clean_external_helper_captures_and_bootstraps_real_repository(tmp_path:
     assert origin["executable"] == str(python)
     dispatched = _run(json.loads(result.stdout)["next_command"], repository, environment)
     assert dispatched.returncode == 0, dispatched.stderr
+    (repository / "guide.md").write_bytes(b"<!--\n~~~text\n-->\n\n~~~python\nprint(42)\n~~~\n")
+    result = _run(
+        [str(python), "-E", "-s", str(SCRIPTS / "capture_scope.py"), "--repo", str(repository), "--mode", "worktree", "--path", "guide.md"],
+        repository,
+        environment,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["captured_python_example_paths"] == ["guide.md"]

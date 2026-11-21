@@ -1,20 +1,21 @@
 # Review Graph Python Environment
 
 Run the graph scripts with Python 3.15 or newer and the published
-`research-repo-tools` package. Dotfiles pins version 0.3.0. Consuming repositories
-can declare the same tooling dependency in an environment supporting Python
+`research-repo-tools` package. Dotfiles pins version 0.3.0. Markdown scope
+capture uses `markdown-it-py` to recognize CommonMark fences. Consuming repositories
+can declare both tooling dependencies in an environment supporting Python
 3.15. Use the consumer's migration recipes when upgrading an existing pin;
 reconcile its Python selector and requirement before adding the dependency:
 
 ```sh
-uv add --group dev 'research-repo-tools==0.3.0'
+uv add --group dev 'research-repo-tools==0.3.0' 'markdown-it-py==4.3.0'
 uv run --locked python "$SKILLS_ROOT/review-graph/scripts/capture_scope.py" --help
 ```
 
-For a repository without that dependency, supply it for the invocation:
+For a repository without those dependencies, supply them for the invocation:
 
 ```sh
-uv run --python 3.15 --with 'research-repo-tools==0.3.0' \
+uv run --python 3.15 --with 'research-repo-tools==0.3.0' --with 'markdown-it-py==4.3.0' \
   python "$SKILLS_ROOT/review-graph/scripts/review_graph_runtime.py" --help
 ```
 
@@ -74,7 +75,7 @@ an approved external proof store with a new helper directory:
   export UV_CACHE_DIR="$PROOF_STORE/helper-cache"
   uv venv --no-project --no-config --python 3.15 "$PROOF_STORE/helper"
   uv pip install --no-config --python "$PROOF_STORE/helper/bin/python" \
-    --link-mode copy 'research-repo-tools==0.3.0'
+    --link-mode copy 'research-repo-tools==0.3.0' 'markdown-it-py==4.3.0'
   "$PROOF_STORE/helper/bin/python" -E -s \
     "$SKILLS_ROOT/review-graph/scripts/capture_scope.py" \
     --repo "$PWD" --mode baseline --output "$PROOF_STORE/initial.capture.json"

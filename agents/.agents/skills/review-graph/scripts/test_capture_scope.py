@@ -6,6 +6,7 @@ import shutil
 import sys
 from collections.abc import Sequence  # noqa: TC003 - keep available for runtime annotation evaluation.
 from dataclasses import asdict
+from io import BytesIO
 from typing import cast
 lazy from pathlib import Path
 
@@ -16,6 +17,41 @@ from review_graph_git_objects import GitPathIdentity
 from review_graph_integrity import digest_json
 from review_graph_reuse import source_snapshot
 from test_support_review_graph_capture import _capture, _capture_result, _commit_all, _git, _init_repo
+
+
+@pytest.mark.parametrize(
+    ("opener", "closer"),
+    [
+        (b"<SCRIPT src=x>", b"</script>"),
+        (b"<!--", b"-->"),
+        (b"<?xml", b"?>"),
+        (b"<!DOCTYPE", b">"),
+        (b"<![CDATA[", b"]]>"),
+        (b"<div>", b""),
+        (b'<x a="1">', b""),
+        (b"[ref]: /url\n<custom>", b""),
+    ],
+)
+def test_html_blocks_hide_fences_until_their_terminator(opener: bytes, closer: bytes) -> None:
+    """Each HTML block type consumes fence-looking lines through its own closing line."""
+    assert not capture_scope._contains_python_fence(BytesIO(b"\n".join([opener, b"~~~python", closer])))
+    assert capture_scope._contains_python_fence(BytesIO(b"\n".join([opener, b"~~~text", closer, b"~~~python"])))
+
+
+@pytest.mark.parametrize(
+    "lines",
+    [
+        [b"<!-- one line -->", b"~~~python"],
+        [b"> <!--", b"> ~~~text", b"~~~python"],
+        [b"- > <!--", b"", b"  > ~~~python"],
+        [b"~~~text", b"<!--", b"~~~", b"~~~python"],
+        [b"Paragraph", b"<custom>", b"~~~python"],
+        [b"    <!--", b"~~~python"],
+    ],
+)
+def test_python_fences_at_html_block_boundaries(lines: list[bytes]) -> None:
+    """Closing a container, literal HTML in code, and inline tags preserve subsequent Markdown fences."""
+    assert capture_scope._contains_python_fence(BytesIO(b"\n".join(lines)))
 
 
 @pytest.mark.parametrize("mode", ["baseline", "branch", "staged", "worktree"])

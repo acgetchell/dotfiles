@@ -293,6 +293,7 @@ build = [
 ]
 dev = [
     { name = "actionlint-py" },
+    { name = "markdown-it-py" },
     { name = "nbformat" },
     { name = "pytest" },
     { name = "pytest-xdist" },
@@ -304,6 +305,7 @@ dev = [
     { name = "zizmor" },
 ]
 tooling = [
+    { name = "markdown-it-py" },
     { name = "research-repo-tools" },
 ]
 
@@ -324,6 +326,7 @@ build = [
 ]
 dev = [
     { name = "actionlint-py", marker = "python_full_version >= '3.15'", specifier = "==1.7.12.25" },
+    { name = "markdown-it-py", marker = "python_full_version >= '3.15'", specifier = "==4.3.0" },
     { name = "nbformat", marker = "python_full_version >= '3.15'", specifier = "==5.11.1" },
     { name = "pytest", marker = "python_full_version >= '3.15'", specifier = "==9.2.0" },
     { name = "pytest-xdist", marker = "python_full_version >= '3.15'", specifier = "==3.8.0" },
@@ -335,7 +338,10 @@ dev = [
     { name = "yamllint", marker = "python_full_version >= '3.15'", specifier = "==1.38.0" },
     { name = "zizmor", marker = "python_full_version >= '3.15'", specifier = "==1.32.0" },
 ]
-tooling = [{ name = "research-repo-tools", marker = "python_full_version >= '3.15'", specifier = "==0.3.0" }]
+tooling = [
+    { name = "markdown-it-py", marker = "python_full_version >= '3.15'", specifier = "==4.3.0" },
+    { name = "research-repo-tools", marker = "python_full_version >= '3.15'", specifier = "==0.3.0" },
+]
 
 [[package]]
 name = "exceptiongroup"

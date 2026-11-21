@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 
 from skill_validate import validate_skill
@@ -106,7 +107,9 @@ def helper_version() -> str:
 def default_helper_directory() -> Path:
     """Select a directory for the pinned helper while preserving older runtimes."""
     prefix = Path(os.environ.get("DOTFILES_REVIEW_PREFIX", Path.home() / ".local/share/dotfiles-review"))
-    return prefix / f"helper-{helper_version()}"
+    packages = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))["package"]
+    parser_version = next(package["version"] for package in packages if package["name"] == "markdown-it-py")
+    return prefix / f"helper-{helper_version()}-markdown-it-{parser_version}"
 
 
 def check_helper(helper: Path) -> dict[str, object]:

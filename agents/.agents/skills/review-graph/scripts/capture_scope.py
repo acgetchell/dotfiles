@@ -3,6 +3,7 @@
 
 __lazy_modules__ = (
     "argparse",
+    "markdown_it",
     "subprocess",
     "research_repo_tools.git_inspect",
     "research_repo_tools.process",
@@ -15,7 +16,6 @@ import hashlib
 import io
 import json
 import os
-import re
 import shutil
 import stat
 import subprocess
@@ -24,6 +24,7 @@ from itertools import batched
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
+from markdown_it import MarkdownIt
 from research_repo_tools.git_inspect import git_diff_paths_bytes, git_status_bytes
 from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics, run_command_bytes
 from review_graph_capture_timing import collect_timings, phase, timed_phase
@@ -32,66 +33,28 @@ from review_graph_git_objects import GitPathIdentity, git_object_id
 from review_graph_reuse import SNAPSHOT_FORMAT, source_snapshot
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterable, Mapping, Sequence
+    from collections.abc import Generator, Mapping, Sequence
+    from typing import BinaryIO
 
 _CHUNK_SIZE = 1024 * 1024
 _CAPTURE_MODES = frozenset(("branch", "staged", "worktree", "baseline"))
 _TIMEOUT_SECONDS = 30
 _BLOB_BATCH_BYTES = 16 * 1024 * 1024
-_MARKDOWN_SUFFIXES = {".md", ".markdown"}
-_QUOTE_MARKER = re.compile(rb" {0,3}> ?")
-_LIST_MARKER = re.compile(rb" {0,3}(?:[-+*]|[0-9]{1,9}[.)])( +|$)")
-_CODE_FENCE = re.compile(rb" {0,3}(`{3,}|~{3,})(.*)")
+MARKDOWN_SUFFIXES = frozenset({".md", ".markdown"})
 
 
-def _markdown_block_content(line: bytes, containers: list[int], fence: bytes) -> tuple[bytes, bytes]:
-    """Strip enclosing quote markers and list indentation, ending a fence when its container ends."""
-    start = 0
-    for index, indent in enumerate(containers):
-        if indent == 0 and (quote := _QUOTE_MARKER.match(line, start)):
-            start = quote.end()
-        elif indent and line.startswith(b" " * indent, start):
-            start += indent
-        elif indent and not line[start:].strip():
-            return b"", fence
-        else:
-            del containers[index:]
-            fence = b""
-            break
-
-    while not fence:
-        if quote := _QUOTE_MARKER.match(line, start):
-            containers.append(0)  # Quotes repeat their marker on continuation lines.
-            start = quote.end()
-        elif item := _LIST_MARKER.match(line, start):
-            # Five or more spaces after a marker start indented code within the item.
-            padding = len(item[1])
-            end = item.start(1) + (padding if 1 <= padding <= 4 else 1)
-            containers.append(end - start)
-            start = end
-        else:
-            break
-    return line[start:], fence
-
-
-def _contains_python_fence(lines: Iterable[bytes]) -> bool:
-    """Recognize a Python fence without treating literal fences inside another code block as examples."""
-    fence = b""
-    containers: list[int] = []
-    for line in lines:
-        content, fence = _markdown_block_content(line.rstrip(b"\r\n").expandtabs(4), containers, fence)
-        match = _CODE_FENCE.fullmatch(content)
-        if match is None:
-            continue
-        marker, info = match.groups()
-        if fence:
-            if marker.startswith(fence) and not info.strip():
-                fence = b""
-        elif not (marker.startswith(b"`") and b"`" in info):
-            words = info.split(maxsplit=1)
-            if words and words[0].lower() in {b"python", b"python3", b"py", b"pycon"}:
+def _contains_python_fence(stream: BinaryIO) -> bool:
+    """Read CommonMark block tokens only for files containing a possible Python fence."""
+    if not any((b"```" in line or b"~~~" in line) and b"py" in line.lower() for line in stream):
+        return False
+    stream.seek(0)
+    # Only block structure and fence info matter. Inline markup inside prose is irrelevant.
+    parser = MarkdownIt("commonmark").disable("inline")
+    for token in parser.parse(stream.read().decode("utf-8", errors="replace")):
+        if token.type == "fence":
+            words = token.info.split(maxsplit=1)
+            if words and words[0].lower() in {"python", "python3", "py", "pycon"}:
                 return True
-            fence = marker
     return False
 
 
@@ -456,7 +419,7 @@ def _git_blob_line_bounds(git: str, repo: Path, revision: str, paths: Sequence[s
     entries = _blob_entries(git, repo, revision)
     selected = {path: entries[path] for path in paths if path in entries}
     regular = {path: oid for path, (mode, oid) in selected.items() if mode in {b"100644", b"100755"}}
-    markdown = {path: oid for path, oid in regular.items() if python_examples is not None and Path(path).suffix.lower() in _MARKDOWN_SUFFIXES}
+    markdown = {path: oid for path, oid in regular.items() if python_examples is not None and Path(path).suffix.lower() in MARKDOWN_SUFFIXES}
     examples = dict.fromkeys(markdown.values(), False)
     bounds = _batch_blob_line_bounds(git, repo, list(regular.values()), markdown=examples)
     if python_examples is not None:
@@ -475,7 +438,7 @@ def _captured_path_line_bounds(*, git: str, repo: Path, mode: str, base_revision
     bounds: dict[str, int] = {}
     for relative in paths:
         current = current_bounds.get(relative) if mode == "staged" else _worktree_line_bound(repo / relative)
-        if mode != "staged" and bool(current) and relative not in python_examples and Path(relative).suffix.lower() in _MARKDOWN_SUFFIXES:
+        if mode != "staged" and bool(current) and relative not in python_examples and Path(relative).suffix.lower() in MARKDOWN_SUFFIXES:
             with (repo / relative).open("rb") as stream:
                 if _contains_python_fence(stream):
                     python_examples.add(relative)

@@ -259,6 +259,7 @@ dev = [
   "zizmor==1.32.0",
 ]
 tooling = [
+    "markdown-it-py==4.3.0",
     "research-repo-tools==0.3.0",
 ]
 

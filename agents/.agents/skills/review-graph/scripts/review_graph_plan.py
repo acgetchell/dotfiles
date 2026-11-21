@@ -16,7 +16,7 @@ from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from capture_scope import _scope_data, captured_head_changes
+from capture_scope import MARKDOWN_SUFFIXES, _scope_data, captured_head_changes
 from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics, run_command_bytes
 from review_graph_control import issue_run_control
 from review_graph_coverage import coverage_reference, reused_dependency_paths, reused_paths
@@ -1493,7 +1493,7 @@ def assess_routing_discoveries(decisions: Sequence[RoutingDecision], discoveries
 
 def _python_example_signals(paths: Sequence[str], examples: Sequence[str]) -> set[str]:
     """Bind each reported Python fence to a Markdown file in the selected scope."""
-    if examples and (set(examples) - set(paths) or any(PurePosixPath(path).suffix.lower() not in {".md", ".markdown"} for path in examples)):
+    if examples and (set(examples) - set(paths) or any(PurePosixPath(path).suffix.lower() not in MARKDOWN_SUFFIXES for path in examples)):
         msg = "captured Python example paths must be Markdown files in the captured scope"
         raise ValueError(msg)
     return {f"{path}: captured Markdown contains a fenced Python example" for path in examples}
@@ -5765,7 +5765,7 @@ def _verified_captured_source(
     declared_bounds: Sequence[tuple[str, int]],
     observed_metadata_transition: MetadataTransition | None = None,
 ) -> dict[str, Any]:
-    """Recapture exact source state and reject caller-authored line-bound claims."""
+    """Recapture source state and verify the declared line bounds and fenced Python examples."""
     if repository_root is None:
         msg = "independent-review line bounds require a trusted repository_root"
         raise ValueError(msg)
@@ -5804,6 +5804,8 @@ def _verified_captured_source(
         # The verified transition binds identical bytes, line bounds and boundaries.
         # Keep the actual pre-staging identity in this intermediate repair plan.
         expected_manifest["repository_state_fingerprint"] = observed_metadata_transition.after.repository_state_fingerprint
+    # Capture omits the field when there are no examples. The bootstrap document may use [].
+    expected_manifest["captured_python_example_paths"] = list(_tuple_field(document, "captured_python_example_paths")) or None
     mismatches = tuple(field for field, expected in expected_manifest.items() if manifest.get(field) != expected)
     if mismatches:
         msg = "captured source manifest does not match independent recapture: " + ", ".join(mismatches)
@@ -6159,7 +6161,9 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0913, PLR0915
     exclusions = scope_exclusions(document.get("review_scope_exclusions", []))
     if exhaustive_routing:
         routing_catalog = load_routing_catalog(catalog_path, skill_roots=skill_roots)
-        python_example_paths = _tuple_field(document, "captured_python_example_paths")
+        if verified_capture is None and captured_paths is not None and repository_root is not None and "capture_mode" in document:
+            verified_capture = _verified_captured_source(document, captured_paths, repository_root, captured_path_line_bounds)
+        python_example_paths = _tuple_field(verified_capture if verified_capture is not None else document, "captured_python_example_paths")
         consulted_routers = _routers_for_examples(_tuple_field(document, "consulted_routers"), python_example_paths)
         concrete_change_target = document.get("concrete_change_target")
         if not isinstance(concrete_change_target, bool):
@@ -6201,6 +6205,8 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0913, PLR0915
             routing_surface_blockers = ()
         routing_assessment = validate_routing_ledger(routing_catalog, routing_decisions, consulted_routers=consulted_routers)
         routing_metadata_blockers: list[str] = list(routing_surface_blockers)
+        if verified_capture is None and any(PurePosixPath(path).suffix.lower() in MARKDOWN_SUFFIXES for path in captured_paths or ()):
+            routing_metadata_blockers.append("Markdown example routing requires an independently verified capture")
         scope_mode = document.get("scope_mode")
         if scope_mode not in {"branch", "staged-only", "changed-file-only", "baseline", "release-readiness"}:
             routing_metadata_blockers.append("exhaustive routing requires a known scope_mode")
@@ -6209,9 +6215,9 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0913, PLR0915
             if captured_paths is None:
                 msg = "independent-review line-bound verification requires captured_paths"
                 raise ValueError(msg)
-            if observed_metadata_transition is None:
+            if verified_capture is None:
                 verified_capture = _verified_captured_source(document, captured_paths, repository_root, captured_path_line_bounds)
-            if verified_capture is not None and purpose == "repair-verification":
+            if purpose == "repair-verification":
                 independent_decision = _independent_change_surface(independent_decision, change_target or "", verified_capture, repository_root)
                 routing_decisions = tuple(independent_decision if item.catalog_id == "repo.independent" else item for item in routing_decisions)
                 routing_assessment = validate_routing_ledger(routing_catalog, routing_decisions, consulted_routers=consulted_routers)
