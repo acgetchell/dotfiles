@@ -39,32 +39,59 @@ _CAPTURE_MODES = frozenset(("branch", "staged", "worktree", "baseline"))
 _TIMEOUT_SECONDS = 30
 _BLOB_BATCH_BYTES = 16 * 1024 * 1024
 _MARKDOWN_SUFFIXES = {".md", ".markdown"}
-_QUOTE_PREFIX = re.compile(rb"(?: {0,3}>[ \t]?)+")
-_CODE_FENCE = re.compile(rb" {0,3}(?:(?:[-+*]|[0-9]{1,9}[.)])[ \t]+)?(`{3,}|~{3,})(.*)")
+_QUOTE_MARKER = re.compile(rb" {0,3}> ?")
+_LIST_MARKER = re.compile(rb" {0,3}(?:[-+*]|[0-9]{1,9}[.)])( +|$)")
+_CODE_FENCE = re.compile(rb" {0,3}(`{3,}|~{3,})(.*)")
+
+
+def _markdown_block_content(line: bytes, containers: list[int], fence: bytes) -> tuple[bytes, bytes]:
+    """Strip enclosing quote markers and list indentation, ending a fence when its container ends."""
+    start = 0
+    for index, indent in enumerate(containers):
+        if indent == 0 and (quote := _QUOTE_MARKER.match(line, start)):
+            start = quote.end()
+        elif indent and line.startswith(b" " * indent, start):
+            start += indent
+        elif indent and not line[start:].strip():
+            return b"", fence
+        else:
+            del containers[index:]
+            fence = b""
+            break
+
+    while not fence:
+        if quote := _QUOTE_MARKER.match(line, start):
+            containers.append(0)  # Quotes repeat their marker on continuation lines.
+            start = quote.end()
+        elif item := _LIST_MARKER.match(line, start):
+            # Five or more spaces after a marker start indented code within the item.
+            padding = len(item[1])
+            end = item.start(1) + (padding if 1 <= padding <= 4 else 1)
+            containers.append(end - start)
+            start = end
+        else:
+            break
+    return line[start:], fence
 
 
 def _contains_python_fence(lines: Iterable[bytes]) -> bool:
     """Recognize a Python fence without treating literal fences inside another code block as examples."""
     fence = b""
-    fence_quote_depth = 0
+    containers: list[int] = []
     for line in lines:
-        quote = _QUOTE_PREFIX.match(line)
-        depth = quote[0].count(b">") if quote else 0
-        if depth < fence_quote_depth:
-            fence = b""
-        match = _CODE_FENCE.fullmatch(line.rstrip(b"\r\n"), quote.end() if quote else 0)
+        content, fence = _markdown_block_content(line.rstrip(b"\r\n").expandtabs(4), containers, fence)
+        match = _CODE_FENCE.fullmatch(content)
         if match is None:
             continue
         marker, info = match.groups()
         if fence:
-            if depth == fence_quote_depth and marker.startswith(fence) and not info.strip():
+            if marker.startswith(fence) and not info.strip():
                 fence = b""
         elif not (marker.startswith(b"`") and b"`" in info):
             words = info.split(maxsplit=1)
             if words and words[0].lower() in {b"python", b"python3", b"py", b"pycon"}:
                 return True
             fence = marker
-            fence_quote_depth = depth
     return False
 
 

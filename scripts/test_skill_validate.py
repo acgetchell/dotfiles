@@ -43,11 +43,11 @@ def test_import_falls_back_without_libyaml() -> None:
 
 
 @pytest.mark.parametrize("filename", ["SKILL.md", "agents/openai.yaml"])
-def test_unsafe_yaml_tags_are_rejected(tmp_path: Path, filename: str) -> None:
-    """Both input paths reject Python object construction with either loader."""
+@pytest.mark.parametrize("content", ["!!python/object:builtins.object {}", "updated: 2026-02-30"])
+def test_invalid_yaml_returns_a_diagnostic(tmp_path: Path, filename: str, content: str) -> None:
+    """Both input paths diagnose unsafe tags and impossible dates with either loader."""
     skill_dir = tmp_path / "example-skill"
     write_skill(skill_dir, "name: example-skill\ndescription: Example.")
-    content = "!!python/object:builtins.object {}"
     if filename == "SKILL.md":
         content = f"---\n{content}\n---\n"
     (skill_dir / filename).write_text(content, encoding="utf-8")

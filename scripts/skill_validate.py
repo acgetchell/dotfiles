@@ -112,7 +112,7 @@ def load_openai_metadata(skill_path: Path | str) -> tuple[dict[str, object] | No
 
     try:
         loaded_metadata = frontmatter_yaml.load_safe_yaml(metadata_path.read_text(encoding=UTF8))
-    except yaml.YAMLError as exc:
+    except (yaml.YAMLError, ValueError) as exc:
         return None, f"Invalid YAML in agents/openai.yaml: {exc}"
 
     return frontmatter_yaml.string_keyed_mapping(loaded_metadata, "agents/openai.yaml")

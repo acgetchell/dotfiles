@@ -114,15 +114,23 @@ def test_partial_assessment_reports_the_remaining_candidate(path: str, router: s
     assert str(error.value) == f"semantic applicability decisions required for path-matched candidates: {missing_catalog_id}"
 
 
-def test_markdown_only_capture_routes_fenced_python_to_style_review(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("example", "literal"),
+    [
+        ("> - ~~~Python\n>   print(42)\n>   ~~~\n", "````text\n```python\n```\n````\n"),
+        ("1.  Example\n\n    ```python\n    print(42)\n    ```\n", "Prose.\n\n    ```python\n    print(42)\n    ```\n"),
+    ],
+)
+def test_markdown_only_capture_routes_fenced_python_to_style_review(tmp_path: Path, example: str, literal: str) -> None:
+    """Staged examples select style review while literal fence text in the worktree does not."""
     repo = tmp_path / "repo"
     _init_repo(repo)
     guide = repo / "guide.md"
     guide.write_text("Prose.\n")
     _commit_all(repo)
-    guide.write_text("> - ~~~Python\n>   print(42)\n>   ~~~\n")
+    guide.write_text(example)
     _git(repo, "add", "guide.md")
-    guide.write_text("````text\n```python\n```\n````\n")
+    guide.write_text(literal)
     template = _sparse_plan_document()
     template.update(
         consulted_routers=["review-graph"],

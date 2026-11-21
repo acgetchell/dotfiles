@@ -124,7 +124,7 @@ def parse_frontmatter(frontmatter_text: str) -> tuple[dict[str, object] | None, 
             loaded_frontmatter = loader.construct_document(node) if node is not None else None
         finally:
             loader.dispose()
-    except yaml.YAMLError as exc:
+    except (yaml.YAMLError, ValueError) as exc:
         return None, f"Invalid YAML in frontmatter: {exc}"
 
     return string_keyed_mapping(loaded_frontmatter, "Frontmatter")
