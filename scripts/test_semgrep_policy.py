@@ -59,6 +59,7 @@ def parse(value, items):
 
 
 def _scanner_environment(tmp_path: Path) -> dict[str, str]:
+    """Configure the fixture scanner environment with telemetry disabled."""
     environment = {
         **os.environ,
         "SEMGREP_SEND_METRICS": "off",
@@ -165,6 +166,7 @@ UV_CACHE_DIR="cache" uv run --locked pytest
         "scripts/linux_review.py": [1, 0, 0, 0],
         "scripts/test_runtime.py": [0, 0, 0, 0],
         f"{owned}/capture_scope.py": [1, 0, 0, 0],
+        f"{owned}/review_graph_frontmatter.py": [1, 3, 0, 0],
         f"{owned}/test_runtime.py": [0, 0, 0, 0],
         "docs/runtime.py": [0, 0, 0, 0],
         "justfile": [0, 0, 2, 2],

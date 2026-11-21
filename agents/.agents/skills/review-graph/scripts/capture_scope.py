@@ -3,6 +3,7 @@
 
 __lazy_modules__ = (
     "argparse",
+    "markdown_it",
     "subprocess",
     "research_repo_tools.git_inspect",
     "research_repo_tools.process",
@@ -12,6 +13,7 @@ __lazy_modules__ = (
 
 import argparse
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -22,6 +24,7 @@ from itertools import batched
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
+from markdown_it import MarkdownIt
 from research_repo_tools.git_inspect import git_diff_paths_bytes, git_status_bytes
 from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics, run_command_bytes
 from review_graph_capture_timing import collect_timings, phase, timed_phase
@@ -31,11 +34,28 @@ from review_graph_reuse import SNAPSHOT_FORMAT, source_snapshot
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Mapping, Sequence
+    from typing import BinaryIO
 
 _CHUNK_SIZE = 1024 * 1024
 _CAPTURE_MODES = frozenset(("branch", "staged", "worktree", "baseline"))
 _TIMEOUT_SECONDS = 30
 _BLOB_BATCH_BYTES = 16 * 1024 * 1024
+MARKDOWN_SUFFIXES = frozenset({".md", ".markdown"})
+
+
+def _contains_python_fence(stream: BinaryIO) -> bool:
+    """Read CommonMark block tokens only for files containing a possible Python fence."""
+    if not any((b"```" in line or b"~~~" in line) and b"py" in line.lower() for line in stream):
+        return False
+    stream.seek(0)
+    # Only block structure and fence info matter. Inline markup inside prose is irrelevant.
+    parser = MarkdownIt("commonmark").disable("inline")
+    for token in parser.parse(stream.read().decode("utf-8", errors="replace")):
+        if token.type == "fence":
+            words = token.info.split(maxsplit=1)
+            if words and words[0].lower() in {"python", "python3", "py", "pycon"}:
+                return True
+    return False
 
 
 class _Digest(Protocol):
@@ -365,7 +385,7 @@ def _blob_batches(git: str, repo: Path, object_ids: Sequence[bytes]) -> Generato
         yield tuple(pending)
 
 
-def _batch_blob_line_bounds(git: str, repo: Path, object_ids: Sequence[bytes]) -> dict[bytes, int]:
+def _batch_blob_line_bounds(git: str, repo: Path, object_ids: Sequence[bytes], *, markdown: dict[bytes, bool] | None = None) -> dict[bytes, int]:
     """Count exact immutable blobs without combining unbounded payloads in memory."""
     bounds = {}
     for batch in _blob_batches(git, repo, object_ids):
@@ -385,6 +405,8 @@ def _batch_blob_line_bounds(git: str, repo: Path, object_ids: Sequence[bytes]) -
                 message = "truncated captured Git batch blob"
                 raise RuntimeError(message)
             bounds[object_id] = output.count(b"\n", start, end) + int(end > start and output[end - 1 : end] != b"\n")
+            if markdown is not None and object_id in markdown:
+                markdown[object_id] = _contains_python_fence(io.BytesIO(output[start:end]))
             offset = end + 1
         if offset != len(output):
             message = "unexpected trailing captured Git batch bytes"
@@ -392,29 +414,41 @@ def _batch_blob_line_bounds(git: str, repo: Path, object_ids: Sequence[bytes]) -
     return bounds
 
 
-def _git_blob_line_bounds(git: str, repo: Path, revision: str, paths: Sequence[str]) -> dict[str, int]:
+def _git_blob_line_bounds(git: str, repo: Path, revision: str, paths: Sequence[str], python_examples: set[str] | None = None) -> dict[str, int]:
     """Derive path bounds from one inventory and exact immutable blob contents."""
     entries = _blob_entries(git, repo, revision)
     selected = {path: entries[path] for path in paths if path in entries}
-    bounds = _batch_blob_line_bounds(git, repo, [object_id for mode, object_id in selected.values() if mode in {b"100644", b"100755"}])
+    regular = {path: oid for path, (mode, oid) in selected.items() if mode in {b"100644", b"100755"}}
+    markdown = {path: oid for path, oid in regular.items() if python_examples is not None and Path(path).suffix.lower() in MARKDOWN_SUFFIXES}
+    examples = dict.fromkeys(markdown.values(), False)
+    bounds = _batch_blob_line_bounds(git, repo, list(regular.values()), markdown=examples)
+    if python_examples is not None:
+        python_examples.update(path for path, oid in markdown.items() if examples[oid])
     return {path: bounds[object_id] if mode in {b"100644", b"100755"} else 0 for path, (mode, object_id) in selected.items()}
 
 
 @timed_phase("line_bounds")
-def _captured_path_line_bounds(*, git: str, repo: Path, mode: str, base_revision: str | None, paths: Sequence[str]) -> dict[str, int]:
-    """Derive maximum addressable lines from the exact captured source sides."""
-    current_bounds = _git_blob_line_bounds(git, repo, ":index", paths) if mode == "staged" and paths else {}
-    base_bounds = _git_blob_line_bounds(git, repo, base_revision, paths) if base_revision is not None and paths else {}
+def _captured_path_line_bounds(*, git: str, repo: Path, mode: str, base_revision: str | None, paths: Sequence[str]) -> tuple[dict[str, int], list[str]]:
+    """Derive addressable lines and Markdown Python examples from the captured source sides."""
+    python_examples: set[str] = set()
+    current_bounds = _git_blob_line_bounds(git, repo, ":index", paths, python_examples) if mode == "staged" and paths else {}
+    base_bounds = (
+        _git_blob_line_bounds(git, repo, base_revision, paths, None if mode == "baseline" else python_examples) if base_revision is not None and paths else {}
+    )
     bounds: dict[str, int] = {}
     for relative in paths:
         current = current_bounds.get(relative) if mode == "staged" else _worktree_line_bound(repo / relative)
+        if mode != "staged" and bool(current) and relative not in python_examples and Path(relative).suffix.lower() in MARKDOWN_SUFFIXES:
+            with (repo / relative).open("rb") as stream:
+                if _contains_python_fence(stream):
+                    python_examples.add(relative)
         base = base_bounds.get(relative)
         candidates = tuple(bound for bound in (current, base) if bound is not None)
         if not candidates:
             message = f"captured path has no current or base-side source identity: {relative}"
             raise RuntimeError(message)
         bounds[relative] = max(candidates)
-    return bounds
+    return bounds, sorted(python_examples)
 
 
 @timed_phase("repository_state")
@@ -497,7 +531,7 @@ def _scope_data(git: str, repo: Path, mode: str, base: str | None, pathspecs: Se
             repo=repo,
         )
 
-    captured_path_line_bounds = _captured_path_line_bounds(
+    captured_path_line_bounds, python_examples = _captured_path_line_bounds(
         git=git, repo=repo, mode=mode, base_revision=merge_base if mode == "branch" else head, paths=captured_scope_paths
     )
     confirmed_scope_fingerprint = (
@@ -534,6 +568,7 @@ def _scope_data(git: str, repo: Path, mode: str, base: str | None, pathspecs: Se
         "branch": branch or None,
         "capture_mode": mode,
         "captured_path_line_bounds": captured_path_line_bounds,
+        **({"captured_python_example_paths": python_examples} if python_examples else {}),
         "captured_scope_paths": captured_scope_paths,
         "captured_worktree_fingerprint": captured_worktree_fingerprint,
         "head": head,
@@ -634,7 +669,12 @@ def _parser() -> argparse.ArgumentParser:
 
 @timed_phase("persistence")
 def persist_capture(manifest: dict[str, Any], output: Path) -> dict[str, Any]:
-    """Persist immutable capture bytes before returning all observed fingerprints."""
+    """Write the manifest to output and return its digest and fingerprint receipt.
+
+    Resolve relative output from the current directory. Both files must be outside
+    the reviewed repository. Write the manifest first and its .receipt.json sibling
+    second, so an identical retry can finish a missing receipt.
+    """
     from review_graph_runtime import _write_bytes_atomically_once  # noqa: PLC0415 - shared durable artifact writer, loaded only for persistence.
 
     snapshot = source_snapshot(manifest)
@@ -658,7 +698,7 @@ def persist_capture(manifest: dict[str, Any], output: Path) -> dict[str, Any]:
 
 
 def main() -> int:
-    """Print the captured review scope as JSON."""
+    """Print the scope manifest as JSON, or persist it and print its receipt with --output."""
     from review_graph_session import verify_current_snapshot  # noqa: PLC0415 - verify frozen resources before parsing the command.
 
     with collect_timings() as timing:

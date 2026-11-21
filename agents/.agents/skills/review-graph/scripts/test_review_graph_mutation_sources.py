@@ -7,10 +7,11 @@ from typing import Any
 
 import pytest
 import review_graph_runtime as runtime
-from test_review_graph_runtime import _mutation_with_audit_source
+from test_support_review_graph_lifecycle import _mutation_with_audit_source
 
 
 def _accepted_mutation(tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any], dict[str, str]]:
+    """Persist the dispatches and journal for a mutation with accepted audit evidence."""
     request, entry, source = _mutation_with_audit_source(tmp_path)
     dispatches = runtime.materialize_dispatches(
         {

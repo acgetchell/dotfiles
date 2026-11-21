@@ -15,6 +15,7 @@ REPOSITORY = Path(__file__).resolve().parents[1]
 
 
 def _consumer(tmp_path: Path) -> Path:
+    """Copy the workflows and tooling into a consumer checkout with spaces and Unicode in its path."""
     root = tmp_path / "workflow consumer ü"
     shutil.copytree(REPOSITORY / ".github/workflows", root / ".github/workflows")
     shutil.copy2(REPOSITORY / ".github/action-updates.toml", root / ".github/action-updates.toml")
@@ -24,6 +25,7 @@ def _consumer(tmp_path: Path) -> Path:
 
 
 def _check(root: Path) -> subprocess.CompletedProcess[str]:
+    """Run the consumer's recipe offline with the current Python environment and a checkout-local uv cache."""
     just = shutil.which("just")
     assert just is not None
     return subprocess.run(  # noqa: S603 - actual consumer recipe against copied policy/workflows and the installed package.

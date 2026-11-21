@@ -13,18 +13,10 @@ from review_graph_plan import plan_from_document
 from review_graph_read_provenance import MissingReadProvenanceError, file_identity, verify_runtime_inputs
 from review_graph_reads import source_read_operands
 from review_graph_session import runtime_command
-from test_review_graph_git import _accept, _discovery_payload
-from test_review_graph_runtime import (
-    ROUTING_CATALOG,
-    SKILL_ROOT,
-    _baseline_mutation_fixture,
-    _compact_audit_payload,
-    _mutation_with_audit_source,
-    _publish_worker_bytes,
-    _run_test_git,
-    _worker_input_fixture,
-)
-from test_review_graph_transitions import _materialize, _staging_fixture
+from test_support_review_graph import ROUTING_CATALOG, SKILL_ROOT, _materialize, _run_test_git, _worker_input_fixture
+from test_support_review_graph_evidence import _accept, _compact_audit_payload, _discovery_payload, _publish_worker_bytes
+from test_support_review_graph_handoffs import _staging_fixture
+from test_support_review_graph_lifecycle import _baseline_mutation_fixture, _mutation_with_audit_source
 
 
 @pytest.mark.parametrize("paths", [["tool.py", "added.txt"], ["tool.py"]])

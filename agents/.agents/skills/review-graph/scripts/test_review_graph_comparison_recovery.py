@@ -10,9 +10,8 @@ from pathlib import Path
 import review_graph_runtime as runtime
 from capture_scope import _scope_data
 from review_graph_reuse import source_snapshot
-from test_review_graph_continuity_e2e import _compile, _frozen_run
-from test_review_graph_runtime import _compact_audit_payload
-from test_review_graph_sessions import _cli
+from test_support_review_graph_evidence import _compact_audit_payload
+from test_support_review_graph_sessions import _cli, _compile, _frozen_run
 
 
 def test_updated_runtime_advances_large_frozen_baseline_without_reauditing_unchanged_source(tmp_path: Path) -> None:

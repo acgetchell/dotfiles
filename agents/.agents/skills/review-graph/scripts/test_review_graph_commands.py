@@ -9,11 +9,12 @@ from typing import Any
 import pytest
 import review_graph_runtime as runtime
 from review_graph_plan import plan_from_document, validation_command_identity_digest
-from test_review_graph_compact import _publish
-from test_review_graph_runtime import ROUTING_CATALOG, SKILL_ROOT, _compile_cli_paths, _execution_payload, _json_plan, _sparse_plan_document
+from test_support_review_graph import ROUTING_CATALOG, SKILL_ROOT, _json_plan, _publish, _sparse_plan_document
+from test_support_review_graph_evidence import _compile_cli_paths, _execution_payload
 
 
 def _command_fixture(tmp_path: Path, commands: tuple[str, ...]) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Materialize a validation dispatch with the requested command and expose its originating plan."""
     planning = _sparse_plan_document()
     requirement = planning["validation_requirements"][0]
     requirement["commands"] = list(commands)
@@ -149,6 +150,7 @@ def test_compile_node_recovers_saved_success_without_reexecution(tmp_path: Path,
     ]
 
     def legacy_field(command: object) -> tuple[str, str]:
+        """Render the command as a legacy text field to exercise recovery of an older saved result."""
         return "Command", runtime._required_text({"command": command}, "command")
 
     def forbid_execution(*args: object, **kwargs: object) -> None:

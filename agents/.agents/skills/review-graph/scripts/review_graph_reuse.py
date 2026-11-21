@@ -35,6 +35,7 @@ def regular_file_fingerprint(path: str, content: bytes, *, executable: bool = Fa
 
 
 def _repository_path(path: str) -> bool:
+    """Check for a normalized repository-relative POSIX path without traversal components or NUL bytes."""
     return (
         bool(path)
         and "\0" not in path
@@ -244,6 +245,7 @@ class ExternalSourceTransition(_TransitionEndpoints):
         self._verify_source_change(preserve_index=True)
 
     def _verify_source_change(self, *, preserve_index: bool) -> tuple[str, ...]:
+        """Verify both snapshots and return sorted captured changes, optionally requiring the index to match."""
         self.before.verify()
         self.after.verify()
         _external_source_text(self.external_source_actor)
@@ -395,6 +397,7 @@ class AuthorizedGitContextTransition(_TransitionEndpoints):
         before, after = self.before, self.after
 
         def identity(snapshot: ReviewSourceSnapshot) -> tuple[object, ...]:
+            """Select the snapshot fields that must stay fixed across an authorized Git context change."""
             return (
                 snapshot.repository_root,
                 snapshot.capture_mode,
@@ -441,6 +444,7 @@ type MetadataTransition = (
 
 
 def _external_source_text(raw: object) -> str:
+    """Require nonblank attribution for an external source change and retain its original wording."""
     if not isinstance(raw, str) or not raw.strip():
         msg = "external source changes require an actor and explicit maintainer attribution"
         raise ValueError(msg)
@@ -448,6 +452,7 @@ def _external_source_text(raw: object) -> str:
 
 
 def _repair_attribution(raw: object) -> str:
+    """Require nonblank attribution for an interleaved repair or staging action."""
     if not isinstance(raw, str) or not raw.strip():
         msg = "interleaved repair requires explicit repair and maintainer staging attribution"
         raise ValueError(msg)
@@ -455,6 +460,7 @@ def _repair_attribution(raw: object) -> str:
 
 
 def _observed_source_transition(raw: dict[str, Any], before: ReviewSourceSnapshot, after: ReviewSourceSnapshot) -> ObservedSourceTransition:
+    """Build a source-only bridge and reject fields that would attribute it to a different kind of transition."""
     if raw["observed_source_only"] is not True or any(
         field in raw
         for field in (
@@ -475,6 +481,7 @@ def _observed_source_transition(raw: dict[str, Any], before: ReviewSourceSnapsho
 
 
 def _interleaved_transition(raw: dict[str, Any], before: ReviewSourceSnapshot, after: ReviewSourceSnapshot) -> InterleavedRepairTransition:
+    """Parse the repair epoch, affected paths, and separate repair and staging attributions."""
     if any(
         field in raw
         for field in ("external_source_actor", "external_source_attribution", "external_staging_attribution", "commit_handoff", "git_context_authorization")
@@ -496,6 +503,7 @@ def _interleaved_transition(raw: dict[str, Any], before: ReviewSourceSnapshot, a
 
 
 def _external_source_transition(raw: dict[str, Any], before: ReviewSourceSnapshot, after: ReviewSourceSnapshot) -> ExternalSourceTransition:
+    """Parse an external source change, requiring separate staging attribution when supplied by the transition."""
     if any(field in raw for field in ("commit_handoff", "git_context_authorization", "repair_paths", "repair_attribution", "staging_attribution")):
         msg = "external source attribution cannot authorize another Git or agent repair transition"
         raise ValueError(msg)

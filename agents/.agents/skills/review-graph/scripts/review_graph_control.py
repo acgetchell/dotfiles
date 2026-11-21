@@ -37,6 +37,10 @@ def read_control_file(path: Path) -> bytes:
 
 
 def _write_control_file(path: Path, document: dict[str, Any]) -> ControlReference:
+    """Publish canonical JSON at the control path and return its digest-bound reference.
+
+    Reuse an identical existing file. Raise ValueError if the path holds different content.
+    """
     content = (canonical_json(document) + "\n").encode()
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, name = tempfile.mkstemp(prefix=".control.", dir=path.parent)
@@ -70,6 +74,7 @@ def _write_control_file(path: Path, document: dict[str, Any]) -> ControlReferenc
 
 
 def _reference_document(reference: ControlReference) -> dict[str, Any]:
+    """Read the referenced control object and verify its digest and schema version."""
     content = read_control_file(Path(reference.path))
     if digest_bytes(content) != reference.digest:
         msg = "run control artifact differs from its immutable reference"
@@ -115,13 +120,9 @@ def require_run_control(binding: RunControlBinding | None) -> RunControlBinding:
     return binding
 
 
-def verify_run_control(
-    binding: RunControlBinding | None, *, repository: Path | None = None, policy: dict[str, Any] | None = None, pending_generation: bool = False
-) -> dict[str, Any]:
-    """Verify shared authority without creating it for historical transport."""
-    binding = require_run_control(binding)
-    identity = _reference_document(binding.identity)
-    recorded_repository = identity.get("repository_root")
+def run_control_repository(binding: RunControlBinding) -> Path:
+    """Read the canonical reviewed checkout from its immutable run identity."""
+    recorded_repository = _reference_document(binding.identity).get("repository_root")
     if (
         not isinstance(recorded_repository, str)
         or not Path(recorded_repository).is_absolute()
@@ -129,6 +130,15 @@ def verify_run_control(
     ):
         msg = "run control identity requires its initialized repository_root"
         raise ValueError(msg)
+    return Path(recorded_repository)
+
+
+def verify_run_control(
+    binding: RunControlBinding | None, *, repository: Path | None = None, policy: dict[str, Any] | None = None, pending_generation: bool = False
+) -> dict[str, Any]:
+    """Verify shared authority without creating it for historical transport."""
+    binding = require_run_control(binding)
+    recorded_repository = run_control_repository(binding)
     generation = _reference_document(binding.generation)
     root = Path(binding.identity.path).parent
     if (
@@ -165,10 +175,10 @@ def verify_run_control(
         ):
             msg = "review lifecycle differs from its authoritative control generation counters or history"
             raise ValueError(msg)
-    if repository is not None and Path(recorded_repository) != repository.resolve():
+    if repository is not None and recorded_repository != repository.resolve():
         msg = "run control identity repository_root differs from the signed repository"
         raise ValueError(msg)
-    if root.is_relative_to(Path(recorded_repository)) or Path(recorded_repository).is_relative_to(root):
+    if root.is_relative_to(recorded_repository) or recorded_repository.is_relative_to(root):
         msg = "run control store must be outside the reviewed repository"
         raise ValueError(msg)
     return generation

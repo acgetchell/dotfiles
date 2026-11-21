@@ -6,6 +6,7 @@ _PARALLEL_MODES = frozenset({"audit", "independent-review", "synthesis"})
 
 
 def _capacity_state(capacity: dict[str, Any] | None, occupied_workers: int) -> tuple[str, int]:
+    """Return the capacity state and free worker count, allowing one provisional slot for unknown capacity."""
     if capacity is None:
         return "unknown", 1
     source = capacity.get("source")
@@ -28,6 +29,7 @@ def _capacity_state(capacity: dict[str, Any] | None, occupied_workers: int) -> t
 
 
 def _failure_action(failure: dict[str, Any] | None, capacity_state: str) -> str | None:
+    """Allow one retry for a capacity failure while capacity may remain, then hand recovery to the coordinator."""
     if failure is None:
         return None
     if failure["failure_kind"] == "capacity" and failure["attempts"] == 1 and capacity_state != "known-exhausted":

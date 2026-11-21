@@ -14,13 +14,14 @@ from capture_scope import _scope_data
 from review_graph_lifecycle import ReviewLifecycle, lifecycle_from_document
 from review_graph_plan import graph_plan_digest, plan_from_document
 from review_graph_reuse import source_snapshot
-from test_review_graph_commit import _commit_fixture, _save
-from test_review_graph_runtime import _baseline_mutation_fixture, _sparse_plan
-from test_review_graph_transitions import _materialize, _payload
-from test_support_review_graph import _prepare_all_fixture_timing
+from test_support_review_graph import _materialize, _prepare_all_fixture_timing, _sparse_plan
+from test_support_review_graph_evidence import _payload, _save
+from test_support_review_graph_handoffs import _commit_fixture
+from test_support_review_graph_lifecycle import _baseline_mutation_fixture, _control_args, _control_cli, _control_fixture, _two_repairs
 
 
 def _history_document() -> dict[str, Any]:
+    """Build lifecycle history with completed repairs and an authorized budget extension."""
     return {
         "repair_budget": 3,
         "repairs_completed": 2,
@@ -99,41 +100,6 @@ def test_lifecycle_history_entries_reject_mutation(history_field: str, entry_fie
         setattr(getattr(lifecycle, history_field)[0], entry_field, replacement)
     assert lifecycle_from_document(asdict(lifecycle)) == lifecycle
     assert graph_plan_digest(plan) == original_digest
-
-
-def _control_args(tmp_path: Path, result: dict[str, Any]) -> Namespace:
-    return Namespace(
-        journal=Path(result["journal_path"]),
-        dispatches=Path(result["dispatches_path"]),
-        current_capture=Path(result.get("current_capture_path", result.get("capture_path"))),
-        output=tmp_path / "control-result.json",
-    )
-
-
-def _two_repairs(tmp_path: Path) -> tuple[dict[str, Any], Namespace]:
-    git, repository, template, capture, plan = _baseline_mutation_fixture(tmp_path)
-    lifecycle, _entries, _dispatches = _materialize(tmp_path, capture, plan)
-    result: dict[str, Any] = {}
-    for ordinal in (1, 2):
-        (repository / "tool.py").write_text(f"value = {ordinal + 1}\n")
-        new_capture = _scope_data(git, repository, "baseline", None, ())
-        result = runtime.advance_after_mutation(
-            {
-                **lifecycle,
-                "previous_capture": capture,
-                "new_capture": new_capture,
-                "planning_template": template,
-                "changed_paths": ["tool.py"],
-                "authorization_before": "review-and-fix",
-                "authorization_after": "review-and-fix",
-                "repair_epoch": ordinal,
-                "artifact_store": str(tmp_path / "repairs"),
-                "state_verification_command": "capture_scope.py --mode baseline",
-            }
-        )
-        lifecycle = result["lifecycle_input"]
-        capture = new_capture
-    return result, _control_args(tmp_path, result)
 
 
 def test_optional_finding_cascade_stops_before_third_source_batch(tmp_path: Path) -> None:
@@ -357,37 +323,6 @@ def test_review_control_cli_publishes_cancellation_receipt(tmp_path: Path, capsy
     assert Path(receipt["continuation"]["path"]).is_file()
 
 
-def _control_fixture(tmp_path: Path) -> tuple[dict[str, Any], Namespace, Path]:
-    _git, repository, _template, capture, plan = _baseline_mutation_fixture(tmp_path)
-    lifecycle, entries, dispatches = _materialize(tmp_path, capture, plan)
-    capture_path = tmp_path / "capture.json"
-    capture_path.write_text(json.dumps(capture))
-    args = Namespace(journal=tmp_path / "execution.jsonl", dispatches=dispatches, current_capture=capture_path, output=tmp_path / "result.json")
-    node_id = next(entry["node_id"] for entry in entries["dispatches"] if not entry["dispatch"]["predecessor_evidence_ids"])
-    runtime.append_journal_event(args.journal, lifecycle, runtime.JournalEventRequest(node_id, "in-flight"))
-    return {**lifecycle, "action": "stop", "reason": "Stop now", "artifact_store": str(tmp_path / "control")}, args, repository
-
-
-def _control_cli(request: dict[str, Any], args: Namespace, tmp_path: Path) -> int:
-    input_path = tmp_path / "control-request.json"
-    input_path.write_text(json.dumps(request))
-    return runtime.main(
-        [
-            "review-control",
-            "--input",
-            str(input_path),
-            "--journal",
-            str(args.journal),
-            "--dispatches",
-            str(args.dispatches),
-            "--current-capture",
-            str(args.current_capture),
-            "--output",
-            str(args.output),
-        ]
-    )
-
-
 @pytest.mark.parametrize("rehash", [False, True])
 def test_control_rejects_substituted_capture_root_before_writes(tmp_path: Path, rehash: bool) -> None:
     request, args, repository = _control_fixture(tmp_path)
@@ -464,6 +399,7 @@ def test_control_cli_publication_failure_preserves_state_and_allows_corrected_re
         write = runtime._write_bytes_atomically_once
 
         def refuse_marker(path: Path, content: bytes, *, mode: int) -> bool:
+            """Fail just the control marker write while preserving ordinary writes for the retry scenario."""
             if path == marker:
                 msg = "marker publication failed"
                 raise OSError(msg)

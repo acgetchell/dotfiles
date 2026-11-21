@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 
 from skill_validate import validate_skill
@@ -43,7 +44,11 @@ def skill_sources(source: Path) -> tuple[Path, ...]:
 
 
 def inspect_links(source: Path, destination: Path, *, installed: bool) -> tuple[Path, ...]:
-    """Preflight the whole installation, including stale links, before adding anything."""
+    """Return sorted source skill directories after checking destination links.
+
+    Preflight permits missing links. With installed=True, each skill must already
+    have a directory link and a regular SKILL.md. Conflicts raise ValueError.
+    """
     sources = skill_sources(source)
     if destination.resolve() == source.resolve() or destination.resolve().is_relative_to(source.resolve()):
         raise ValueError(f"Skill destination must be separate from its source: {destination}")
@@ -68,7 +73,11 @@ def inspect_links(source: Path, destination: Path, *, installed: bool) -> tuple[
 
 
 def link_skills(source: Path, destination: Path) -> None:
-    """Reuse the review installer's directory-link layout and collision policy."""
+    """Create missing skill directory links after checking the whole destination.
+
+    On a link-creation error, roll back links this call added that still point
+    to their expected targets. Existing installations are preserved.
+    """
     sources = inspect_links(source, destination, installed=False)
     destination.mkdir(parents=True, exist_ok=True)
     created: list[Path] = []
@@ -98,7 +107,9 @@ def helper_version() -> str:
 def default_helper_directory() -> Path:
     """Select a directory for the pinned helper while preserving older runtimes."""
     prefix = Path(os.environ.get("DOTFILES_REVIEW_PREFIX", Path.home() / ".local/share/dotfiles-review"))
-    return prefix / f"helper-{helper_version()}"
+    packages = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))["package"]
+    parser_version = next(package["version"] for package in packages if package["name"] == "markdown-it-py")
+    return prefix / f"helper-{helper_version()}-markdown-it-{parser_version}"
 
 
 def check_helper(helper: Path) -> dict[str, object]:

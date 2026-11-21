@@ -70,6 +70,7 @@ def worker(root: Path, output: Path, scale: int) -> dict[str, Any]:
     invocation: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
 
     def capture(*args: Any, **kwargs: Any) -> Any:
+        """Record each planner invocation before forwarding its arguments to the original planner."""
         invocation.append((args, kwargs))
         return planner(*args, **kwargs)
 
@@ -123,7 +124,11 @@ def summary(samples: list[float]) -> dict[str, object]:
 
 
 def trial_metrics(trial: dict[str, Any]) -> dict[str, float]:
-    """Weight every subprocess equally, including its internal warm samples."""
+    """Return one value in seconds per metric for a single worker process.
+
+    Reduce repeated planner and warm replay samples to their respective medians.
+    Cold replay and whole-process time each contribute their single observation.
+    """
     return {
         "planner": statistics.median(_positive_durations(trial["planner_seconds"])),
         "cold_replay": _positive_durations([trial["cold_replay_seconds"]])[0],
@@ -133,6 +138,7 @@ def trial_metrics(trial: dict[str, Any]) -> dict[str, float]:
 
 
 def _positive_durations(raw: object) -> tuple[float, ...]:
+    """Convert nonempty positive finite timing samples to floats and reject booleans and overflow."""
     message = "benchmark measurements must be nonempty, finite and positive"
     if not isinstance(raw, (list, tuple)) or not raw or any(type(value) not in (int, float) for value in raw):
         raise ValueError(message)
@@ -146,7 +152,11 @@ def _positive_durations(raw: object) -> tuple[float, ...]:
 
 
 def paired_effects(off: list[dict[str, Any]], on: list[dict[str, Any]]) -> dict[str, object]:
-    """Retain within-pair JIT differences and dimensionless ratios."""
+    """Compare JIT-on and JIT-off trials paired by position.
+
+    Return on-minus-off differences in seconds and on/off ratios for each metric.
+    Require at least one pair, equal run counts, and finite positive timings and ratios.
+    """
     pairs = [(trial_metrics(before), trial_metrics(after)) for before, after in zip(off, on, strict=True)]
     if not pairs:
         msg = "benchmark comparison requires at least one pair"

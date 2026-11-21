@@ -18,20 +18,13 @@ from review_graph_runtime import (
     read_execution_journal,
     resume_after_external_metadata,
 )
-from test_review_graph_git import _discovery_payload
-from test_review_graph_runtime import (
-    ROUTING_CATALOG,
-    SKILL_ROOT,
-    _baseline_mutation_fixture,
-    _compile_repair_fixture_entry,
-    _mutation_with_audit_source,
-    _run_test_git,
-)
-from test_review_graph_transitions import _materialize, _payload
-from test_support_review_graph import _prepare_all_fixture_timing
+from test_support_review_graph import ROUTING_CATALOG, SKILL_ROOT, _materialize, _prepare_all_fixture_timing, _run_test_git
+from test_support_review_graph_evidence import _discovery_payload, _payload
+from test_support_review_graph_lifecycle import _baseline_mutation_fixture, _compile_repair_fixture_entry, _mutation_with_audit_source
 
 
 def _git_payload(entry: dict[str, Any], kind: str) -> dict[str, Any]:
+    """Construct audit evidence with the requested dependency on Git state."""
     if kind == "source-discovery":
         return _discovery_payload(entry)
     return {

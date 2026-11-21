@@ -21,103 +21,32 @@ from review_graph_runtime import (
     compile_validation,
     finalize_proof,
     main,
-    materialize_dispatches,
     next_ready_nodes,
     read_execution_journal,
     resume_after_external_metadata,
 )
 from review_graph_schema import SchemaValidationError, require_schema_definition
 from review_graph_synthesis import validate_synthesis
-from test_review_graph_runtime import (
+from test_support_review_graph import (
     ROUTING_CATALOG,
     SCHEMA_ROOT,
     SKILL_ROOT,
-    _baseline_mutation_fixture,
-    _compact_independent_payload,
     _complete_structural_fixture_routing,
-    _json_plan,
-    _publish_worker_bytes,
+    _materialize,
+    _prepare_all_fixture_timing,
     _run_test_git,
     _set_fixture_routing,
     _sparse_plan_document,
 )
-from test_support_review_graph import _prepare_all_fixture_timing
-
-
-def _payload(paths: list[str], *, dispatch: dict[str, Any] | None = None) -> dict[str, Any]:
-    return {
-        "status": "no-findings",
-        "files_inspected": paths,
-        "findings": [],
-        "changes": [],
-        "handoffs": [],
-        "limitations": [],
-        "scope_limitations": [],
-        "nearby_contract_owners": list((dispatch or {}).get("required_read_paths", [])),
-        "validation_requirements": [],
-        "commands_executed": [],
-        "command_policy_attested": True,
-    }
-
-
-def _synthesis_payload(dispatch: dict[str, Any], bundle: dict[str, Any]) -> dict[str, Any]:
-    records = [record for record in bundle["records"] if record["evidence_id"] in dispatch["predecessor_evidence_ids"]]
-    findings = [
-        {
-            **{key: finding[key] for key in ("severity", "location", "summary", "evidence", "remediation")},
-            "owner": record["skill_id"],
-            "disposition": "remaining",
-            "source_findings": [{"evidence_id": record["evidence_id"], "finding_id": finding["finding_id"]}],
-        }
-        for record in records
-        for finding in record.get("findings", [])
-    ]
-    return {
-        **_payload([]),
-        "status": "completed" if findings else "no-findings",
-        "findings": findings,
-        "readiness_verdict": "not-ready" if findings else "ready",
-        "verdict_reasons": ["Findings remain." if findings else "Required evidence reconciles."],
-        "predecessor_coverage": [
-            {"evidence_id": record["evidence_id"], "requirement_ids": record["requirement_ids"], "disposition": "reused" if record.get("reuse") else "accepted"}
-            for record in records
-        ],
-        "routing_closure": {"complete": True, "unresolved_handoff_ids": [], "user_excluded_catalog_ids": []},
-        "validation_reconciliation": [
-            {
-                "evidence_id": record["evidence_id"],
-                "requirement_ids": record["requirement_ids"],
-                "result": record["status"],
-                "platform": bundle["plan_context"]["validation_environments"][record["node_id"]]["platform"],
-                "execution_mode": "native",
-            }
-            for record in records
-            if record["record_type"] == "validation"
-        ],
-        "cross_surface_risks": [],
-    }
-
-
-def _materialize(tmp_path: Path, capture: dict[str, Any], plan: Any) -> tuple[dict[str, Any], dict[str, Any], Path]:
-    state = [capture[key] for key in ("scope_fingerprint", "captured_worktree_fingerprint", "repository_state_fingerprint")]
-    lifecycle = {"plan": _json_plan(plan), "source_state": state}
-    entries = materialize_dispatches(
-        {
-            **lifecycle,
-            "artifact_store": str(tmp_path / "old"),
-            "repository_root": capture["repository_root"],
-            "authorization": "review-only",
-            "state_verification_command": "capture_scope.py --mode baseline",
-        }
-    )
-    dispatches = tmp_path / "dispatches.json"
-    dispatches.write_text(json.dumps(entries))
-    return lifecycle, entries, dispatches
+from test_support_review_graph_evidence import _compact_independent_payload, _payload, _publish_worker_bytes, _synthesis_payload
+from test_support_review_graph_handoffs import _staging_fixture
+from test_support_review_graph_lifecycle import _baseline_mutation_fixture
 
 
 @pytest.mark.parametrize("dependency", ["independent", "manifest", "uncertain", "undeclared"])
 @pytest.mark.parametrize("absolute", [False, True])
 def test_manifest_delta_reuses_implementation_and_preserves_findings(tmp_path: Path, dependency: str, absolute: bool) -> None:
+    """Change the manifest and trace each retained finding back to the original evidence while checking which units need reinspection."""
     git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
     (repository / "pyproject.toml").write_text('[project]\nname = "example"\nversion = "0.1.0"\ndependencies = []\n')
     _run_test_git(git, "-C", str(repository), "add", "pyproject.toml")
@@ -253,39 +182,9 @@ def test_manifest_delta_reuses_implementation_and_preserves_findings(tmp_path: P
         compile_review({"dispatch": {**tampered, "before_state": state, "after_state": state}, "payload": updated})
 
 
-def _staging_fixture(
-    tmp_path: Path, *, independent: bool = False, staging: str = "subset", mode: str = "baseline"
-) -> tuple[str, Path, dict[str, Any], dict[str, Any], dict[str, Any]]:
-    git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
-    if staging == "mixed":
-        (repository / "tool.py").write_text("value = 0\n")
-        _run_test_git(git, "-C", str(repository), "add", "tool.py")
-    (repository / "tool.py").write_text("value = 2\n")
-    (repository / "state.rs").write_text("pub fn state() { let value = 2; }\n")
-    if independent:
-        template.update(concrete_change_target=True, change_target="git diff -- state.rs tool.py")
-    capture = _scope_data(git, repository, mode, None, ())
-    _complete_structural_fixture_routing(template, cast("list[str]", capture["captured_scope_paths"]))
-    plan = plan_from_document(bootstrap_document(capture, template), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)
-    lifecycle, entries, dispatches = _materialize(tmp_path, capture, plan)
-    journal = tmp_path / "old.jsonl"
-    audit = next(item for item in entries["dispatches"] if item["dispatch"].get("mode") == "audit")
-    _publish_worker_bytes(audit, json.dumps(_payload(audit["dispatch"]["owned_paths"], dispatch=audit["dispatch"])).encode())
-    append_journal_event(journal, lifecycle, JournalEventRequest(audit["node_id"], "in-flight"))
-    _run_test_git(git, "-C", str(repository), "add", "." if staging == "all" else "tool.py")
-    request = {
-        **lifecycle,
-        "previous_capture": capture,
-        "new_capture": _scope_data(git, repository, mode, None, ()),
-        "dispatches_path": str(dispatches),
-        "journal_path": str(journal),
-        "artifact_store": str(tmp_path / "resumed"),
-    }
-    return git, repository, request, audit, entries
-
-
 @pytest.mark.parametrize("remaining_findings", [False, True])
 def test_external_staging_between_dispatch_and_compile_completes_without_rollback(tmp_path: Path, remaining_findings: bool) -> None:  # noqa: PLR0915
+    """Stage a change after dispatch, then follow the preserved audit through compilation and the next transition."""
     git, repository, request, audit, _entries = _staging_fixture(tmp_path)
     payload = _payload(audit["dispatch"]["owned_paths"], dispatch=audit["dispatch"])
     command = "git --no-pager diff -- tool.py state.rs"
@@ -584,6 +483,7 @@ def test_malformed_metadata_transition_is_a_cli_error_without_publication(
 
 @pytest.mark.parametrize("staged_before_repairs", [False, True])
 def test_partitioned_audit_retains_original_capture_across_multiple_repairs(tmp_path: Path, staged_before_repairs: bool) -> None:
+    """Repair separate coverage units and check that reused evidence still resolves against its original capture."""
     git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
     (repository / "pyproject.toml").write_text('[project]\nname="example"\nversion="0.1.0"\n')
     _run_test_git(git, "-C", str(repository), "add", "pyproject.toml")

@@ -14,8 +14,8 @@ from review_graph_integrity import digest_bytes
 from review_graph_plan import ReviewRequirement, ValidationRequirement, WorkerBudget, WorkerNode, plan_graph
 from review_graph_read_provenance import MissingReadProvenanceError, bind_runtime_reads
 from review_graph_receipts import stage_receipt
-from test_review_graph_runtime import SKILL_ROOT
-from test_review_graph_transitions import _payload
+from test_support_review_graph import SKILL_ROOT
+from test_support_review_graph_evidence import _payload
 
 RULES = (
     "Rule: Parse nonnegative counts; reject negative counts.\n",
@@ -28,6 +28,7 @@ RULES = (
 
 
 def _fixture(root: Path, *, reduced: bool) -> dict[str, Any]:
+    """Write the instruction tree and construct the planning input for its temporary repository."""
     root.mkdir()
     historical = []
     for index, rule in enumerate(RULES):
@@ -120,6 +121,7 @@ def _fixture(root: Path, *, reduced: bool) -> dict[str, Any]:
 
 
 def _read_context(context: dict[str, Any]) -> dict[str, bytes]:
+    """Reassemble each instruction file from the chunks referenced by its manifest."""
     reference = context["manifest"]
     manifest = json.loads(Path(reference["path"]).read_bytes())
     return {

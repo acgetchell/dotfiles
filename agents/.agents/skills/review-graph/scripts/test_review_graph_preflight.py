@@ -13,16 +13,18 @@ import pytest
 import review_graph_preflight as preflight
 import review_graph_runtime as runtime
 from review_graph_schema import SchemaValidationError
-from test_review_graph_efficiency import _preflight_request
+from test_support_review_graph_scheduling import _preflight_request
 
 
 def _executable(path: Path) -> None:
+    """Install an executable shell stub whose exit code exposes an accidental launch."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("#!/bin/sh\nexit 99\n", encoding="utf-8")
     path.chmod(0o755)
 
 
 def _uv_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Build a uv preflight request and install a guard against starting subprocesses."""
     request = _preflight_request(tmp_path)
     unit = request["plan"]["coalesced_validation_units"][0]
     unit.update(commands=["just check ci", "just coverage-rust coverage-summary"], working_directories=[str(tmp_path)] * 2)
@@ -44,6 +46,7 @@ def _uv_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, An
     )
 
     def forbidden_launch(*_args: Any, **_kwargs: Any) -> None:
+        """Fail the test if preflight attempts to start a process."""
         pytest.fail("preflight must not launch a process, sync, or download")
 
     monkeypatch.setattr(subprocess, "Popen", forbidden_launch)
@@ -51,6 +54,7 @@ def _uv_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, An
 
 
 def _tree_snapshot(root: Path) -> dict[str, Any]:
+    """Capture metadata, file contents, and symlink targets for detecting preflight writes."""
     return {
         str(path.relative_to(root)): (
             (path.lstat().st_mode, path.lstat().st_size, path.lstat().st_mtime_ns),

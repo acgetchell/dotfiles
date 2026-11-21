@@ -10,14 +10,15 @@ from typing import Any
 import pytest
 import review_graph_runtime as runtime
 from capture_scope import _scope_data
-from test_review_graph_execution_recovery import _compile_aggregate
-from test_review_graph_repair_staging import _continuation_args, _finish_repair, _recovery_request, _run_continuation, _staged_repair
-from test_review_graph_runtime import _late_validation_plan, _late_validation_requirement, _run_test_git
-from test_review_graph_transitions import _payload
-from test_support_review_graph import _prepare_all_fixture_timing
+from test_support_review_graph import _prepare_all_fixture_timing, _run_test_git
+from test_support_review_graph_evidence import _payload
+from test_support_review_graph_lifecycle import _late_validation_plan, _late_validation_requirement
+from test_support_review_graph_recovery import _compile_aggregate
+from test_support_review_graph_repair_staging import _continuation_args, _finish_repair, _recovery_request, _run_continuation, _staged_repair
 
 
 def _ready(result: dict[str, Any]) -> dict[str, Any]:
+    """Compute ready nodes from the continuation's current source state and journal."""
     _prepare_all_fixture_timing(result["dispatch_set"])
     lifecycle = result["lifecycle_input"]
     events, _state, _head = runtime.read_execution_journal(
@@ -29,6 +30,7 @@ def _ready(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def _barrier_fixture(tmp_path: Path, *, resumes: int) -> tuple[dict[str, Any], dict[str, Any], dict[Path, bytes]]:
+    """Stage a repair and verify that its gate is the only runnable node."""
     git, repository, request, _old_audit, _history = _staged_repair(tmp_path)
     request.pop("post_repair_capture")
     _run_test_git(git, "-C", str(repository), "reset", "HEAD", "--", "state.rs")
@@ -86,6 +88,7 @@ def _barrier_fixture(tmp_path: Path, *, resumes: int) -> tuple[dict[str, Any], d
 
 
 def _expand(tmp_path: Path, result: dict[str, Any]) -> dict[str, Any]:
+    """Request an additional validation requirement through the continuation CLI."""
     lifecycle = result["lifecycle_input"]
     sample = result["dispatch_set"]["dispatches"][0]["dispatch"]
     addition = {**_late_validation_plan(), "source_state": lifecycle["source_state"], "commands": ["true"], "working_directories": [sample["repository_root"]]}
@@ -99,6 +102,7 @@ def _expand(tmp_path: Path, result: dict[str, Any]) -> dict[str, Any]:
 
 
 def _block_gate(entry: dict[str, Any], result: dict[str, Any]) -> None:
+    """Record a permission denial at the gate before its worker launches."""
     snapshot = runtime.capture_workspace_snapshot(entry["dispatch"])
     dispatch = {
         **entry["dispatch"],
@@ -120,6 +124,7 @@ def _block_gate(entry: dict[str, Any], result: dict[str, Any]) -> None:
 
 
 def _assert_historical_attempt_cannot_be_promoted(result: dict[str, Any], gate: dict[str, Any]) -> None:
+    """Check that replay rejects omission of the invalidation and tampering with the original passing evidence."""
     lifecycle = result["lifecycle_input"]
     plan = runtime._graph_plan(lifecycle["plan"])
     state = tuple(lifecycle["source_state"])
@@ -209,6 +214,7 @@ def test_ordinary_expansion_keeps_completed_barrier_and_audit(tmp_path: Path) ->
 
 
 def _replacement_gate_fixture(tmp_path: Path, transition: str) -> tuple[dict[str, Any], dict[str, Any], dict[Path, bytes]]:
+    """Apply the requested continuation transition to a run with a pending repair gate."""
     result, audit, history = _barrier_fixture(tmp_path, resumes=1)
     if transition != "metadata":
         gate = _ready(result)["ready_dispatches"][0]

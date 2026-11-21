@@ -8,12 +8,14 @@ from typing import Any
 
 import pytest
 import review_graph_runtime as runtime
-import test_review_graph_runtime as fixtures
+import test_support_review_graph_lifecycle as fixtures
 from review_graph_plan import ValidationArtifact
 from review_graph_validation_outputs import obligation_identity
+from test_support_review_graph import _json_plan
 
 
 def _external_log(path: Path) -> ValidationArtifact:
+    """Declare a log whose output directory is isolated from the repository."""
     return ValidationArtifact(path=str(path), kind="log", repository_status="outside-repository", status_source="isolated-output-directory")
 
 
@@ -25,6 +27,7 @@ def test_repair_log_relocation_retains_source_audit_and_requires_fresh_validatio
     original_log.write_text("immutable original execution\n")
 
     def request_with_log(directory: Path, *, instructions: bool = False) -> dict[str, Any]:
+        """Bind the original validation command and its declared output to the same external log."""
         request = original_request(directory, instructions=instructions)
         plan = runtime._graph_plan(request["plan"])
         unit = replace(
@@ -35,7 +38,7 @@ def test_repair_log_relocation_retains_source_audit_and_requires_fresh_validatio
             dependency_policy="continue-independent",
             isolation_root=str(log_root),
         )
-        request["plan"] = fixtures._json_plan(replace(plan, coalesced_validation_units=(unit,)))
+        request["plan"] = _json_plan(replace(plan, coalesced_validation_units=(unit,)))
         request["planning_template"]["validation_requirements"][0].update(
             commands=["just check-fast > " + shlex.quote(str(replacement_log)) + " 2>&1"],
             canonical_recipe=None,

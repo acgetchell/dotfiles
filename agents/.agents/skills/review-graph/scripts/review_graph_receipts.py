@@ -29,6 +29,7 @@ def dispatch_summary(entry: dict[str, Any]) -> dict[str, Any]:
 
 
 def _continuation_receipt(output: dict[str, Any]) -> dict[str, Any]:
+    """Include the retained paths the coordinator needs for the next continuation step."""
     receipt: dict[str, Any] = {}
     next_inputs = {
         key: output[key]
@@ -81,6 +82,7 @@ def _launch_node(entry: dict[str, Any], requirements: dict[str, dict[str, Any]])
 
 
 def _launch_receipt(operation: str, output: dict[str, Any]) -> dict[str, Any]:
+    """Summarize worker launch information for materialized or ready dispatches."""
     receipt: dict[str, Any] = {}
     for key in ("dispatches", "ready_dispatches"):
         if key in output:
@@ -93,6 +95,7 @@ def _launch_receipt(operation: str, output: dict[str, Any]) -> dict[str, Any]:
 
 
 def _lifecycle_receipt(operation: str, output: dict[str, Any]) -> dict[str, Any]:
+    """Summarize lifecycle counts and the required completion order when lifecycle data is present."""
     if "lifecycle" not in output:
         return {}
     counts = {key.removesuffix("_node_ids"): len(value) for key, value in output["lifecycle"].items()}
@@ -108,6 +111,7 @@ def _lifecycle_receipt(operation: str, output: dict[str, Any]) -> dict[str, Any]
 
 
 def _coverage_receipt(output: dict[str, Any]) -> dict[str, Any]:
+    """Summarize inherited and rechecked coverage units per node for a continuation."""
     if "coverage_reuse_decisions" not in output:
         return {}
     return {

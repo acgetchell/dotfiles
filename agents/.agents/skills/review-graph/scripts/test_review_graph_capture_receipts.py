@@ -13,8 +13,9 @@ from review_graph_handoffs import _literal_words, audit_observations, validation
 from review_graph_plan import plan_from_document
 from review_graph_read_provenance import bind_runtime_reads
 from review_graph_session import runtime_command
-from test_capture_scope import _commit_all, _init_repo
-from test_review_graph_runtime import ROUTING_CATALOG, SKILL_ROOT, _baseline_mutation_fixture, _json_plan, _worker_input_fixture
+from test_support_review_graph import ROUTING_CATALOG, SKILL_ROOT, _json_plan, _worker_input_fixture
+from test_support_review_graph_capture import _commit_all, _init_repo
+from test_support_review_graph_lifecycle import _baseline_mutation_fixture
 
 
 def test_large_audit_captures_persist_before_compact_receipts(tmp_path: Path) -> None:

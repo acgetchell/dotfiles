@@ -2,7 +2,6 @@
 
 import json
 import shutil
-import subprocess
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -16,192 +15,14 @@ from review_graph_commit import _unchanged_comparison, verify_live_commit
 from review_graph_integrity import digest_bytes
 from review_graph_plan import plan_from_document
 from review_graph_reuse import metadata_transition, source_snapshot
-from test_review_graph_runtime import (
-    ROUTING_CATALOG,
-    SKILL_ROOT,
-    _baseline_mutation_fixture,
-    _compact_independent_payload,
-    _complete_structural_fixture_routing,
-    _publish_worker_bytes,
-    _run_test_git,
-)
-from test_review_graph_transitions import _materialize, _payload, _synthesis_payload
-from test_support_review_graph import _prepare_fixture_timing
-
-
-def _save(entry: dict[str, Any], lifecycle: dict[str, Any], journal: Path, payload: dict[str, Any]) -> dict[str, str]:
-    state = lifecycle.get("current_source_state", lifecycle["source_state"])
-    dispatch = {**entry["dispatch"], "before_state": state, "after_state": state, "source_capture": lifecycle.get("capture", lifecycle.get("new_capture"))}
-    compiler = {
-        "audit": runtime.compile_review,
-        "synthesis": runtime.compile_review,
-        "independent-review": runtime.compile_independent_payload,
-        "validation": runtime.compile_validation,
-    }[dispatch["mode"]]
-    content, metadata = compiler({"dispatch": dispatch, "payload": payload})
-    Path(entry["artifact_path"]).write_bytes(content)
-    Path(entry["metadata_path"]).write_text(json.dumps(metadata))
-    source: dict[str, str] = {key: entry[key] for key in ("artifact_path", "metadata_path")}
-    runtime.append_journal_event(
-        journal,
-        lifecycle,
-        runtime.JournalEventRequest(
-            entry["node_id"],
-            "blocked" if payload["status"] == "blocked" else "accepted",
-            source=source,
-            reason="Native CI requires an authorized published commit." if payload["status"] == "blocked" else None,
-        ),
-    )
-    return source
-
-
-def _validation_payload(entry: dict[str, Any], *, blocked: bool = False) -> dict[str, Any]:
-    unit = entry["dispatch"]["validation_unit"]
-    return {
-        "schema_version": 3,
-        "status": "blocked" if blocked else "passed",
-        "artifacts": [],
-        "limitations": ["Native CI unavailable before authorized commit and push."] if blocked else [],
-        "executions": [
-            {
-                "command": command,
-                "working_directory": directory,
-                "executor": "fixture",
-                "result": "blocked" if blocked else "passed",
-                "evidence": "Unavailable before commit" if blocked else "Fixture completed",
-                "exit_code": None if blocked else 0,
-                "elapsed": "0s",
-                "artifact_paths": [],
-            }
-            for command, directory in zip(unit["commands"], unit["working_directories"], strict=True)
-        ],
-    }
-
-
-def _commit_audit_payload(dispatch: dict[str, Any], *, mode: str, change_target: str) -> dict[str, Any]:
-    payload = _payload(dispatch["owned_paths"], dispatch=dispatch)
-    if mode == "branch":
-        payload.update(
-            commands_executed=[change_target],
-            git_dependencies=[{"kind": "head", "command": change_target, "reason": "Compare inspected bytes against the immutable branch base."}],
-        )
-    return payload
-
-
-def _commit_fixture(  # noqa: PLR0915 - complete real-Git execution and handoff fixture.
-    tmp_path: Path, *, mode: str = "baseline", git_sensitive_review: bool = False
-) -> tuple[dict[str, Any], dict[str, dict[str, Any]], dict[str, dict[str, str]]]:
-    git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
-    (repository / "justfile").write_text("ci:\n    test -f tool.py\n")
-    (repository / "review-validation-contracts.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "contracts": [
-                    {
-                        "contract_id": "fixture-ci",
-                        "commands": ["just ci"],
-                        "working_directories": ["."],
-                        "implementation_paths": ["justfile"],
-                        "input_scope": "repository",
-                        "input_prefixes": [],
-                        "git_inputs": [],
-                        "deterministic": True,
-                        "rationale": "The fixture recipe checks file existence only.",
-                    }
-                ],
-            }
-        )
-    )
-    _run_test_git(git, "-C", str(repository), "add", "justfile")
-    _run_test_git(git, "-C", str(repository), "commit", "-m", "CI recipe")
-    (repository / "tool.py").write_text("value = 2\n")
-    (repository / "state.rs").write_text("pub fn state() { let value = 2; }\n")
-    template.update(concrete_change_target=True, change_target="git diff HEAD -- tool.py state.rs")
-    local = template["validation_requirements"][0]
-    local.update(commands=["just ci"], canonical_recipe="just ci")
-    native = deepcopy(local)
-    native.update(
-        requirement_id="native-ci", commands=["native-ci-pending"], canonical_recipe=None, baseline=False, environment="native Linux", platform="linux"
-    )
-    template["validation_requirements"].append(native)
-    template["pre_review_validation_requirement_ids"] = [local["requirement_id"]]
-    base_ref = _run_git(git, repository, ("rev-parse", "HEAD^")).decode().strip() if mode == "branch" else None
-    capture = _scope_data(git, repository, mode, base_ref, ())
-    if mode == "branch":
-        template["change_target"] = f"git diff {capture['merge_base']} -- tool.py state.rs"
-    _complete_structural_fixture_routing(template, cast("list[str]", capture["captured_scope_paths"]))
-    plan = plan_from_document(bootstrap_document(capture, template), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)
-    assert plan.dispatch_allowed, plan.blockers
-    lifecycle, dispatch_set, dispatches = _materialize(tmp_path, capture, plan)
-    lifecycle["capture"] = capture
-    entries = {entry["node_id"]: entry for entry in dispatch_set["dispatches"]}
-    journal = tmp_path / "original.jsonl"
-    local_entry = next(entry for entry in entries.values() if entry["dispatch"].get("validation_unit", {}).get("baseline"))
-    native_entry = next(entry for entry in entries.values() if entry["dispatch"]["mode"] == "validation" and entry != local_entry)
-    just = shutil.which("just")
-    assert just is not None
-    subprocess.run([just, "ci"], cwd=repository, check=True, capture_output=True)  # noqa: S603 - fixed fixture command.
-    sources = {local_entry["node_id"]: _save(local_entry, lifecycle, journal, _validation_payload(local_entry))}
-    for entry in entries.values():
-        dispatch = entry["dispatch"]
-        if dispatch["mode"] == "audit":
-            payload = _commit_audit_payload(dispatch, mode=mode, change_target=template["change_target"])
-            planned = next(unit for unit in dispatch["command_policy"]["planned_validation_units"] if "native-ci" in unit["requirement_ids"])
-            payload["validation_requirements"] = [
-                {
-                    "requirement_id": "native-ci",
-                    "planned_validation_digest": planned["planned_validation_digest"],
-                    "owner": dispatch["skill_id"],
-                    "reason": "Native target behavior requires CI",
-                    "expected_evidence": "Native CI passes",
-                }
-            ]
-            sources[entry["node_id"]] = _save(entry, lifecycle, journal, payload)
-        elif dispatch["mode"] == "independent-review":
-            payload = _compact_independent_payload(dispatch)
-            if git_sensitive_review:
-                payload["commands_executed"] = ["git log -1"]
-                payload["git_dependencies"] = [{"kind": "history", "command": "git log -1", "reason": "Inspect the commit history."}]
-            sources[entry["node_id"]] = _save(entry, lifecycle, journal, payload)
-        elif dispatch["mode"] == "validation" and entry != local_entry:
-            sources[entry["node_id"]] = _save(entry, lifecycle, journal, _validation_payload(entry, blocked=True))
-    _run_test_git(git, "-C", str(repository), "switch", "-c", "fix/reviewed-commit")
-    _run_test_git(git, "-C", str(repository), "add", ".")
-    _run_test_git(git, "-C", str(repository), "commit", "-m", "Reviewed source")
-    current = _scope_data(git, repository, mode, base_ref, ())
-    lifecycle.pop("capture")
-    request = {
-        **lifecycle,
-        "previous_capture": capture,
-        "new_capture": current,
-        "journal_path": str(journal),
-        "dispatches_path": str(dispatches),
-        "artifact_store": str(tmp_path / "handoff"),
-        "authorization": {
-            "operation": "branch-commit",
-            "repository_root": str(repository),
-            "branch": current["branch"],
-            "source_state": lifecycle["source_state"],
-            "user_authorization": "Commit these reviewed changes on fix/reviewed-commit and push.",
-        },
-        "independent_reviews": {
-            entry["node_id"]: {
-                "change_target": entry["dispatch"]["change_target"],
-                "comparison_commit": capture["merge_base"] if mode == "branch" else capture["head"],
-                "reason": "Same captured worktree compared with the same immutable HEAD.",
-            }
-            for entry in entries.values()
-            if entry["dispatch"]["mode"] == "independent-review"
-        },
-        "native_ci": {native_entry["node_id"]: {"commands": [f"native-ci --commit {current['head']}"], "checks": [{"name": "CI", "target": "linux"}]}},
-    }
-    if git_sensitive_review:
-        request["independent_reviews"] = {}
-    return request, entries, sources
+from test_support_review_graph import ROUTING_CATALOG, SKILL_ROOT, _complete_structural_fixture_routing, _materialize, _prepare_fixture_timing, _run_test_git
+from test_support_review_graph_evidence import _compact_independent_payload, _payload, _publish_worker_bytes, _save, _synthesis_payload, _validation_payload
+from test_support_review_graph_handoffs import _commit_fixture
+from test_support_review_graph_lifecycle import _baseline_mutation_fixture
 
 
 def _assert_original_comparison(request: dict[str, Any], dispatch: dict[str, Any]) -> None:
+    """Check that the original comparison still exposes the fixture's change to tool.py."""
     comparison = request["previous_capture"]["merge_base"] or request["previous_capture"]["head"]
     target = f"git diff {comparison} -- tool.py state.rs"
     assert dispatch["change_target"] == target
@@ -212,6 +33,7 @@ def _assert_original_comparison(request: dict[str, Any], dispatch: dict[str, Any
 
 
 def test_reused_audit_native_requirement_survives_a_repair_then_commit(tmp_path: Path) -> None:
+    """Trace a reused audit's native validation requirement from its original evidence to the commit that must satisfy it."""
     git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
     native = deepcopy(template["validation_requirements"][0])
     native.update(
@@ -304,6 +126,7 @@ def test_reused_audit_native_requirement_survives_a_repair_then_commit(tmp_path:
 
 
 def _native_synthesis_payload(dispatch: dict[str, Any], bundle: dict[str, Any], head: str) -> dict[str, Any]:
+    """Verify that validation requirements bind to the handed-off commit before constructing synthesis evidence."""
     reconciliation = bundle["plan_context"]["validation_reconciliation"]
     assert reconciliation["blockers"] == []
     assert reconciliation["requirements"]
@@ -317,6 +140,7 @@ def _native_synthesis_payload(dispatch: dict[str, Any], bundle: dict[str, Any], 
 def test_commit_handoff_preserves_evidence_and_finalizes_exact_commit(  # noqa: PLR0915 - full commit handoff and certification scenario.
     tmp_path: Path, mode: str, git_sensitive_review: bool
 ) -> None:
+    """Carry earlier evidence across a real commit, then remove or alter its recorded history to exercise proof verification."""
     request, entries, sources = _commit_fixture(tmp_path, mode=mode, git_sensitive_review=git_sensitive_review)
     originals = {path: Path(path).read_bytes() for source in sources.values() for path in source.values()}
     with pytest.raises(ValueError, match=r"only the index|require replanning"):

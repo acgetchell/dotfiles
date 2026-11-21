@@ -11,19 +11,14 @@ from capture_scope import _scope_data
 from review_graph_bootstrap import bootstrap_document
 from review_graph_plan import plan_from_document
 from review_graph_scheduling import select_execution_lanes
-from test_review_graph_reuse import _compile_args
-from test_review_graph_runtime import (
-    ROUTING_CATALOG,
-    SKILL_ROOT,
-    _baseline_mutation_fixture,
-    _complete_structural_fixture_routing,
-    _run_test_git,
-    _set_fixture_routing,
-)
-from test_review_graph_transitions import _materialize, _payload
+from test_support_review_graph import ROUTING_CATALOG, SKILL_ROOT, _complete_structural_fixture_routing, _materialize, _run_test_git, _set_fixture_routing
+from test_support_review_graph_evidence import _payload
+from test_support_review_graph_lifecycle import _baseline_mutation_fixture
+from test_support_review_graph_reuse import _compile_args
 
 
 def _fixture(tmp_path: Path, *, material: bool = False, recipe: bool = False, partition: bool = True) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Advance a Rust review across an instruction edit and return its portability dispatch."""
     git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
     files = {
         "Cargo.toml": '[package]\nname = "fixture"\nversion = "0.1.0"\nedition = "2024"\n',
@@ -111,6 +106,7 @@ def _fixture(tmp_path: Path, *, material: bool = False, recipe: bool = False, pa
 
 
 def _assessment(entry: dict[str, Any], *, material: bool = False) -> dict[str, Any]:
+    """Describe the effect of the instruction changes on the reused coverage unit."""
     units = entry["dispatch"]["coverage_reuse"]["units"]
     deltas = units[0]["input_deltas"]
     return {

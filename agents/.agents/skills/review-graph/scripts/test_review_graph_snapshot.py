@@ -12,6 +12,7 @@ from review_graph_session import verify_snapshot
 
 
 def _digest(content: bytes) -> str:
+    """Compute the tagged content digest used in fixture snapshots."""
     return "sha256:" + hashlib.sha256(content).hexdigest()
 
 
@@ -44,6 +45,7 @@ def test_snapshot_verification_reads_each_resource_once_and_rechecks_changed_byt
     original_read = Path.read_bytes
 
     def read(path: Path) -> bytes:
+        """Count resource reads while allowing the verifier to consume the actual file bytes."""
         if path in resources:
             reads[path] += 1
         return original_read(path)

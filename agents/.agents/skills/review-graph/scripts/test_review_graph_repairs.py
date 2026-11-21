@@ -1,17 +1,15 @@
 """Regression coverage for publication and recovery without Git fixture mutations."""
 
 import json
-import os
-import tempfile
 from argparse import Namespace
 from copy import deepcopy
 from dataclasses import replace
 from hashlib import sha256
 from pathlib import Path
-from typing import IO, Any
+from typing import Any
 
 import pytest
-from review_graph_plan import ValidationArtifact, _validation_nodes, plan_from_document
+from review_graph_plan import ValidationArtifact, _validation_nodes
 from review_graph_runtime import (
     JournalEventRequest,
     _graph_plan,
@@ -30,23 +28,14 @@ from review_graph_runtime import (
     recover_validation_launch,
     review_worker_payload_write,
 )
-from test_review_graph_runtime import (
-    ROUTING_CATALOG,
-    SKILL_ROOT,
-    _compact_audit_payload,
-    _compile_repair_fixture_entry,
-    _continuation_fixture,
-    _json_plan,
-    _late_validation_plan,
-    _late_validation_requirement,
-    _sparse_plan,
-    _sparse_plan_document,
-    _worker_input_fixture,
-)
-from test_support_review_graph import _prepare_all_fixture_timing
+from test_support_review_graph import _json_plan, _prepare_all_fixture_timing, _sparse_plan, _worker_input_fixture
+from test_support_review_graph_evidence import _compact_audit_payload
+from test_support_review_graph_lifecycle import _compile_repair_fixture_entry, _continuation_fixture, _late_validation_plan
+from test_support_review_graph_recovery import _block_validator, _interrupt_recovery_write, _recovery_fixture
 
 
 def _partitioned_payload(entry: dict[str, Any]) -> dict[str, Any]:
+    """Group the inspected paths with their shared contract dependencies in a coverage unit."""
     payload = _compact_audit_payload(entry)
     payload["nearby_contract_owners"].extend(["AGENTS.md", "pyproject.toml"])
     payload["coverage_units"] = [
@@ -118,81 +107,6 @@ def test_rejected_partition_can_be_corrected_published_and_compiled(tmp_path: Pa
     assert metadata["evidence"]["status"] == "no-findings"
     assert Path(entry["worker_payload_path"]).read_bytes() == content
     assert "partition every owned path and every finding exactly once" in entry["worker_prompt"]
-
-
-def _block_validator(entry: dict[str, Any], lifecycle: dict[str, Any], journal: Path) -> None:
-    dispatch = {**entry["dispatch"], "before_state": lifecycle["source_state"], "after_state": lifecycle["source_state"]}
-    payload = {"schema_version": 3, "executions": [], "status": "blocked", "limitations": ["uv cache permission denied before checks started"]}
-    content, metadata = compile_validation({"dispatch": dispatch, "payload": payload})
-    Path(entry["artifact_path"]).write_bytes(content)
-    Path(entry["metadata_path"]).write_text(json.dumps(metadata))
-    append_journal_event(
-        journal,
-        lifecycle,
-        JournalEventRequest(
-            entry["node_id"], "blocked", source={key: entry[key] for key in ("artifact_path", "metadata_path")}, reason=payload["limitations"][0]
-        ),
-    )
-
-
-def _recovery_fixture(tmp_path: Path, *, late: bool = False, extra_validator: bool = False) -> tuple[dict[str, Any], Namespace, dict[str, Any]]:
-    lifecycle, dispatches, paths = _continuation_fixture(tmp_path)
-    if extra_validator:
-        planning = _sparse_plan_document()
-        extra = {**planning["validation_requirements"][0], "requirement_id": "second-validation", "baseline": False, "environment": "second executor"}
-        planning["validation_requirements"].append(extra)
-        lifecycle["plan"] = _json_plan(
-            plan_from_document(planning, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=SKILL_ROOT.parents[2])
-        )
-        dispatches = materialize_dispatches(
-            {
-                **lifecycle,
-                "artifact_store": str(tmp_path / "two-validators"),
-                "authorization": "review-only",
-                "repository_root": str(SKILL_ROOT.parents[2]),
-                "state_verification_command": "capture_scope.py --mode baseline",
-            }
-        )
-        paths["dispatches"].write_text(json.dumps(dispatches))
-    validation = next(entry for entry in dispatches["dispatches"] if entry["result_contract"] == "compact-validation")
-    for entry in dispatches["dispatches"]:
-        if entry["dispatch"].get("mode") == "audit":
-            payload = _compact_audit_payload(entry)
-            planned = entry["dispatch"]["command_policy"]["planned_validation_units"][0]
-            payload["validation_requirements"] = [
-                {
-                    "requirement_id": planned["requirement_ids"][0],
-                    "planned_validation_digest": planned["planned_validation_digest"],
-                    "owner": "review-validator",
-                    "reason": "Exercise the dispatch contract",
-                    "expected_evidence": "Exact baseline passes",
-                }
-            ]
-            if late:
-                payload["validation_requirements"].append(_late_validation_requirement())
-            dispatch = {**entry["dispatch"], "before_state": lifecycle["source_state"], "after_state": lifecycle["source_state"]}
-            content, metadata = compile_review({"dispatch": dispatch, "payload": payload})
-            Path(entry["artifact_path"]).write_bytes(content)
-            Path(entry["metadata_path"]).write_text(json.dumps(metadata))
-            append_journal_event(
-                paths["journal"],
-                lifecycle,
-                JournalEventRequest(entry["node_id"], "accepted", source={key: entry[key] for key in ("artifact_path", "metadata_path")}),
-            )
-    _block_validator(validation, lifecycle, paths["journal"])
-    request = {
-        **lifecycle,
-        "artifact_store": str(tmp_path / "recovery"),
-        "node_id": validation["node_id"],
-        "failure_kind": "cache-access",
-        "checks_started": False,
-        "reason": "uv failed to open its cache before pytest launched",
-        "remedy": "Use an accessible repository-local uv cache",
-        "environment": "UV_CACHE_DIR=.uv-cache",
-        "permission_change": "none",
-    }
-    args = Namespace(journal=paths["journal"], dispatches=paths["dispatches"], current_capture=paths["current-capture"])
-    return request, args, validation
 
 
 @pytest.mark.parametrize("other_has_evidence", [False, True])
@@ -272,51 +186,6 @@ def test_launch_recovery_retains_other_blocked_nodes_and_recovers_each_once(  # 
     assert final["graph_proof_status"] == "complete"
     assert len(final["validation_recoveries"]) == 2
     assert all(path.read_bytes() == content for path, content in original_files.items())
-
-
-def _interrupt_recovery_write(monkeypatch: pytest.MonkeyPatch, stage: str, name: str) -> list[Path]:
-    """Fail below either direct or atomic publication after writing a prefix."""
-    original_open, original_fdopen, original_mkstemp = Path.open, os.fdopen, tempfile.mkstemp
-    descriptors: dict[int, Path] = {}
-    interrupted: list[Path] = []
-
-    def wrap(stream: IO[Any], path: Path) -> IO[Any]:
-        target = path.name == name or path.name.startswith(f".{name}.")
-        parent = path.parent.name
-        selected = parent.startswith("launch-history-") if stage == "history" else parent.startswith("validation-recovered-")
-        if target and (selected or stage == "result"):
-            write = stream.write
-
-            def fail(content: bytes) -> int:
-                write(content[:17])
-                stream.flush()
-                interrupted.append(path)
-                msg = "injected interrupted recovery write"
-                raise OSError(msg)
-
-            monkeypatch.setattr(stream, "write", fail)
-        return stream
-
-    def open_path(path: Path, mode: str = "r", *args: Any, **kwargs: Any) -> IO[Any]:
-        stream = original_open(path, mode, *args, **kwargs)
-        return wrap(stream, path) if mode == "xb" else stream
-
-    def mkstemp(*args: Any, **kwargs: Any) -> tuple[int, str]:
-        descriptor, path = original_mkstemp(*args, **kwargs)
-        assert isinstance(descriptor, int)
-        assert isinstance(path, str)
-        descriptors[descriptor] = Path(path)
-        return descriptor, path
-
-    def fdopen(descriptor: int, mode: str = "r", *args: Any, **kwargs: Any) -> IO[Any]:
-        stream = original_fdopen(descriptor, mode, *args, **kwargs)
-        path = descriptors.pop(descriptor, None)
-        return wrap(stream, path) if mode == "wb" and path is not None else stream
-
-    monkeypatch.setattr(Path, "open", open_path)
-    monkeypatch.setattr(tempfile, "mkstemp", mkstemp)
-    monkeypatch.setattr(os, "fdopen", fdopen)
-    return interrupted
 
 
 @pytest.mark.parametrize(

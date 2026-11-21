@@ -71,6 +71,7 @@ class _OpenBracket:
 
 
 def _angle_destination_end(text: str, start: int) -> int | None:
+    """Return the index after the closing angle bracket or None for an invalid or unterminated destination."""
     for index in range(start + 1, len(text)):
         if text[index] in "<>\\" and _escaped(text, index):
             continue
@@ -209,6 +210,7 @@ def collect_entry(lines: Sequence[str], doi_idx: int, definitions: tuple[Referen
 
 
 def _escaped(text: str, index: int) -> bool:
+    """Check whether an odd run of preceding backslashes escapes the character at this index."""
     start = index
     while start > 0 and text[start - 1] == "\\":
         start -= 1
@@ -216,6 +218,7 @@ def _escaped(text: str, index: int) -> bool:
 
 
 def _block_boundary_at(text: str, newline: int) -> bool:
+    """Check whether the line after the newline starts a new block or list item."""
     line = text[newline + 1 :].partition("\n")[0]
     return bool(_BOUNDARY.match(line) or _LIST_ITEM.match(line))
 
@@ -248,6 +251,7 @@ def _label_end(text: str, start: int) -> int | None:
 
 
 def _label(text: str) -> str | None:
+    """Normalize a valid reference label for lookup, returning None for empty, oversized, or malformed labels."""
     if not 1 <= len(text) <= 999 or not text.strip():
         return None
     if any(char in "[]" and not _escaped(text, index) for index, char in enumerate(text)):
@@ -296,6 +300,7 @@ def _reference_candidate(text: str, start: int, end: int) -> tuple[str | None, i
 
 
 def _close_link(text: str, opening: _OpenBracket, end: int, definitions: dict[str, str]) -> _LinkMatch | None:
+    """Resolve an active opening bracket to an inline or defined reference link, or return None."""
     if not opening.active:
         return None
     label = None
@@ -379,6 +384,7 @@ def _reference_matches(text: str, definitions: dict[str, str]) -> list[_LinkMatc
 
 
 def _definition_destinations(parsed: tuple[ReferenceDefinition, ...]) -> dict[str, str]:
+    """Index reference destinations by normalized label, preserving the first definition."""
     definitions: dict[str, str] = {}
     for definition in parsed:
         definitions.setdefault(definition.label, definition.destination)

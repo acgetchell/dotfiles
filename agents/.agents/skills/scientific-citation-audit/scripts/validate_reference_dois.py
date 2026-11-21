@@ -15,12 +15,12 @@ import math
 import re
 import ssl
 import sys
-import urllib.error
 import urllib.request
 from dataclasses import dataclass, replace
 from datetime import date
 from enum import StrEnum
 from hashlib import sha256
+from http.client import HTTPException
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -241,6 +241,17 @@ class SoftwareCitation:
         }
 
 
+def _reported_doi(raw: dict[str, Any]) -> str | None:
+    """Return None for an absent CSL DOI field and raise TypeError for a present non-string value."""
+    if "DOI" not in raw:
+        return None
+    value = raw["DOI"]
+    if not isinstance(value, str):
+        msg = "DOI metadata field DOI must be a string"
+        raise TypeError(msg)
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class CslMetadata:
     """Parsed DOI metadata needed for citation relevance checks."""
@@ -251,6 +262,17 @@ class CslMetadata:
     author_families: tuple[str, ...]
     date_provenance: tuple[tuple[str, str], ...] = ()
     authors_complete: bool = False
+    reported_doi: str | None = None
+
+    def contradicts_doi(self, expected: Doi) -> bool:
+        """A present resolver claim must identify the linked DOI."""
+        if self.reported_doi is None:
+            return False
+        try:
+            resolved = Doi.parse(self.reported_doi)
+        except ValueError:
+            return True
+        return resolved.value.casefold() != expected.value.casefold()
 
     @classmethod
     def parse(cls, raw: dict[str, Any]) -> CslMetadata:
@@ -266,7 +288,15 @@ class CslMetadata:
         raw_authors = raw.get("author")
         authors = author_families(raw_authors)
         authors_complete = isinstance(raw_authors, list) and bool(authors) and len(authors) == len(raw_authors)
-        return cls(title=title, year=year, container=container, author_families=authors, date_provenance=dates, authors_complete=authors_complete)
+        return cls(
+            title=title,
+            year=year,
+            container=container,
+            author_families=authors,
+            date_provenance=dates,
+            authors_complete=authors_complete,
+            reported_doi=_reported_doi(raw),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -344,7 +374,11 @@ def _definition_content(parsed: tuple[ReferenceDefinition, ...]) -> dict[int, li
 
 
 def extract_entries(markdown: str) -> list[DoiEntry]:
-    """Extract DOI labels and nearby bibliography entries from Markdown text."""
+    """Return bibliography occurrences in source-line order, with one-based line numbers.
+
+    Collapse case-insensitive repeats of a DOI on the same line. Keep occurrences
+    on different lines so each can be checked against its own citation context.
+    """
     lines = markdown.splitlines()
     entries: list[DoiEntry] = []
     seen: set[tuple[str, int]] = set()
@@ -552,7 +586,7 @@ def validate_entry(
     try:
         raw = fetcher(entry.doi, timeout)
         metadata = CslMetadata.parse(raw)
-    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError, TypeError, ValueError, json.JSONDecodeError, ssl.SSLError) as exc:
+    except (HTTPException, OSError, TypeError, ValueError) as exc:
         return DoiResult(
             doi=entry.doi.value,
             line=entry.line,
@@ -583,7 +617,7 @@ def validate_entry(
             date_provenance=metadata.date_provenance,
             mismatched_fields=("year",) if conflict else (),
         )
-        return reconcile_software(result, metadata, raw, citation) if citation is not None else result
+        return _reconcile_software(result, metadata, citation) if citation is not None else result
 
     claims = entry.bibliographic_claims
     resolved_title_score = title_score(metadata.title, claims)
@@ -604,7 +638,7 @@ def validate_entry(
         problems.append(conflict)
         if "year" not in fields:
             fields.append("year")
-    if isinstance(raw.get("DOI"), str) and raw["DOI"].casefold() != entry.doi.value.casefold():
+    if metadata.contradicts_doi(entry.doi):
         problems.append("resolved DOI differs from linked DOI")
         fields.append("doi")
 
@@ -631,18 +665,17 @@ def validate_entry(
 
 
 def reconcile_software(result: DoiResult, metadata: CslMetadata, raw: dict[str, Any], citation: SoftwareCitation) -> DoiResult:
+    """Reconcile pre-parsed bibliographic metadata with the DOI claim from its CSL response."""
+    return _reconcile_software(result, replace(metadata, reported_doi=_reported_doi(raw)), citation)
+
+
+def _reconcile_software(result: DoiResult, metadata: CslMetadata, citation: SoftwareCitation) -> DoiResult:
     """Check canonical identity only for entries without bibliographic claims."""
-    resolved_doi = raw.get("DOI")
     problems = [result.message] if result.status == AuditStatus.MISMATCH else []
     if result.doi.casefold() != citation.doi.value.casefold():
         problems.append("linked DOI differs from canonical software DOI")
-    if isinstance(resolved_doi, str):
-        try:
-            same_doi = Doi.parse(resolved_doi).value.casefold() == citation.doi.value.casefold()
-        except ValueError:
-            same_doi = False
-        if not same_doi:
-            problems.append("resolved DOI differs from canonical software DOI")
+    if metadata.contradicts_doi(citation.doi):
+        problems.append("resolved DOI differs from canonical software DOI")
     if identity_text(metadata.title) != identity_text(citation.title):
         problems.append("resolved title differs from canonical software title")
     if metadata.author_families and {identity_text(name) for name in metadata.author_families} != {identity_text(name) for name in citation.authors}:
@@ -651,7 +684,7 @@ def reconcile_software(result: DoiResult, metadata: CslMetadata, raw: dict[str, 
         problems.append("resolved year differs from canonical software year")
     if problems:
         status, message = AuditStatus.MISMATCH, "; ".join(problems)
-    elif not isinstance(resolved_doi, str) or not metadata.authors_complete or metadata.year is None:
+    elif metadata.reported_doi is None or not metadata.authors_complete or metadata.year is None:
         status, message = AuditStatus.INSUFFICIENT_CONTEXT, "resolved software metadata lacks DOI, authors, or year"
     else:
         status, message = AuditStatus.OK, "software identity matches explicit CITATION.cff metadata"
@@ -666,10 +699,16 @@ def validate_entries(
     *,
     citation: SoftwareCitation | None = None,
 ) -> list[DoiResult]:
-    """Validate parsed DOI entries."""
+    """Return one audit result per entry in input order.
+
+    By default, resolve metadata at doi.org with a request timeout in seconds.
+    Reuse a fetcher's returned metadata for the same DOI spelling within this
+    call. A fetch that raises leaves the next occurrence free to try again.
+    """
     cache: dict[str, dict[str, Any]] = {}
 
     def cached_fetcher(doi: Doi, request_timeout: float) -> dict[str, Any]:
+        """Reuse successful responses for the same DOI spelling within this audit and let failed fetches be retried."""
         if doi.value not in cache:
             cache[doi.value] = fetcher(doi, request_timeout)
         return cache[doi.value]
@@ -704,7 +743,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run(argv: Sequence[str] | None = None) -> int:
-    """Run the DOI audit command."""
+    """Print the audit report and return 1 if any DOI result needs attention.
+
+    Return 2 for unreadable or invalid audit inputs or an empty bibliography.
+    With --allow-empty, an empty bibliography produces an empty report and exits 0.
+    """
     args = build_parser().parse_args(argv)
 
     try:
@@ -744,7 +787,7 @@ def run(argv: Sequence[str] | None = None) -> int:
 
 
 def main() -> int:
-    """CLI entry point."""
+    """Audit the bibliography named on the command line and return its exit status."""
     return run()
 
 

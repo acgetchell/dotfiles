@@ -29,6 +29,7 @@ class FakeOpener:
         self.requests: list[Request] = []
 
     def open(self, request: Request, *, timeout: int) -> FakeResponse:
+        """Record the request and return its configured response or raise the injected error."""
         assert timeout > 0
         self.requests.append(request)
         if isinstance(self.result, Exception):
@@ -41,6 +42,7 @@ def install_opener(monkeypatch: pytest.MonkeyPatch, result: bytes | Exception) -
     opener = FakeOpener(result)
 
     def build_opener(handler: typesafe_check.NoRedirect) -> FakeOpener:
+        """Check the redirect handler and return the fixture opener."""
         assert isinstance(handler, typesafe_check.NoRedirect)
         return opener
 

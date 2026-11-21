@@ -128,7 +128,11 @@ def parse_repository(raw: object, directory: Path) -> RepositoryProfile:
 
 
 def load_inventory(path: Path) -> tuple[tuple[RepositoryProfile, ...], str]:
-    """Validate the entire inventory before modifying the first environment."""
+    """Return profiles in inventory order and the SHA-256 hex digest of the file bytes.
+
+    Resolve relative checkout paths from the inventory's directory. Reject repeated
+    names, checkout paths, or environments before the caller starts provisioning.
+    """
     content = path.read_bytes()
     raw = tomllib.loads(content.decode("utf-8"))
     if set(raw) != {"schema_version", "repository"} or type(raw["schema_version"]) is not int or raw["schema_version"] != 1:
@@ -187,7 +191,11 @@ def sync_arguments(profile: RepositoryProfile, mode: Mode) -> list[str]:
 
 @contextmanager
 def environment_lock(environment: Path) -> Generator[None]:
-    """Serialize cooperating lifecycle runs; kernel locks survive interrupted runs safely."""
+    """Hold the lock for this resolved environment until the context exits.
+
+    Raise ValueError immediately if another lifecycle command holds the lock.
+    The lock file can persist between runs. Its open descriptor holds the lock.
+    """
     if os.name != "posix":
         msg = "Cloud lifecycle requires macOS or Linux"
         raise ValueError(msg)

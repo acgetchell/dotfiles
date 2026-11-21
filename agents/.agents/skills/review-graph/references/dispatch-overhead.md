@@ -184,23 +184,27 @@ the earlier publication comparison. The direct Python entrypoint defaults to
 `da0e045d420a890d53a1e0993a0ecdfee5057c72`, the #87 comparison. Pass the
 chosen revision explicitly when comparing results from these entrypoints.
 
-The command prints an external `report.json` path. It reads the selected trusted
-Git revision with `git show`; it does not change Git state or execute repository
-validation recipes. The baseline revision must be available locally. For a
-chosen new output directory or repeat count, use
+The command prints an external `report.json` path. It resolves the selected
+trusted Git revision to a commit and exports its review-graph scripts and
+references into the benchmark directory with `git archive`. The report records
+the resolved commit in `baseline_commit`. The revision must be available locally.
+For a chosen new output directory or repeat count, use
 `scripts/review_graph_benchmark.py --help` inside this skill.
 
 Each run defaults to 265 Python/tooling/documentation files (`--scale 20`), performs exhaustive
-catalog routing, and retains nine audits, one conclusion-blind independent
-dispatch, three validators, and two syntheses. Both versions use the current
-planner, dependencies, and skills; each runtime loads its own versioned operation
-input schema from Git. Historical formats are used only in temporary benchmark
-storage and are not accepted by the current runtime. A four-slot wave projection preserves dependencies
-and serializes validators. It is a cost model, not actual concurrent model work.
+catalog routing, and selects ten audits, including Python style hygiene across
+the generated modules, script, and test. The plan also includes one conclusion-blind
+independent dispatch, three validators, and two syntheses. The current planner builds
+one plan for both arms. Each trial starts a fresh interpreter and uses the same
+fixture, skill files, and replay driver. Each runtime loads its own helpers and
+schemas to verify its evidence. Timings begin after interpreter setup. Serialized
+byte counts include absolute paths to the baseline snapshot or current checkout. The report
+projects dependency-ordered waves with four slots, including for runtimes that
+predate the optional `concurrent_worker_limit` input.
 
 Five paired trials alternate baseline/current execution order. Each materializes
 all workers, follows source packets with direct-read fallback, publishes and
-compiles nine scripted audit payloads, and checks exact payload bytes, approval
+compiles ten scripted audit payloads, and checks exact payload bytes, approval
 receipts, accepted status, and equality of four seeded findings. Each also replays
 one independent transcript through publication/compilation. The legacy transcript
 starts with a deliberate `Check`/`Inspected` label mismatch, then retries with

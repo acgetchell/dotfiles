@@ -14,12 +14,14 @@ def no_processes(monkeypatch: pytest.MonkeyPatch) -> None:
     """A pure parsing scenario must not acquire live source state or launch tools."""
 
     def forbidden(*_args: Any, **_kwargs: Any) -> None:
+        """Fail immediately if validation input parsing tries to launch a subprocess."""
         pytest.fail("validation parsing unexpectedly launched a process")
 
     monkeypatch.setattr(subprocess, "Popen", forbidden)
 
 
 def _validation_document() -> dict[str, Any]:
+    """Extract the sparse plan's validation inputs for parser tests."""
     return {"validation_requirements": _sparse_plan_document()["validation_requirements"]}
 
 

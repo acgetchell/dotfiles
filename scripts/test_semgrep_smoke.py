@@ -55,6 +55,7 @@ def test_native_smoke_rejects_process_and_output_failures(code: int, output: str
 
 
 def _selected_launcher(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Create a placeholder launcher next to the fixture interpreter."""
     monkeypatch.setattr(semgrep_smoke.sys, "executable", str(tmp_path / "python"))
     launcher = tmp_path / ("semgrep.exe" if os.name == "nt" else "semgrep")
     launcher.write_text("", encoding="utf-8")
@@ -72,6 +73,7 @@ def test_native_smoke_uses_available_ca_bundle_without_overriding_caller(tmp_pat
         monkeypatch.setenv("SSL_CERT_FILE", configured)
 
     def scan(_argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        """Check which certificate bundle reached the subprocess and return a valid fixture finding."""
         environment = kwargs["env"]
         assert isinstance(environment, dict)
         assert environment["SSL_CERT_FILE"] == (configured or str(bundle))

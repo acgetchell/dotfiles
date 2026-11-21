@@ -6,7 +6,6 @@ import shlex
 import subprocess
 from copy import deepcopy
 from pathlib import Path
-from typing import Any
 
 import pytest
 from review_graph_bootstrap import PLANNING_SCHEMA, RUNTIME_SCHEMA, bootstrap_document, main
@@ -15,44 +14,7 @@ from review_graph_plan import DEFAULT_ROUTING_CATALOG, DEFAULT_SKILL_ROOT, plan_
 from review_graph_runtime import main as runtime_main
 from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
 from review_graph_starter import STARTER_EXAMPLE, STARTER_SCHEMA, starter_template
-from test_support_review_graph import _assessed_fixture_candidates, _captured_rust_repository
-
-
-def _fixture(tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Use fresh branch history with repository-owned ignore rules and source."""
-    capture = _captured_rust_repository(tmp_path, branch=True)
-    choices = json.loads(STARTER_EXAMPLE.read_text())
-    root = tmp_path / "proof ' space $(no-shell-expansion)"
-    root.mkdir()
-    choices.update(
-        artifact_root=str(root),
-        consulted_routers=["review-graph", "rust-review-orchestrator"],
-        ignored_outputs=[{"path": ".pytest_cache", "kind": "cache"}],
-        command_policy={"disposition": "allowed", "reason": "Deterministic stand-in emits text and exits; no Git or source mutation."},
-    )
-    choices["routing_overrides"] = _assessed_fixture_candidates(
-        capture["captured_scope_paths"],
-        choices["consulted_routers"],
-        {"rust.invariants": "Scripted fixture exercises invariant-owner dispatch", "rust.build": "Scripted fixture exercises build-owner dispatch"},
-    )
-    host = tmp_path / "host"
-    host.mkdir()
-    just = host / "just"
-    just.write_text('#!/bin/sh\nprintf "%s\\n" "$UV_CACHE_DIR"\nexit 7\n')
-    just.chmod(0o755)
-    choices["execution_prerequisites"] = {
-        "executables": [str(just)],
-        "native_available": True,
-        "reason": "POSIX stand-in inspected for this deterministic fixture; no recipe is run by bootstrap.",
-    }
-    return capture, choices
-
-
-def _invoke(tmp_path: Path, capture: dict[str, Any], choices: dict[str, Any]) -> tuple[int, Path]:
-    capture_path, choices_path, output = (tmp_path / name for name in ("capture.json", "choices.json", "bootstrap.json"))
-    capture_path.write_text(json.dumps(capture, indent=2) + "\n")
-    choices_path.write_text(json.dumps(choices, indent=2) + "\n")
-    return main(["--capture", str(capture_path), "--starter-config", str(choices_path), "--output", str(output)]), output
+from test_support_review_graph_sessions import _fixture, _invoke
 
 
 def test_starter_comparison_is_commit_handoff_eligible(tmp_path: Path) -> None:

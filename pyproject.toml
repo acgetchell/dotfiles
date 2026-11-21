@@ -25,6 +25,8 @@ override-dependencies = [
   "opentelemetry-sdk==1.45.2",
   "pywin32==312; sys_platform == 'win32'",
   "tomli==2.5.0",
+  # Semgrep 1.186 still requests wcmatch 8.x. Its globmatch API is compatible with the GHSA-53pm-wgxf-c6qf fix.
+  "wcmatch==11.2",
 ]
 
 [tool.research-repo-tools.toolchain]
@@ -251,12 +253,13 @@ dev = [
   "pytest==9.2.0",
   "pytest-xdist==3.8.0",
   "research-repo-tools[semgrep]==0.3.0",
-  "ruff==0.17.5",
+  "ruff==0.17.6",
   "ty==0.0.107",
   "yamllint==1.38.0",
   "zizmor==1.32.0",
 ]
 tooling = [
+    "markdown-it-py==4.3.0",
     "research-repo-tools==0.3.0",
 ]
 

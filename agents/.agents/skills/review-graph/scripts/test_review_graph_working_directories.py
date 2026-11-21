@@ -9,8 +9,8 @@ import pytest
 import review_graph_runtime as runtime
 from review_graph_plan import validation_requirements_from_document
 from review_graph_timing import timing_documents
-from test_review_graph_efficiency import _preflight_request
-from test_review_graph_runtime import SKILL_ROOT, _sparse_plan_document
+from test_support_review_graph import SKILL_ROOT, _sparse_plan_document
+from test_support_review_graph_scheduling import _preflight_request
 
 if TYPE_CHECKING:
     from pathlib import Path

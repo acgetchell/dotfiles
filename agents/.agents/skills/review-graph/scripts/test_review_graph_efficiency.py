@@ -1,8 +1,9 @@
 """Workflow cost, prerequisite, and continuation regressions without Git mutations."""
 
 import json
+import os
+import shutil
 import subprocess
-import sys
 from argparse import Namespace
 from collections import Counter
 from dataclasses import asdict, replace
@@ -10,42 +11,42 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import review_graph_benchmark as benchmark
 import review_graph_runtime as runtime
-from research_repo_tools.process import ExecutableNotFoundError
-from review_graph_benchmark import _baseline_runtime, _trial, benchmark_fixture
+from research_repo_tools.process import ExecutableNotFoundError, run_command_bytes
+from review_graph_benchmark import RUNTIME_INPUT_SCHEMA, _snapshot_baseline, _trial, benchmark_fixture
 from review_graph_metrics import projected_waves, source_demand
 from review_graph_plan import ValidationArtifact, validation_requirements_from_document
-from test_review_graph_runtime import (
-    SKILL_ROOT,
-    _compact_audit_payload,
-    _execution_payload,
-    _json_plan,
-    _late_validation_fixture,
-    _late_validation_plan,
-    _sparse_plan,
-    _sparse_plan_document,
-    _worker_input_fixture,
-)
+from test_support_review_graph import SKILL_ROOT, _json_plan, _sparse_plan, _sparse_plan_document, _worker_input_fixture
+from test_support_review_graph_evidence import _compact_audit_payload, _execution_payload
+from test_support_review_graph_lifecycle import _late_validation_fixture, _late_validation_plan
+from test_support_review_graph_scheduling import _preflight_request
 
 
-def test_benchmark_preserves_catalog_independence_findings_and_measures_reads(tmp_path: Path) -> None:
-    document = benchmark_fixture(tmp_path / "repository")
+def test_benchmark_preserves_catalog_independence_findings_and_measures_reads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    document = benchmark_fixture(Path("repository"))
+    assert Path(document["repository_root"]) == tmp_path.resolve() / "repository"
     nodes = document["plan"]["actual_worker_nodes"]
-    assert Counter(node["mode"] for node in nodes) == {"audit": 9, "validation": 3, "independent-review": 1, "synthesis": 2}
+    assert Counter(node["mode"] for node in nodes) == {"audit": 10, "validation": 3, "independent-review": 1, "synthesis": 2}
     assert document["plan"]["routing_catalog_closed"]
     manifest = _trial(runtime, document, tmp_path / "trial")
     metrics = manifest["metrics"]
     assert len(manifest["findings"]) == 4
-    assert len(manifest["receipts"]) == 9
+    style = next(entry["dispatch"] for entry in manifest["dispatches"]["dispatches"] if entry["dispatch"].get("skill_id") == "python-style-hygiene")
+    repository = tmp_path / "repository"
+    assert style["mode"] == "audit"
+    assert set(style["owned_paths"]) == {path.relative_to(repository).as_posix() for path in repository.rglob("*.py")}
+    assert len(manifest["receipts"]) == 10
     assert metrics["scripted_reads"]["source_file_reads"] == 18  # Independent review reads every source directly.
     assert metrics["scripted_reads"]["repeated_source_file_reads"] == 0
-    assert metrics["coordinator_api_operations"] == 21
+    assert metrics["coordinator_api_operations"] == 23
     assert metrics["model_review_seconds"] is None
     assert sum(metrics["per_worker_input_bytes"].values()) == metrics["worker_input_bytes"]
     assert metrics["default_cli_output_bytes"] == metrics["coordinator_result_bytes"] < metrics["full_result_bytes"]
     assert metrics["repeated_validation_identity_bytes"] == 0
     assert metrics["independent_protocol_replay"] == {"publication_attempts": 1, "formatting_only_retries": 0, "coordinator_api_operations": 2}
-    assert metrics["optional_coverage_protocol_replay"] == {"partitioned_workers": 9, "publication_attempts": 9, "formatting_only_retries": 0}
+    assert metrics["optional_coverage_protocol_replay"] == {"partitioned_workers": 10, "publication_attempts": 10, "formatting_only_retries": 0}
     telemetry = manifest["dispatches"]["telemetry"]
     assert telemetry["source_demand"]["distinct_paths"] == 18
     assert telemetry["source_demand"]["repeated_file_reads"] > 0
@@ -72,12 +73,51 @@ def test_large_fixture_measures_compact_transport_without_git_history(tmp_path: 
     assert metrics["independent_protocol_replay"] == {"publication_attempts": 1, "formatting_only_retries": 0, "coordinator_api_operations": 2}
 
 
+def test_benchmark_replays_committed_schemas_without_wave_telemetry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise an older CLI contract from a local commit, including its evidence checks."""
+    skill = SKILL_ROOT / "review-graph"
+    checkout = tmp_path / "checkout"
+    shutil.copytree(skill / "scripts", checkout / "scripts", ignore=shutil.ignore_patterns("__pycache__", "test_*.py", "fixtures"))
+    shutil.copytree(skill / "references", checkout / "references")
+    schema_path = checkout / RUNTIME_INPUT_SCHEMA.relative_to(skill)
+    schema = json.loads(schema_path.read_bytes())
+    del schema["$defs"]["materialize-dispatches"]["properties"]["concurrent_worker_limit"]
+    schema_path.write_text(json.dumps(schema), encoding="utf-8")
+    git = shutil.which("git")
+    assert git is not None
+    # Keep setup and the benchmark's own Git subprocesses in the temporary checkout.
+    git_locations = {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR", "GIT_ALTERNATE_OBJECT_DIRECTORIES"}
+    for name in tuple(os.environ):
+        if name.upper() in git_locations:
+            monkeypatch.delenv(name)
+    run_command_bytes(git, ("init", "-q"), cwd=checkout)
+    run_command_bytes(git, ("add", "scripts", "references"), cwd=checkout)
+    run_command_bytes(git, ("-c", "user.name=Fixture", "-c", "user.email=fixture@example.org", "commit", "-qm", "Baseline"), cwd=checkout)
+    schema_path.write_bytes(RUNTIME_INPUT_SCHEMA.read_bytes())
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(benchmark, "_snapshot_baseline", lambda _skill, ref, destination: _snapshot_baseline(checkout, ref, destination))
+    report = benchmark.run_benchmark(Path("results"), baseline_ref="HEAD", repeats=1, scale=1)
+    results = tmp_path.resolve() / "results"
+    assert report == json.loads((results / "report.json").read_bytes())
+    assert report["baseline_commit"] == run_command_bytes(git, ("rev-parse", "HEAD"), cwd=checkout).stdout.decode().strip()
+    before = json.loads((results / "before-000/benchmark-manifest.json").read_bytes())
+    after = json.loads((results / "after_-000/benchmark-manifest.json").read_bytes())
+    assert "concurrent_worker_limit" not in json.loads((results / "before-000.input.json").read_bytes())
+    assert json.loads((results / "after_-000.input.json").read_bytes())["concurrent_worker_limit"] == 4
+    validator = next(entry["dispatch"] for entry in before["dispatches"]["dispatches"] if entry["dispatch"]["mode"] == "validation")
+    assert Path(validator["payload_schema"]["path"]).parent == results / "baseline/references/schemas"
+    assert len(before["findings"]) == 4
+    assert before["findings"] == after["findings"]
+
+
 @pytest.mark.parametrize("field", ["worker_payload_digest", "worker_payload_path"])
 def test_benchmark_rejects_mismatched_publication_receipts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str) -> None:
     document = benchmark_fixture(tmp_path / "repository")
     publish = runtime.publish_worker_payload_bytes
 
     def mismatched_receipt(contract: dict[str, Any], content: bytes) -> dict[str, Any]:
+        """Corrupt the digest or destination in a receipt returned by a successful publication."""
         receipt = publish(contract, content)
         receipt[field] = "sha256:" + "0" * 64 if field == "worker_payload_digest" else str(tmp_path / "wrong-payload.json")
         return receipt
@@ -116,20 +156,8 @@ def test_wave_projection_rejects_invalid_capacity(limit: Any) -> None:
 @pytest.mark.parametrize("ref", ["", "--output=unexpected-file"])
 def test_benchmark_rejects_git_options_before_invocation(tmp_path: Path, ref: str) -> None:
     with pytest.raises(ValueError, match="not an option"):
-        _baseline_runtime(tmp_path, ref, schema_store=tmp_path / "schema")
+        _snapshot_baseline(tmp_path, ref, tmp_path / "baseline")
     assert not list(tmp_path.iterdir())
-
-
-def _preflight_request(tmp_path: Path) -> dict[str, Any]:
-    plan = _sparse_plan()
-    unit = replace(plan.coalesced_validation_units[0], working_directories=(str(tmp_path),))
-    return {
-        "plan": _json_plan(replace(plan, coalesced_validation_units=(unit,))),
-        "repository_root": str(tmp_path),
-        "cache_paths": [],
-        "command_policy": [{"command": "true", "disposition": "allowed", "reason": "read-only fixture"}],
-        "execution_prerequisites": [{"node_id": unit.node_id, "executables": [sys.executable], "native_available": True, "reason": "current host"}],
-    }
 
 
 @pytest.mark.parametrize("defect", ["executable", "empty-executables", "native", "directory", "uninspected"])
@@ -361,6 +389,7 @@ def test_benchmark_verifies_independent_publication_receipt(tmp_path: Path, monk
     publish = runtime.publish_worker_payload_bytes
 
     def mismatched_receipt(contract: dict[str, Any], content: bytes) -> dict[str, Any]:
+        """Alter only the independent review receipt so earlier audit publications remain valid."""
         receipt = publish(contract, content)
         if contract["result_contract"] == "compact-independent-review":
             receipt[field] = "wrong"

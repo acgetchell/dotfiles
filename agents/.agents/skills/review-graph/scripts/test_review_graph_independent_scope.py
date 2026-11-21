@@ -10,10 +10,13 @@ import review_graph_runtime as runtime
 from capture_scope import _scope_data
 from review_graph_bootstrap import bootstrap_document
 from review_graph_plan import plan_from_document
-from test_review_graph_runtime import ROUTING_CATALOG, SKILL_ROOT, _baseline_mutation_fixture, _compact_independent_payload, _json_plan
+from test_support_review_graph import ROUTING_CATALOG, SKILL_ROOT, _json_plan
+from test_support_review_graph_evidence import _compact_independent_payload
+from test_support_review_graph_lifecycle import _baseline_mutation_fixture
 
 
 def _repair(tmp_path: Path, comparison: str = "commit") -> dict[str, Any]:
+    """Build a repair request spanning modified and newly created paths in a real checkout."""
     git, repository, template, before, plan = _baseline_mutation_fixture(tmp_path)
     (repository / "tool.py").write_text("value = 2\n")
     (repository / "new.txt").write_text("new untracked input\n")

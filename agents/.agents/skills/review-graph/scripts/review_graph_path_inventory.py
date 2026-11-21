@@ -7,6 +7,7 @@ from review_graph_integrity import digest_json
 
 
 def _disposition(item: Any, selected_catalog_ids: set[str]) -> dict[str, Any]:
+    """Validate a captured-path disposition and return its owning audit IDs in sorted order."""
     if not isinstance(item, dict) or set(item) != {"paths", "disposition", "reason", "catalog_ids"}:
         msg = "captured_path_dispositions entries require paths, disposition, reason, and catalog_ids"
         raise ValueError(msg)

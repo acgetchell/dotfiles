@@ -54,7 +54,11 @@ class SourceDiscovery:
             raise ValueError(msg)
 
     def select(self, snapshot: ReviewSourceSnapshot) -> tuple[str, ...]:
-        """Select only captured tracked/nonignored membership, including empty results."""
+        """Return captured paths under the selected roots that match any supplied glob.
+
+        Globs match the whole case-sensitive path, so * can cross a slash.
+        Return an empty tuple for no matches. A capture missing the inventory raises ValueError.
+        """
         self.verify()
         snapshot.verify()
         universe = snapshot.repository_selection_paths
@@ -112,7 +116,11 @@ def load_discovery(capture: Path, state: tuple[str, ...], paths: tuple[str, ...]
 
 
 def bind_discovery(command: str, dispatch: dict[str, Any]) -> tuple[SourceDiscovery, tuple[str, str]] | None:
-    """Classify only the generated command with the supported literal selectors."""
+    """Return the bound selection and its capture path and digest for a recognized command.
+
+    Return None for an unrecognized command or invalid selectors. Once a command
+    matches, an unreadable or inconsistent capture is an error, even for an empty selection.
+    """
     context = dispatch.get("source_discovery")
     if context is None:
         return None

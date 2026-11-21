@@ -60,6 +60,7 @@ def _rust_declaration_end(code: str, start: int, end: int) -> int | None:
 
 
 def _rust_locations(content: bytes) -> list[dict[str, Any]]:
+    """Return Rust declaration locations interleaved by category for the source index."""
     text = content.decode("utf-8", errors="replace")
     code = _rust_code(text)
     line_starts = [0, *(match.end() for match in re.finditer("\n", text))]

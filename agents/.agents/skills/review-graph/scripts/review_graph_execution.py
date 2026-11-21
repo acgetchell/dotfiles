@@ -64,6 +64,7 @@ def _runner_policy(raw: object, repository: Path) -> dict[str, Any]:
 def _check_uv_policy(  # noqa: PLR0913 - explicit policy components, no ambient runner configuration.
     executable: Path, argv: list[str], directory: Path, paths: list[Path], environment: dict[str, str], *, repository: Path
 ) -> None:
+    """Require a pinned project, locked execution, and an approved writable external cache for a uv runner."""
     if executable.stem == "uv":
         if "run" not in argv or "--locked" not in argv or not {directory / "uv.lock", directory / "pyproject.toml"} <= set(paths):
             msg = "uv runner requires run --locked and both project/lock identities"

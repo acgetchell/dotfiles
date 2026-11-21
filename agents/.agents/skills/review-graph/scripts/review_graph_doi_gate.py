@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 
 def _text(raw: object, label: str) -> str:
+    """Require a nonblank string and preserve its original spelling for DOI evidence."""
     if not isinstance(raw, str) or not raw.strip():
         raise ValueError(f"software DOI {label} must be nonempty text")
     return raw

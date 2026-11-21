@@ -8,9 +8,9 @@ from typing import Any
 
 import pytest
 import review_graph_runtime as runtime
-from test_review_graph_compact import _publish
-from test_review_graph_runtime import _compact_audit_payload, _compile_repair_fixture_entry, _continuation_fixture, _late_handoff_replan
-from test_support_review_graph import _prepare_all_fixture_timing
+from test_support_review_graph import _late_handoff_replan, _prepare_all_fixture_timing, _publish
+from test_support_review_graph_evidence import _compact_audit_payload
+from test_support_review_graph_lifecycle import _compile_repair_fixture_entry, _continuation_fixture
 
 
 def test_replacement_synthesis_retains_exact_reused_evidence() -> None:
@@ -26,6 +26,7 @@ def test_replacement_synthesis_retains_exact_reused_evidence() -> None:
 
 
 def _fixture(tmp_path: Path, *, repairs_completed: int = 0) -> tuple[dict[str, Any], Namespace, dict[str, Any], dict[str, Any]]:
+    """Prepare a continuation request and its previous audit at the requested repair count."""
     lifecycle, dispatches, paths = _continuation_fixture(tmp_path)
     if repairs_completed:
         lifecycle["plan"]["review_lifecycle"]["repairs_completed"] = repairs_completed
@@ -262,6 +263,7 @@ def test_replacement_cli_uses_real_operation_schema(
         fsync_directory = runtime._fsync_directory
 
         def fail_output_sync(path: Path) -> None:
+            """Interrupt directory synchronization after the replacement result becomes visible."""
             if path == output.parent and output.exists():
                 msg = "Interrupted result publication"
                 raise OSError(msg)

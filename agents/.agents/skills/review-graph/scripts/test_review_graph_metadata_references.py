@@ -7,21 +7,21 @@ from typing import Any
 
 import pytest
 import review_graph_runtime as runtime
-import test_review_graph_commit as commit_tests
+import test_support_review_graph_handoffs as handoff_fixtures
 from review_graph_integrity import canonical_json, digest_bytes
 from review_graph_plan import MAX_NATIVE_EVIDENCE_BLOCK_BYTES, MAX_NATIVE_SECTION_BYTES, _native_json_block
 from review_graph_provenance import metadata_transition_reference
 from review_graph_reuse import CommitHandoffTransition
-from test_review_graph_commit import _save, _validation_payload
-from test_review_graph_runtime import _compact_independent_payload, _run_test_git
-from test_review_graph_transitions import _payload, _synthesis_payload
-from test_support_review_graph import _prepare_all_fixture_timing
+from test_support_review_graph import _prepare_all_fixture_timing, _run_test_git
+from test_support_review_graph_evidence import _compact_independent_payload, _payload, _save, _synthesis_payload, _validation_payload
 
 
 def _handoff(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, large: bool = True) -> tuple[dict[str, Any], dict[str, Any], dict[str, dict[str, str]]]:
-    baseline = commit_tests._baseline_mutation_fixture
+    """Commit the fixture change and return the evidence sources preserved across the handoff."""
+    baseline = handoff_fixtures._baseline_mutation_fixture
 
     def with_complete_inventory(root: Path) -> Any:
+        """Seed and commit the remaining inventory before the handoff captures its baseline."""
         fixture = baseline(root)
         git, repository, _template, _capture, _plan = fixture
         inventory = repository / "inventory"
@@ -33,13 +33,14 @@ def _handoff(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, large: bool = T
         return fixture
 
     if large:
-        monkeypatch.setattr(commit_tests, "_baseline_mutation_fixture", with_complete_inventory)
-    request, _entries, sources = commit_tests._commit_fixture(tmp_path, mode="branch")
+        monkeypatch.setattr(handoff_fixtures, "_baseline_mutation_fixture", with_complete_inventory)
+    request, _entries, sources = handoff_fixtures._commit_fixture(tmp_path, mode="branch")
     result = runtime.resume_after_authorized_commit(request)
     return request, result, {node: source for node, source in sources.items() if node in result["preserved_node_ids"]}
 
 
 def _dispatch(entry: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+    """Bind a worker to the post-transition source state and its external metadata history."""
     return {
         **entry["dispatch"],
         "before_state": result["current_source_state"],
@@ -49,6 +50,7 @@ def _dispatch(entry: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
 
 
 def _load_compiled(tmp_path: Path, name: str, content: bytes, metadata: dict[str, Any]) -> None:
+    """Write the artifact and sidecar, then load them through the normalized evidence reader."""
     artifact, record = tmp_path / f"{name}.review.md", tmp_path / f"{name}.evidence.json"
     artifact.write_bytes(content)
     record.write_text(json.dumps(metadata))
@@ -56,6 +58,7 @@ def _load_compiled(tmp_path: Path, name: str, content: bytes, metadata: dict[str
 
 
 def _assert_reference(content: bytes, metadata: dict[str, Any], *, independent: bool = False, large: bool = True) -> None:
+    """Verify that the native report references its evidence within the configured byte limit."""
     text = content.decode()
     section = "## Review Graph Envelope" if independent else "## State Verification"
     body = text.split(section + "\n", 1)[1].split("\n## ", 1)[0]
@@ -81,6 +84,7 @@ def test_large_real_commit_handoff_compiles_all_four_modes(tmp_path: Path, monke
     render_state = runtime._state_verification
 
     def inline_state(dispatch: dict[str, Any], evidence: Any, paths: tuple[str, ...]) -> str:
+        """Replace the compact transition reference with its full historical representation."""
         body = render_state(dispatch, evidence, paths)
         compact = "- External metadata transitions reference: " + canonical_json(metadata_transition_reference(evidence.fingerprints.metadata_transitions))
         inline = "- External metadata transitions: " + canonical_json([asdict(item) for item in evidence.fingerprints.metadata_transitions])

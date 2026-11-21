@@ -7,11 +7,13 @@ from typing import Any
 
 import pytest
 from review_graph_runtime import JournalEventRequest, append_journal_event, main
-from test_review_graph_runtime import _compact_audit_payload, _compile_repair_fixture_entry, _publish_worker_bytes
-from test_review_graph_scheduling import _audits, _capacity, _fixture, _run_schedule
+from test_support_review_graph_evidence import _compact_audit_payload, _publish_worker_bytes
+from test_support_review_graph_lifecycle import _compile_repair_fixture_entry
+from test_support_review_graph_scheduling import _audits, _capacity, _fixture, _run_schedule
 
 
 def _compile(paths: dict[str, Path], entry: dict[str, Any], output: Path) -> int:
+    """Compile a scheduled worker using the same persisted capture before and after execution."""
     return main(
         [
             "compile-node",
@@ -31,6 +33,7 @@ def _compile(paths: dict[str, Path], entry: dict[str, Any], output: Path) -> int
 def _schedule_with_worker(
     tmp_path: Path, *, profile: str = "grouped", already_dispatched: bool = False
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Path], dict[str, Any], dict[str, Any]]:
+    """Schedule the fixture run and return the worker and coordinator inputs for inspection."""
     lifecycle, dispatches, paths = _fixture(tmp_path, profile=profile)
     validator = next(entry for entry in dispatches["dispatches"] if entry["result_contract"] == "compact-validation")
     _compile_repair_fixture_entry(validator, lifecycle, paths["journal"])

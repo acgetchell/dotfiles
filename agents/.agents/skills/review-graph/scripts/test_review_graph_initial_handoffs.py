@@ -12,14 +12,16 @@ from typing import Any
 
 import pytest
 import review_graph_runtime as runtime
+from review_graph_bootstrap import RUNTIME_SCHEMA
 from review_graph_execution import capture_execution_context, command_prefix
 from review_graph_isolation import IsolationPublicationError
 from review_graph_plan import plan_from_document
 from review_graph_schema import require_schema_definition
 from review_graph_session import _check_portable_references, freeze_runtime, verify_snapshot
 from review_graph_timing import timing_blocker, timing_documents
-from test_review_graph_runtime import SKILL_ROOT, _compact_audit_payload, _json_plan, _run_test_git, _sparse_plan_document, _worker_input_fixture
-from test_review_graph_starter import RUNTIME_SCHEMA, _fixture, _invoke
+from test_support_review_graph import SKILL_ROOT, _json_plan, _run_test_git, _sparse_plan_document, _worker_input_fixture
+from test_support_review_graph_evidence import _compact_audit_payload
+from test_support_review_graph_sessions import _fixture, _invoke
 
 
 @pytest.mark.parametrize("form", ["token", "relative", "absolute", "outside", "symlink"])
@@ -108,6 +110,7 @@ def test_starter_to_grouped_schedule_and_continuation_without_plan_transcription
 
 
 def _prepare_timing(entry: dict[str, Any], tmp_path: Path) -> dict[str, Any]:
+    """Run timing preparation with the fixture shell policy and load its manifest."""
     policy = tmp_path / "shell.json"
     policy.write_text(json.dumps({"shell_argv": ["/bin/sh", "-c"]}))
     assert runtime.main(["prepare-validation-timing", "--input", entry["worker_payload_contract_path"], "--shell-policy", str(policy)]) == 0
@@ -256,6 +259,7 @@ def test_isolation_rejects_selectors_that_read_other_workers(tmp_path: Path, sel
 
 
 def _runner_project(tmp_path: Path) -> Path:
+    """Create a runner checkout with a working-tree change for the initial handoff."""
     project = tmp_path / "project"
     project.mkdir()
     for name in ("pyproject.toml", "uv.lock"):

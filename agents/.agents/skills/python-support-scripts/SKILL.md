@@ -46,6 +46,8 @@ Check:
 
 Flag permissive regular expressions, string concatenation for strict formats, silent partial parsing, and output validation performed only by rereading with the same flawed parser.
 
+When a script exchanges CSV with another tool, check the agreed dialect and a record with a delimiter or newline inside a quoted field. Splitting the input into lines can corrupt that field. Open CSV text files with the format's encoding and `newline=""` so the CSV reader or writer handles newlines. See [Real Python on file handling](https://realpython.com/ref/best-practices/file-handling/) and [Python's CSV guidance](https://docs.python.org/3/library/csv.html#csv.reader).
+
 ## Determinism And Reproducibility
 
 Sort filesystem, set, mapping, and external-command results before committed output unless semantic order is already defined. Derive dates and versions from explicit inputs rather than the wall clock. Fix locale, timezone, encoding, and machine-readable command modes when parsing external output.

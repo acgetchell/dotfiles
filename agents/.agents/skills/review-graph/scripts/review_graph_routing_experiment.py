@@ -8,6 +8,7 @@ import re
 import sys
 import tempfile
 import time
+from copy import deepcopy
 from http.client import HTTPException
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, override
@@ -45,6 +46,7 @@ class NoRedirect(HTTPRedirectHandler):
 
 
 def _paths(scope: dict[str, Any]) -> list[str]:
+    """Validate the bounded scope and return its unique normalized source paths in input order."""
     if not isinstance(scope, dict):
         msg = "scope must be an object"
         raise TypeError(msg)
@@ -118,6 +120,7 @@ def baseline_from_plan(plan: dict[str, Any], ids: set[str]) -> dict[str, Any]:
 
 
 def _choices(value: object, ids: set[str], *, nullable: bool) -> dict[str, bool | None]:
+    """Copy decisions for known candidates and accept an explicitly unknown value only when nullable."""
     if not isinstance(value, dict) or set(value) - ids:
         msg = "decisions reference unknown candidates"
         raise ValueError(msg)
@@ -129,6 +132,7 @@ def _choices(value: object, ids: set[str], *, nullable: bool) -> dict[str, bool 
 
 def prepare(case: dict[str, Any], *, plan: dict[str, Any] | None = None) -> dict[str, Any]:
     """Freeze the same source and catalog for both methods; keep answers out of API input."""
+    case = deepcopy(case)
     scope = case["scope"]
     paths = _paths(scope)
     leaves, protected = candidates()
@@ -180,6 +184,7 @@ def prepare(case: dict[str, Any], *, plan: dict[str, Any] | None = None) -> dict
 
 
 def _validate_response(value: object, ids: set[str]) -> tuple[str, dict[str, float], dict[str, Any]]:
+    """Require one probability per candidate and return the response model, probabilities, and validated usage."""
     if not isinstance(value, dict) or not isinstance(value.get("model"), str) or not value["model"]:
         msg = "missing response model"
         raise ValueError(msg)
@@ -205,7 +210,7 @@ def _validate_response(value: object, ids: set[str]) -> tuple[str, dict[str, flo
     return value["model"], probabilities, measurements({**usage, "measurement_source": "TypeSafe response"})
 
 
-def _consume_response(body: bytes, packet: dict[str, Any], result: dict[str, Any], usage: dict[str, Any]) -> None:
+def _consume_response(body: bytes, request: dict[str, Any], result: dict[str, Any], usage: dict[str, Any]) -> None:
     """Retain safe model/usage metadata before validating all candidate answers."""
     # Do not persist raw responses: only validated answers and numeric usage.
     payload = parse_json(body)
@@ -221,39 +226,57 @@ def _consume_response(body: bytes, packet: dict[str, Any], result: dict[str, Any
     if payload.get("model") == PRICE["model"] and usage["input_tokens"] is not None:
         usage.update(cost_usd=usage["input_tokens"] * PRICE["input_usd_per_million"] / 1_000_000, cost_basis="estimated")
         result["rate_card"] = PRICE
-    if isinstance(payload.get("answers"), dict) and set(payload["answers"]) != set(packet["request"]["questions"]):
+    if isinstance(payload.get("answers"), dict) and set(payload["answers"]) != set(request["questions"]):
         result.setdefault("error", "partial-response")
-    model, probabilities, _ = _validate_response(payload, set(packet["request"]["questions"]))
-    if model != packet["request"]["model"]:
+    model, probabilities, _ = _validate_response(payload, set(request["questions"]))
+    if model != request["model"]:
         msg = "response did not use the pinned model"
         raise ValueError(msg)
     result.update(status="succeeded", response_model=model, probabilities=probabilities)
 
 
+def _snapshot_request(packet: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    """Copy the exact request to send and reject a stale digest or a different model before starting an attempt."""
+    request = deepcopy(packet["request"])
+    request_digest = digest(request)
+    if request_digest != packet["request_digest"] or request["model"] != MODEL:
+        msg = "stale routing request or model"
+        raise ValueError(msg)
+    return request, request_digest
+
+
 def call_jev(packet: dict[str, Any], ledger: Path) -> dict[str, Any]:
     """Make one measured request; persist failures and never retry invisibly."""
-    attempt = start_request(ledger, stage="routing-shadow", provider="typesafe", model=MODEL, scope_digest=packet["request_digest"])
+    request, request_digest = _snapshot_request(packet)
+    attempt = start_request(ledger, stage="routing-shadow", provider="typesafe", model=MODEL, scope_digest=request_digest)
     started = time.monotonic()
     usage: dict[str, Any] = {"measurement_source": "TypeSafe response unavailable"}
-    result: dict[str, Any] = {"status": "failed", "attempt_id": attempt, "probabilities": {}, "http_status": None, "response_model": None}
+    result: dict[str, Any] = {
+        "status": "failed",
+        "attempt_id": attempt,
+        "probabilities": {},
+        "http_status": None,
+        "response_model": None,
+        "request_digest": request_digest,
+    }
     try:
         key = os.environ.get("TYPESAFE_API_KEY", "")
         if not key or key.startswith("op://") or any(c.isspace() for c in key):
             result["error"] = "credential-unavailable"
         else:
-            request = Request(
+            http_request = Request(
                 ENDPOINT,
-                data=json.dumps(packet["request"], ensure_ascii=False).encode(),
+                data=json.dumps(request, ensure_ascii=False).encode(),
                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json", "Accept": "application/json"},
                 method="POST",
             )
-            with build_opener(NoRedirect()).open(request, timeout=60) as response:
+            with build_opener(NoRedirect()).open(http_request, timeout=60) as response:
                 result["http_status"] = response.status
                 body = response.read(MAX_RESPONSE_BYTES + 1)
             if result["http_status"] != 200 or len(body) > MAX_RESPONSE_BYTES:
                 msg = "invalid response status or size"
                 raise ValueError(msg)
-            _consume_response(body, packet, result, usage)
+            _consume_response(body, request, result, usage)
     except HTTPError as error:
         result.update(error="rate-limited" if error.code == 429 else "http-error", http_status=error.code)
         error.close()
@@ -278,6 +301,7 @@ def call_jev(packet: dict[str, Any], ledger: Path) -> dict[str, Any]:
 
 
 def _quality(expected: dict[str, bool | None], decisions: dict[str, bool | None]) -> dict[str, Any]:
+    """Count resolved and unresolved predictions and compute metrics only when their denominators are nonzero."""
     counts: dict[str, int] = {
         "true_positive": 0,
         "true_negative": 0,
@@ -311,15 +335,21 @@ def _quality(expected: dict[str, bool | None], decisions: dict[str, bool | None]
 def evidence_status(packet: dict[str, Any], result: dict[str, Any]) -> str:
     """Gate all selections, including sweeps, on complete and correctly bound evidence."""
     if result.get("status") != "succeeded":
-        return str(result.get("error", result.get("status", "not-run")))
-    if result.get("request_digest", packet["request_digest"]) != packet["request_digest"] or result.get("response_model", MODEL) != packet["request"]["model"]:
+        failure = str(result.get("error", result.get("status", "not-run")))
+        return "invalid-response" if failure == "complete" else failure
+    if (
+        result.get("request_digest") != packet["request_digest"]
+        or digest(packet["request"]) != packet["request_digest"]
+        or result.get("response_model") != packet["request"]["model"]
+        or packet["request"]["model"] != MODEL
+    ):
         return "stale-response-or-model"
     if not packet["request"]["state"]["complete"] or not all(f["complete"] for f in packet["request"]["state"]["files"]):
         return "insufficient-evidence"
     probabilities = result.get("probabilities", {})
     if set(probabilities) != set(packet["request"]["questions"]):
         return "partial-response"
-    if any(type(p) not in {int, float} or not math.isfinite(p) or not 0 <= p <= 1 for p in probabilities.values()):
+    if any(type(p) not in {int, float} or not 0 <= p <= 1 for p in probabilities.values()):
         return "invalid-response"
     return "complete"
 
@@ -539,11 +569,10 @@ def run_case(case: dict[str, Any], output: Path, *, live: bool, plan: dict[str, 
     # An imported baseline is a reference measurement, not another request made by this run.
     baseline_usage = measurements(packet["baseline"].get("usage", {"measurement_source": "baseline measurements unavailable"}))
     ledger.touch(mode=0o600, exist_ok=False)
-    result: dict[str, Any] = {"status": "not-run", "probabilities": {}}
+    result: dict[str, Any] = {"status": "not-run", "probabilities": {}, "request_digest": packet["request_digest"]}
     attempts = []
     for index in range(1 + max_retries if live else 0):
         result = call_jev(packet, ledger)
-        result["request_digest"] = packet["request_digest"]
         result["result_digest"] = digest(result)
         write_json(output / f"attempt-{index:03d}.json", result)
         attempts.append(result["attempt_id"])
@@ -552,7 +581,6 @@ def run_case(case: dict[str, Any], output: Path, *, live: bool, plan: dict[str, 
             break
         time.sleep(2**index)
     result.pop("result_digest", None)
-    result["request_digest"] = packet["request_digest"]
     result["attempt_ids"] = attempts
     result["retries"] = max(0, len(attempts) - 1)
     result["result_digest"] = digest(result)

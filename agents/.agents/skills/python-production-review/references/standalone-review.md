@@ -28,6 +28,8 @@ Load this reference only when `python-production-review` is invoked directly for
 - Trace ownership and cleanup of files, directories, subprocesses, sockets, database connections, temporary artifacts, locks, generators, and background tasks.
 - Check early returns, exceptions, cancellation, and partial iteration.
 - Flag import-time I/O, network calls, environment mutation, or process-global configuration.
+- Trace a library log record through the host application's handlers. A module logger such as `logging.getLogger(__name__)` lets the host select the destination. Installing a library handler can print the record twice when it also propagates to the host. See [Real Python on logging](https://realpython.com/ref/best-practices/logging/) and [Python's guidance for libraries](https://docs.python.org/3/howto/logging.html#configuring-logging-for-a-library).
+- If opening the third input fails, verify that the first two close. For a variable number of resources, a `with ExitStack()` block can register each successful acquisition with `enter_context()` before the next begins. See [Real Python on resource management](https://realpython.com/ref/best-practices/resource-management/) and [Python's ExitStack example](https://docs.python.org/3/library/contextlib.html#contextlib.ExitStack).
 - Verify writes are atomic when replacing important user or generated files.
 
 ## Async And Concurrency

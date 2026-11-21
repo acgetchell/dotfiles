@@ -8,11 +8,13 @@ from typing import Any
 
 
 def _project_path(raw: str, root: Path) -> Path:
+    """Interpret relative paths from the declared project root and preserve absolute paths."""
     path = Path(raw)
     return path if path.is_absolute() else root / path
 
 
 def _environment_executable(name: str, directory: Path) -> dict[str, Any]:
+    """Inspect the executable in the declared environment directory, including Windows executable suffixes."""
     candidates = [directory / name]
     if os.name == "nt" and Path(name).suffix.lower() not in {".exe", ".com", ".bat", ".cmd"}:
         candidates = [directory / (name + suffix) for suffix in (".exe", ".com", ".bat", ".cmd")]
@@ -21,6 +23,7 @@ def _environment_executable(name: str, directory: Path) -> dict[str, Any]:
 
 
 def _project_files(project: Path, environment: Path) -> list[str]:
+    """Collect diagnostics for the project manifest, uv lockfile, and virtual environment configuration."""
     blockers: list[str] = []
     for name in ("pyproject.toml", "uv.lock"):
         path = project / name
@@ -40,6 +43,7 @@ def _project_files(project: Path, environment: Path) -> list[str]:
 
 
 def _inspect_uv_project(declaration: dict[str, Any], repository_root: Path) -> dict[str, Any]:
+    """Report the declared environment's executables, configured Python, and preflight blockers."""
     project = _project_path(declaration["project_directory"], repository_root)
     environment = _project_path(declaration["environment_path"], project)
     blockers = _project_files(project, environment)

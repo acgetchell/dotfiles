@@ -11,7 +11,8 @@ import pytest
 from review_graph_bench import benchmark_identity, benchmark_recipes, equivalent_recipe
 from review_graph_plan import ValidationRequirement
 from review_graph_runtime import _expanded_validation_plan, _late_validation_quality_blockers
-from test_review_graph_runtime import _compile_materialized_evidence, _late_validation_plan, _late_validation_requirement
+from test_support_review_graph_evidence import _compile_materialized_evidence
+from test_support_review_graph_lifecycle import _late_validation_plan, _late_validation_requirement
 
 
 @pytest.mark.parametrize(

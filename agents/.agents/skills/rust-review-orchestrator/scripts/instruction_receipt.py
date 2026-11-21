@@ -1,4 +1,4 @@
-"""Emit complete instruction files once per live review context, with provenance."""
+"""Track which instruction files a review context has loaded and emit them again when a pass changes."""
 
 import argparse
 import hashlib
@@ -18,7 +18,12 @@ def digest(content: bytes) -> str:
 def load_instructions(  # noqa: PLR0913 - explicit receipt identities
     root: Path, paths: list[str], ledger: dict[str, Any], *, context: str, scope: str, skill_id: str
 ) -> tuple[str, dict[str, Any], dict[str, Any]]:
-    """Return emitted text, updated ledger, and this invocation's byte receipt."""
+    """Read paths under root and return emitted text, a new ledger, and a per-file receipt.
+
+    Empty text means all requested bodies were reused. A change to the files
+    required by a previously recorded skill, or to their contents, reloads the
+    whole pass. Changing the root, context, or scope starts a fresh ledger.
+    """
     if not context or not scope or not skill_id or not paths or len(set(paths)) != len(paths):
         message = "Context, scope, pass ID, and unique instruction paths are required"
         raise ValueError(message)

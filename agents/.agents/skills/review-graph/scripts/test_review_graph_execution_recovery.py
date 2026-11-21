@@ -1,11 +1,8 @@
 """Permission failures after partial aggregate execution retain exact attempt history."""
 
 import json
-import os
 import shlex
-import subprocess
 import sys
-import time
 from argparse import Namespace
 from pathlib import Path
 from typing import Any
@@ -14,12 +11,9 @@ import pytest
 from review_graph_executor import executor_permissions
 from review_graph_plan import plan_from_document
 from review_graph_runtime import (
-    JournalEventRequest,
     _graph_plan,
     _planned_validation_digest,
     _validation_reconciliation,
-    append_journal_event,
-    capture_workspace_snapshot,
     main,
     materialize_dispatches,
     next_ready_nodes,
@@ -28,135 +22,26 @@ from review_graph_runtime import (
     recover_validation_execution,
     recover_validation_launch,
 )
-from test_review_graph_repairs import _recovery_fixture
-from test_review_graph_runtime import ROUTING_CATALOG, SKILL_ROOT, _compile_repair_fixture_entry, _json_plan, _publish_worker_bytes, _sparse_plan_document
-from test_support_review_graph import _prepare_all_fixture_timing
+from test_support_review_graph import ROUTING_CATALOG, SKILL_ROOT, _json_plan, _prepare_all_fixture_timing, _sparse_plan_document
+from test_support_review_graph_lifecycle import _compile_repair_fixture_entry
+from test_support_review_graph_recovery import DENIAL, _compile_aggregate, _recovery_fixture
 
-DENIAL = "PermissionError: [Errno 1] Operation not permitted"
 TAPLO_PANIC = "thread 'main' panicked at /build/registry/system-configuration-0.5.1/src/dynamic_store.rs:154:9:\nAttempted to create a NULL object."
 TAPLO_ENVIRONMENT = {"platform": "aarch64-apple-darwin", "toolchain": "Rust 1.99.1, Taplo 0.10.0", "environment": "native macOS workspace-write"}
 
 
 def _ready(lifecycle: dict[str, Any], args: Namespace) -> dict[str, Any]:
+    """Load the saved dispatches and journal to compute which recovery workers can run."""
     dispatch_set = json.loads(args.dispatches.read_bytes())
     _prepare_all_fixture_timing(dispatch_set)
     events, _state, _head = read_execution_journal(args.journal, plan=_graph_plan(lifecycle["plan"]), source_state=tuple(lifecycle["source_state"]))
     return next_ready_nodes({**lifecycle, "current_source_state": lifecycle["source_state"]}, journal_events=events, dispatch_set=dispatch_set)
 
 
-def _compile_aggregate(  # noqa: PLR0913 - preserve the exact modeled fault through execution and evidence compilation.
-    lifecycle: dict[str, Any], args: Namespace, entry: dict[str, Any], directory: Path, *, permitted: bool, diagnostic: str = DENIAL
-) -> dict[str, str]:
-    """Run a deterministic executor fault model, then use the real compiler gates."""
-    directory.mkdir()
-    append_journal_event(args.journal, lifecycle, JournalEventRequest(entry["node_id"], "in-flight"))
-    before = capture_workspace_snapshot(entry["dispatch"])
-    unit = entry["dispatch"]["validation_unit"]
-    preceding = []
-    if len(unit["commands"]) > 1:
-        started = time.monotonic()
-        passed = subprocess.run(  # noqa: S603 - fixture-owned independent command, before the failing aggregate.
-            shlex.split(unit["commands"][0]), cwd=unit["working_directories"][0], capture_output=True, check=True
-        )
-        preceding.append(
-            {
-                "command": unit["commands"][0],
-                "working_directory": unit["working_directories"][0],
-                "executor": entry["node_id"],
-                "result": "passed",
-                "exit_code": passed.returncode,
-                "elapsed": f"{time.monotonic() - started}s",
-                "evidence": "separate fixture command passed",
-                "artifact_paths": [],
-            }
-        )
-    started = time.monotonic()
-    run = subprocess.run(  # noqa: S603 - fixture-owned aggregate models a denied capability without requiring actual socket access.
-        shlex.split(unit["commands"][-1]),
-        cwd=unit["working_directories"][0],
-        env={**os.environ, "FIXTURE_SOCKET_ACCESS": "permitted" if permitted else "denied"},
-        capture_output=True,
-        check=False,
-    )
-    elapsed = time.monotonic() - started
-    output = run.stdout + run.stderr
-    assert b"2 checks passed" in output
-    assert (b"build completed" in output) == permitted
-    log = Path(unit["allowed_artifacts"][0]["path"])
-    log.write_bytes(output)
-    after = capture_workspace_snapshot(entry["dispatch"])
-    status = "passed" if run.returncode == 0 else "failed"
-    diagnostic = " ".join(diagnostic.split())
-    fault_evidence = f"socket.bind: {diagnostic}" if diagnostic == DENIAL else diagnostic
-    limitation = (
-        "The modeled executor denied socket binding after checks ran; build was not reached."
-        if diagnostic == DENIAL
-        else "The modeled executor failed after checks ran; build was not reached."
-    )
-    payload = {
-        "schema_version": 3,
-        "status": status,
-        "limitations": [] if permitted else [limitation],
-        "executions": [
-            *preceding,
-            {
-                "command": unit["commands"][-1],
-                "working_directory": unit["working_directories"][0],
-                "executor": entry["node_id"],
-                "result": status,
-                "exit_code": run.returncode,
-                "elapsed": f"{elapsed}s",
-                "evidence": "2 checks passed; build completed" if permitted else f"2 checks passed; {fault_evidence}; build not reached",
-                "artifact_paths": [str(log)],
-            },
-        ],
-    }
-    _publish_worker_bytes(entry, json.dumps(payload).encode())
-    for phase, snapshot in (("before", before), ("after", after)):
-        if lifecycle.get("external_metadata_transitions"):
-            snapshot["observed_source_state"] = lifecycle["current_source_state"]
-        (directory / f"workspace-{phase}.json").write_text(json.dumps(snapshot))
-    lifecycle_path = directory / "lifecycle.json"
-    lifecycle_path.write_text(json.dumps(lifecycle))
-    assert (
-        main(
-            [
-                "compile-node",
-                "--input",
-                str(lifecycle_path),
-                "--dispatches",
-                str(args.dispatches),
-                "--journal",
-                str(args.journal),
-                "--node-id",
-                entry["node_id"],
-                "--before-capture",
-                str(args.current_capture),
-                "--after-capture",
-                str(args.current_capture),
-                "--workspace-before",
-                str(directory / "workspace-before.json"),
-                "--workspace-after",
-                str(directory / "workspace-after.json"),
-                "--output",
-                str(directory / "compiled.json"),
-            ]
-        )
-        == 0
-    )
-    return {
-        "log_path": str(log),
-        "diagnostic": diagnostic,
-        "before_capture": str(args.current_capture),
-        "after_capture": str(args.current_capture),
-        "workspace_before": str(directory / "workspace-before.json"),
-        "workspace_after": str(directory / "workspace-after.json"),
-    }
-
-
 def _fixture(
     tmp_path: Path, *, extra_command: bool = False, non_utf8_output: bool = False, diagnostic: str = DENIAL, unit_overrides: dict[str, Any] | None = None
 ) -> tuple[dict[str, Any], Namespace, dict[str, Any], dict[str, Any]]:
+    """Create a validation failure and the request to retry it with different executor permissions."""
     script = tmp_path / "aggregate.py"
     fault = 'raise PermissionError(1, "Operation not permitted")' if diagnostic == DENIAL else f"print({diagnostic!r}, flush=True); raise SystemExit(101)"
     script.write_text(
@@ -171,7 +56,7 @@ def _fixture(
         {
             **original,
             "requirement_id": "aggregate",
-            "commands": [*(["true"] if extra_command else []), shlex.join([sys.executable, str(script)])],
+            "commands": [*(["true"] if extra_command else []), shlex.join([sys.executable, script.name if extra_command else str(script)])],
             "canonical_recipe": "just ci",
             "isolation_root": str(tmp_path),
             "working_directories": [str(tmp_path)] * (2 if extra_command else 1),
@@ -217,12 +102,14 @@ def _fixture(
 
 
 def _continuation(result: dict[str, Any]) -> tuple[dict[str, Any], Namespace]:
+    """Extract the lifecycle and saved file paths needed for the next operation."""
     return result["lifecycle_input"], Namespace(
         journal=Path(result["journal_path"]), dispatches=Path(result["dispatches_path"]), current_capture=Path(result["current_capture_path"])
     )
 
 
 def _finalize(lifecycle: dict[str, Any], args: Namespace, directory: Path) -> dict[str, Any]:
+    """Run finalization through its CLI and check the exit status against the reported outcome."""
     directory.mkdir(exist_ok=True)
     input_path, output_path = directory / "final-input.json", directory / "final.json"
     input_path.write_text(json.dumps(lifecycle))
@@ -432,7 +319,9 @@ def test_recovered_history_tampering_blocks_scheduling(tmp_path: Path) -> None:
 
 
 def test_recovery_rejects_unit_with_a_separately_passed_command(tmp_path: Path) -> None:
-    request, args, _failed, _successful = _fixture(tmp_path, extra_command=True)
+    first = tmp_path / "first-command"
+    first.mkdir()
+    request, args, _failed, _successful = _fixture(tmp_path, extra_command=True, unit_overrides={"working_directories": [str(first), str(tmp_path)]})
     with pytest.raises(ValueError, match="never replay separately passed commands"):
         recover_validation_execution(request, args)
     assert not Path(request["artifact_store"]).exists()

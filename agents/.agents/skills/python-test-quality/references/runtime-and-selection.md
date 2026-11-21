@@ -20,6 +20,8 @@ downstream logic; assertions should still prove outcomes, not merely mocked
 calls. Do not replace byte transport, concurrent-change detection, provenance,
 cleanup, or failure-atomic publication evidence with in-memory approximations.
 
+When a test replaces an external dependency, trace the name the code under test looks up. If `report` uses `from transport import fetch`, patch `report.fetch`. Patching `transport.fetch` after that import leaves the real call reachable. Assert the resulting report or failure so the test demonstrates the behavior the replacement made possible. See [Real Python on code testing](https://realpython.com/ref/best-practices/code-testing/) and [Python's guide to patch targets](https://docs.python.org/3/library/unittest.mock.html#where-to-patch).
+
 Keep complete workflow scenarios for meaningful interactions such as recovery
 and handoff. Preserve distinct failure categories and necessary combinations;
 reduce incidental setup rather than deleting behavioral coverage. Do not impose

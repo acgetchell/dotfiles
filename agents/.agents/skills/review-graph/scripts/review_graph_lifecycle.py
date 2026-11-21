@@ -15,6 +15,7 @@ def _substantive_text(value: object) -> bool:
 
 
 def _immutable_history(value: object, entry_type: type[object]) -> bool:
+    """Check that history is a tuple containing only entries of the expected kind."""
     return isinstance(value, tuple) and all(isinstance(entry, entry_type) for entry in value)
 
 

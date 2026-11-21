@@ -43,8 +43,9 @@ contracts, caller-visible effects, and API evolution here. Keep:
 
 Record the caller-visible consequence of a neighboring defect and hand off its
 deep proof. Do not claim that contract is complete from API evidence alone.
-Documentation reviewers own completeness and navigation; this pass establishes
-whether documented caller expressions and promises match the interface.
+Check whether documented calls and promises match the public interface.
+`python-style-hygiene` owns missing callable docstrings and unclear names.
+Repository documentation reviewers own completeness and navigation.
 
 ## Map Concepts And Caller Workflows
 
@@ -60,6 +61,12 @@ capabilities composable without parallel families of classes or methods. Give
 ordinary operations one preferred path; alternate constructors, aliases, and
 wrappers should serve a distinct caller or compatibility need. Preserve distinct
 units, invariants, and semantic roles even when structures look similar.
+
+Trace dependency types through public annotations, return values, and examples.
+If callers must import a dependency's private module to use the API, check for a
+documented public import or an existing interface that provides what callers
+need. Confirm the dependency's documented API before flagging an underscored
+name. See [Real Python on public API surface](https://realpython.com/ref/best-practices/public-api-surface/).
 
 ## Make Calls And Results Unambiguous
 

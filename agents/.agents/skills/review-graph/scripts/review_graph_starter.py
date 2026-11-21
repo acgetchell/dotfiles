@@ -151,7 +151,8 @@ def prepare_release(capture: dict[str, Any], artifact_root: Path) -> tuple[dict[
     """Discover instructions and routing candidates without inventing semantic decisions."""
     choices = json.loads(RELEASE_EXAMPLE.read_bytes())
     choices["artifact_root"] = str(artifact_root.resolve())
-    surfaces = classify_repository_paths(capture["captured_scope_paths"], release_readiness=True)
+    python_examples = capture.get("captured_python_example_paths", [])
+    surfaces = classify_repository_paths(capture["captured_scope_paths"], release_readiness=True, python_example_paths=python_examples)
     routers = {
         "cpp": "cpp-review-orchestrator",
         "rust": "rust-review-orchestrator",
@@ -174,7 +175,9 @@ def prepare_release(capture: dict[str, Any], artifact_root: Path) -> tuple[dict[
             "Root instructions are global; nested instructions are discovered per owned or declared dependency path at materialization. "
             "Inspect these instructions for transitive references and declare required instruction_paths explicitly."
         ),
-        "routing_projection": build_routing_projection(catalog, consulted_routers=choices["consulted_routers"], captured_paths=capture["captured_scope_paths"]),
+        "routing_projection": build_routing_projection(
+            catalog, consulted_routers=choices["consulted_routers"], captured_paths=capture["captured_scope_paths"], python_example_paths=python_examples
+        ),
         "coverage_policy": (
             "Candidate matches do not assign ownership. Bootstrap reports captured_path_inventory and blocks whole-repository fanout until every "
             "unassigned path has an explicit assessment. Extend leaf review_surface for owned contracts; use captured_path_dispositions for "

@@ -8,6 +8,7 @@ from review_graph_reuse import SNAPSHOT_FORMAT, ReviewSourceSnapshot, metadata_t
 
 
 def _metadata_change() -> dict[str, Any]:
+    """Build a pair of self-consistent snapshots for a Git metadata transition."""
     before = ReviewSourceSnapshot(SNAPSHOT_FORMAT, "/fixture", "baseline", "head", "main", None, None, (), (), "a" * 64, "b" * 64, "", "c" * 64, (), ())
     before = replace(before, repository_state_fingerprint=before.computed_fingerprint())
     after = replace(before, index_fingerprint="d" * 64)

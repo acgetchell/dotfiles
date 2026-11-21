@@ -75,6 +75,8 @@ When Python validates Rust, C++, or another native component, keep the Python pa
 
 Flag obvious accidental quadratic work, repeated large copies, per-row dataframe operations, and unnecessary I/O in hot paths. Prefer vectorization only when it preserves clarity and numerical meaning. Require representative benchmarks before claiming improvement; do not turn a correctness review into speculative micro-optimization.
 
+When comparing an eager computation with a lazy one, time both through the result the scientific caller uses. If the caller sums every sample, consume fresh inputs through that reduction on each run and check the sums against the same numerical criterion. Timing generator construction alone omits the sampling work. See Real Python on [optimization](https://realpython.com/ref/best-practices/optimization/) and [generator expressions](https://realpython.com/ref/best-practices/generator-expressions/).
+
 ## Output
 
 Lead with mathematical, numerical, reproducibility, or interoperability blockers. For each finding, state the violated property, triggering input class, consequence, smallest correction, and independent evidence needed. Report assumptions, focused skills handed off, validation run, and unavailable datasets or platforms.

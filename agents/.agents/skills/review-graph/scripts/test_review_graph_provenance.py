@@ -12,18 +12,16 @@ import review_graph_runtime as runtime
 from capture_scope import _scope_data
 from review_graph_bootstrap import bootstrap_document
 from review_graph_integrity import digest_bytes
-from test_review_graph_runtime import (
+from test_support_review_graph import (
     ROUTING_CATALOG,
     SKILL_ROOT,
     STATE_FIXTURE,
     _captured_rust_repository,
-    _compact_independent_payload,
-    _compile_cli_paths,
     _json_plan,
     _sparse_plan_document,
     _worker_input_fixture,
 )
-from test_review_graph_transitions import _payload
+from test_support_review_graph_evidence import _compact_independent_payload, _compile_cli_paths, _payload
 
 
 @pytest.fixture

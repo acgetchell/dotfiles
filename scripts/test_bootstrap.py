@@ -9,12 +9,14 @@ import pytest
 
 
 def write_executable(binaries: Path, name: str, body: str) -> None:
+    """Install an executable Bash stub in the fixture's command directory."""
     target = binaries / name
     target.write_text(f"#!/bin/bash\nset -euo pipefail\n{body}\n", encoding="utf-8")
     target.chmod(0o755)
 
 
 def prepare_legacy_skill(tmp_path: Path, skill: Path) -> None:
+    """Populate a legacy skill directory with cached bytecode for the bootstrap migration."""
     legacy = tmp_path / ".agents" / "skills" / "bootstrap-test"
     legacy.mkdir(parents=True)
     (legacy / "SKILL.md").symlink_to(os.path.relpath(skill / "SKILL.md", legacy))
@@ -23,6 +25,7 @@ def prepare_legacy_skill(tmp_path: Path, skill: Path) -> None:
 
 
 def prepare_omz(tmp_path: Path, omz_state: str) -> Path:
+    """Construct the requested Oh My Zsh installation state below the fixture home."""
     omz = tmp_path / ".oh-my-zsh"
     if omz_state != "missing":
         omz.mkdir()
@@ -34,6 +37,7 @@ def prepare_omz(tmp_path: Path, omz_state: str) -> Path:
 
 
 def write_bootstrap_justfile(repository: Path, checkout: Path, just: str) -> None:
+    """Copy the repository recipes with tool versions pinned to the fixture environment."""
     just_version = (
         subprocess.run(  # noqa: S603 - resolved Just executable and fixed version query.
             [just, "--version"], check=True, capture_output=True, text=True
@@ -82,6 +86,7 @@ def test_bootstrap_rejects_other_hosts_before_setup(tmp_path: Path, system: str)
     ],
 )
 def test_bootstrap_installs_updater_by_package_and_checks_its_executable(tmp_path: Path, installed_version: str | None, omz_state: str) -> None:
+    """Simulate the package and installation states in a temporary home and verify that bootstrap preserves existing customizations."""
     repository = Path(__file__).resolve().parents[1]
     checkout = tmp_path / "dotfiles"
     binaries = tmp_path / "bin"

@@ -10,7 +10,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from review_graph_plan import ValidationArtifact, _verified_artifact_status
 from review_graph_runtime import _validation_unit, _validation_workspace_audit, _workspace_content_digest, capture_workspace_snapshot
-from test_review_graph_runtime import _baseline_mutation_fixture, _run_test_git
+from test_support_review_graph import _run_test_git
+from test_support_review_graph_lifecycle import _baseline_mutation_fixture
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
 
 
 def _cache_dispatch(tmp_path: Path, name: str, status: str) -> tuple[dict[str, Any], Path, Path]:
+    """Set up a checkout and an isolated validation dispatch for observing the cache path."""
     git, repository, _template, _capture, plan = _baseline_mutation_fixture(tmp_path)
     (repository / ".gitignore").write_text(f"{name}/\n", encoding="utf-8")
     _run_test_git(git, "-C", str(repository), "add", ".gitignore")
@@ -47,6 +49,7 @@ def test_declared_cache_roots_never_read_nested_directories_or_contents(tmp_path
         return original_read_bytes(path)
 
     def guarded_scandir(path: str | Path) -> AbstractContextManager[Iterator[os.DirEntry[str]]]:
+        """Record scans of the cache root and detect any attempt to descend into its children."""
         candidate = Path(path)
         if candidate.is_relative_to(cache):
             scanned.append(candidate)

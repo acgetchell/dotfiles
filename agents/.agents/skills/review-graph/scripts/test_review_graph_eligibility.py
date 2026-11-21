@@ -16,11 +16,13 @@ from review_graph_eligibility import compact_eligibility, reuse_eligibility
 from review_graph_plan import plan_from_document
 from review_graph_read_provenance import bind_runtime_reads
 from review_graph_session import freeze_runtime
-from test_review_graph_runtime import ROUTING_CATALOG, SKILL_ROOT, _baseline_mutation_fixture, _complete_structural_fixture_routing, _run_test_git
-from test_review_graph_transitions import _materialize, _payload
+from test_support_review_graph import ROUTING_CATALOG, SKILL_ROOT, _complete_structural_fixture_routing, _materialize, _run_test_git
+from test_support_review_graph_evidence import _payload
+from test_support_review_graph_lifecycle import _baseline_mutation_fixture
 
 
 def _execute_reads(repository: Path, commands: list[str]) -> None:
+    """Run each worker read command under Bash in the fixture checkout."""
     shell = shutil.which("bash")
     assert shell is not None
     for command in commands:
@@ -80,6 +82,7 @@ def test_compact_external_read_truncates_only_the_diagnostic(tmp_path: Path) -> 
 def test_baseline_reports_blockers_before_accepting_and_preserves_only_proved_audits(  # noqa: C901, PLR0915 - complete lifecycle regression.
     tmp_path: Path, capsys: pytest.CaptureFixture[str], context: str
 ) -> None:
+    """Track evidence and index bytes while exercising the difference between a reported blocker and a reusable audit."""
     git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
     locks = ("Cargo.lock", "uv.lock")
     for path in locks:

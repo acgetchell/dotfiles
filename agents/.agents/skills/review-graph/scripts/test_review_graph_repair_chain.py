@@ -11,12 +11,13 @@ import review_graph_runtime as runtime
 from capture_scope import _scope_data
 from review_graph_git import intervening_metadata_blockers
 from review_graph_reuse import ObservedSourceTransition, metadata_states, metadata_transition, source_snapshot
-from test_review_graph_interleaved import _interleaved
-from test_review_graph_repair_staging import _finish_repair
-from test_review_graph_runtime import _baseline_mutation_fixture, _run_test_git
+from test_support_review_graph import _run_test_git
+from test_support_review_graph_lifecycle import _baseline_mutation_fixture
+from test_support_review_graph_repair_staging import _finish_repair, _interleaved
 
 
 def _repair_chain(tmp_path: Path, dependency: str) -> tuple[str, Path, dict[str, Any], dict[str, Any], dict[str, Any], dict[Path, bytes]]:
+    """Prepare two consecutive repairs with maintainer staging during the second epoch."""
     git, repository, request, audit, history = _interleaved(tmp_path, dependency)
     request.pop("interleaved_staging")
     _run_test_git(git, "-C", str(repository), "reset", "HEAD", "--", "state.rs")
@@ -75,6 +76,7 @@ def test_ordinary_then_interleaved_repair_preserves_only_eligible_audits(tmp_pat
 
 @pytest.fixture(scope="module")
 def ordinary_captures(tmp_path_factory: pytest.TempPathFactory) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Capture the same checkout before and after an ordinary source edit."""
     git, repository, _template, before, _plan = _baseline_mutation_fixture(tmp_path_factory.mktemp("ordinary-repair-captures"))
     (repository / "state.rs").write_text("pub fn state() { assert_eq!(1, 1); }\n")
     return before, _scope_data(git, repository, "baseline", None, ())

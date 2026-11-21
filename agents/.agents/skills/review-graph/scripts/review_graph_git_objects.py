@@ -63,6 +63,7 @@ def source_tree_id(paths: tuple[tuple[str, str], ...]) -> str | None:
 
 
 def _tree_id(entries: dict[str, GitPathIdentity], prefix: str, algorithm: str) -> str:
+    """Rebuild a Git tree ID from path identities using Git's directory ordering and the requested hash algorithm."""
     children: dict[str, tuple[str, str]] = {}
     for path, entry in entries.items():
         if not path.startswith(prefix):

@@ -29,21 +29,13 @@ from review_graph_runtime import (
     resume_after_external_metadata,
 )
 from review_graph_scheduling import select_execution_lanes
-from test_review_graph_runtime import (
-    ROUTING_CATALOG,
-    SKILL_ROOT,
-    _compile_repair_fixture_entry,
-    _json_plan,
-    _mutation_request,
-    _mutation_with_audit_source,
-    _publish_worker_bytes,
-    _run_test_git,
-    _sparse_plan_document,
-)
-from test_support_review_graph import _prepare_all_fixture_timing
+from test_support_review_graph import ROUTING_CATALOG, SKILL_ROOT, _json_plan, _prepare_all_fixture_timing, _run_test_git, _sparse_plan_document
+from test_support_review_graph_evidence import _publish_worker_bytes
+from test_support_review_graph_lifecycle import _compile_repair_fixture_entry, _mutation_request, _mutation_with_audit_source
 
 
 def _phase_plan(profile: str = "grouped") -> dict[str, Any]:
+    """Build a plan with pre-review validation requirements under the requested execution profile."""
     planning = _sparse_plan_document()
     planning["execution_profile"] = profile
     first = planning["validation_requirements"][0]
@@ -178,6 +170,7 @@ def test_multiple_early_units_require_verified_success_in_declared_order(tmp_pat
 
 
 def _ready(result: dict[str, Any]) -> dict[str, Any]:
+    """Prepare worker timing and calculate phase eligibility from the persisted journal."""
     _prepare_all_fixture_timing(result["dispatch_set"])
     lifecycle = result["lifecycle_input"]
     events, _state, _head = read_execution_journal(
@@ -228,6 +221,7 @@ def test_accounting_requires_complete_attempts_and_proven_executor_history(statu
 
 
 def _run_early_check(result: dict[str, Any], tmp_path: Path) -> dict[str, str]:
+    """Run and compile the first eligible validation and return its evidence paths."""
     lifecycle = result["lifecycle_input"]
     entry = _ready(result)["ready_dispatches"][0]
     dispatch = entry["dispatch"]

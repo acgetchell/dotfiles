@@ -12,34 +12,27 @@ import review_graph_runtime as runtime
 from review_graph_benchmark import _read_worker_sources, benchmark_fixture
 from review_graph_independent import CHECK_LABELS, SCHEMA
 from review_graph_schema import require_schema
-from test_review_graph_runtime import (
-    _compact_audit_payload,
-    _compact_independent_payload,
-    _compile_repair_fixture_entry,
-    _continuation_fixture,
-    _execution_payload,
-)
-from test_support_review_graph import _prepare_all_fixture_timing
+from test_support_review_graph import _prepare_all_fixture_timing, _publish
+from test_support_review_graph_evidence import _compact_audit_payload, _compact_independent_payload, _execution_payload
+from test_support_review_graph_lifecycle import _compile_repair_fixture_entry, _continuation_fixture
 
 
 def _digest(content: bytes) -> str:
+    """Return a SHA-256 digest with the prefix expected by the evidence contract."""
     return "sha256:" + hashlib.sha256(content).hexdigest()
 
 
 @pytest.fixture
 def materialized(tmp_path: Path) -> dict[str, Any]:
+    """Materialize worker contracts for a fixture checkout with repository-level instructions."""
     document = benchmark_fixture(tmp_path / "repository")
     (tmp_path / "repository" / "AGENTS.md").write_text("Read the source and retain truthful evidence.\n")
     return runtime.materialize_dispatches({**document, "artifact_store": str(tmp_path / "proof")})
 
 
 def _independent_entry(materialized: dict[str, Any]) -> dict[str, Any]:
+    """Select the independent review worker from the materialized dispatch set."""
     return next(entry for entry in materialized["dispatches"] if entry["result_contract"] == "compact-independent-review")
-
-
-def _publish(entry: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
-    contract = json.loads(Path(entry["worker_payload_contract_path"]).read_bytes())
-    return runtime.publish_worker_payload_bytes(contract, json.dumps(payload).encode())
 
 
 def test_compact_handoff_destinations_author_valid_payload(materialized: dict[str, Any]) -> None:
@@ -330,7 +323,7 @@ def test_planned_validation_identity_is_shared(materialized: dict[str, Any]) -> 
             assert path.stat().st_mode & 0o777 == 0o444
             assert _digest(path.read_bytes()) == ref["digest"] == record["planned_validation_digest"]
             paths.add(ref["path"])
-    assert len(paths) == 3  # Three unique units, shared across all nine audit dispatches.
+    assert len(paths) == 3  # Every audit references the same three validation units.
 
 
 @pytest.mark.parametrize("damage", ["missing", "tampered", "symlink", "summary", "reference-digest", "unknown-field"])

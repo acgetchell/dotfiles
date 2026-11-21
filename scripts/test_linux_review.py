@@ -435,6 +435,7 @@ def test_probe_records_only_safe_status_and_has_hard_bound(monkeypatch: pytest.M
     marker = b"private-secret-or-response"
 
     def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        """Put the same marker in both process streams to detect disclosure on completion or timeout."""
         assert kwargs["timeout"] == 30
         assert kwargs["capture_output"] is True
         if outcome == "timeout":
@@ -548,6 +549,7 @@ def test_inventory_compares_the_complete_tool_version(monkeypatch: pytest.Monkey
     original = linux_review.command_output
 
     def output(argv: list[str]) -> str:
+        """Supply distinct pinned and installed dprint versions while forwarding unrelated commands."""
         if argv[-2:] == ["--evaluate", "dprint_version"]:
             return expected
         if Path(argv[0]).name == "dprint" and argv[-1] == "--version":
@@ -632,6 +634,7 @@ def test_source_identity_preserves_submodule_gitlink_checkout_and_dirty_content(
     assert git is not None
 
     def run(repository: Path, *arguments: str) -> str:
+        """Run Git in disposable fixture repositories with local submodule transport and a reproducible commit identity."""
         return subprocess.run(  # noqa: S603 - local disposable repositories and explicit fixture commits.
             [
                 git,

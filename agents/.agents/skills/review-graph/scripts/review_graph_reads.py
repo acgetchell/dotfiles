@@ -89,6 +89,7 @@ def path_only_inventory(command: str) -> bool:
 
 
 def _rg_arguments(args: list[str]) -> list[str] | None:
+    """Return explicit search paths after a supported ripgrep pattern and options, or None for an unrecognized invocation."""
     pattern = False
     index = 0
     while index < len(args):

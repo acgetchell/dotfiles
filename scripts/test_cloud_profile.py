@@ -292,6 +292,7 @@ def test_receipt_hashes_the_inventory_bytes_actually_parsed(checkout: Path, tmp_
     reads = []
 
     def observed_read(path: Path) -> bytes:
+        """Track reads of the inventory while leaving other file access untouched."""
         content = read_bytes(path)
         if path == inventory:
             reads.append(path)
@@ -300,6 +301,7 @@ def test_receipt_hashes_the_inventory_bytes_actually_parsed(checkout: Path, tmp_
     parse_repository = cloud_profile.parse_repository
 
     def replace_after_parse(raw: object, directory: Path) -> cloud_profile.RepositoryProfile:
+        """Rewrite the inventory after parsing so a second read would hash different bytes."""
         profile = parse_repository(raw, directory)
         inventory.write_bytes(original.replace(b'name="fixture"', b'name="changed"'))
         return profile

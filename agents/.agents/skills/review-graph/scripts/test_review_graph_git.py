@@ -2,23 +2,15 @@
 
 import json
 from pathlib import Path
-from typing import Any
 
 import pytest
 from capture_scope import _scope_data
 from review_graph_git import covers_captured_worktree, fixed_branch_comparison, git_dependency_blockers
 from review_graph_receipts import stage_receipt
-from review_graph_runtime import (
-    JournalEventRequest,
-    _load_evidence_source,
-    _metadata_evidence_blockers,
-    append_journal_event,
-    compile_review,
-    main,
-    resume_after_external_metadata,
-)
-from test_review_graph_runtime import _publish_worker_bytes, _run_test_git
-from test_review_graph_transitions import _payload, _staging_fixture
+from review_graph_runtime import _load_evidence_source, _metadata_evidence_blockers, compile_review, main, resume_after_external_metadata
+from test_support_review_graph import _run_test_git
+from test_support_review_graph_evidence import _accept, _discovery_payload, _publish_worker_bytes
+from test_support_review_graph_handoffs import _staging_fixture
 
 
 @pytest.mark.parametrize("option", ["--cached", "--staged", "HEAD", "origin/main", "&& git log -1", "a" * 40])
@@ -38,24 +30,6 @@ def test_whole_worktree_comparison_recognizes_bound_source(comparison: str) -> N
 def test_other_comparisons_do_not_narrow_the_declared_review_boundary(comparison: str) -> None:
     capture = {"head": "a" * 40, "requested_paths": [], "captured_scope_paths": ["tool.py", "state.rs"]}
     assert not covers_captured_worktree(f"git diff {comparison}", capture)
-
-
-def _discovery_payload(audit: dict[str, Any], command: str = "git --no-pager diff -- tool.py state.rs") -> dict[str, Any]:
-    return {
-        **_payload(audit["dispatch"]["owned_paths"], dispatch=audit["dispatch"]),
-        "commands_executed": [command],
-        "git_dependencies": [{"kind": "source-discovery", "command": command, "reason": "Located changes; judgments use the inspected worktree files."}],
-    }
-
-
-def _accept(request: dict[str, Any], entry: dict[str, Any], payload: dict[str, Any]) -> dict[str, str]:
-    state = request["source_state"]
-    content, metadata = compile_review({"dispatch": {**entry["dispatch"], "before_state": state, "after_state": state}, "payload": payload})
-    Path(entry["artifact_path"]).write_bytes(content)
-    Path(entry["metadata_path"]).write_text(json.dumps(metadata))
-    source: dict[str, str] = {"artifact_path": entry["artifact_path"], "metadata_path": entry["metadata_path"]}
-    append_journal_event(Path(request["journal_path"]), request, JournalEventRequest(entry["node_id"], "accepted", source=source))
-    return source
 
 
 @pytest.mark.parametrize("staging", ["all", "subset", "mixed"])

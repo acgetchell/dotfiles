@@ -64,6 +64,7 @@ def _history_mapping(value: Any, name: str) -> dict[str, Any]:
 
 
 def _history_object(retained: dict[str, bytes], name: str) -> dict[str, Any]:
+    """Decode a required object from retained commit history and reject missing entries."""
     if name not in retained:
         msg = f"commit handoff history is missing {name}"
         raise ValueError(msg)
@@ -71,6 +72,7 @@ def _history_object(retained: dict[str, bytes], name: str) -> dict[str, Any]:
 
 
 def _history_record(retained: dict[str, bytes], name: str) -> dict[str, Any]:
+    """Extract a normalized history record and require a nonblank evidence ID."""
     record = _history_mapping(_history_object(retained, name).get("normalized_record"), name + ".normalized_record")
     if not isinstance(record.get("evidence_id"), str) or not record["evidence_id"].strip():
         msg = f"commit handoff history {name} requires an evidence_id"

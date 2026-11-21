@@ -46,11 +46,10 @@ instructions/references, and lazy schema/provenance access. Coordinator executio
 Use `references/routing-catalog.json` through `scripts/review_graph_plan.py`,
 which owns catalog/router/rule IDs, skill paths, priorities, and synthesis dependencies.
 
-1. Apply the deterministic repository classifier to captured paths.
-2. Run `review_graph_runtime.py routing-projection` for the consulted routers.
-   Inspect its candidates, path matches, and semantic triggers. Inspect a surface `references/check-routing.md`
-   only when shared ownership or ambiguity is not resolved by the projection.
-   Do not load orchestrator bodies for routing.
+1. Classify the captured repository paths.
+2. Run `review_graph_runtime.py routing-projection` with consulted routers and any `captured_python_example_paths`.
+   Inspect candidates, path matches, and semantic triggers. Consult a surface's `references/check-routing.md`
+   for unresolved ownership or applicability. Keep orchestrator bodies unloaded during routing.
 3. Inspect the affected contracts and return `routing_overrides` for each matched
    specialist: select it, justify `not-applicable`, reuse exact evidence, or record
    an exclusion/blocker. Include semantic additions even without path matches.

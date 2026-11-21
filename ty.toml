@@ -1,0 +1,3 @@
+# The repository validator imports the YAML reader distributed with the review skill.
+[environment]
+extra-paths = ["agents/.agents/skills/review-graph/scripts"]
