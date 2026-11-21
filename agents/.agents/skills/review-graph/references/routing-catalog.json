@@ -580,6 +580,20 @@
       "semantic_triggers": ["Material public or cross-module concepts, import/export paths, signatures, return shapes, typing/protocol/callback contracts, stubs, extension hooks, or compatible evolution changed. Private helper changes alone do not require API review."]
     },
     {
+      "catalog_id": "python.style",
+      "router_id": "python-review-orchestrator",
+      "rule_id": "python-style-hygiene",
+      "layer": "surface",
+      "surface": "python",
+      "skill_id": "python-style-hygiene",
+      "skill_path": "$SKILLS_ROOT/python-style-hygiene/SKILL.md",
+      "target_kind": "leaf",
+      "default_priority": "supporting-quality",
+      "synthesis_dependency": "python-synthesis",
+      "path_patterns": ["**/*.py", "**/*.pyi"],
+      "semantic_triggers": ["Python implementations or examples are in scope. Inspect function docstrings, naming, and import placement regardless of lint results."]
+    },
+    {
       "catalog_id": "python.notebook",
       "router_id": "python-review-orchestrator",
       "rule_id": "python-notebook-reproducibility",

@@ -25,10 +25,12 @@ _SCOPE_MODES = {"baseline": "baseline", "branch": "branch", "staged": "staged-on
 
 
 def _source_state(capture: dict[str, Any]) -> list[object]:
+    """Return the scope, worktree, and repository fingerprints in the order expected by the planner."""
     return [capture.get("scope_fingerprint"), capture.get("captured_worktree_fingerprint"), capture.get("repository_state_fingerprint")]
 
 
 def _capture_command(capture: dict[str, Any]) -> str:
+    """Reconstruct the capture command with the original repository, comparison base, and requested paths."""
     capture_script = Path(__file__).resolve().with_name("capture_scope.py")
     command = runtime_command(capture_script, "--mode", str(capture.get("capture_mode", "<missing>")))
     repository_root = capture.get("repository_root")
@@ -42,8 +44,17 @@ def _capture_command(capture: dict[str, Any]) -> str:
     return shlex.join(command)
 
 
+def _detach_containers(value: Any) -> Any:
+    """Copy each occurrence of a JSON container without coercing values before schema validation."""
+    if isinstance(value, dict):
+        return {key: _detach_containers(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_detach_containers(item) for item in value]
+    return value
+
+
 def bootstrap_document(capture: dict[str, Any], template: dict[str, Any]) -> dict[str, Any]:
-    """Bind trusted capture fields and validator identities without caller transcription."""
+    """Return an independently editable planning document bound to the supplied capture."""
     merged = dict(template)
     capture_mode = capture.get("capture_mode")
     captured_paths = capture.get("captured_scope_paths")
@@ -102,14 +113,16 @@ def bootstrap_document(capture: dict[str, Any], template: dict[str, Any]) -> dic
             item.setdefault("requires_isolation", False)
             normalized.append(item)
         merged["validation_requirements"] = normalized
-    return merged
+    return _detach_containers(merged)
 
 
 def _read_object(path: Path) -> dict[str, Any]:
+    """Decode a strict JSON object from the named bootstrap input."""
     return parse_json_object(path.read_bytes())
 
 
 def _write_once(path: Path, value: object) -> None:
+    """Create the JSON output, accept byte-identical retries, and reject conflicting content."""
     content = (json.dumps(value, indent=2, sort_keys=True) + "\n").encode()
     try:
         with path.open("xb") as stream:
@@ -121,6 +134,7 @@ def _write_once(path: Path, value: object) -> None:
 
 
 def _parser() -> argparse.ArgumentParser:
+    """Define the CLI arguments for capture-based planning, starter preflight, and resumption."""
     parser = argparse.ArgumentParser(
         description=__doc__,
         epilog=(
@@ -156,6 +170,7 @@ def _parser() -> argparse.ArgumentParser:
 
 def _starter_preflight(output: dict[str, Any], choices: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
     # Import here: runtime also imports bootstrap_document for continuations.
+    """Run validation preflight and attach its input, report, and starter metrics to the output bundle."""
     from review_graph_runtime import preflight_validation  # noqa: PLC0415
 
     document = starter_preflight(output["plan"], choices, output["planning_input"]["repository_root"])
@@ -277,6 +292,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _retry_command(args: argparse.Namespace) -> list[str]:
+    """Build a resume command that writes a separate preflight bundle beside the original output."""
     return runtime_command(
         Path(__file__),
         "--resume-from",

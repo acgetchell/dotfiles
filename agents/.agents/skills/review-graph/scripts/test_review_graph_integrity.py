@@ -23,8 +23,8 @@ from review_graph_integrity import canonical_json, digest_bytes, digest_json
 from review_graph_plan import _file_identity_digest
 from review_graph_receipts import artifact_reference
 from review_graph_usage import digest, parse_json
-from test_capture_scope import _git, _init_repo
-from test_review_graph_runtime import _baseline_capture, _sparse_plan_document, _worker_input_fixture
+from test_support_review_graph import _baseline_capture, _sparse_plan_document, _worker_input_fixture
+from test_support_review_graph_capture import _git, _init_repo
 
 
 @pytest.mark.parametrize("content", [b"", b"first\r\nsecond\n\xff\x00last\r"])
@@ -98,6 +98,7 @@ def test_capture_timeout_reports_both_captured_streams_without_publishing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     def timed_out(*_args: Any, **_kwargs: Any) -> bytes:
+        """Raise a Git timeout carrying partial stdout and non-UTF-8 stderr."""
         raise subprocess.TimeoutExpired(["git", "rev-parse"], 30, output=b"partial\r\n", stderr=b"diagnostic\xff\n")
 
     monkeypatch.setattr(capture_scope, "_run_git", timed_out)
@@ -119,6 +120,7 @@ def test_ignored_artifact_verification_propagates_fatal_git_queries(tmp_path: Pa
     prior.write_bytes(b'{"status":"valid"}\n')
 
     def run(command: str, args: tuple[str, ...], **_kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        """Fail only the selected Git query while keeping the other ignore check successful."""
         if failed_query in args:
             return subprocess.CompletedProcess([command, *args], 128, b"", b"fatal: fixture object database is unreadable\n")
         return subprocess.CompletedProcess([command, *args], 0, b".gitignore\x001\x00cache/\x00cache/output\x00", b"")
@@ -225,6 +227,7 @@ def test_runtime_fatal_git_diagnostic_uses_stderr_and_preserves_prior_artifacts(
     protected = {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
 
     def fatal(*_args: Any, **_kwargs: Any) -> None:
+        """Supply distinct stdout and stderr so the test can identify the diagnostic's source."""
         raise subprocess.CalledProcessError(128, ["git", "ls-files"], output=b"partial\n", stderr=b"fatal: fixture repository is unreadable\n")
 
     monkeypatch.setattr(runtime, "_run_operation", fatal)

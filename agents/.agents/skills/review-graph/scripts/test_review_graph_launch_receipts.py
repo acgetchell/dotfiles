@@ -7,8 +7,9 @@ from typing import Any
 import pytest
 from capture_scope import _scope_data
 from review_graph_integrity import digest_bytes
-from test_review_graph_runtime import SKILL_ROOT, _baseline_mutation_fixture, _run_test_git
-from test_review_graph_sessions import _cli
+from test_support_review_graph import SKILL_ROOT, _run_test_git
+from test_support_review_graph_lifecycle import _baseline_mutation_fixture
+from test_support_review_graph_sessions import _cli
 
 
 def _large_bootstrap(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
@@ -77,6 +78,7 @@ def _large_bootstrap(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
 
 
 def _read_reference(reference: dict[str, str]) -> dict[str, Any]:
+    """Verify the referenced file's integrity and read-only mode before decoding it."""
     path = Path(reference["path"])
     content = path.read_bytes()
     assert digest_bytes(content) == reference["digest"]
@@ -85,6 +87,7 @@ def _read_reference(reference: dict[str, str]) -> dict[str, Any]:
 
 
 def _assert_launches(receipt: dict[str, Any], entries: list[dict[str, Any]]) -> dict[str, Any]:
+    """Resolve the receipt's launch manifest and check that its continuation inputs agree."""
     assert {"dispatches", "ready_dispatches", "launch_manifest"}.isdisjoint(receipt)
     manifest = _read_reference(receipt["launch_manifest_reference"])
     assert len(manifest["nodes"]) == receipt["node_count"] == len(entries)

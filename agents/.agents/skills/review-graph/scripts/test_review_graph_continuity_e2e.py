@@ -8,142 +8,15 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from capture_scope import _scope_data, persist_capture
-from review_graph_reuse import WORKTREE_SELECTION_ALGORITHM, source_snapshot
-from test_review_graph_runtime import (
-    SKILL_ROOT,
-    _baseline_mutation_fixture,
-    _compact_audit_payload,
-    _compact_independent_payload,
-    _complete_structural_fixture_routing,
-    _run_test_git,
-)
-from test_review_graph_sessions import _cli
-
-
-def _frozen_run(
-    tmp_path: Path, *, early: bool, input_selection: bool = False, log_kind: str = "file", large_scope: bool = False
-) -> tuple[str, Path, dict[str, Any], dict[str, Any], Path, Path]:
-    git, repository, template, capture, _plan = _baseline_mutation_fixture(tmp_path)
-    if large_scope:
-        for index in range(200):
-            (repository / f"long_baseline_document_name_{index:04d}.txt").write_text("unchanged baseline evidence\n")
-        template["captured_path_dispositions"].append(
-            {
-                "paths": [f"long_baseline_document_name_{index:04d}.txt" for index in range(200)],
-                "disposition": "historical",
-                "reason": "Inactive text records retained to exercise large inventory transport",
-                "catalog_ids": [],
-            }
-        )
-        _run_test_git(git, "-C", str(repository), "add", ".")
-        _run_test_git(git, "-C", str(repository), "commit", "-m", "large baseline")
-        capture = _scope_data(git, repository, "baseline", None, ())
-        _complete_structural_fixture_routing(template, list(source_snapshot(capture).captured_scope_paths))
-    snapshot = source_snapshot(capture)
-    template.update(
-        authorization="review-and-fix",
-        concrete_change_target=True,
-        change_target=shlex.join(["git", "diff", snapshot.head, "--", *(["."] if large_scope else snapshot.captured_scope_paths)]),
-    )
-    requirement = template["validation_requirements"][0]
-    isolation = tmp_path / "validator"
-    isolation.mkdir()
-    if log_kind == "aliased-directory":
-        alias = tmp_path / "validator-alias"
-        alias.symlink_to(isolation, target_is_directory=True)
-        isolation = alias
-    log = isolation / "ci.log"
-    artifact = log
-    if log_kind in {"directory", "aliased-directory"}:
-        artifact = isolation / "logs"
-        log = artifact / "nested" / "ci.log"
-        log.parent.mkdir(parents=True)
-        (artifact / "empty").mkdir()
-        outside = tmp_path / "outside.log"
-        outside.write_text("external bytes must not be archived\n")
-        (artifact / "external-link").symlink_to(outside)
-    elif log_kind == "symlink":
-        artifact = isolation / "log-link"
-        artifact.symlink_to(log.name)
-    requirement.update(
-        commands=["printf passed > " + shlex.quote(str(log))],
-        canonical_recipe=None,
-        requires_isolation=True,
-        isolation_root=str(isolation),
-        working_directories=[str(isolation)],
-        allowed_artifacts=[{"path": str(artifact), "kind": "log", "repository_status": "outside-repository"}],
-    )
-    if input_selection:
-        (repository / "enumerate.sh").write_text('git -C "$1" ls-files --cached --others --exclude-standard -z\n')
-        template["routing_overrides"].append(
-            {
-                "catalog_id": "repo.tooling",
-                "disposition": "selected",
-                "reason": "The fixture's validator invokes this repository input-selection script",
-                "applicability_evidence": ["enumerate.sh selects the gate's inputs"],
-                "review_surface": ["enumerate.sh"],
-                "owners": ["tooling"],
-            }
-        )
-        requirement.update(commands=[shlex.join(["sh", str(repository / "enumerate.sh"), str(repository)]) + " > " + shlex.quote(str(log))])
-        capture = _scope_data(git, repository, "baseline", None, ())
-        snapshot = source_snapshot(capture)
-        template["change_target"] = shlex.join(["git", "diff", snapshot.head, "--", *snapshot.captured_scope_paths])
-        _complete_structural_fixture_routing(template, list(snapshot.captured_scope_paths))
-    if early:
-        template["pre_review_validation_requirement_ids"] = [requirement["requirement_id"]]
-    capture_path, template_path, bundle_path = (tmp_path / name for name in ("initial-capture.json", "template.json", "bootstrap.json"))
-    capture_path.write_text(json.dumps(capture))
-    template_path.write_text(json.dumps(template))
-    _cli(
-        SKILL_ROOT / "review-graph/scripts/review_graph_bootstrap.py",
-        "--capture",
-        str(capture_path),
-        "--input",
-        str(template_path),
-        "--output",
-        str(bundle_path),
-    )
-    bundle = json.loads(bundle_path.read_bytes())
-    assert bundle["validation_reuse_prerequisite"]["registry_present"] is False
-    frozen_runtime = Path(bundle["runtime_snapshot"]["path"]).parent / "skills/review-graph/scripts/review_graph_runtime.py"
-    dispatch_path = tmp_path / "dispatches.json"
-    _cli(frozen_runtime, "materialize-dispatches", "--input", str(bundle_path), "--output", str(dispatch_path))
-    return git, repository, bundle, json.loads(dispatch_path.read_bytes()), frozen_runtime, dispatch_path
-
-
-def _compile(  # noqa: PLR0913, PLR0917 - mirror the explicit compiler CLI boundaries.
-    frozen: Path, lifecycle: Path, dispatches: Path, journal: Path, entry: dict[str, Any], before: str, after: str, output: Path, *workspace: str
-) -> None:
-    captures = {"before": before, "after": after}
-    for phase, observation in entry["dispatch"].get("audit_observations", {}).items():
-        # Preserve the fixture's actual earlier observations, never dispatch expectations.
-        manifest = json.loads(Path(captures[phase]).read_bytes())
-        persist_capture(manifest, Path(observation["capture_path"]))
-        captures[phase] = observation["capture_path"]
-    _cli(
-        frozen,
-        "compile-node",
-        "--input",
-        str(lifecycle),
-        "--dispatches",
-        str(dispatches),
-        "--journal",
-        str(journal),
-        "--node-id",
-        entry["node_id"],
-        "--before-capture",
-        captures["before"],
-        "--after-capture",
-        captures["after"],
-        "--output",
-        str(output),
-        *workspace,
-    )
+from capture_scope import _scope_data
+from review_graph_reuse import WORKTREE_SELECTION_ALGORITHM
+from test_support_review_graph import _run_test_git
+from test_support_review_graph_evidence import _compact_audit_payload, _compact_independent_payload
+from test_support_review_graph_sessions import _cli, _compile, _frozen_run
 
 
 def _observe(entry: dict[str, Any], phase: str) -> dict[str, Any]:
+    """Execute the capture commands for one validation phase and return its observation descriptor."""
     observation = entry["dispatch"]["validation_observations"][phase]
     subprocess.run(["/bin/sh", "-c", observation["capture_command"]], check=True)  # noqa: S603 - runtime-generated fixture capture only.
     subprocess.run(observation["workspace_command"], check=True, capture_output=True)  # noqa: S603 - runtime-owned fixture snapshot.
@@ -163,6 +36,7 @@ def _observe(entry: dict[str, Any], phase: str) -> dict[str, Any]:
     ],
 )
 def test_frozen_validator_handoffs_release_source_review_without_metadata_ci_replay(tmp_path: Path, dependency_kind: str, log_kind: str) -> None:  # noqa: PLR0915 - frozen execution through metadata continuation.
+    """Use the frozen worker's capture commands and check that an unavailable validation contract still blocks delivery."""
     git, repository, bundle, dispatches, frozen, dispatch_path = _frozen_run(
         tmp_path, early=True, input_selection=dependency_kind == "input-selection", log_kind=log_kind
     )
@@ -316,6 +190,7 @@ def test_frozen_validator_handoffs_release_source_review_without_metadata_ci_rep
 
 @pytest.mark.parametrize("external_read", [False, True])
 def test_frozen_audit_repair_reuse_and_range_read_commit_continuation(tmp_path: Path, external_read: bool) -> None:  # noqa: PLR0915 - complete frozen workflow.
+    """Keep the original dispatch on disk so the repaired run must justify its new read scope from continuation evidence."""
     git, repository, bundle, dispatches, frozen, dispatch_path = _frozen_run(tmp_path, early=False)
     audit = next(entry for entry in dispatches["dispatches"] if entry["dispatch"].get("skill_id") == "python-cli-review")
     payload = _compact_audit_payload(audit)

@@ -70,6 +70,7 @@ class SchemaValidationError(ValueError):
 
 
 def _resolve_ref(root: dict[str, Any], reference: str) -> dict[str, Any]:
+    """Resolve a local JSON pointer against the root schema and require an object at its destination."""
     if not reference.startswith("#/"):
         msg = f"only local schema references are supported: {reference}"
         raise ValueError(msg)
@@ -86,6 +87,7 @@ def _resolve_ref(root: dict[str, Any], reference: str) -> dict[str, Any]:
 
 
 def _type_name(value: object) -> str:  # noqa: PLR0911
+    """Classify a Python value using JSON Schema types, distinguishing booleans from integers."""
     if value is None:
         return "null"
     if isinstance(value, bool):
@@ -104,6 +106,7 @@ def _type_name(value: object) -> str:  # noqa: PLR0911
 
 
 def _accepted_types(schema: dict[str, Any]) -> tuple[str, ...]:
+    """Return the declared schema types as a tuple, or an empty tuple for an absent or malformed declaration."""
     raw = schema.get("type")
     if isinstance(raw, str):
         return (raw,)
@@ -113,11 +116,13 @@ def _accepted_types(schema: dict[str, Any]) -> tuple[str, ...]:
 
 
 def _matches_type(value: object, accepted: tuple[str, ...]) -> bool:
+    """Match a JSON value against the allowed types, including integers in the number category."""
     observed = _type_name(value)
     return observed in accepted or (observed == "integer" and "number" in accepted)
 
 
 def _shape(schema: dict[str, Any]) -> str:
+    """Describe the expected type, constant, or enumeration for a schema diagnostic."""
     accepted = _accepted_types(schema)
     if accepted:
         return " | ".join(accepted)
@@ -131,6 +136,7 @@ def _shape(schema: dict[str, Any]) -> str:
 def _diagnose(  # noqa: C901, PLR0912, PLR0915
     value: object, schema: dict[str, Any], root: dict[str, Any], path: str, output: list[SchemaDiagnostic]
 ) -> None:
+    """Append path-specific diagnostics for the value and its nested schema constraints."""
     reference = schema.get("$ref")
     if isinstance(reference, str):
         _diagnose(value, _resolve_ref(root, reference), root, path, output)

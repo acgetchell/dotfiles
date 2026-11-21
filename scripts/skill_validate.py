@@ -7,15 +7,16 @@ import argparse
 import re
 import subprocess
 import sys
-from collections.abc import Hashable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, cast
 
 import yaml
 from research_repo_tools.process import ExecutableNotFoundError
 from research_repo_tools.selection import select_files
-from yaml.constructor import ConstructorError
-from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
+
+# The shared YAML reader ships with the standalone and frozen graph runtimes.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "agents/.agents/skills/review-graph/scripts"))
+import review_graph_frontmatter as frontmatter_yaml
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -25,80 +26,18 @@ MAX_SKILL_NAME_LENGTH = 64
 MIN_SHORT_DESCRIPTION_LENGTH = 25
 MAX_SHORT_DESCRIPTION_LENGTH = 64
 ALLOWED_FRONTMATTER_KEYS = frozenset({"name", "description", "license", "allowed-tools", "metadata"})
-FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---(?:\n|\Z)", re.DOTALL)
 SKILL_NAME_RE = re.compile(r"^[a-z0-9-]+$")
-_YAML_MERGE_KEY = sentinel("_YAML_MERGE_KEY")
-SAFE_YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 
 
-class SafeYamlLoader(Protocol):
-    """Shared node-construction interface of the Python and C safe loaders."""
-
-    def construct_object(self, node: Node, deep: bool = False) -> Any:
-        """Construct a safe YAML value."""
-        ...
-
-    def get_single_node(self) -> Node | None:
-        """Compose one YAML document without flattening its mappings."""
-        ...
-
-    def dispose(self) -> None:
-        """Release parser resources."""
-        ...
-
-
-def load_safe_yaml(text: str) -> Any:
-    """Construct a document with the selected safe loader and release resources."""
-    loader = SAFE_YAML_LOADER(text)
-    try:
-        return loader.get_single_data()
-    finally:
-        loader.dispose()
-
-
-def construct_scalar_mapping_key(node: ScalarNode, loader: SafeYamlLoader) -> Hashable:
-    """Construct a key identity without flattening away explicit duplicates."""
-    if node.tag == "tag:yaml.org,2002:merge":
-        # A merge directive is distinct from a literal quoted '<<' key.
-        key = _YAML_MERGE_KEY
-    elif node.tag == "tag:yaml.org,2002:value":
-        # SafeLoader normalizes this mapping-context tag to a string.
-        key = node.value
-    else:
-        key = loader.construct_object(node, deep=True)
-    if not isinstance(key, Hashable):
-        raise ConstructorError(None, None, "found unhashable key", node.start_mark)
-    return key
-
-
-def find_duplicate_mapping_key(node: Node | None, loader: SafeYamlLoader) -> str | None:
-    """Return the first repeated scalar mapping key in a YAML node tree."""
-    if node is None:
-        return None
-    pending = [node]
-    visited: set[int] = set()
-    while pending:
-        current = pending.pop()
-        if id(current) in visited:
-            continue
-        visited.add(id(current))
-        if isinstance(current, MappingNode):
-            seen: set[object] = set()
-            for key_node, value_node in current.value:
-                if isinstance(key_node, ScalarNode):
-                    key_value = cast("str", key_node.value)
-                    key_identity = construct_scalar_mapping_key(key_node, loader)
-                    if key_identity in seen:
-                        return key_value
-                    seen.add(key_identity)
-                pending.extend((key_node, value_node))
-        elif isinstance(current, SequenceNode):
-            pending.extend(current.value)
-    return None
+parse_frontmatter = frontmatter_yaml.parse_frontmatter
 
 
 def load_frontmatter(skill_path: Path | str) -> tuple[dict[str, object] | None, str]:
-    """Load validated YAML frontmatter from one skill directory."""
+    """Read SKILL.md and return its parsed mapping or (None, diagnostic).
+
+    A mapping has an empty diagnostic and still needs field validation.
+    File read and decoding errors propagate to the caller.
+    """
     frontmatter_text, message = read_frontmatter_text(skill_path)
     if frontmatter_text is None:
         return None, message
@@ -112,40 +51,7 @@ def read_frontmatter_text(skill_path: Path | str) -> tuple[str | None, str]:
     if not skill_md.exists():
         return None, "SKILL.md not found"
 
-    content = skill_md.read_text(encoding=UTF8)
-    if not content.startswith("---"):
-        return None, "No YAML frontmatter found"
-
-    match = FRONTMATTER_RE.match(content)
-    if match is None:
-        return None, "Invalid frontmatter format"
-    return cast("str", match.group(1)), ""
-
-
-def parse_frontmatter(frontmatter_text: str) -> tuple[dict[str, object] | None, str]:
-    """Parse and validate the raw YAML frontmatter shape."""
-    try:
-        loader = SAFE_YAML_LOADER(frontmatter_text)
-        try:
-            duplicate_key = find_duplicate_mapping_key(loader.get_single_node(), loader)
-        finally:
-            loader.dispose()
-        if duplicate_key is not None:
-            return None, f"Duplicate key in frontmatter: {duplicate_key}"
-        loaded_frontmatter: Any = load_safe_yaml(frontmatter_text)
-    except yaml.YAMLError as exc:
-        return None, f"Invalid YAML in frontmatter: {exc}"
-
-    if not isinstance(loaded_frontmatter, dict):
-        return None, "Frontmatter must be a YAML dictionary"
-
-    frontmatter = cast("dict[object, object]", loaded_frontmatter)
-    non_string_keys = [key for key in frontmatter if not isinstance(key, str)]
-    if non_string_keys:
-        keys = ", ".join(repr(key) for key in non_string_keys)
-        return None, f"Frontmatter keys must be strings: {keys}"
-
-    return {key: value for key, value in frontmatter.items() if isinstance(key, str)}, ""
+    return frontmatter_yaml.frontmatter_text(skill_md.read_text(encoding=UTF8))
 
 
 def validate_frontmatter(frontmatter: dict[str, object]) -> tuple[bool, str]:
@@ -173,7 +79,11 @@ def validate_frontmatter(frontmatter: dict[str, object]) -> tuple[bool, str]:
 
 
 def validate_skill(skill_path: Path | str) -> tuple[bool, str]:
-    """Validate one skill directory."""
+    """Check SKILL.md and agents/openai.yaml, returning success or the first diagnostic.
+
+    The boolean indicates validity. The message is suitable for display in either case.
+    File read and decoding errors propagate to the caller.
+    """
     skill_dir = Path(skill_path)
     frontmatter, message = load_frontmatter(skill_dir)
     if frontmatter is None:
@@ -201,14 +111,11 @@ def load_openai_metadata(skill_path: Path | str) -> tuple[dict[str, object] | No
         return None, "agents/openai.yaml not found"
 
     try:
-        loaded_metadata: Any = load_safe_yaml(metadata_path.read_text(encoding=UTF8))
+        loaded_metadata = frontmatter_yaml.load_safe_yaml(metadata_path.read_text(encoding=UTF8))
     except yaml.YAMLError as exc:
         return None, f"Invalid YAML in agents/openai.yaml: {exc}"
 
-    if not isinstance(loaded_metadata, dict):
-        return None, "agents/openai.yaml must be a YAML dictionary"
-
-    return cast("dict[str, object]", loaded_metadata), ""
+    return frontmatter_yaml.string_keyed_mapping(loaded_metadata, "agents/openai.yaml")
 
 
 def validate_openai_metadata(metadata: dict[str, object], skill_name: str) -> tuple[bool, str]:
@@ -279,7 +186,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run skill validation."""
+    """Report each selected skill and return 1 on inventory or validation failure."""
     args = parse_args(sys.argv[1:] if argv is None else argv)
     skills = args.skills
     if args.repository is not None:

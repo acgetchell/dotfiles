@@ -23,6 +23,7 @@ behavior:
 | Skill | Select when | Skip when |
 |---|---|---|
 | `python-build-portability` | Wheels, sdists, package discovery/data, installed imports, entry points, extras, markers, supported runtimes/platforms, native extensions, external consumers; platform-sensitive scripts and fixtures, including unpackaged tooling | Only workflow commands or tool pins changed and no Python platform contract is affected |
+| `python-style-hygiene` | Python source, tests, stubs, or code examples are in scope, even when lint passes. | The scope contains no Python code or examples. |
 | `python-api-design` | Material public or cross-module concepts, imports/exports, callable signatures, return shapes, protocols, callbacks, stubs, extension hooks, or compatibility changed | Private helper changes with no material shared caller contract |
 | `jupyter-notebook-review` | Notebook cells, metadata, outputs, execution, plotting, environments, or notebook artifacts changed | A normal Python module merely supports a notebook |
 | `python-cli-review` | User-visible arguments, output, privacy, application files, dates/times, or exit behavior changed | Pure parser/model or support-transform change |

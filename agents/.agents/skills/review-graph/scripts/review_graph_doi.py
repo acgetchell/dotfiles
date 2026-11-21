@@ -21,6 +21,7 @@ class _UnusableReportError(ValueError):
 
 
 def _reject(detail: str) -> ValueError:
+    """Give DOI reconciliation failures a consistent diagnostic prefix."""
     return ValueError(f"software DOI reconciliation: {detail}")
 
 
@@ -32,6 +33,7 @@ def _bibliography_parser() -> dict[str, Any]:
 
 
 def _execution(record: dict[str, Any], index: int, result: str) -> dict[str, Any]:
+    """Select an accepted execution by index and check that its outcome agrees with its exit code."""
     executions = record.get("executions", [])
     if type(index) is not int or not 0 <= index < len(executions):
         msg = "execution index is outside the accepted validator"
@@ -45,6 +47,7 @@ def _execution(record: dict[str, Any], index: int, result: str) -> dict[str, Any
 
 
 def _checker_arguments(command: str) -> list[str]:
+    """Extract arguments for a single DOI checker invocation, removing trailing report redirection."""
     words = shlex.split(command)
     scripts = [index for index, word in enumerate(words) if Path(word).name == "validate_reference_dois.py"]
     if len(scripts) != 1:
@@ -60,6 +63,7 @@ def _checker_arguments(command: str) -> list[str]:
 
 
 def _command_inputs(execution: dict[str, Any]) -> tuple[Path, Path | None]:
+    """Resolve the Markdown and optional CFF inputs against the checker's recorded working directory."""
     args = _checker_arguments(execution["command"])
     positional: list[str] = []
     cff = None
@@ -88,6 +92,7 @@ def _command_inputs(execution: dict[str, Any]) -> tuple[Path, Path | None]:
 
 
 def _report(record: dict[str, Any], execution: dict[str, Any], path: str) -> dict[tuple[str, int], dict[str, Any]]:
+    """Verify the report artifact and index its rows by case-folded DOI and source line, rejecting duplicate occurrences."""
     artifacts = [item for item in record.get("artifacts", []) if item["path"] == path]
     if path not in execution.get("artifact_paths", []) or len(artifacts) != 1:
         msg = "report is not bound to the accepted execution"
@@ -145,6 +150,7 @@ def inspect_canonical_recheck(record: dict[str, Any], request: dict[str, Any], c
 
 
 def _identity(value: str) -> str:
+    """Normalize case and punctuation so titles and author names can be compared across records."""
     return re.sub(r"\W+", " ", value.casefold()).strip()
 
 
@@ -171,6 +177,7 @@ def _captured_cff_digest(canonical: dict[str, Any], cff: Path, capture: ReviewSo
 
 
 def _canonical_report_path(record: dict[str, Any], execution: dict[str, Any]) -> str | None:
+    """Return the sole matching report path after applying output redirection, or None if the match is absent or ambiguous."""
     candidates: list[str] = [
         artifact["path"] for artifact in record["artifacts"] if artifact["kind"] == "report" and artifact["path"] in execution.get("artifact_paths", [])
     ]
@@ -182,6 +189,7 @@ def _canonical_report_path(record: dict[str, Any], execution: dict[str, Any]) ->
 
 
 def _canonical_rows(record: dict[str, Any]) -> list[tuple[Path, dict[str, Any]]]:
+    """Collect successful canonical software rows from usable CFF-backed checker reports."""
     rows = []
     for execution in record["executions"]:
         if execution["result"] not in {"passed", "failed"} or str(execution.get("exit_code")) not in {"0", "1"}:
@@ -270,6 +278,7 @@ def _bibliography_digest(rows: dict[tuple[str, int], dict[str, Any]], markdown: 
 
 
 def _canonical_match(row: dict[str, Any], cff: Path, captured_inputs: dict[str, str]) -> None:
+    """Verify the software identity against the captured CFF and the DOI resolver's metadata."""
     canonical = row.get("canonical_software")
     if not isinstance(canonical, dict) or canonical.get("path") != str(cff):
         msg = "canonical identity does not name the executed CITATION.cff"
@@ -301,6 +310,7 @@ def _canonical_match(row: dict[str, Any], cff: Path, captured_inputs: dict[str, 
 
 
 def _reconcile_reports(original: dict[str, Any], verified: dict[str, Any], check: dict[str, Any]) -> None:  # noqa: C901
+    """Compare the failed report with its canonical recheck and reject changes in source or resolved identity."""
     old_execution = _execution(original, check["execution_index"], "failed")
     new_execution = _execution(verified, check["verification_execution_index"], "passed")
     old_input, _old_cff = _command_inputs(old_execution)
@@ -370,9 +380,18 @@ def validate_software_doi_resolution(resolution: dict[str, Any], original: dict[
         _reconcile_reports(original, verified, check)
 
 
+def _match_score(row: dict[str, Any], field: str) -> float:
+    """Read a numeric match score in the closed unit interval and reject booleans or missing values."""
+    score = row.get(field)
+    if not isinstance(score, int | float) or isinstance(score, bool) or not 0 <= score <= 1:
+        msg = f"{field} must be a number between 0 and 1"
+        raise _reject(msg)
+    return float(score)
+
+
 def _primary_year(row: dict[str, Any], occurrence: dict[str, Any]) -> None:
     """Verify the retained primary record supports the same identity and local year."""
-    if row.get("mismatched_fields") != ["year"] or (row.get("title_score") or 0) < 0.8 or row.get("author_score") != 1.0:
+    if row.get("mismatched_fields") != ["year"] or _match_score(row, "title_score") < 0.8 or _match_score(row, "author_score") != 1.0:
         msg = "scholarly resolution requires a year-only disagreement with matching title and authors"
         raise _reject(msg)
     primary = occurrence["primary_record"]
@@ -429,6 +448,7 @@ def _primary_excerpt(primary: dict[str, Any], content: bytes) -> None:
 
 
 def _source_row(row: dict[str, Any], markdown: Path, original: dict[str, Any], retained: bytes | None = None) -> dict[str, Any]:
+    """Verify the reported DOI at its captured bibliography line and recover the publication years from that entry."""
     source = row.get("source", {})
     if not isinstance(source, dict):
         msg = "scholarly report has an invalid bibliography source"

@@ -10,17 +10,10 @@ import review_graph_runtime as runtime
 from capture_scope import _scope_data
 from review_graph_bootstrap import bootstrap_document
 from review_graph_plan import plan_from_document
-from test_review_graph_compact import _publish
-from test_review_graph_runtime import (
-    ROUTING_CATALOG,
-    SKILL_ROOT,
-    _baseline_mutation_fixture,
-    _compile_repair_fixture_entry,
-    _complete_structural_fixture_routing,
-    _set_fixture_routing,
-)
-from test_review_graph_sessions import _use_historical_views
-from test_review_graph_transitions import _materialize, _payload
+from test_support_review_graph import ROUTING_CATALOG, SKILL_ROOT, _complete_structural_fixture_routing, _materialize, _publish, _set_fixture_routing
+from test_support_review_graph_evidence import _payload
+from test_support_review_graph_lifecycle import _baseline_mutation_fixture, _compile_repair_fixture_entry
+from test_support_review_graph_sessions import _use_historical_views
 
 ACTIVE = ["docs/current.md", "docs/remaining.md"]
 ARCHIVES = ["docs/archive/history.md", "docs/archive/CHANGELOG.md"]
@@ -63,6 +56,7 @@ def test_rust_style_coverage_is_per_skill_and_focused_scope_stays_focused(tmp_pa
 def _fixture(
     tmp_path: Path, *, exclude_before: bool = False, citation_only_archives: bool = False
 ) -> tuple[dict[str, Any], Namespace, dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Prepare a partial inspection request with scope exclusions attributed to repository instructions."""
     git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path, instructions=True)
     (repository / "AGENTS.md").write_text("Historical archives and generated changelog archives are excluded from citation maintenance.\n")
     for path in [*ACTIVE, *ARCHIVES]:
@@ -129,6 +123,7 @@ def _fixture(
 
 
 def _compile(entry: dict[str, Any], payload: dict[str, Any], lifecycle: dict[str, Any], args: Namespace) -> dict[str, Any]:
+    """Publish and compile a partial result, record its journal outcome, and return the normalized evidence."""
     _publish(entry, payload)
     runtime._compile_node_from_files(
         lifecycle,
@@ -150,6 +145,7 @@ def _compile(entry: dict[str, Any], payload: dict[str, Any], lifecycle: dict[str
 
 
 def _partial(entry: dict[str, Any], *, finding: bool = False) -> dict[str, Any]:
+    """Build a blocked audit reporting a citation finding on the first inspected path."""
     payload = _payload([ACTIVE[0]], dispatch=entry["dispatch"])
     payload.update(
         status="blocked",

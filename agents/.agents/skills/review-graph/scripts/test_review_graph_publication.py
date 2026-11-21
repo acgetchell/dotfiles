@@ -14,31 +14,29 @@ import review_graph_runtime as runtime
 from review_graph_benchmark import benchmark_fixture
 from review_graph_integrity import digest_bytes
 from review_graph_plan import GraphPlan, ValidationArtifact, plan_from_document
-from test_review_graph_compact import _publish
-from test_review_graph_runtime import (
+from test_support_review_graph import (
     ROUTING_CATALOG,
     SKILL_ROOT,
-    _compact_audit_payload,
-    _compile_materialized_evidence,
-    _execution_payload,
     _json_plan,
     _late_handoff_replan,
+    _publish,
     _run_test_git,
-    _source_by_node,
     _sparse_plan_document,
     _worker_input_fixture,
 )
-from test_review_graph_transitions import _synthesis_payload
+from test_support_review_graph_evidence import _compact_audit_payload, _compile_materialized_evidence, _execution_payload, _source_by_node, _synthesis_payload
 
 
 @pytest.fixture
 def dispatch_set(tmp_path: Path) -> dict[str, Any]:
+    """Materialize benchmark workers and their publication contracts in a temporary proof directory."""
     document = benchmark_fixture(tmp_path / "repository")
     return runtime.materialize_dispatches({**document, "artifact_store": str(tmp_path / "proof")})
 
 
 @pytest.fixture(params=[21, 84])
 def broad_publication(tmp_path: Path, request: pytest.FixtureRequest) -> tuple[dict[str, Any], bytes]:
+    """Provide a serialized audit payload and its dispatch covering at least 125 paths."""
     document = benchmark_fixture(tmp_path / "repository", scale=request.param)
     dispatches = runtime.materialize_dispatches({**document, "artifact_store": str(tmp_path / "proof")})
     entry = next(item for item in dispatches["dispatches"] if item["dispatch"]["skill_id"] == "python-test-quality")
@@ -47,11 +45,13 @@ def broad_publication(tmp_path: Path, request: pytest.FixtureRequest) -> tuple[d
 
 
 def _publish_cli(entry: dict[str, Any], content: bytes, monkeypatch: pytest.MonkeyPatch, *options: str) -> int:
+    """Feed the supplied bytes to the publication CLI through standard input."""
     monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(content), encoding="utf-8"))
     return runtime.main(["publish-worker-payload", "--input", entry["worker_payload_contract_path"], *options])
 
 
 def _assert_write_review_reference(receipt: dict[str, Any], entry: dict[str, Any], content: bytes) -> dict[str, Any]:
+    """Resolve the receipt reference and compare its record with an independent review of the same bytes."""
     reference = receipt["artifact_write_review_reference"]
     path = Path(reference["path"])
     saved = path.read_bytes()
@@ -244,6 +244,7 @@ def test_optional_coverage_remains_strict(dispatch_set: dict[str, Any], damage: 
 
 
 def _validation_fixture(tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Bind a materialized validator to the fixture's before and after workspace observations."""
     document, _entries = _worker_input_fixture(tmp_path / "original")
     repository = tmp_path / "repository"
     repository.mkdir()
@@ -342,6 +343,7 @@ def test_validation_publication_and_compilation_require_explicit_arrays(tmp_path
 
 
 def _synthesis_fixture(tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Prepare a synthesis payload and its bundle from previously compiled evidence."""
     _plan, _sources = _compile_materialized_evidence(tmp_path / "proof", reference_planned_validation=True)
     entry = json.loads((tmp_path / "proof" / "rust-synthesis.worker-input.json").read_bytes())
     dispatch = entry["dispatch"]
@@ -438,6 +440,7 @@ def test_synthesis_publication_rejects_tampered_predecessor(tmp_path: Path, kind
 
 
 def _compile_reused_syntheses_and_finalize(tmp_path: Path, plan: GraphPlan, reused: list[dict[str, str]]) -> None:
+    """Compile synthesis workers with reused evidence and assert that finalization produces a complete proof."""
     materialized = runtime.materialize_dispatches(
         {
             "plan": _json_plan(plan),

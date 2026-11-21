@@ -8,6 +8,7 @@ import review_graph_usage as usage
 
 
 def _finish_args(ledger: Path, usage_path: Path) -> list[str]:
+    """Construct the command that records a successful fixture attempt with usage from a file."""
     return ["finish", "--ledger", str(ledger), "--id", "fixture-attempt", "--status", "succeeded", "--usage", str(usage_path)]
 
 
@@ -73,6 +74,7 @@ def test_invalid_usage_identifies_failure_without_echoing_values(tmp_path: Path,
 @pytest.fixture
 def deeply_nested_usage(tmp_path: Path) -> Path:
     # Decoder stack limits vary by Python build; keep the input below the four MiB cap.
+    """Write a deeply nested JSON value directly to disk for testing the ledger's input limits."""
     depth = 1_000_000
     path = tmp_path / "private-filename.json"
     path.write_text('{"private-value":' + "[" * depth + '"private-value"' + "]" * depth + "}", encoding="utf-8")
@@ -122,3 +124,17 @@ def test_supplied_cost_does_not_infer_missing_tokens(tmp_path: Path, basis: str)
     assert event["cost_basis"] == basis
     assert event["input_tokens"] is None
     assert event["output_tokens"] is None
+
+
+@pytest.mark.parametrize("status", ["attempts", "measured_cost_usd", "unfinished", None, []])
+def test_report_rejects_invalid_restored_completion(tmp_path: Path, capsys: pytest.CaptureFixture[str], status: object) -> None:
+    ledger = tmp_path / "usage.jsonl"
+    request_id = usage.start_request(ledger, stage="review", provider="local", model=None, scope_digest="fixture")
+    usage.finish_request(ledger, request_id, status="succeeded", usage={"cost_basis": "measured", "cost_usd": 0, "measurement_source": "fixture"})
+    start, end = map(json.loads, ledger.read_text(encoding="utf-8").splitlines())
+    end["status"] = status
+    ledger.write_text(f"{json.dumps(start)}\n{json.dumps(end)}\n", encoding="utf-8")
+    assert usage.main(["report", str(ledger)]) == 2
+    output = capsys.readouterr()
+    assert not output.out
+    assert "invalid request status" in output.err

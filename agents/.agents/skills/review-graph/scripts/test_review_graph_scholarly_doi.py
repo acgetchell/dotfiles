@@ -23,14 +23,16 @@ from review_graph_runtime import (
 )
 from review_graph_schema import schema_diagnostics
 from review_graph_synthesis import validate_synthesis
-from test_review_graph_doi import _fixture, _requirement, _save_report, _source_capture
-from test_review_graph_runtime import ROUTING_CATALOG, SCHEMA_ROOT, SKILL_ROOT, _compile_repair_fixture_entry, _json_plan, _sparse_plan_document
-from test_review_graph_transitions import _synthesis_payload
+from test_support_review_graph import ROUTING_CATALOG, SCHEMA_ROOT, SKILL_ROOT, _json_plan, _sparse_plan_document
+from test_support_review_graph_doi import _fixture, _requirement, _save_report, _source_capture
+from test_support_review_graph_evidence import _synthesis_payload
+from test_support_review_graph_lifecycle import _compile_repair_fixture_entry
 
 
 def _scholarly_fixture(
     tmp_path: Path, *, mixed: bool = False, first_doi: str = "10.24033/rhm.30", adjacent: bool = False
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Bind original and verified DOI records to a scholarly citation and its captured source."""
     original, verified, _software = _fixture(tmp_path)
     prefix, separator = ("- ", "\n") if adjacent else ("", "\n\n")
     references = (
@@ -130,6 +132,7 @@ def _scholarly_fixture(
 
 
 def _checker_report(markdown: str, rows: list[dict[str, Any]], source: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """Run the citation checker against fixture lookup results and attach the source to every row."""
     checker_path = SKILL_ROOT / "scientific-citation-audit" / "scripts" / "validate_reference_dois.py"
     monkeypatch.syspath_prepend(str(checker_path.parent))
     checker = runpy.run_path(str(checker_path))
@@ -310,6 +313,20 @@ def test_primary_year_resolution_retains_failed_history_and_mixed_software(tmp_p
 
 
 @pytest.mark.parametrize(
+    ("field", "score"),
+    [("title_score", True), ("title_score", 2), ("title_score", float("nan")), ("author_score", True), ("author_score", "1.0"), ("author_score", float("inf"))],
+)
+def test_year_reconciliation_rejects_malformed_match_scores(tmp_path: Path, field: str, score: object) -> None:
+    original, _verified, resolution, _capture = _scholarly_fixture(tmp_path)
+    report = Path(original["artifacts"][0]["path"])
+    rows = json.loads(report.read_bytes())
+    rows[0][field] = score
+    original["artifacts"] = [_save_report(report, rows)]
+    with pytest.raises(ValueError, match=field):
+        validate_scholarly_doi_resolution(resolution, original, {})
+
+
+@pytest.mark.parametrize(
     "defect",
     [
         "title",
@@ -446,6 +463,7 @@ def test_reconciliation_identifies_a_contradictory_publication_date_field(tmp_pa
 
 
 def test_scholarly_resolution_final_proof_rechecks_primary_bytes(tmp_path: Path) -> None:
+    """Change the primary evidence after recording a DOI resolution and check that finalization detects the mismatch."""
     original, _verified, resolution, capture = _scholarly_fixture(tmp_path)
     planning = _sparse_plan_document()
     planning["validation_requirements"] = [_requirement(original, baseline=True)]

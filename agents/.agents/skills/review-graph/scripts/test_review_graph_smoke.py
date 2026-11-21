@@ -44,6 +44,7 @@ def test_smoke_does_not_replace_prior_artifacts(tmp_path: Path) -> None:
 @pytest.mark.parametrize("exit_code", [0, 74])
 def test_main_rejects_empty_timing_receipts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], exit_code: int) -> None:
     def run(argv: list[str]) -> int:
+        """Create an empty receipt independently of the simulated runner's exit status."""
         Path(argv[argv.index("--receipt") + 1]).write_bytes(b"")
         return exit_code
 

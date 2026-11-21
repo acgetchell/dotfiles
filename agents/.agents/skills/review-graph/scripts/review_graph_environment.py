@@ -38,6 +38,7 @@ def check_helper_compatibility() -> None:
 
 
 def _installed_package() -> tuple[importlib.metadata.Distribution, Path]:
+    """Return the distribution and import origin after verifying the installed package against its recorded hash."""
     spec = importlib.util.find_spec(_PACKAGE)
     if spec is None or spec.origin is None:
         msg = "review runtime requires the installed research-repo-tools dependency"
@@ -68,6 +69,7 @@ def _installed_package() -> tuple[importlib.metadata.Distribution, Path]:
 
 
 def _check_isolation(repository: Path, prefix: Path, executable: Path) -> None:
+    """Require an external virtual environment and interpreter flags that isolate the helper from user configuration."""
     if sys.prefix == sys.base_prefix or prefix.is_relative_to(repository) or executable.is_relative_to(repository):
         msg = "isolated helper requires a separate virtual environment outside the reviewed repository"
         raise ValueError(msg)

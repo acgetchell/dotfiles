@@ -19,31 +19,23 @@ from review_graph_plan import plan_from_document
 from review_graph_read_provenance import _protocol_input_bindings
 from review_graph_receipts import dispatch_summary
 from review_graph_session import freeze_runtime, verify_snapshot
-from test_review_graph_git import _accept, _discovery_payload
-from test_review_graph_reuse import _audit_request
-from test_review_graph_runtime import (
+from test_support_review_graph import (
     ROUTING_CATALOG,
     SKILL_ROOT,
-    _baseline_mutation_fixture,
-    _compact_independent_payload,
-    _compile_repair_fixture_entry,
     _complete_structural_fixture_routing,
     _json_plan,
-    _publish_worker_bytes,
+    _materialize,
     _run_test_git,
     _worker_input_fixture,
 )
-from test_review_graph_starter import _fixture as _starter_fixture
-from test_review_graph_transitions import _materialize, _payload
-
-
-def _cli(script: Path, *arguments: str, stdin: bytes | None = None) -> subprocess.CompletedProcess[bytes]:
-    return subprocess.run(  # noqa: S603 - fixed repository scripts with isolated fixture paths.
-        [sys.executable, "-B", str(script), *arguments], input=stdin, capture_output=True, check=True
-    )
+from test_support_review_graph_evidence import _accept, _compact_independent_payload, _discovery_payload, _payload, _publish_worker_bytes
+from test_support_review_graph_lifecycle import _baseline_mutation_fixture, _compile_repair_fixture_entry
+from test_support_review_graph_reuse import _audit_request
+from test_support_review_graph_sessions import _cli, _fixture as _starter_fixture, _use_historical_views
 
 
 def test_bootstrap_freezes_resources_and_recovers_signed_dispatch_publication(tmp_path: Path) -> None:  # noqa: PLR0915 - frozen recovery through capture, publication and final proof.
+    """Replace the live schema and catalog after bootstrap to exercise dispatch recovery from frozen resources."""
     _git, _repository, template, capture, _plan = _baseline_mutation_fixture(tmp_path)
     live = tmp_path / "live-skills"
     shutil.copytree(SKILL_ROOT, live, ignore=shutil.ignore_patterns("__pycache__", "test_*.py", "*.pyc"))
@@ -175,6 +167,7 @@ def test_concurrent_freeze_checks_the_winning_runner_context(tmp_path: Path, mon
     winning_reference: dict[str, str] = {}
 
     def concurrent_rename(staged: Path, target: Path) -> Path:
+        """Let a second bootstrap publish its execution context immediately before the first rename."""
         nonlocal won
         if target == destination and not won:
             won = True
@@ -305,20 +298,6 @@ def test_branch_scope_preserves_source_audits_and_completed_independent_review(t
     assert not runtime._metadata_evidence_blockers(result["lifecycle_input"], [metadata["normalized_record"]])
 
 
-def _use_historical_views(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
-    """Materialize the legacy unbound format using different frozen guidance."""
-    live = tmp_path / "historical-skills"
-    shutil.copytree(SKILL_ROOT, live, ignore=shutil.ignore_patterns("__pycache__", "test_*.py", "*.pyc"))
-    renderer = live / "review-graph/scripts/review_graph_views.py"
-    content = renderer.read_text().replace("Read skill/instructions", "Historical guidance: read skill/instructions")
-    renderer.write_text(content.replace(' + "\\n").encode()', ' + "\\r\\n").encode()'))
-    reference = freeze_runtime(live, tmp_path / "frozen", repository=SKILL_ROOT.parents[2])
-    monkeypatch.setattr(runtime, "verify_current_snapshot", lambda: reference)
-    # Historical materialization did not bind guidance into the canonical input.
-    monkeypatch.setattr(runtime, "bind_execution_instructions", lambda _entry: None)
-    return reference
-
-
 def test_updated_runtime_accepts_frozen_guidance_and_rejects_tampering(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     reference = _use_historical_views(tmp_path, monkeypatch)
     lifecycle, entries = _worker_input_fixture(tmp_path)
@@ -373,6 +352,7 @@ def test_instruction_binding_rejects_bad_renderer_output_without_mutation(monkey
 @pytest.mark.parametrize("failure", ["timeout", "exit"])
 def test_historical_renderer_reports_process_failures(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure: str) -> None:
     def fail(argv: list[str], **_kwargs: object) -> None:
+        """Distinguish a timed-out retained renderer from one that exits with a diagnostic."""
         if failure == "timeout":
             raise subprocess.TimeoutExpired(argv, 30)
         raise subprocess.CalledProcessError(2, argv, stderr=b"retained renderer unavailable")

@@ -25,6 +25,7 @@ _VERIFIED: set[Path] = set()
 
 
 def _object(raw: object, fields: set[str], label: str) -> dict[str, object]:
+    """Require exactly the named fields and return a shallow copy of the session object."""
     if not isinstance(raw, dict) or set(raw) != fields:
         msg = f"{label} requires exactly {sorted(fields)}"
         raise ValueError(msg)
@@ -32,6 +33,7 @@ def _object(raw: object, fields: set[str], label: str) -> dict[str, object]:
 
 
 def _text(raw: object, label: str) -> str:
+    """Require a nonempty session field and preserve its text exactly."""
     if not isinstance(raw, str) or not raw:
         msg = f"{label} must be a nonempty string"
         raise ValueError(msg)
@@ -39,6 +41,7 @@ def _text(raw: object, label: str) -> str:
 
 
 def _digest_value(raw: object) -> str:
+    """Require an algorithm-prefixed SHA-256 digest with 64 lowercase hexadecimal digits."""
     value = _text(raw, "runtime digest")
     if re.fullmatch(r"sha256:[0-9a-f]{64}", value) is None:
         msg = "runtime digest must be a SHA-256 identity"
@@ -47,6 +50,7 @@ def _digest_value(raw: object) -> str:
 
 
 def _require_inventory(raw: object) -> None:
+    """Require an immutable tuple of resource path and digest string pairs."""
     if not isinstance(raw, tuple) or any(not isinstance(pair, tuple) or len(pair) != 2 or any(not isinstance(value, str) for value in pair) for pair in raw):
         msg = "runtime resource inventory must be immutable path/digest pairs"
         raise TypeError(msg)
@@ -140,6 +144,7 @@ class RuntimeManifest:
 
 
 def _digest(content: bytes) -> str:
+    """Compute the algorithm-prefixed SHA-256 identity of the supplied bytes."""
     return "sha256:" + hashlib.sha256(content).hexdigest()
 
 
@@ -157,15 +162,18 @@ def _resource_paths(root: Path) -> Iterator[Path]:
 
 
 def _files(root: Path) -> dict[str, bytes]:
+    """Read the runtime resources into a map keyed by POSIX paths relative to the snapshot root."""
     return {path.relative_to(root).as_posix(): path.read_bytes() for path in _resource_paths(root)}
 
 
 def _interpreter() -> InterpreterIdentity:
+    """Identify the running interpreter by its resolved executable, file digest, and Python version."""
     executable = Path(sys.executable).resolve()
     return InterpreterIdentity(str(executable), _digest(executable.read_bytes()), sys.version)
 
 
 def _read_reference(path: Path) -> RuntimeReference:
+    """Read the saved JSON reference and parse it before using the snapshot path."""
     return RuntimeReference.parse(json.loads(path.read_bytes()))
 
 
@@ -199,6 +207,7 @@ def verify_snapshot(reference: object) -> RuntimeManifest:
 
 
 def _check_retained_context(destination: Path, execution_context: dict[str, object] | None) -> None:
+    """Reject a retry whose supplied execution context differs from the retained runner configuration."""
     retained = destination / CONTEXT_FILE
     if execution_context is not None and (not retained.is_file() or json.loads(retained.read_bytes()) != execution_context):
         msg = "frozen runtime Python runner cannot change on retry"
@@ -310,6 +319,7 @@ def runtime_command(script: Path, *arguments: str) -> list[str]:
 
 
 def _check_resumed_runner(reference: RuntimeReference, runner_path: Path | None) -> None:
+    """Compare an explicitly proposed runner with the context retained by the frozen runtime."""
     if runner_path is None:
         return
     retained = json.loads((reference.path.parent / CONTEXT_FILE).read_bytes())
@@ -375,6 +385,7 @@ def bootstrap_frozen(args: argparse.Namespace, argv: list[str]) -> None:
 
 
 def _check_absolute_reference(raw: str, skill_root: Path) -> None:
+    """Reject static paths that cannot be relocated when the skill tree is frozen."""
     root = skill_root.resolve()
     path = Path(raw)
     resolved = path.resolve()
@@ -394,6 +405,7 @@ def _check_portable_references(input_path: Path, skill_root: Path) -> None:
     """Reject unsupported absolute static references before creating a freeze."""
 
     def inspect(value: object) -> None:
+        """Find absolute static-reference paths in nested planning objects and check their portability."""
         if isinstance(value, list):
             for item in value:
                 inspect(item)

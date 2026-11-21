@@ -22,6 +22,7 @@ CHECK_LABELS = frozendict(
 
 
 def _context_blockers(context: list[str], owned: list[str]) -> list[str]:
+    """Report duplicate context paths and paths already assigned to the independent reviewer."""
     if len(context) != len(set(context)) or set(context) & set(owned):
         return ["$.nearby_contract_owners must contain unique dependency/context paths outside dispatch ownership"]
     return []

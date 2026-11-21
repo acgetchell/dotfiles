@@ -27,6 +27,7 @@ class InstructionChunkOutOfRangeError(ValueError):
 
 
 def _content(path: str) -> bytes:
+    """Read the instruction bytes and reject a change between fingerprinting and reading the file."""
     identity = file_identity(path)
     content = Path(path).read_bytes()
     if digest_bytes(content) != identity:
@@ -37,6 +38,7 @@ def _content(path: str) -> bytes:
 
 def _chunks(content: bytes) -> list[list[int]]:
     # UTF-8 boundaries also bound a single very long line without losing bytes.
+    """Validate UTF-8 and divide instruction bytes into chunks for the read inventory."""
     content.decode("utf-8")
     chunks = []
     start = 0

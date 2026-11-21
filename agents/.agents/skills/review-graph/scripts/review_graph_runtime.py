@@ -38,7 +38,15 @@ from review_graph_commit import (
     verify_native_results,
 )
 from review_graph_continuation import MissingIntermediateCapture, NextReadyAction
-from review_graph_control import control_marker_paths, extend_run_control, read_control_file, require_run_control, run_control_lock, verify_run_control
+from review_graph_control import (
+    control_marker_paths,
+    extend_run_control,
+    read_control_file,
+    require_run_control,
+    run_control_lock,
+    run_control_repository,
+    verify_run_control,
+)
 from review_graph_coverage import (
     combined_findings,
     coverage_decision_report,
@@ -139,6 +147,7 @@ from review_graph_plan import (
     load_routing_catalog,
     plan_from_document,
     repository_review_proof_expectation,
+    required_routing_texts,
     review_requirements_from_routing,
     review_source_state_blockers,
     validation_command_field,
@@ -313,6 +322,7 @@ def _read_regular_file_no_follow(path: Path) -> bytes:
 
 
 def _fsync_directory(path: Path) -> None:
+    """Flush directory entry changes to storage and close the directory descriptor even on failure."""
     descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
     try:
         os.fsync(descriptor)
@@ -332,11 +342,16 @@ def _write_bytes_once(path: Path, content: bytes) -> None:
 
 
 def _write_text_once(path: Path, content: str) -> None:
+    """Publish UTF-8 text and permit a retry only if the existing artifact has identical bytes."""
     _write_bytes_once(path, content.encode("utf-8"))
 
 
 def _write_bytes_atomically_once(path: Path, content: bytes, *, mode: int) -> bool:
-    """Atomically create immutable content and report whether this call published it."""
+    """Publish new bytes atomically and return True if this call created the file.
+
+    Return False for an existing regular file with identical bytes. Different
+    bytes raise ValueError. The requested mode applies only to a new file.
+    """
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     temporary_path = Path(temporary_name)
     created = False
@@ -441,6 +456,7 @@ def _publish_materialization_with_result(
 
 
 def _required_text(item: dict[str, Any], name: str) -> str:
+    """Read a required nonblank, single-line field and preserve its original spelling."""
     value = item.get(name)
     if not isinstance(value, str) or not value.strip() or "\n" in value:
         msg = f"{name} must be one non-empty line"
@@ -449,6 +465,7 @@ def _required_text(item: dict[str, Any], name: str) -> str:
 
 
 def _defaulted_text(item: dict[str, Any], name: str, default: str) -> str:
+    """Apply the default for an absent field and require the resulting text to be nonblank and single-line."""
     value = item.get(name, default)
     if not isinstance(value, str) or not value.strip() or "\n" in value:
         msg = f"{name} must be one non-empty line"
@@ -457,6 +474,7 @@ def _defaulted_text(item: dict[str, Any], name: str, default: str) -> str:
 
 
 def _required_bool(item: dict[str, Any], name: str) -> bool:
+    """Read an explicit boolean field and raise TypeError for missing or non-boolean values."""
     value = item.get(name)
     if not isinstance(value, bool):
         msg = f"{name} must be a boolean"
@@ -465,6 +483,7 @@ def _required_bool(item: dict[str, Any], name: str) -> bool:
 
 
 def _required_int(item: dict[str, Any], name: str) -> int:
+    """Read a required integer and reject booleans even though Python treats them as integers."""
     value = item.get(name)
     if not isinstance(value, int) or isinstance(value, bool):
         msg = f"{name} must be an integer"
@@ -473,6 +492,7 @@ def _required_int(item: dict[str, Any], name: str) -> int:
 
 
 def _text_list(item: dict[str, Any], name: str, *, required: bool = False) -> tuple[str, ...]:
+    """Read nonblank strings in order and reject an empty list when the field is required."""
     value = item.get(name, [])
     if not isinstance(value, list) or any(not isinstance(entry, str) or not entry.strip() for entry in value):
         msg = f"{name} must be a list of non-empty strings"
@@ -484,6 +504,7 @@ def _text_list(item: dict[str, Any], name: str, *, required: bool = False) -> tu
 
 
 def _records(item: dict[str, Any], name: str) -> tuple[dict[str, Any], ...]:
+    """Read an ordered list of objects, defaulting an absent collection to an empty tuple."""
     value = item.get(name, [])
     if not isinstance(value, list) or any(not isinstance(entry, dict) for entry in value):
         msg = f"{name} must be a list of objects"
@@ -492,6 +513,7 @@ def _records(item: dict[str, Any], name: str) -> tuple[dict[str, Any], ...]:
 
 
 def _state(item: dict[str, Any], name: str) -> tuple[str, str, str]:
+    """Require the scope, worktree, and repository fingerprints in that order."""
     value = _text_list(item, name)
     if len(value) != 3:
         msg = f"{name} must contain scope, worktree, and repository-state fingerprints"
@@ -500,6 +522,7 @@ def _state(item: dict[str, Any], name: str) -> tuple[str, str, str]:
 
 
 def _finding_records(payload: dict[str, Any], node_id: str) -> tuple[tuple[str, dict[str, Any]], ...]:
+    """Check finding severity and required text, assigning node-scoped IDs in report order."""
     records: list[tuple[str, dict[str, Any]]] = []
     for ordinal, finding in enumerate(_records(payload, "findings"), start=1):
         severity = _required_text(finding, "severity")
@@ -513,6 +536,7 @@ def _finding_records(payload: dict[str, Any], node_id: str) -> tuple[tuple[str, 
 
 
 def _validation_records(payload: dict[str, Any]) -> tuple[tuple[str, dict[str, Any]], ...]:
+    """Parse requested validations, distinguishing planned references from new requirements and rejecting duplicate IDs."""
     records: list[tuple[str, dict[str, Any]]] = []
     for requirement in _records(payload, "validation_requirements"):
         requirement_id = _required_text(requirement, "requirement_id")
@@ -539,6 +563,7 @@ def _validation_records(payload: dict[str, Any]) -> tuple[tuple[str, dict[str, A
 
 
 def _handoff_records(payload: dict[str, Any], node_id: str) -> tuple[tuple[str, dict[str, Any]], ...]:
+    """Assign node-scoped IDs to handoffs and validate each destination, trigger, reason, and scope."""
     records: list[tuple[str, dict[str, Any]]] = []
     for ordinal, handoff in enumerate(_records(payload, "handoffs"), start=1):
         for field_name in ("catalog_id", "observed_trigger", "reason"):
@@ -549,6 +574,7 @@ def _handoff_records(payload: dict[str, Any], node_id: str) -> tuple[tuple[str, 
 
 
 def _review_header(expectation: ReviewEvidenceExpectation, evidence: ReviewEvidence) -> str:
+    """Render the review identity, authorization, and expected source fingerprints in the native header."""
     return "\n".join(
         (
             f"- Node ID: {evidence.node_id}",
@@ -568,6 +594,7 @@ def _review_header(expectation: ReviewEvidenceExpectation, evidence: ReviewEvide
 
 
 def _state_verification(dispatch: dict[str, Any], evidence: ReviewEvidence, changed_paths: tuple[str, ...]) -> str:
+    """Render before and after observations, including declared source changes and metadata transitions."""
     before_result = "blocked" if evidence.status == "blocked" else "matched"
     after_result = "blocked" if evidence.status == "blocked" else "changed-as-reported" if evidence.source_mutated else "matched"
     return "\n".join(
@@ -595,6 +622,7 @@ def _state_verification(dispatch: dict[str, Any], evidence: ReviewEvidence, chan
 
 
 def _findings_body(findings: tuple[tuple[str, dict[str, Any]], ...]) -> str:
+    """Render findings in order or emit the native absence marker for an empty collection."""
     if not findings:
         return "none"
     return "\n".join(
@@ -613,6 +641,7 @@ def _findings_body(findings: tuple[tuple[str, dict[str, Any]], ...]) -> str:
 
 
 def _validation_body(records: tuple[tuple[str, dict[str, Any]], ...]) -> str:
+    """Render requested validations with the appropriate fields for new requirements or references to planned work."""
     if not records:
         return "none"
     rendered: list[str] = []
@@ -643,6 +672,7 @@ def _validation_body(records: tuple[tuple[str, dict[str, Any]], ...]) -> str:
 
 
 def _handoffs_body(records: tuple[tuple[str, dict[str, Any]], ...]) -> str:
+    """Render catalog destinations and scope for routing handoffs, preserving report order."""
     if not records:
         return "none"
     return "\n".join(
@@ -660,6 +690,7 @@ def _handoffs_body(records: tuple[tuple[str, dict[str, Any]], ...]) -> str:
 
 
 def _changes_body(payload: dict[str, Any], evidence: ReviewEvidence, changed_paths: tuple[str, ...]) -> str:
+    """Render source changes and require their files to match the declared changed paths in first-seen order."""
     changes = _records(payload, "changes")
     if not evidence.source_mutated:
         if changes:
@@ -696,6 +727,7 @@ def _changes_body(payload: dict[str, Any], evidence: ReviewEvidence, changed_pat
 
 
 def _predecessor_body(dispatch: dict[str, Any], evidence: ReviewEvidence) -> str:
+    """Pair synthesis predecessors with accepted evidence and emit the absence marker for other worker modes."""
     if evidence.mode != "synthesis":
         return "none"
     node_ids = _text_list(dispatch, "predecessor_node_ids")
@@ -714,6 +746,7 @@ def _predecessor_body(dispatch: dict[str, Any], evidence: ReviewEvidence) -> str
 
 
 def _review_normalized_record(payload: dict[str, Any], expectation: ReviewEvidenceExpectation, evidence: ReviewEvidence) -> dict[str, Any]:
+    """Build the evidence record from the review payload, including inherited findings and validation requests."""
     findings = _finding_records({**payload, "findings": combined_findings(payload, expectation.coverage_reuse)}, evidence.node_id)
     validations = _validation_records(payload)
     handoffs = _handoff_records(payload, evidence.node_id)
@@ -758,6 +791,7 @@ def _review_normalized_record(payload: dict[str, Any], expectation: ReviewEviden
 
 
 def _review_command_policy_blockers(dispatch: dict[str, Any], payload: dict[str, Any]) -> tuple[str, ...]:
+    """Report missing attestations, prohibited commands, and violations of the dispatch's read restrictions."""
     attested = payload.get("command_policy_attested")
     commands = _text_list(payload, "commands_executed")
     raw_policy = dispatch.get("command_policy")
@@ -806,10 +840,12 @@ def _planned_validation_identity(unit: ValidationUnit) -> dict[str, Any]:
 
 
 def _planned_validation_digest(unit: ValidationUnit) -> str:
+    """Hash the canonical execution identity of a planned validation unit."""
     return digest_bytes(canonical_json(_planned_validation_identity(unit)).encode())
 
 
 def _planned_validation_units(plan: GraphPlan) -> list[dict[str, Any]]:
+    """List validation identities and requirement mappings in stable node-ID order."""
     return [
         {
             "execution_identity": _planned_validation_identity(unit),
@@ -822,6 +858,7 @@ def _planned_validation_units(plan: GraphPlan) -> list[dict[str, Any]]:
 
 
 def _validation_identity_summary(identity: dict[str, Any]) -> dict[str, Any]:
+    """Expose commands, working directories, scope, platform, and captured path count for a compact dispatch."""
     return {
         **{key: identity[key] for key in ("commands", "working_directories", "requested_scope", "platform", "required")},
         "captured_path_count": len(identity["captured_paths"]),
@@ -829,6 +866,7 @@ def _validation_identity_summary(identity: dict[str, Any]) -> dict[str, Any]:
 
 
 def _resolve_planned_validation_record(record: dict[str, Any]) -> dict[str, Any]:
+    """Verify the referenced execution identity and restore it to the compact validation record."""
     expected_keys = {"execution_identity_reference", "execution_summary", "planned_validation_digest", "requirement_ids", "validation_unit_id"}
     if set(record) != expected_keys:
         msg = "planned validation reference contains missing or unknown fields"
@@ -856,6 +894,7 @@ def _resolve_planned_validation_record(record: dict[str, Any]) -> dict[str, Any]
 
 
 def _dispatched_planned_validations(dispatch: dict[str, Any]) -> dict[str, tuple[str, str, dict[str, Any]]]:
+    """Index planned validation units by requirement ID and reject ambiguous ownership."""
     raw_policy = dispatch.get("command_policy")
     if raw_policy is None:
         return {}
@@ -893,6 +932,7 @@ def _dispatched_planned_validations(dispatch: dict[str, Any]) -> dict[str, tuple
 
 
 def _review_validation_requirement_blockers(dispatch: dict[str, Any], validations: tuple[tuple[str, dict[str, Any]], ...]) -> tuple[str, ...]:
+    """Compare a worker's requested validations with the units and identities already in its dispatch."""
     try:
         planned = _dispatched_planned_validations(dispatch)
     except (OSError, TypeError, ValueError) as error:
@@ -922,16 +962,20 @@ def _review_validation_requirement_blockers(dispatch: dict[str, Any], validation
 
 
 def _review_handoff_catalog_blockers(dispatch: dict[str, Any], handoffs: tuple[tuple[str, dict[str, Any]], ...]) -> tuple[str, ...]:
-    raw_catalog_ids = dispatch.get("handoff_catalog_ids")
-    if raw_catalog_ids is None:
-        catalog_ids = {entry.catalog_id for entry in load_routing_catalog(DEFAULT_ROUTING_CATALOG, skill_roots=(DEFAULT_SKILL_ROOT,))}
-    else:
+    """Flag handoffs to destinations outside the dispatch's declared catalog."""
+    if dispatch.get("handoff_catalog_ids") is not None:
+        # Saved dispatches can carry an explicit allowlist.
         catalog_ids = set(_text_list(dispatch, "handoff_catalog_ids"))
+    elif "handoff_destinations" in dispatch:
+        catalog_ids = {_required_text(destination, "catalog_id") for destination in _records(dispatch, "handoff_destinations")}
+    else:
+        catalog_ids = {entry.catalog_id for entry in load_routing_catalog(DEFAULT_ROUTING_CATALOG, skill_roots=(DEFAULT_SKILL_ROOT,))}
     unknown = tuple(sorted({_required_text(record, "catalog_id") for _handoff_id, record in handoffs} - catalog_ids))
     return ("review payload contains unknown handoff catalog IDs: " + ", ".join(unknown),) if unknown else ()
 
 
 def _scope_limitation_records(payload: dict[str, Any]) -> tuple[tuple[str, str], ...]:
+    """Read ordered path and reason pairs and reject extra or missing limitation fields."""
     records: list[tuple[str, str]] = []
     for ordinal, record in enumerate(_records(payload, "scope_limitations"), start=1):
         if set(record) != {"path", "reason"}:
@@ -980,6 +1024,7 @@ def _review_scope_coverage_blockers(dispatch: dict[str, Any], payload: dict[str,
 
 
 def _compiled_audit_inputs(dispatch: dict[str, Any], payload: dict[str, Any]) -> AuditInputIdentity | None:
+    """Assemble direct, inherited, and discovered read evidence for an audit or independent review."""
     if dispatch["mode"] not in {"audit", "independent-review"}:
         return None
     bound = bind_runtime_reads(dispatch, payload)
@@ -1013,6 +1058,7 @@ def _compiled_audit_inputs(dispatch: dict[str, Any], payload: dict[str, Any]) ->
 
 
 def _reconciled_coverage(dispatch: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Reconcile instruction and validation changes with reused coverage, then check partial-audit obligations."""
     has_reconciliation = bool(payload.get("instruction_reconciliations") or payload.get("validation_reassessments"))
     if has_reconciliation:
         require_schema(payload, _REVIEW_PAYLOAD_SCHEMA)
@@ -1329,6 +1375,7 @@ def compile_review(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:  #
 
 
 def _independent_input_sections(content: bytes) -> dict[str, str]:
+    """Decode a bounded UTF-8 independent report and require its native sections in order."""
     if len(content) > 1_048_576:
         msg = "independent native artifact exceeds the maximum size"
         raise ValueError(msg)
@@ -1352,6 +1399,7 @@ def _independent_input_sections(content: bytes) -> dict[str, str]:
 
 
 def _independent_findings(body: str, node_id: str, status: str) -> tuple[tuple[str, dict[str, str]], ...]:
+    """Parse independent findings in order and require the exact no-findings assertion for that status."""
     if status == "no-findings":
         if body != "No findings.":
             msg = "independent no-findings artifact requires the exact No findings. assertion"
@@ -1382,6 +1430,7 @@ def _independent_findings(body: str, node_id: str, status: str) -> tuple[tuple[s
 
 
 def _independent_scope_blockers(body: str, dispatch: dict[str, Any]) -> tuple[str, ...]:
+    """Check that the native independent scope names the dispatched change target and planned paths."""
     blockers: list[str] = []
     expected_target = _required_text(dispatch, "change_target")
     expected_paths = _text_list(dispatch, "planned_paths", required=True)
@@ -1400,6 +1449,7 @@ def _independent_scope_blockers(body: str, dispatch: dict[str, Any]) -> tuple[st
 
 
 def _independent_handoffs(body: str, node_id: str, dispatch: dict[str, Any]) -> tuple[tuple[str, dict[str, Any]], ...]:
+    """Parse native routing records and check that the worker may hand off to each catalog destination."""
     if body == "none":
         return ()
     records = _native_records(body, "Catalog ID")
@@ -1431,6 +1481,7 @@ def _independent_handoffs(body: str, node_id: str, dispatch: dict[str, Any]) -> 
 
 
 def _independent_findings_body(findings: tuple[tuple[str, dict[str, str]], ...], status: str) -> str:
+    """Render independent findings, preserving the distinct no-findings assertion and empty-section marker."""
     if status == "no-findings":
         return "No findings."
     if not findings:
@@ -1440,6 +1491,7 @@ def _independent_findings_body(findings: tuple[tuple[str, dict[str, str]], ...],
 
 
 def _independent_handoffs_body(handoffs: tuple[tuple[str, dict[str, Any]], ...]) -> str:
+    """Render normalized independent handoffs in order or emit the native absence marker."""
     if not handoffs:
         return "none"
     return "\n".join(
@@ -1701,6 +1753,7 @@ def compile_independent_payload(document: dict[str, Any]) -> tuple[bytes, dict[s
 
 
 def _independent_normalized_record(content: bytes, expectation: ReviewEvidenceExpectation, evidence: ReviewEvidence) -> dict[str, Any]:
+    """Rebuild the independent evidence record from its native report sections and bound review identity."""
     text = content.decode("utf-8", errors="strict")
     ordered = (*_INDEPENDENT_NATIVE_SECTIONS, "## Review Graph Envelope", "## Machine Evidence")
     sections, blockers = _native_section_bodies(text, ordered)
@@ -1775,6 +1828,7 @@ def _independent_normalized_record(content: bytes, expectation: ReviewEvidenceEx
 
 
 def _validation_unit(raw: dict[str, Any]) -> ValidationUnit:
+    """Restore commands, artifact declarations, execution policy, and isolation requirements from a saved validation unit."""
     executor_permissions(_text_list(raw, "features"))
     allowed_artifacts = tuple(
         ValidationArtifact(
@@ -1838,6 +1892,7 @@ def _validation_unit(raw: dict[str, Any]) -> ValidationUnit:
 
 
 def _string_tuple(raw: dict[str, Any], name: str) -> tuple[str, ...]:
+    """Read a string list or tuple in order and default an absent field to an empty tuple."""
     value = raw.get(name, [])
     if not isinstance(value, (list, tuple)) or any(not isinstance(item, str) for item in value):
         msg = f"{name} must be a string array"
@@ -1846,6 +1901,7 @@ def _string_tuple(raw: dict[str, Any], name: str) -> tuple[str, ...]:
 
 
 def _string_pairs(raw: dict[str, Any], name: str) -> tuple[tuple[str, str], ...]:
+    """Restore an ordered tuple of string pairs from a serialized plan field."""
     value = raw.get(name, [])
     if not isinstance(value, (list, tuple)):
         msg = f"{name} must be an array"
@@ -1858,6 +1914,7 @@ def _string_pairs(raw: dict[str, Any], name: str) -> tuple[tuple[str, str], ...]
 
 
 def _path_line_bounds(raw: dict[str, Any], name: str) -> tuple[tuple[str, int], ...]:
+    """Restore path and integer line-bound pairs used to verify reported finding locations."""
     value = raw.get(name, [])
     if not isinstance(value, (list, tuple)):
         msg = f"{name} must be an array"
@@ -1870,6 +1927,7 @@ def _path_line_bounds(raw: dict[str, Any], name: str) -> tuple[tuple[str, int], 
 
 
 def _fingerprint_evidence(raw: dict[str, Any]) -> FingerprintEvidence:
+    """Parse the expected, before, and after source states and any recorded metadata transitions."""
     return FingerprintEvidence(
         expected=_state(raw, "expected"),
         before=_state(raw, "before"),
@@ -1879,6 +1937,7 @@ def _fingerprint_evidence(raw: dict[str, Any]) -> FingerprintEvidence:
 
 
 def _dispatch_fingerprints(dispatch: dict[str, Any]) -> FingerprintEvidence:
+    """Collect the dispatch's source observations into the fingerprint evidence used by the compiler."""
     return _fingerprint_evidence(
         {
             "expected": dispatch["source_state"],
@@ -1890,6 +1949,7 @@ def _dispatch_fingerprints(dispatch: dict[str, Any]) -> FingerprintEvidence:
 
 
 def _audit_input_identity(raw: object) -> AuditInputIdentity | None:
+    """Restore direct and inherited audit inputs and discoveries, preserving None when no identity was recorded."""
     if raw is None:
         return None
     if not isinstance(raw, dict):
@@ -1911,6 +1971,7 @@ def _audit_input_identity(raw: object) -> AuditInputIdentity | None:
 
 
 def _review_expectation(raw: dict[str, Any]) -> ReviewEvidenceExpectation:
+    """Restore the review assignment and its optional expected final state, coverage, and canonical worker payload."""
     expected_after = tuple(raw["expected_after_state"]) if raw.get("expected_after_state") is not None else None
     payload = raw.get("canonical_worker_payload")
     if payload is not None:
@@ -1940,6 +2001,7 @@ def _review_expectation(raw: dict[str, Any]) -> ReviewEvidenceExpectation:
 
 
 def _review_evidence(raw: dict[str, Any]) -> ReviewEvidence:
+    """Parse observed review fingerprints, findings, requirements, and handoffs from the evidence envelope."""
     fingerprints = raw.get("fingerprints")
     if not isinstance(fingerprints, dict):
         msg = "review evidence fingerprints must be an object"
@@ -1986,6 +2048,7 @@ def _review_evidence(raw: dict[str, Any]) -> ReviewEvidence:
 
 
 def _validation_expectation(raw: dict[str, Any]) -> ValidationEvidenceExpectation:
+    """Restore the validator's execution profile, location, and required validation unit."""
     unit = raw.get("validation_unit")
     if not isinstance(unit, dict):
         msg = "validation expectation requires validation_unit"
@@ -2004,6 +2067,7 @@ def _validation_expectation(raw: dict[str, Any]) -> ValidationEvidenceExpectatio
 
 
 def _validation_evidence(raw: dict[str, Any]) -> ValidationEvidence:
+    """Restore validator outcomes, mutation flags, source fingerprints, and raw-result identity."""
     fingerprints = raw.get("fingerprints")
     if not isinstance(fingerprints, dict):
         msg = "validation evidence fingerprints must be an object"
@@ -2031,6 +2095,7 @@ def _validation_evidence(raw: dict[str, Any]) -> ValidationEvidence:
 
 
 def _validation_state_verification(dispatch: dict[str, Any], evidence: ValidationEvidence) -> str:
+    """Render before and after source observations and the validator's recorded metadata transitions."""
     result = "blocked" if evidence.status == "blocked" else "matched"
     return "\n".join(
         (
@@ -2056,6 +2121,7 @@ def _validation_state_verification(dispatch: dict[str, Any], evidence: Validatio
 def _validation_artifacts_body(  # noqa: C901
     payload: dict[str, Any], unit: ValidationUnit, workspace_after: dict[str, tuple[str, str, bool, str]]
 ) -> tuple[str, tuple[ValidationArtifact, ...]]:
+    """Match worker outputs with approved artifacts and workspace observations before rendering their identities."""
     raw_artifacts = _records(payload, "artifacts") if "artifacts" in payload else ()
     raw_by_path = {_required_text(raw, "path"): raw for raw in raw_artifacts}
     if len(raw_by_path) != len(raw_artifacts):
@@ -2132,6 +2198,7 @@ def _validation_artifacts_body(  # noqa: C901
 def _validation_executions_body(
     payload: dict[str, Any], evidence: ValidationEvidence, expectation_environment: str, artifacts: tuple[ValidationArtifact, ...]
 ) -> tuple[str, tuple[str, ...]]:
+    """Render execution records and link each reported artifact to its validated identity."""
     raw_executions = _records(payload, "executions")
     artifact_by_path = {artifact.path: artifact for artifact in artifacts}
     blockers = _validation_artifact_reference_blockers(
@@ -2209,6 +2276,7 @@ def _validation_artifact_reference_blockers(payload: dict[str, Any], permitted_p
 def _validation_normalized_record(
     payload: dict[str, Any], evidence: ValidationEvidence, capture: dict[str, Any] | None = None, *, contract_binding: ContractBinding | None = None
 ) -> dict[str, Any]:
+    """Build the retained validator record, binding contract and citation inputs when available."""
     record = {
         "schema_version": 3,
         **({"failure_kind": payload["failure_kind"]} if "failure_kind" in payload else {}),
@@ -2262,6 +2330,7 @@ def _validation_normalized_record(
 
 
 def _workspace_path(path: str, repository_root: Path, *, follow_symlinks: bool = True) -> Path:
+    """Interpret relative paths from the checkout and optionally resolve symlinks for filesystem identity checks."""
     candidate = Path(path)
     absolute = candidate if candidate.is_absolute() else repository_root / candidate
     return absolute.resolve(strict=False) if follow_symlinks else absolute
@@ -2344,6 +2413,7 @@ def _workspace_content_digest(path: Path, *, declared_cache: bool = False) -> tu
 
 
 def _git_path_status(repository_root: Path, path: Path) -> str:
+    """Classify a workspace path using repository Git rules and distinguish paths outside the checkout."""
     if not path.is_relative_to(repository_root):
         return "outside-repository"
     git = shutil.which("git")
@@ -2392,6 +2462,7 @@ def capture_workspace_snapshot(dispatch: dict[str, Any]) -> dict[str, Any]:
 
 
 def _workspace_snapshot(dispatch: dict[str, Any], name: str) -> dict[str, tuple[str, str, bool, str]]:
+    """Parse recorded workspace state by path and reject inconsistent existence and content identities."""
     records = _records(dispatch, name)
     snapshot: dict[str, tuple[str, str, bool, str]] = {}
     for ordinal, raw in enumerate(records, start=1):
@@ -2421,10 +2492,12 @@ def _workspace_snapshot(dispatch: dict[str, Any], name: str) -> dict[str, tuple[
 
 
 def _path_allowed(path: str, allowed: tuple[str, ...]) -> bool:
+    """Check whether a workspace path equals or descends from an approved path."""
     return any(path == candidate or path.startswith(candidate.rstrip("/") + "/") for candidate in allowed)
 
 
 def _validate_isolated_workspace_paths(dispatch: dict[str, Any], unit: ValidationUnit, changed: tuple[str, ...]) -> None:
+    """Require isolated working directories and observed changes to respect the dispatched isolation root."""
     repository_root = Path(_required_text(dispatch, "repository_root")).resolve()
     inside = tuple(directory for directory in unit.working_directories if Path(directory).resolve(strict=False).is_relative_to(repository_root))
     if inside:
@@ -2453,6 +2526,7 @@ def _validate_isolated_workspace_paths(dispatch: dict[str, Any], unit: Validatio
 
 
 def _validation_workspace_audit(dispatch: dict[str, Any], unit: ValidationUnit) -> dict[str, object]:
+    """Compare workspace snapshots against allowed artifacts, declared effects, and isolation constraints."""
     required = bool(unit.allowed_artifacts or unit.expected_workspace_effects or unit.requires_isolation or unit.isolation_root)
     if not required and "workspace_before" not in dispatch and "workspace_after" not in dispatch:
         return {"observed": False, "unexpected_paths": []}
@@ -2708,6 +2782,7 @@ def compile_validation(document: dict[str, Any]) -> tuple[bytes, dict[str, Any]]
 
 
 def _worker_node(raw: dict[str, Any]) -> WorkerNode:
+    """Restore a worker's assignment, dependencies, and skill and reference digests from its saved plan."""
     return WorkerNode(
         node_id=_required_text(raw, "node_id"),
         skill_id=_required_text(raw, "skill_id"),
@@ -2732,6 +2807,7 @@ def _worker_node(raw: dict[str, Any]) -> WorkerNode:
 
 
 def _routing_decision(raw: dict[str, Any]) -> RoutingDecision:
+    """Restore a catalog decision and require a reason and nonblank supporting evidence."""
     return RoutingDecision(
         catalog_id=_required_text(raw, "catalog_id"),
         requirement_id=_required_text(raw, "requirement_id"),
@@ -2741,7 +2817,7 @@ def _routing_decision(raw: dict[str, Any]) -> RoutingDecision:
         skill_path=_required_text(raw, "skill_path"),
         disposition=_required_text(raw, "disposition"),
         reason=_required_text(raw, "reason"),
-        applicability_evidence=_string_tuple(raw, "applicability_evidence"),
+        applicability_evidence=required_routing_texts(raw, "applicability_evidence"),
         review_surface=_string_tuple(raw, "review_surface"),
         instruction_paths=_string_tuple(raw, "instruction_paths"),
         static_references=_string_tuple(raw, "static_references"),
@@ -2754,6 +2830,7 @@ def _routing_decision(raw: dict[str, Any]) -> RoutingDecision:
 
 
 def _reused_review_identity(raw: dict[str, Any]) -> ReusedReviewEvidencePlan:
+    """Restore the source, skill, and coverage identity of a review carried forward as evidence."""
     return ReusedReviewEvidencePlan(
         requirement_id=_required_text(raw, "requirement_id"),
         evidence_id=_required_text(raw, "evidence_id"),
@@ -2816,6 +2893,7 @@ def _audit_replacement_record(raw: dict[str, Any], *, partial: bool = False) -> 
 
 
 def _graph_plan(raw: dict[str, Any]) -> GraphPlan:
+    """Rebuild the typed plan and check its validation barriers and requirement bindings before returning it."""
     worker_nodes = _records(raw, "actual_worker_nodes")
     epochs = _records(raw, "execution_epochs")
     validation_units = _records(raw, "coalesced_validation_units")
@@ -2905,6 +2983,7 @@ def _graph_plan(raw: dict[str, Any]) -> GraphPlan:
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:
+    """Decode a strict JSON object from the file's bytes."""
     return parse_json_object(path.read_bytes())
 
 
@@ -2927,6 +3006,7 @@ def _operation_document(document: dict[str, Any], operation: str) -> dict[str, A
 
 
 def _canonical_worker_payload(content: bytes, *, expectation: ReviewEvidenceExpectation | None = None) -> dict[str, Any]:
+    """Recover the embedded or referenced worker payload and check it against the expected canonical payload when supplied."""
     prefix = b"- Canonical worker payload: "
     matches = [line.removeprefix(prefix) for line in content.splitlines() if line.startswith(prefix)]
     reference_prefix = b"- Worker payload reference: "
@@ -3022,6 +3102,11 @@ def _load_evidence_source(
 def _load_evidence_source_once(  # noqa: C901, PLR0912, PLR0915
     raw: dict[str, Any], *, require_normalized: bool = False
 ) -> tuple[str, ReviewEvidenceExpectation | ValidationEvidenceExpectation, ReviewEvidence | ValidationEvidence, bytes, EvidenceRecord | None]:
+    """Verify a retained artifact against its metadata and return both typed records and the bytes.
+
+    The final item is a verified validation record or the review's normalized
+    record. Older review metadata can omit it unless require_normalized is set.
+    """
     metadata_path = Path(_required_text(raw, "metadata_path")).resolve()
     artifact_path = Path(_required_text(raw, "artifact_path")).resolve()
     metadata = _read_json_object(metadata_path)
@@ -3182,6 +3267,7 @@ def validation_applicability(record: VerifiedValidationRecord, *, target: Review
         ]
 
     def observe(artifact: ArtifactIdentity) -> tuple[str, str]:
+        """Resolve the artifact path and compute the current digest and mode for validation reuse."""
         path = Path(artifact.path)
         if not path.is_absolute():
             path = Path(target.repository_root) / path
@@ -3411,6 +3497,7 @@ def _commit_validation_reference(plan: GraphPlan, record: dict[str, Any], requir
 
 
 def _synthesis_plan_context(plan: GraphPlan, records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Collect plan coverage, accepted evidence, and handoff reconciliation for the synthesizer."""
     by_evidence = {str(record["evidence_id"]): record for record in records}
     review_ids = tuple(str(record["evidence_id"]) for record in records if record.get("record_type") == "review")
     handoffs, unresolved, blockers = _reconciled_handoffs(plan, by_evidence, review_ids)
@@ -3554,6 +3641,7 @@ def _verified_reused_sources(plan: GraphPlan, source_state: tuple[str, str, str]
 
 
 def _evidence_sources(document: dict[str, Any], plan: GraphPlan | None, *, check_current_inputs: bool = True) -> tuple[dict[str, Any], ...]:
+    """Combine supplied evidence paths with plan-bound sources, checking current inputs when requested."""
     sources = _records(document, "sources")
     if plan is None:
         return sources
@@ -3605,6 +3693,7 @@ def _required_schema_shape(node: dict[str, Any]) -> object:
 
 
 def _schema_reference(path: Path, *, validation_reassessment: bool = False) -> dict[str, object]:
+    """Read the payload schema and return its identity, version, and required shape for worker dispatch."""
     raw = _read_json_object(path)
     required = raw.get("required")
     if not isinstance(required, list) or any(not isinstance(name, str) for name in required):
@@ -3633,12 +3722,14 @@ def _schema_reference(path: Path, *, validation_reassessment: bool = False) -> d
 
 
 def _required_context_paths(plan: GraphPlan, requirement_ids: tuple[str, ...]) -> tuple[str, ...]:
+    """Find captured dependency paths assigned to the catalog entries for these requirements."""
     return dependency_paths(
         plan.captured_path_inventory, {decision.catalog_id for decision in plan.routing_decisions if decision.requirement_id in requirement_ids}
     )
 
 
 def _missing_context_reads(plan: GraphPlan, requirement_ids: tuple[str, ...], inputs: AuditInputIdentity, root: Path) -> tuple[str, ...]:
+    """Return required context paths missing from direct, inherited, command, or instruction reads."""
     observed = {
         root / path
         for path in (
@@ -3652,6 +3743,7 @@ def _missing_context_reads(plan: GraphPlan, requirement_ids: tuple[str, ...], in
 
 
 def _applicable_instruction_paths(repository_root: Path, owned_paths: tuple[str, ...], declared: tuple[str, ...]) -> tuple[str, ...]:
+    """Combine declared instructions with applicable ancestor instruction files and return sorted absolute paths."""
     owned_paths = _normalized_repository_paths(owned_paths, label="instruction discovery owned_paths")
     candidates = {Path(path).resolve() for path in declared}
     root_instruction = repository_root / "AGENTS.md"
@@ -3671,6 +3763,7 @@ def _applicable_instruction_paths(repository_root: Path, owned_paths: tuple[str,
 
 
 def _materialized_command_policy(plan: GraphPlan, node: WorkerNode, authorized_duplicates: tuple[str, ...]) -> dict[str, object]:
+    """Assign validator-owned commands and describe which commands the dispatched worker may execute."""
     validator_commands = tuple(sorted({command for unit in plan.coalesced_validation_units for command in unit.commands}))
     if node.mode == "validation":
         unit = next((unit for unit in plan.coalesced_validation_units if unit.node_id == node.node_id), None)
@@ -3702,6 +3795,7 @@ def _materialized_command_policy(plan: GraphPlan, node: WorkerNode, authorized_d
 
 
 def _independent_adversarial_checks(paths: tuple[str, ...]) -> tuple[str, ...]:
+    """Select independent review checks appropriate to the source and test paths in scope."""
     code_suffixes = {".c", ".cc", ".cpp", ".h", ".hpp", ".py", ".rs"}
     checks: list[str] = []
     if any(Path(path).suffix in code_suffixes for path in paths):
@@ -3712,6 +3806,7 @@ def _independent_adversarial_checks(paths: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def _inspection_groups(plan: GraphPlan, source_state: tuple[str, str, str], artifact_store: Path, repository_root: Path) -> dict[str, dict[str, object]]:
+    """Identify audits sharing coverage and prepare their common inspection data from observed repository files."""
     groups: dict[tuple[str, ...], list[str]] = {}
     for node in plan.actual_worker_nodes:
         if node.mode == "audit" and node.coverage:
@@ -3837,6 +3932,7 @@ def _synthesis_examples(dispatch: dict[str, Any]) -> dict[str, Any]:
 
 
 def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
+    """Render the worker's assignment with its evidence, read, command, and payload publication requirements."""
     schema = dispatch.get("payload_schema")
     schema_text = (
         "dispatch.payload_schema (open its path only when more schema detail is needed)"
@@ -4001,6 +4097,7 @@ def _worker_prompt(contract: str, dispatch: dict[str, Any]) -> str:
 
 
 def _review_payload_schema(dispatch: dict[str, Any]) -> Path:
+    """Select the synthesis schema for synthesis workers and the ordinary review schema otherwise."""
     return _SYNTHESIS_PAYLOAD_SCHEMA if dispatch.get("mode") == "synthesis" else _REVIEW_PAYLOAD_SCHEMA
 
 
@@ -4215,6 +4312,7 @@ def review_worker_payload_write(contract_document: dict[str, Any], payload_bytes
 def _approved_worker_payload_write(
     contract_document: dict[str, Any], payload_bytes: bytes, approval_identity: str | None, *, candidate_is_write_target: bool = True
 ) -> dict[str, Any]:
+    """Assess the candidate write, retain isolation violations, and check any explicit approval identity."""
     try:
         artifact_write_review = review_worker_payload_write(contract_document, payload_bytes, candidate_is_write_target=candidate_is_write_target)
     except IsolationViolationError as error:
@@ -4247,6 +4345,7 @@ def _persist_worker_write_review(artifact_write_review: dict[str, Any]) -> dict[
 def _worker_payload_receipt(
     contract_document: dict[str, Any], payload_bytes: bytes, artifact_write_review: dict[str, Any], review_reference: dict[str, Any]
 ) -> dict[str, Any]:
+    """Record the publication destination, exact payload digest, and retained write review for this node."""
     return {
         "node_id": _required_text(contract_document, "node_id"),
         "result_contract": _required_text(contract_document, "result_contract"),
@@ -4406,7 +4505,6 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
         msg = f"routing catalog does not exist: {catalog_path}"
         raise ValueError(msg)
     catalog = load_routing_catalog(catalog_path, skill_roots=_continuation_skill_roots(plan))
-    catalog_ids = sorted(entry.catalog_id for entry in catalog)
     handoff_destinations = [{"catalog_id": entry.catalog_id, "skill_id": entry.skill_id} for entry in sorted(catalog, key=lambda entry: entry.catalog_id)]
     locations = document.get("execution_locations", {})
     if not isinstance(locations, dict) or any(not isinstance(key, str) or value not in {"worker", "coordinator"} for key, value in locations.items()):
@@ -4547,7 +4645,6 @@ def materialize_dispatches(  # noqa: C901, PLR0912, PLR0915
             "fresh_context": location == "worker",
             "command_policy": _materialized_command_policy(plan, node, authorized_duplicates),
             "handoff_catalog_digest": _file_identity_digest(str(catalog_path)),
-            "handoff_catalog_ids": catalog_ids,
             "handoff_destinations": handoff_destinations,
             "instruction_digests": [[path, _file_identity_digest(path)] for path in instruction_paths],
             "instruction_paths": list(instruction_paths),
@@ -4800,6 +4897,7 @@ def _epoch_scoped_plan(plan: GraphPlan, epoch: int, *, suffix: str = "") -> Grap
     node_ids = {node.node_id: prefix + node.node_id for node in plan.actual_worker_nodes}
 
     def mapped(node_id: str | None) -> str | None:
+        """Translate a node ID into the epoch namespace while preserving absent or unmapped IDs."""
         return node_ids.get(node_id, node_id) if node_id is not None else None
 
     nodes = tuple(
@@ -4831,6 +4929,7 @@ def _epoch_scoped_plan(plan: GraphPlan, epoch: int, *, suffix: str = "") -> Grap
 
 
 def _capture_path_fingerprints(capture: dict[str, Any], *, label: str) -> dict[str, str]:
+    """Recover per-path identities and check that the captured scope is represented by the fingerprint map."""
     if capture.get("repository_state_format") == SNAPSHOT_FORMAT:
         parsed = source_snapshot(capture)
         parsed.verify()
@@ -4863,6 +4962,7 @@ def _capture_path_fingerprints(capture: dict[str, Any], *, label: str) -> dict[s
 def _mutation_path_delta(
     document: dict[str, Any], previous: dict[str, Any], current: dict[str, Any], interleaved: InterleavedRepairTransition | None = None
 ) -> tuple[str, ...]:
+    """Compare captures and reconcile the changed paths with the declared mutation or interleaved repair."""
     previous_state = tuple(_required_text(previous, field) for field in ("scope_fingerprint", "captured_worktree_fingerprint", "repository_state_fingerprint"))
     if previous_state != _current_metadata_state(document):
         msg = "previous_capture must match the immediately prior plan source_state"
@@ -5022,6 +5122,7 @@ def _compact_reuse_overrides(plan: GraphPlan, reused_requirements: dict[str, str
 
 
 def _audit_reuse_blocker(record: dict[str, Any], *, invalidated: bool) -> tuple[str, str] | None:
+    """Return the reason an audit cannot be reused, or None when it passes these eligibility checks."""
     if record.get("mode") != "audit" or record.get("status") not in {"completed", "no-findings"}:
         return "ineligible-evidence", "Only completed audit leaves can be reused across captures."
     if record.get("scope_limitations"):
@@ -5056,6 +5157,7 @@ def _carry_forward_audits(  # noqa: C901, PLR0912, PLR0913, PLR0915 - preserve p
     }
 
     def decision(node_id: str, code: str, reason: str) -> None:
+        """Record the node's reuse decision, reason code, and explanation in the continuation result."""
         decisions[node_id] = {"node_id": node_id, "disposition": "reused" if code == "verified" else "not-reused", "reason_code": code, "reason": reason}
 
     previous, current = document["previous_capture"], document["new_capture"]
@@ -5471,6 +5573,7 @@ def _verify_audit_metadata(payload: dict[str, Any], fingerprints: FingerprintEvi
 
 
 def _metadata_chain_from(document: dict[str, Any], state: tuple[str, str, str]) -> tuple[MetadataTransition, ...]:
+    """Return the suffix of metadata transitions starting at the supplied source state, or an empty tuple."""
     transitions = tuple(metadata_transition(item) for item in _records(document, "external_metadata_transitions"))
     for reuse in _records(document.get("plan", {}), "audit_reuse_transitions"):
         if _state(reuse, "source_state") == state:
@@ -5493,11 +5596,13 @@ def _metadata_chain_from(document: dict[str, Any], state: tuple[str, str, str]) 
 
 
 def _current_metadata_state(document: dict[str, Any]) -> tuple[str, str, str]:
+    """Resolve the latest source state reached by the document's recorded metadata transitions."""
     transitions = tuple(metadata_transition(item) for item in _records(document, "external_metadata_transitions"))
     return metadata_states(_state(document, "source_state"), transitions)[-1]
 
 
 def _metadata_evidence_blockers(document: dict[str, Any], records: Sequence[EvidenceRecord]) -> list[str]:
+    """Identify accepted evidence that cannot be carried across the recorded metadata change."""
     if not document.get("external_metadata_transitions"):
         return []
     current = _current_metadata_state(document)
@@ -5794,6 +5899,7 @@ def _prepare_commit_handoff(  # noqa: PLR0913 - the continuation binds the compl
     records: dict[str, EvidenceRecord],
     entries: dict[str, dict[str, Any]],
 ) -> tuple[GraphPlan, CommitHandoffTransition]:
+    """Require quiescent execution and bind the verified commit transition to the updated plan."""
     if any(status in {"in-flight", "awaiting-replan"} for status in lifecycle.values()):
         msg = "commit handoff requires quiescent execution"
         raise ValueError(msg)
@@ -5848,6 +5954,7 @@ def _log_directory_archive(source: Path) -> bytes:
     """Retain a deterministic directory tree without dereferencing log symlinks."""
 
     def fail_walk(error: OSError) -> None:
+        """Propagate directory traversal errors so the archive cannot silently omit unreadable files."""
         raise error
 
     if source.is_symlink():
@@ -5942,6 +6049,7 @@ def _archive_metadata_validation_logs(
 
 
 def _transition_kind(transition: MetadataTransition) -> str:
+    """Map a verified transition variant to its serialized handoff or source-change label."""
     if isinstance(transition, StagedExternalSourceTransition):
         return "staged-external-source-change"
     if isinstance(transition, ExternalSourceTransition):
@@ -6124,6 +6232,7 @@ def _review_control_marker(lifecycle: ReviewLifecycle) -> Path | None:
 
 
 def _require_running_review(document: dict[str, Any], journal: Path | None = None) -> None:
+    """Raise with the retained stop reason when policy or journal state prevents further review."""
     if (reason := _review_stop_reason(document, journal)) is not None:
         msg = f"review stopped: {reason}"
         raise ValueError(msg)
@@ -6191,10 +6300,12 @@ def _replay_review_control(marker: Path, request_identity: str) -> dict[str, Any
 
 
 def _write_review_control_output(path: Path, result: dict[str, Any]) -> None:
+    """Publish the formatted control result atomically as a read-only artifact."""
     _write_bytes_atomically_once(path, (json.dumps(result, indent=2, sort_keys=True) + "\n").encode(), mode=0o444)
 
 
 def _review_control_output_destination(args: argparse.Namespace, path: Path, *, store: Path | None = None) -> Path:
+    """Require a distinct external output path that cannot overwrite control inputs or the journal."""
     output = path.absolute()
     protected = {
         args.journal.resolve(),
@@ -6210,6 +6321,7 @@ def _review_control_output_destination(args: argparse.Namespace, path: Path, *, 
 
 
 def _updated_review_control_policy(document: dict[str, Any], policy: ReviewLifecycle) -> ReviewLifecycle:
+    """Apply the requested budget extension, repair, or stop action to a copy of the lifecycle policy."""
     action = document["action"]
     if action == "extend-budget":
         if policy.stop_reason is not None and not policy.stop_reason.startswith("repair-budget-exhausted"):
@@ -6302,6 +6414,7 @@ def _begin_repair_result(  # noqa: PLR0913 - explicit source, journal and author
     events: tuple[dict[str, Any], ...],
     active: list[str],
 ) -> dict[str, Any] | None:
+    """Check repair eligibility and describe the authorized repair or verification follow-up."""
     policy = plan.review_lifecycle
     followup = document.get("verification_followup")
     if followup is None and policy.repairs_completed >= policy.repair_budget:
@@ -6962,10 +7075,12 @@ def _resume_after_repair_metadata(
 
 
 def _plan_digest(plan: GraphPlan) -> str:
+    """Compute the canonical plan identity used in journal and control records."""
     return graph_plan_digest(plan)
 
 
 def _expected_evidence_id(node: WorkerNode, plan: GraphPlan) -> str:
+    """Derive the node's evidence ID, including the attempt identity for a recovered validation."""
     identity = f"{'validation' if node.mode == 'validation' else 'review'}:{node.node_id}"
     unit = next((item for item in plan.coalesced_validation_units if item.node_id == node.node_id), None)
     recovery = next(
@@ -6980,6 +7095,7 @@ def _expected_evidence_id(node: WorkerNode, plan: GraphPlan) -> str:
 
 
 def _sha256_digest(value: object, name: str) -> str:
+    """Require a SHA-256-prefixed hexadecimal digest in the named field."""
     if not isinstance(value, str) or not value.startswith("sha256:") or len(value) != 71:
         msg = f"{name} must be a sha256 digest"
         raise ValueError(msg)
@@ -7054,6 +7170,7 @@ def _verify_doi_journal_source(raw: dict[str, Any], plan: GraphPlan, node: Worke
 
 
 def _journal_evidence(raw: object, *, plan: GraphPlan, node: WorkerNode, status: str, superseded: bool = False) -> dict[str, str] | None:
+    """Check whether evidence is permitted for this status and verify its references against the planned node."""
     if raw is None:
         if status == "accepted":
             msg = f"accepted journal event requires verified evidence: {node.node_id}"
@@ -7102,6 +7219,7 @@ def _verified_journal_evidence(
     loaded: tuple[str, ReviewEvidenceExpectation | ValidationEvidenceExpectation, ReviewEvidence | ValidationEvidence, bytes, EvidenceRecord | None]
     | None = None,
 ) -> tuple[dict[str, Any], tuple[str, ...]]:
+    """Verify a compiled evidence source for this node and return the journal record and its limitations."""
     kind, expectation, evidence, _content, normalized = loaded if loaded is not None else _load_evidence_source(source, require_normalized=True)
     normalized = _record_document(normalized) if normalized is not None else None
     if normalized is None:  # Defensive for type narrowing after require_normalized.
@@ -7154,6 +7272,7 @@ def _verified_journal_evidence(
 
 
 def _journal_affected_nodes(plan: GraphPlan, state: dict[str, str], node_id: str) -> tuple[str, ...]:
+    """Return the invalidated node and descendants whose current status requires invalidation."""
     descendants = {node_id}
     changed = True
     while changed:
@@ -7170,6 +7289,7 @@ def _journal_affected_nodes(plan: GraphPlan, state: dict[str, str], node_id: str
 
 
 def _apply_journal_transition(plan: GraphPlan, state: dict[str, str], *, node_id: str, status: str) -> tuple[str, ...]:
+    """Check predecessor and lifecycle constraints, update node state, and return affected node IDs."""
     by_id = {node.node_id: node for node in plan.actual_worker_nodes}
     node = by_id.get(node_id)
     if node is None:
@@ -7209,6 +7329,7 @@ def _validated_journal_record(  # noqa: PLR0913 - bind both chain and historical
     superseded: bool,
     verified_plan_digests: set[str],
 ) -> tuple[str, str]:
+    """Verify journal fields, sequence, plan and source bindings, and evidence before returning node and status."""
     if set(event) - {"recorded_at_unix_ns"} != _JOURNAL_EVENT_KEYS:
         msg = f"journal event {expected_sequence} has unexpected fields"
         raise ValueError(msg)
@@ -7246,6 +7367,7 @@ def _validated_journal_record(  # noqa: PLR0913 - bind both chain and historical
 
 
 def _fold_execution_journal(plan: GraphPlan, source_state: tuple[str, str, str], events: tuple[dict[str, Any], ...]) -> tuple[dict[str, str], str | None]:
+    """Replay the verified event chain and return the resulting node states and last event digest."""
     state: dict[str, str] = {}
     latest: dict[str, dict[str, Any]] = {}
     last = {event.get("node_id"): event for event in events}
@@ -7310,6 +7432,7 @@ def _read_execution_journal_content(
 def _new_journal_evidence(
     request: JournalEventRequest, *, plan: GraphPlan, node: WorkerNode, source_state: tuple[str, str, str]
 ) -> tuple[dict[str, Any] | None, tuple[str, ...]]:
+    """Require verified evidence for acceptance and match any blocked evidence to the requested status."""
     if request.source is None:
         if request.status == "accepted":
             msg = f"accepted journal event requires verified evidence: {request.node_id}"
@@ -7330,6 +7453,7 @@ def _new_journal_evidence(
 
 
 def _new_journal_reason(request: JournalEventRequest, limitations: tuple[str, ...]) -> str | None:
+    """Derive a blocked reason from limitations when omitted and enforce the reason policy for each status."""
     reason = request.reason
     if request.status == "blocked" and reason is None:
         reason = "; ".join(limitations) or None
@@ -7344,6 +7468,7 @@ def _new_journal_reason(request: JournalEventRequest, limitations: tuple[str, ..
 
 
 def _persist_journal_event(stream: Any, path: Path, event: dict[str, Any], *, existing_size: int) -> None:
+    """Append one canonical event only at the expected file size and sync it before returning."""
     encoded = (canonical_json(event) + "\n").encode()
     stream.seek(0, os.SEEK_END)
     if stream.tell() != existing_size:
@@ -7420,6 +7545,7 @@ def append_journal_event(path: Path, document: dict[str, Any], request: JournalE
 
 
 def _dispatches_by_node(dispatch_set: dict[str, Any], *, plan: GraphPlan, source_state: tuple[str, str, str]) -> dict[str, dict[str, Any]]:  # noqa: C901
+    """Verify the dispatch set against the plan and source state, then index every planned node by ID."""
     _verify_validation_recoveries(plan)
     if _required_int(dispatch_set, "schema_version") != 1:
         msg = "dispatch set has an unsupported schema version"
@@ -7501,6 +7627,7 @@ def _accepted_journal_sources(
     *,
     include_blocked: bool = False,
 ) -> tuple[dict[str, dict[str, Any]], list[EvidenceRecord]]:
+    """Recover verified source paths and records for accepted nodes and optionally include blocked nodes."""
     state, _head = _fold_execution_journal(plan, source_state, events)
     latest = {str(event["node_id"]): event for event in events}
     sources: dict[str, dict[str, Any]] = {}
@@ -7948,6 +8075,7 @@ def _software_doi_recheck_bindings(
 def _expanded_validation_plan(
     document: dict[str, Any], plan: GraphPlan, records: Sequence[EvidenceRecord], repository_root: Path, *, authorization: str
 ) -> GraphPlan:
+    """Plan newly requested validations and reject an expansion that leaves unresolved requirement identities."""
     reconciliation = _validation_reconciliation(plan, records)
     pending = {item["requirement_id"] for item in reconciliation["requirements"] if item["resolution"] != "planned"}
     raw_requirements = _records(document, "validation_requirements")
@@ -8078,6 +8206,7 @@ def _migrate_validation_journal(
     state: dict[str, str] = {}
 
     def append(original: dict[str, Any]) -> None:
+        """Replay an event against the new plan and append it with updated sequence and digest bindings."""
         event = {
             **original,
             "affected_node_ids": list(_apply_journal_transition(plan, state, node_id=original["node_id"], status=original["status"])),
@@ -8190,11 +8319,13 @@ def _publish_validation_continuation(  # noqa: PLR0913, PLR0917
 
 
 def _audit_replacement_marker(plan: GraphPlan) -> Path:
+    """Locate the replacement marker beside the bound control identity, keyed by the current plan digest."""
     binding = require_run_control(plan.review_lifecycle.run_control)
     return Path(binding.identity.path).parent / f"audit-replacement-{_plan_digest(plan)[7:]}.json"
 
 
 def _validate_continuation_exclusions(exclusions: tuple[dict[str, str], ...], inputs: AuditInputIdentity, evidence: ReviewEvidence) -> None:
+    """Require each partial exclusion to name this specialist and a skill or instruction bound to its audit."""
     for item in exclusions:
         if item["catalog_id"] not in evidence.requirement_ids or item["policy_source"] not in {evidence.skill_path, *dict(inputs.instruction_digests)}:
             msg = "partial scope exclusion requires this specialist and its bound skill or instructions"
@@ -8202,6 +8333,7 @@ def _validate_continuation_exclusions(exclusions: tuple[dict[str, str], ...], in
 
 
 def _partial_audit_context(document: dict[str, Any], args: argparse.Namespace, entry: dict[str, Any]) -> dict[str, Any]:
+    """Bind partial-audit exclusions and inherited inputs to the original compiled audit evidence."""
     source = {key: entry[key] for key in ("artifact_path", "metadata_path")}
     _kind, expectation, evidence, _content, normalized = _load_evidence_source(source, require_normalized=True)
     if (
@@ -8244,6 +8376,7 @@ def _partial_audit_context(document: dict[str, Any], args: argparse.Namespace, e
 
 
 def _partial_audit_plan(plan: GraphPlan, old: WorkerNode, context: dict[str, Any], new_id: str, dispositions: tuple[dict[str, Any], ...]) -> GraphPlan:
+    """Replace the audit assignment and recompute captured-path ownership after applying its exclusions."""
     exclusions = scope_exclusions(context["partial_audit"]["review_scope_exclusions"])
     excluded = excluded_paths(exclusions, old.requirement_ids)
     updated = replace(
@@ -8323,6 +8456,7 @@ def _replacement_plan(plan: GraphPlan, record: dict[str, Any], *, partial: bool 
 
 
 def _replace_invalidated_audit_locked(document: dict[str, Any], args: argparse.Namespace, plan: GraphPlan, *, partial: bool = False) -> dict[str, Any]:  # noqa: C901, PLR0912, PLR0915 - one serialized replacement transaction.
+    """Publish the replacement plan and continuation under the caller's lock after checking current source state."""
     source_state = _state(document, "source_state")
     if _capture_source_state(args.current_capture) != _current_metadata_state(document):
         msg = "audit replacement requires unchanged source state"
@@ -8476,6 +8610,7 @@ def _verify_validation_recoveries(plan: GraphPlan) -> None:
 
 
 def _preflight_executor(unit: ValidationUnit, prerequisite: dict[str, Any] | None, repository_root: Path) -> tuple[dict[str, Any], list[str]]:
+    """Inspect the unit's executor prerequisites and working directories and return observations and blockers."""
     observations: dict[str, Any] = {"host_executables": [], "uv_projects": []}
     if not unit.commands:
         return observations, []
@@ -8507,6 +8642,7 @@ def _preflight_executor(unit: ValidationUnit, prerequisite: dict[str, Any] | Non
 
 
 def _preflight_outputs(unit: ValidationUnit, repository_root: Path) -> tuple[list[dict[str, Any]], list[str]]:
+    """Classify declared output locations and report conflicts with approved artifacts or workspace effects."""
     observations: list[dict[str, Any]] = []
     blockers: list[str] = []
     approved = {artifact.path: artifact for artifact in unit.allowed_artifacts}
@@ -8811,6 +8947,7 @@ def _recover_validation(document: dict[str, Any], args: argparse.Namespace, *, c
 def _reconciled_handoffs(
     plan: GraphPlan, normalized_by_evidence: dict[str, dict[str, Any]], accepted_review_ids: tuple[str, ...]
 ) -> tuple[list[dict[str, Any]], tuple[str, ...], tuple[str, ...]]:
+    """Match accepted handoffs to routing decisions and return ordered records, unresolved IDs, and blockers."""
     decisions = {decision.catalog_id: decision for decision in plan.routing_decisions}
     requirement_nodes = dict(plan.requirement_to_node)
     records: list[dict[str, Any]] = []
@@ -8887,6 +9024,7 @@ def reconcile_handoffs(document: dict[str, Any]) -> dict[str, Any]:
 
 
 def _delivery_validation_coverage(item: dict[str, Any], accepted: dict[str, Any], snapshot: ReviewSourceSnapshot | None) -> dict[str, Any]:
+    """Add source-bound hosted coverage while retaining the observer's platform as a separate field."""
     if item["execution"] != "hosted":
         return item
     return {
@@ -9263,6 +9401,7 @@ def finalize_proof(document: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, P
 
 
 def _runtime_subparser(subparsers: Any, operation: str, help_text: str, *, contract_text: str | None = None) -> argparse.ArgumentParser:
+    """Register an operation's common input and output options and link its schema and example in CLI help."""
     schema_reference = f"{_RUNTIME_OPERATION_INPUT_SCHEMA}#/$defs/{operation}"
     example_reference = f"{_RUNTIME_OPERATION_EXAMPLES}#/{operation}"
     epilog = f"Input schema: {schema_reference}\nValid example: {example_reference}"
@@ -9277,6 +9416,7 @@ def _runtime_subparser(subparsers: Any, operation: str, help_text: str, *, contr
 
 
 def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
+    """Build the runtime CLI and add the file, lifecycle, scheduling, and publication options for each operation."""
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="operation", required=True)
     control_parser = _runtime_subparser(subparsers, "review-control", "check repair budget, extend it explicitly, authorize a comprehensive restart, or stop")
@@ -9440,6 +9580,7 @@ def _argument_parser() -> argparse.ArgumentParser:  # noqa: PLR0915
 
 
 def _journal_request_from_args(args: argparse.Namespace) -> JournalEventRequest:
+    """Build the journal request and require artifact and metadata paths to be supplied together."""
     if (args.artifact is None) != (args.metadata is None):
         msg = "journal evidence requires both --artifact and --metadata"
         raise ValueError(msg)
@@ -9468,6 +9609,7 @@ def _journal_request_from_args(args: argparse.Namespace) -> JournalEventRequest:
 
 
 def _next_ready_from_files(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    """Restore the plan and journal and report the next eligible dispatches with their execution paths."""
     raw_plan = document.get("plan")
     if not isinstance(raw_plan, dict):
         msg = "next-ready requires a plan object"
@@ -9503,6 +9645,7 @@ def _next_ready_from_files(document: dict[str, Any], args: argparse.Namespace) -
 
 
 def _with_current_capture(document: dict[str, Any], capture_path: Path) -> dict[str, Any]:
+    """Return a copy of the input with the current capture's three source fingerprints."""
     capture = _read_json_object(capture_path)
     output = dict(document)
     output["current_source_state"] = [
@@ -9514,6 +9657,7 @@ def _with_current_capture(document: dict[str, Any], capture_path: Path) -> dict[
 
 
 def _finalize_document_from_files(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    """Bind finalization to the current capture and any supplied journal and dispatch evidence."""
     output = _with_current_capture(document, args.current_capture)
     if args.journal is not None:
         output["journal_path"] = str(args.journal)
@@ -9542,6 +9686,7 @@ def _finalize_document_from_files(document: dict[str, Any], args: argparse.Names
 
 
 def _capture_source_state(path: Path) -> tuple[str, str, str]:
+    """Read the canonical scope, worktree, and repository fingerprints from a capture file."""
     capture = _read_json_object(path)
     state = (capture.get("scope_fingerprint"), capture.get("captured_worktree_fingerprint"), capture.get("repository_state_fingerprint"))
     if any(not isinstance(value, str) or not value for value in state):
@@ -9551,6 +9696,7 @@ def _capture_source_state(path: Path) -> tuple[str, str, str]:
 
 
 def _lifecycle_dispatch(document: dict[str, Any], dispatches_path: Path, node_id: str) -> tuple[GraphPlan, dict[str, Any], list[str]]:
+    """Restore the plan, select the requested dispatch, and identify artifacts excluded from that worker's view."""
     raw_plan = document.get("plan")
     if not isinstance(raw_plan, dict):
         msg = "lifecycle operation requires a plan object"
@@ -9569,6 +9715,7 @@ def _lifecycle_dispatch(document: dict[str, Any], dispatches_path: Path, node_id
 
 
 def _snapshot_workspace_from_files(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    """Capture the validator's workspace under its bound dispatch and record the observed source state."""
     if "compiler_preflight" in document:
         dispatch = _publication_dispatch(document)
         if dispatch is None or dispatch.get("mode") != "validation" or args.dispatches is not None or args.node_id is not None:
@@ -9594,6 +9741,7 @@ def _snapshot_workspace_from_files(document: dict[str, Any], args: argparse.Name
 def _workspace_records(
     path: Path, *, node_id: str, source_state: tuple[str, str, str], observed_state: tuple[str, str, str] | None = None
 ) -> list[dict[str, Any]]:
+    """Require the saved snapshot to match the node and source state before returning its workspace records."""
     snapshot = _read_json_object(path)
     if observed_state is not None and tuple(snapshot.get("observed_source_state", ())) != observed_state:
         msg = "workspace snapshot predates the current external metadata state"
@@ -9664,6 +9812,10 @@ def _verify_audit_captures(dispatch: dict[str, Any], before: Path, after: Path) 
 
 
 def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:  # noqa: C901, PLR0912, PLR0915
+    """Compile a worker payload against its dispatch, seal the evidence, and journal the outcome.
+
+    If publication fails, remove files created by this attempt and roll back any partial journal append.
+    """
     plan, entry, current_artifacts = _lifecycle_dispatch(document, args.dispatches, args.node_id)
     source_state = _state(document, "source_state")
     before_state = _capture_source_state(args.before_capture)
@@ -9841,6 +9993,7 @@ def _compile_node_from_files(document: dict[str, Any], args: argparse.Namespace)
 
 
 def _json_operation_output(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:  # noqa: C901, PLR0911, PLR0912
+    """Dispatch a JSON-backed runtime operation and assemble any file-bound inputs it requires."""
     if args.operation == "review-control":
         return review_control(document, args)
     if args.operation == "preflight-validation":
@@ -9888,15 +10041,18 @@ def _json_operation_output(document: dict[str, Any], args: argparse.Namespace) -
 
 
 def _isolation_attempts(document: dict[str, Any]) -> list[str]:
+    """List retained isolation-rejected payload paths for the node, excluding separate receipt files."""
     target = Path(document["worker_payload_path"])
     return sorted(str(path) for path in target.parent.glob(f"{document['node_id']}.isolation-rejected.*.json") if not path.name.endswith(".receipt.json"))
 
 
 def _provenance_attempts(document: dict[str, Any]) -> list[Path]:
+    """Find the node's retained provenance rejection files beside its payload destination."""
     return list(Path(document["worker_payload_path"]).parent.glob(f"{document['node_id']}.provenance-rejected.*.json"))
 
 
 def _retain_provenance_rejection(document: dict[str, Any], content: bytes, error: ValueError) -> None:
+    """Write a read-only rejection receipt keyed by the submitted payload's content digest."""
     target = Path(document["worker_payload_path"])
     identity = digest_bytes(content).removeprefix("sha256:")
     path = target.with_name(f"{document['node_id']}.provenance-rejected.{identity}.json")
@@ -9912,12 +10068,14 @@ def _retain_provenance_rejection(document: dict[str, Any], content: bytes, error
 
 
 def _require_isolation_budget(document: dict[str, Any]) -> None:
+    """Stop replacement publication after two retained isolation rejections for the same node."""
     if len(_isolation_attempts(document)) >= 2:
         msg = "audit isolation replacement exhausted; retain rejected attempts and leave only this node blocked"
         raise ValueError(msg)
 
 
 def _retain_isolation_rejection(document: dict[str, Any], payload_bytes: bytes, error: ValueError) -> dict[str, Any]:
+    """Serialize rejection recording under the node lock and report whether one replacement remains."""
     target = Path(document["worker_payload_path"])
     with target.with_name(f".{document['node_id']}.isolation.lock").open("ab") as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
@@ -9983,6 +10141,7 @@ def _worker_payload_cli_output(receipt: dict[str, Any], *, full_output: bool) ->
 
 
 def _run_worker_payload_operation(document: dict[str, Any], args: argparse.Namespace) -> int:
+    """Run the requested payload review or publication operation and print the selected receipt."""
     if args.operation == "publish-worker-payload":
         payload_bytes = sys.stdin.buffer.read()
         receipt = publish_worker_payload_bytes(document, payload_bytes, approval_identity=args.approval_identity)
@@ -10006,6 +10165,7 @@ def _run_worker_payload_operation(document: dict[str, Any], args: argparse.Names
 
 
 def _print_operation_result(args: argparse.Namespace, output_path: Path, output: dict[str, Any]) -> None:
+    """Emit the compact stage receipt by default or the full result when requested."""
     receipt = stage_receipt(args.operation, output_path, output)
     if args.operation in {"schedule-ready", "next-ready"}:
         summaries = receipt["launch_manifest"]["nodes"] if args.operation == "schedule-ready" else receipt["ready_dispatches"]
@@ -10073,6 +10233,7 @@ def _print_operation_result(args: argparse.Namespace, output_path: Path, output:
 
 
 def _prepare_validation_timing(document: dict[str, Any], args: argparse.Namespace) -> int:
+    """Bind the timing manifest to the validator dispatch and print the authorized launches."""
     dispatch = _publication_dispatch(document)
     if dispatch is None:
         msg = "timing preparation requires a bound validator publication contract"
@@ -10109,6 +10270,7 @@ def _write_json_operation_result(args: argparse.Namespace, output_path: Path, ou
 
 
 def _run_operation(document: dict[str, Any], args: argparse.Namespace) -> int:  # noqa: C901, PLR0912, PLR0911
+    """Execute the selected protocol operation and return the CLI status, including incomplete certification."""
     if args.operation == "prepare-validation-timing":
         return _prepare_validation_timing(document, args)
     if args.operation in {"persist-worker-payload", "review-worker-payload-write", "publish-worker-payload"}:
@@ -10168,6 +10330,7 @@ def _run_operation(document: dict[str, Any], args: argparse.Namespace) -> int:  
 
 
 def _operation_input(document: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    """Extract and validate the operation-specific input, including scheduling arguments from the CLI."""
     operation_document = _operation_document(document, args.operation)
     if args.operation == "schedule-ready":
         if "lifecycle_input" in document and args.worker_capacity is None:
@@ -10183,6 +10346,21 @@ def _operation_input(document: dict[str, Any], args: argparse.Namespace) -> dict
     return operation_document
 
 
+def _usage_repository_root(document: dict[str, Any]) -> Path | None:
+    """Use the plan's bound checkout, or the repository named by a standalone operation."""
+    plan = document.get("plan")
+    if isinstance(plan, dict):
+        binding = lifecycle_from_document(plan.get("review_lifecycle")).run_control
+        if binding is not None:
+            return run_control_repository(binding)
+    dispatch = _publication_dispatch(document) if "compiler_preflight" in document else document.get("dispatch")
+    for source in (dispatch, document, document.get("new_capture")):
+        if isinstance(source, dict) and "repository_root" in source:
+            return Path(_required_text(source, "repository_root"))
+    root = os.environ.get("REVIEW_GRAPH_REPOSITORY_ROOT", "")
+    return Path(root) if root else None
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run one deterministic review-graph compiler operation."""
     args = _argument_parser().parse_args(argv)
@@ -10195,6 +10373,7 @@ def main(argv: list[str] | None = None) -> int:
             return measure_call(
                 lambda: _run_operation(operation_document, args),
                 Path(usage_ledger),
+                repository_root=_usage_repository_root(operation_document),
                 stage=f"runtime:{args.operation}",
                 scope_digest=usage_digest(operation_document),
             )

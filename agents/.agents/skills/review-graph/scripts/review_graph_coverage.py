@@ -56,6 +56,7 @@ def coverage_diagnostics(payload: dict[str, Any], owned_paths: tuple[str, ...]) 
         return ()
 
     def values(field: str, kind: type) -> list[Any] | None:
+        """Flatten a field across coverage units, returning None if a list or any element has the wrong type."""
         groups = [unit.get(field) for unit in units]
         if any(not isinstance(group, list) or any(type(value) is not kind for value in group) for group in groups):
             return None
@@ -79,6 +80,7 @@ def coverage_diagnostics(payload: dict[str, Any], owned_paths: tuple[str, ...]) 
 
 
 def _recipe_diagnostics(units: list[dict[str, Any]]) -> tuple[str, ...]:
+    """Report malformed, repeated, or undeclared recipe dependencies in coverage units."""
     errors: list[str] = []
     for unit in units:
         recipes = unit.get("recipe_dependencies", [])

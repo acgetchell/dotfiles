@@ -56,6 +56,7 @@ def isolation_violations(dispatch: dict[str, Any], payload: dict[str, Any]) -> t
     @cache
     def selector(path: str) -> str:
         # Resolve each operand once per check, never across filesystem observations.
+        """Resolve the selected directory against the isolation root and produce its recursive glob."""
         selected = Path(path)
         return ((selected if selected.is_absolute() else root / selected).resolve() / "**").as_posix()
 
@@ -163,6 +164,7 @@ def _command_operands(command: str, directory: Path) -> list[str]:
 
 
 def _shell_words(line: str) -> list[str]:
+    """Split a shell line for inspection, returning an empty list when quoting cannot be parsed."""
     try:
         lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True

@@ -7,10 +7,11 @@ from typing import Any
 
 import pytest
 import review_graph_runtime as runtime
-from test_review_graph_coverage_proofs import _compile, _proof_fixture
+from test_support_review_graph_reuse import _compile, _proof_fixture
 
 
 def _judgment(candidate: dict[str, Any]) -> dict[str, Any]:
+    """Bind the reassessment to the candidate's plan digests and describe the remaining validation obligations."""
     return {
         **{key: candidate[key] for key in ("requirement_id", "original_planned_validation_digest", "replacement_planned_validation_digest")},
         "disposition": "source-independent",

@@ -153,6 +153,7 @@ def _payload_input(path: str, dispatch: dict[str, Any], payload: dict[str, Any])
 
 
 def _publication_inputs(command: str, dispatch: dict[str, Any], payload: dict[str, Any]) -> dict[str, str] | None:
+    """Identify inputs to a recognized publication command, returning None for an unrelated command."""
     persistence = dispatch.get("worker_payload_persistence", {})
     publications = {shlex.join(persistence[key]) for key in ("publish_command", "command", "review_command") if key in persistence}
     if command in publications:
@@ -168,6 +169,7 @@ def _publication_inputs(command: str, dispatch: dict[str, Any], payload: dict[st
 
 
 def _operation_inputs(command: str, dispatch: dict[str, Any], payload: dict[str, Any]) -> tuple[dict[str, str], SourceDiscovery | None] | None:
+    """Bind a recognized worker operation to its inputs and optional discovery query, or return None."""
     if (inputs := _publication_inputs(command, dispatch, payload)) is not None:
         inputs.update((path, file_identity(path)) for path in dispatch.get("protocol_input_paths", []))
         return inputs, None

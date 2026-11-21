@@ -634,7 +634,12 @@ def _parser() -> argparse.ArgumentParser:
 
 @timed_phase("persistence")
 def persist_capture(manifest: dict[str, Any], output: Path) -> dict[str, Any]:
-    """Persist immutable capture bytes before returning all observed fingerprints."""
+    """Write the manifest to output and return its digest and fingerprint receipt.
+
+    Resolve relative output from the current directory. Both files must be outside
+    the reviewed repository. Write the manifest first and its .receipt.json sibling
+    second, so an identical retry can finish a missing receipt.
+    """
     from review_graph_runtime import _write_bytes_atomically_once  # noqa: PLC0415 - shared durable artifact writer, loaded only for persistence.
 
     snapshot = source_snapshot(manifest)
@@ -658,7 +663,7 @@ def persist_capture(manifest: dict[str, Any], output: Path) -> dict[str, Any]:
 
 
 def main() -> int:
-    """Print the captured review scope as JSON."""
+    """Print the scope manifest as JSON, or persist it and print its receipt with --output."""
     from review_graph_session import verify_current_snapshot  # noqa: PLC0415 - verify frozen resources before parsing the command.
 
     with collect_timings() as timing:

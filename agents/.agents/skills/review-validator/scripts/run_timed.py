@@ -24,6 +24,7 @@ class Launch:
 
 
 def _unique_fields(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """Reject duplicate launch fields before constructing an argument specification."""
     fields: dict[str, object] = {}
     for name, value in pairs:
         if name in fields:
@@ -54,12 +55,14 @@ def read_launch(path: Path) -> Launch:
 
 
 def _record(stream: TextIO, event: dict[str, object]) -> None:
+    """Write one JSON line, flush it, and sync the receipt to disk before proceeding."""
     stream.write(json.dumps(event, ensure_ascii=True, allow_nan=False) + "\n")
     stream.flush()
     os.fsync(stream.fileno())
 
 
 def _stop(process: subprocess.Popen[bytes]) -> int:
+    """Terminate a running child, escalate to a kill after five seconds, and reap its exit status."""
     if process.poll() is None:
         with contextlib.suppress(ProcessLookupError):
             process.terminate()
@@ -71,7 +74,12 @@ def _stop(process: subprocess.Popen[bytes]) -> int:
 
 
 def execute(launch: Launch, stream: TextIO) -> int:
-    """Time process creation through wait, retaining command and wrapper failures."""
+    """Run the command with inherited streams and sync timing events to the receipt.
+
+    Keep the raw child return code in the finished event. Return the shell-style
+    status for a POSIX signal, 2 for a launch failure, or 130 when interrupted
+    while waiting. A receipt write can raise OSError after the child has run.
+    """
     _record(
         stream, {"schema_version": 1, "event": "attempt-started", "argv": launch.argv, "working_directory": launch.working_directory, "platform": sys.platform}
     )
@@ -115,7 +123,11 @@ def execute(launch: Launch, stream: TextIO) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run one command and write a new, private, append-only JSONL receipt."""
+    """Create a new private JSONL receipt and run one command.
+
+    Return 74 on receipt I/O failure. Inspect the receipt before retrying because
+    the command may already have run.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, required=True, help="coordinator-approved launch JSON")
     parser.add_argument("--receipt", type=Path, required=True, help="new absolute path approved for timing evidence")

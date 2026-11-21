@@ -85,6 +85,7 @@ def test_invalid_measurements_cannot_publish_a_report(tmp_path: Path, monkeypatc
     calls = []
 
     def subprocess_result(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        """Produce per-mode worker reports with the selected fault and record which JIT modes ran."""
         mode = kwargs["env"]["PYTHON_JIT"] == "1"
         calls.append(mode)
         trial = {
@@ -117,6 +118,7 @@ def test_overflowing_ratio_median_cannot_publish_a_report(tmp_path: Path, monkey
     monkeypatch.setattr(benchmark, "source_identity", lambda: "unchanged")
 
     def subprocess_result(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        """Return finite worker measurements whose cross-mode ratios exercise overflow in the median."""
         enabled = kwargs["env"]["PYTHON_JIT"] == "1"
         trial = {
             "jit_available": True,
@@ -226,6 +228,7 @@ def test_successful_report_records_pairs_identity_and_equal_process_weight(
     monkeypatch.setattr(benchmark, "source_identity", lambda: "unchanged")
 
     def subprocess_result(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        """Give each process a different number of samples to expose accidental weighting by sample count."""
         enabled = kwargs["env"]["PYTHON_JIT"] == "1"
         order.append("on" if enabled else "off")
         pair = (len(order) - 1) // 2
@@ -262,6 +265,7 @@ def test_successful_report_records_pairs_identity_and_equal_process_weight(
 @pytest.mark.parametrize("failure", ["exit", "timeout"])
 def test_worker_failure_retains_diagnostics_without_publishing_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str) -> None:
     def fail(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        """Supply distinct process diagnostics for the timeout and nonzero-exit cases."""
         if failure == "timeout":
             raise subprocess.TimeoutExpired(argv, kwargs["timeout"], output=b"partial output", stderr=b"worker detail")
         return subprocess.CompletedProcess(argv, 7, "partial output", "worker detail")

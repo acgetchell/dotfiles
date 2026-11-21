@@ -1,7 +1,6 @@
 """Standard typed validation handoffs preserve executions without metadata reruns."""
 
 import json
-from argparse import Namespace
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 from typing import Any
@@ -9,20 +8,13 @@ from typing import Any
 import pytest
 import review_graph_runtime as runtime
 from capture_scope import _scope_data
-from review_graph_bootstrap import bootstrap_document
-from review_graph_plan import ValidationRequirementBinding, plan_from_document
+from review_graph_plan import ValidationRequirementBinding
 from review_graph_reuse import WORKTREE_SELECTION_ALGORITHM, AuthorizedGitContextTransition, source_snapshot
 from review_graph_validation import ValidationPayload, ValidationRecord, ValidationStatus, VerifiedValidationRecord
-from test_review_graph_runtime import (
-    ROUTING_CATALOG,
-    SKILL_ROOT,
-    _baseline_mutation_fixture,
-    _complete_structural_fixture_routing,
-    _execution_payload,
-    _publish_worker_bytes,
-    _run_test_git,
-)
-from test_review_graph_transitions import _materialize
+from test_support_review_graph import _materialize, _run_test_git
+from test_support_review_graph_evidence import _execution_payload
+from test_support_review_graph_handoffs import _handoff
+from test_support_review_graph_lifecycle import _baseline_mutation_fixture
 
 
 @pytest.mark.parametrize(("before_mode", "after_mode"), [("staged", "staged"), ("staged", "baseline"), ("baseline", "staged")])
@@ -39,6 +31,7 @@ def test_authorized_git_context_rejects_either_staged_capture(tmp_path: Path, be
 
 
 def _source_only_payload(command: str) -> dict[str, Any]:
+    """Build a passing command result whose declared dependencies exclude Git metadata."""
     return {
         "schema_version": 3,
         "status": "passed",
@@ -86,92 +79,6 @@ def test_source_only_validation_accepts_recipe_and_path_words(command: str) -> N
 def test_source_only_validation_rejects_git_tokens_and_unparseable_commands(command: str) -> None:
     with pytest.raises(ValueError, match="unclassified Git command"):
         ValidationPayload.from_raw(_source_only_payload(command))
-
-
-def _handoff(  # noqa: PLR0913 - orthogonal fixture execution and contract controls.
-    tmp_path: Path,
-    *,
-    dependencies: list[dict[str, str]] | None = None,
-    result: str = "passed",
-    failure_kind: str | None = None,
-    prefixes: list[str] | None = None,
-    contract: bool = True,
-    instructions: bool = False,
-    command: str | None = None,
-    worktree: bool = False,
-    readme: bool = False,
-    repairs_completed: int = 0,
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], str, Path, dict[str, Any]]:
-    git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path, instructions=instructions)
-    if readme:
-        (repository / "README.md").write_text("# Fixture\n\n\nDescription.\n")
-        template["consulted_routers"].append("docs-review-orchestrator")
-    if command is not None:
-        template["validation_requirements"][0].update(commands=[command], canonical_recipe=None)
-    commands = template["validation_requirements"][0]["commands"]
-    registry = {
-        "schema_version": 1,
-        "contracts": [
-            {
-                "contract_id": "fixture-check",
-                "commands": commands,
-                "working_directories": ["."],
-                "implementation_paths": ["tool.py"],
-                "input_scope": "repository" if prefixes is None else "prefixes",
-                "input_prefixes": prefixes or [],
-                "git_inputs": [],
-                "deterministic": True,
-                "rationale": "The fixture check depends on captured source only.",
-            }
-        ],
-    }
-    registry["contracts"].append({**registry["contracts"][0], "contract_id": "another-check", "commands": ["echo other"], "implementation_paths": ["LICENSE"]})
-    if contract:
-        (repository / "review-validation-contracts.json").write_text(json.dumps(registry))
-    if worktree:
-        (repository / "tool.py").write_text("value = 2\n")
-    capture = _scope_data(git, repository, "worktree" if worktree else "baseline", None, ())
-    if worktree:
-        template["consulted_routers"].remove("rust-review-orchestrator")
-        captured = set(source_snapshot(capture).captured_scope_paths)
-        template["routing_overrides"] = [item for item in template["routing_overrides"] if captured.intersection(item["review_surface"])]
-    _complete_structural_fixture_routing(template, list(source_snapshot(capture).captured_scope_paths))
-    plan = plan_from_document(bootstrap_document(capture, template), catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=repository)
-    plan = replace(plan, review_lifecycle=replace(plan.review_lifecycle, repairs_completed=repairs_completed))
-    lifecycle, entries, dispatches = _materialize(tmp_path, capture, plan)
-    journal = tmp_path / "execution.jsonl"
-    lifecycle.update(journal_path=str(journal), dispatches_path=str(dispatches))
-    entry = next(item for item in entries["dispatches"] if item["result_contract"] == "compact-validation")
-    payload = _execution_payload(entry, result, 1 if result == "failed" else 0, "1s")
-    if failure_kind is not None:
-        payload["failure_kind"] = failure_kind
-    if dependencies is not None:
-        payload["git_dependencies"] = dependencies
-    _publish_worker_bytes(entry, json.dumps(payload).encode())
-    before, after = tmp_path / "before.json", tmp_path / "after.json"
-    before.write_text(json.dumps(capture))
-    after.write_text(json.dumps(capture))
-    workspace = runtime.capture_workspace_snapshot(entry["dispatch"])
-    workspace_path = tmp_path / "workspace.json"
-    workspace_path.write_text(json.dumps(workspace))
-    runtime._compile_node_from_files(
-        lifecycle,
-        Namespace(
-            dispatches=dispatches,
-            node_id=entry["node_id"],
-            before_capture=before,
-            after_capture=after,
-            workspace_before=workspace_path,
-            workspace_after=workspace_path,
-            payload=None,
-            status=None,
-            limitation=None,
-            journal=journal,
-            output=tmp_path / "compiled.json",
-        ),
-    )
-    metadata = json.loads(Path(entry["metadata_path"]).read_bytes())
-    return lifecycle, entry, capture, git, repository, metadata
 
 
 @pytest.mark.parametrize("changed", ["index", "head"])
@@ -442,10 +349,12 @@ def test_origin_binding_preserves_exact_validation_identity_and_immutable_requir
 
 
 def _verified(entry: dict[str, Any]) -> VerifiedValidationRecord:
+    """Load the worker's artifact and sidecar through the validation evidence verifier."""
     return runtime.load_validation_record(metadata_path=Path(entry["metadata_path"]), artifact_path=Path(entry["artifact_path"]))
 
 
 def _applicability(record: VerifiedValidationRecord, capture: dict[str, Any], **unit_changes: Any) -> list[dict[str, str]]:
+    """Compute reuse objections after applying the supplied changes to the validation unit."""
     return record.applicability_reasons(
         source_snapshot(capture),
         current_unit=replace(record.expectation.validation_unit, **unit_changes),
@@ -578,6 +487,7 @@ def test_accepted_journal_collection_loads_each_incoming_record_once(tmp_path: P
     reads = []
 
     def counted(*args: Any, **kwargs: Any) -> Any:
+        """Record each evidence load before delegating to the actual reader."""
         reads.append(args[0])
         return original(*args, **kwargs)
 

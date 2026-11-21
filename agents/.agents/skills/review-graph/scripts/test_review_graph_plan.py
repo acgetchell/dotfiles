@@ -80,7 +80,7 @@ from review_graph_plan import (
     validation_environment_digest,
     validation_evidence_expectation,
 )
-from test_support_review_graph import _captured_rust_repository
+from test_support_review_graph import _captured_rust_repository, _sparse_plan_document
 
 SKILL_ROOT = Path(__file__).resolve().parents[2]
 ROUTING_CATALOG = Path(__file__).resolve().parents[1] / "references" / "routing-catalog.json"
@@ -95,6 +95,7 @@ def rust_capture(tmp_path: Path) -> dict[str, Any]:
 
 
 def _native_markdown(heading: str, sections: tuple[str, ...], payload: dict[str, object], section_bodies: dict[str, str], *, preamble: str = "") -> bytes:
+    """Render the fixture's report sections and append the canonical JSON evidence block."""
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     body = "\n\n".join(f"{section}\n\n{section_bodies[section]}" for section in sections[:-1])
     prefix = f"{heading}\n\n{preamble}\n\n" if preamble else f"{heading}\n\n"
@@ -102,6 +103,7 @@ def _native_markdown(heading: str, sections: tuple[str, ...], payload: dict[str,
 
 
 def _review_header(expectation: ReviewEvidenceExpectation, evidence: ReviewEvidence) -> str:
+    """Render review identity, source fingerprints, and authorization in the native report preamble."""
     return "\n".join(
         (
             f"- Node ID: {evidence.node_id}",
@@ -121,6 +123,7 @@ def _review_header(expectation: ReviewEvidenceExpectation, evidence: ReviewEvide
 
 
 def _validation_header(evidence: ValidationEvidence) -> str:
+    """Render the validator's identity and expected source fingerprints in the report preamble."""
     return "\n".join(
         (
             f"- Node ID: {evidence.node_id}",
@@ -138,6 +141,7 @@ def _validation_header(evidence: ValidationEvidence) -> str:
 
 
 def _fingerprint_proof(fingerprints: FingerprintEvidence) -> str:
+    """Render expected and observed fingerprint triples for the fixture evidence."""
     return "\n".join(
         (
             "- Expected:",
@@ -157,6 +161,7 @@ def _fingerprint_proof(fingerprints: FingerprintEvidence) -> str:
 
 
 def _state_verification(evidence: ReviewEvidence | ValidationEvidence) -> str:
+    """Render before and after observations, including the outcome of a reported source mutation."""
     after_result = "changed-as-reported" if isinstance(evidence, ReviewEvidence) and evidence.source_mutated else "matched"
     if evidence.status == "blocked":
         after_result = "blocked"
@@ -178,6 +183,7 @@ def _state_verification(evidence: ReviewEvidence | ValidationEvidence) -> str:
 
 
 def _findings(evidence: ReviewEvidence, *, independent: bool, location: str = "assigned-scope:1") -> str:
+    """Render the findings section using the convention for the worker's review mode."""
     if evidence.status == "no-findings":
         return "No findings." if independent else "none"
     if not evidence.finding_ids:
@@ -199,6 +205,7 @@ def _findings(evidence: ReviewEvidence, *, independent: bool, location: str = "a
 
 
 def _handoffs(evidence: ReviewEvidence) -> str:
+    """Link each reported handoff to the routing discovery that triggered it."""
     discoveries = {discovery.handoff_id: discovery for discovery in evidence.routing_discoveries}
     records: list[str] = []
     for handoff_id in evidence.handoff_ids:
@@ -221,6 +228,7 @@ def _handoffs(evidence: ReviewEvidence) -> str:
 
 
 def _review_result_payload(expectation: ReviewEvidenceExpectation, evidence: ReviewEvidence) -> bytes:
+    """Render a native review artifact whose narrative and machine evidence describe the same result."""
     independent = evidence.mode == "independent-review"
     changed_paths = expectation.planned_paths if evidence.source_mutated else ()
     sections = (
@@ -378,6 +386,7 @@ def _review_result_payload(expectation: ReviewEvidenceExpectation, evidence: Rev
 
 
 def _validation_result_payload(expectation: ValidationEvidenceExpectation, evidence: ValidationEvidence) -> bytes:
+    """Render a native validation artifact with command outcomes and a machine-readable record."""
     sections = (
         "## Outcome Summary",
         "## Skill Loading",
@@ -534,10 +543,12 @@ def _validation_result_payload(expectation: ValidationEvidenceExpectation, evide
 
 
 def _result_digest(evidence_id: str) -> str:
+    """Derive a deterministic fixture digest from the evidence identifier."""
     return "sha256:" + hashlib.sha256(evidence_id.encode()).hexdigest()
 
 
 def _capacity(*, remaining: int | None = None, active: int = 1) -> dict[str, object]:
+    """Declare the worker limit and lifecycle semantics for the chosen budget scenario."""
     result: dict[str, object] = {"source": "runtime-capability-metadata", "concurrent_worker_limit": 4, "active_workers": active}
     if remaining is not None:
         result["fresh_worker_creations_remaining"] = remaining
@@ -733,6 +744,7 @@ package = true
 
 
 def _closed_rust_routing_decisions() -> tuple[RoutingDecision, ...]:
+    """Give every catalog entry a routing decision for the fixture's Rust review."""
     catalog = load_routing_catalog(ROUTING_CATALOG)
     selected = {"repo.rust", "repo.independent", "repo.synthesis", "rust.invariants", "rust.tests", "rust.synthesis"}
     decisions: list[RoutingDecision] = []
@@ -765,6 +777,7 @@ def _closed_rust_routing_decisions() -> tuple[RoutingDecision, ...]:
 
 
 def _exhaustive_rust_document(capture: dict[str, Any]) -> dict[str, object]:
+    """Build the isolated Rust review input, including routing and repository synthesis."""
     return {
         "execution_profile": "isolated",
         "worker_budget": 5,
@@ -835,6 +848,7 @@ def _exhaustive_rust_document(capture: dict[str, Any]) -> dict[str, object]:
 
 
 def _set_instruction_path(document: dict[str, object], *, target: str, instruction_path: str) -> str:
+    """Assign an instruction path to the selected worker role and return its fixture identifier."""
     if target == "synthesis":
         syntheses = cast("list[dict[str, object]]", document["synthesis_nodes"])
         syntheses[0]["instruction_paths"] = [instruction_path]
@@ -856,10 +870,86 @@ def _set_instruction_path(document: dict[str, object], *, target: str, instructi
     return "revalidation-rust"
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("reason", None),
+        ("reason", " "),
+        ("applicability_evidence", "source"),
+        ("applicability_evidence", [None]),
+        ("applicability_evidence", [" "]),
+        ("applicability_evidence", []),
+    ],
+)
+def test_compact_exclusion_requires_actual_reason_and_evidence(field: str, value: object) -> None:
+    document = _sparse_plan_document()
+    override = document["routing_overrides"][0]
+    override.update(disposition="not-applicable")
+    override.pop("owners")
+    override.pop("review_surface")
+    override[field] = value
+    with pytest.raises(ValueError, match=field):
+        plan_from_document(document)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("worker_budget", True),
+        ("worker_budget", 3.75),
+        ("worker_budget", "3"),
+        ("recovery_finalization_reserve", False),
+        ("recovery_finalization_reserve", -0.5),
+    ],
+)
+def test_planning_document_rejects_noninteger_capacity(field: str, value: object) -> None:
+    document = _sparse_plan_document()
+    document[field] = value
+    with pytest.raises(ValueError, match=field):
+        plan_from_document(document)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("rule_id", None),
+        ("rule_id", " "),
+        ("semantic_triggers", "performance"),
+        ("semantic_triggers", [" "]),
+        ("semantic_triggers", [None]),
+        ("semantic_triggers", []),
+    ],
+)
+def test_routing_catalog_rejects_malformed_rule_fields(tmp_path: Path, field: str, value: object) -> None:
+    entry = json.loads(ROUTING_CATALOG.read_bytes())["entries"][0]
+    entry[field] = value
+    path = tmp_path / "catalog.json"
+    path.write_text(json.dumps({"version": 1, "entries": [entry]}), encoding="utf-8")
+    with pytest.raises(ValueError, match=field):
+        load_routing_catalog(path)
+
+
+def test_catalog_uses_top_level_yaml_name_and_observes_edits(tmp_path: Path) -> None:
+    entry = json.loads(ROUTING_CATALOG.read_bytes())["entries"][0]
+    skill = tmp_path / "SKILL.md"
+    entry.update(skill_path=str(skill), required_static_references=[])
+    catalog = tmp_path / "catalog.json"
+    catalog.write_text(json.dumps({"version": 1, "entries": [entry]}), encoding="utf-8")
+    skill.write_text(f"---\nmetadata:\n  name: display\nname: '{entry['skill_id']}' # routing identity\n---\n", encoding="utf-8")
+    assert load_routing_catalog(catalog, skill_roots=(tmp_path,))[0].skill_id == entry["skill_id"]
+    skill.write_text(f"---\nmetadata:\n  name: {entry['skill_id']}\nname: another-skill\n---\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="skill/path mismatch"):
+        load_routing_catalog(catalog, skill_roots=(tmp_path,))
+    skill.write_text(f"---\nname: {entry['skill_id']}\nname: another-skill\n---\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="Duplicate key in frontmatter: name"):
+        load_routing_catalog(catalog, skill_roots=(tmp_path,))
+
+
 def test_real_routing_catalog_resolves_every_skill_path_and_frontmatter() -> None:
+    """Load the checked-in catalog and compare the skills assigned to each router with the expected routing inventory."""
     catalog = load_routing_catalog(ROUTING_CATALOG)
 
-    assert len(catalog) == 56
+    assert len(catalog) == 57
     assert all(Path(entry.skill_path).is_absolute() for entry in catalog)
     assert {entry.router_id for entry in catalog} == {
         "review-graph",
@@ -921,6 +1011,7 @@ def test_real_routing_catalog_resolves_every_skill_path_and_frontmatter() -> Non
         "python-cli-review",
         "python-parse-dont-validate",
         "python-scientific-review",
+        "python-style-hygiene",
         "python-support-scripts",
         "python-test-quality",
         "python-simplification-review",
@@ -1473,6 +1564,7 @@ def test_adaptive_coordinator_execution_reconciles_without_worker_creation() -> 
 def _review_requirement(
     ordinal: int, *, priority: str = "supporting-quality", required: bool = False, skill_id: str | None = None, synthesis_dependency: str = "rust-synthesis"
 ) -> ReviewRequirement:
+    """Create a specialist requirement with deterministic identity and configurable routing priority."""
     return ReviewRequirement(
         requirement_id=f"R{ordinal:02d}",
         skill_id=skill_id or f"specialist-{ordinal:02d}",
@@ -1489,6 +1581,7 @@ def _review_requirement(
 
 
 def _validation_requirement(requirement_id: str, *, command: str = "just ci", evidence_id: str | None = None, baseline: bool = False) -> ValidationRequirement:
+    """Create a validation requirement with stable execution and artifact ownership for coalescing tests."""
     return ValidationRequirement(
         requirement_id=requirement_id,
         source_state=("scope", "worktree", "repository"),
@@ -1527,6 +1620,7 @@ def test_isolated_validation_rejects_working_directory_outside_isolation_root() 
 
 
 def _synthesis(node_id: str = "rust-synthesis") -> WorkerNode:
+    """Create a required Rust synthesis node with the fixture's installed skill path."""
     return WorkerNode(
         node_id=node_id,
         skill_id="rust-production-review",
@@ -1817,6 +1911,7 @@ def test_worker_creation_failure_halts_dispatch_and_emits_resume_manifest() -> N
 def _creation_failure(
     *, accepted_node_ids: tuple[str, ...] = ("A01",), unaccepted_node_ids: tuple[str, ...] = (), failed_node_id: str = "A02"
 ) -> CreationFailure:
+    """Describe a worker creation failure and partition the planned nodes by acceptance."""
     planned_nodes = tuple(
         WorkerNode(node_id=node_id, skill_id="specialist", skill_path="/skills/specialist/SKILL.md", mode="audit", priority="supporting-quality", required=True)
         for node_id in ("A01", "A02", "A03")
@@ -1888,6 +1983,7 @@ def test_completion_api_has_no_caller_assertable_bundle_assessment() -> None:
 
 
 def _complete_evidence(*, execution_profile: str, isolation_failures: tuple[str, ...], include_independent: bool = False) -> CompletionEvidence:
+    """Build completion evidence bound to the fixture's records, manifest, and verifier."""
     expectation, proof, review_records, validation_records, manifest, verifier = _completion_binding(execution_profile, include_independent=include_independent)
     return CompletionEvidence(
         required_requirement_ids=("R01",),
@@ -1996,6 +2092,7 @@ def test_completion_derives_independent_review_coverage_from_the_bound_plan() ->
 def _migration_trial(
     trial_id: str, mode: str, *, forced_worker_creation_failure: bool = False, forced_worker_skill_failure: bool = False, multi_epoch: bool = False
 ) -> MigrationTrial:
+    """Describe a migration trial with its expected routing and injected worker failures."""
     return MigrationTrial(
         trial_id=trial_id,
         mode=mode,
@@ -2230,6 +2327,7 @@ def test_node_acceptance_requires_isolation_skill_reference_and_fingerprint_proo
 
 
 def _review_evidence(*, profile: str = "grouped", execution_location: str = "coordinator") -> tuple[ReviewEvidenceExpectation, ReviewEvidence]:
+    """Pair an audit expectation with matching specialist evidence for a stable source state."""
     state = ("scope", "worktree", "repository")
     expectation = ReviewEvidenceExpectation(
         node_id="audit-001",
@@ -2273,6 +2371,7 @@ def _review_evidence(*, profile: str = "grouped", execution_location: str = "coo
 def _independent_review_evidence(
     *, status: str = "completed", finding_ids: tuple[str, ...] = ("independent-1", "independent-2"), handoff_ids: tuple[str, ...] = ()
 ) -> tuple[ReviewEvidenceExpectation, ReviewEvidence]:
+    """Build independent review evidence with the requested routing handoffs."""
     expectation, evidence = _review_evidence()
     expectation = replace(
         expectation,
@@ -2637,6 +2736,7 @@ def test_independent_native_result_rejects_all_none_and_unexpected_level_two_sec
 
 
 def _validation_evidence(unit: ValidationUnit | None = None) -> tuple[ValidationEvidenceExpectation, ValidationEvidence]:
+    """Pair a validation unit's expected evidence with its recorded result."""
     state = ("scope", "worktree", "repository")
     if unit is None:
         (unit,), _ = coalesce_validation_requirements((_validation_requirement("V01"), _validation_requirement("V02")))
@@ -3187,6 +3287,7 @@ def test_isolated_validation_rejects_coordinator_evidence() -> None:
 def _repository_review_expectation(
     *, review_count: int = 1, execution_profile: str = "grouped", include_independent: bool = False
 ) -> RepositoryReviewProofExpectation:
+    """Derive the repository proof obligations for a plan with the requested execution profile."""
     requirements = tuple(_review_requirement(index, synthesis_dependency="repository-synthesis") for index in range(1, review_count + 1))
     audit_reference = "/skills/python-test-quality/references/pytest.md"
     requirements = (
@@ -3240,6 +3341,7 @@ def _repository_review_expectation(
 
 
 def _repository_review_proof(expectation: RepositoryReviewProofExpectation | None = None) -> RepositoryReviewProof:
+    """Bind planned node IDs to fixture evidence and identify the synthesis and manifest."""
     expectation = expectation or _repository_review_expectation()
     evidence_by_node = {
         node.node_id: (
@@ -3300,11 +3402,13 @@ def _completion_binding(
     ArtifactManifest,
     TrustedArtifactVerifier,
 ]:
+    """Build verified completion inputs with the requested profile and independent review policy."""
     expectation = _repository_review_expectation(execution_profile=execution_profile, include_independent=include_independent)
     return _verified_binding(expectation)
 
 
 def _predecessor_evidence_ids(expectation: RepositoryReviewProofExpectation, proof: RepositoryReviewProof, node_id: str) -> tuple[str, ...]:
+    """Resolve the identifiers of predecessor evidence and evidence reused by synthesis."""
     evidence_by_node = dict(proof.planned_node_evidence)
     node = next(item for item in expectation.planned_evidence_nodes if item.node_id == node_id)
     return tuple(
@@ -3322,6 +3426,7 @@ def _verified_binding(
     ArtifactManifest,
     TrustedArtifactVerifier,
 ]:
+    """Build matching proof, typed records, manifest, and verifier for a plan expectation."""
     execution_profile = expectation.plan.execution_profile
     proof = _repository_review_proof(expectation)
     evidence_by_node = dict(proof.planned_node_evidence)
@@ -3477,6 +3582,7 @@ def _artifact_verification(
     tuple[tuple[ReviewEvidenceExpectation, ReviewEvidence], ...],
     tuple[tuple[ValidationEvidenceExpectation, ValidationEvidence], ...],
 ]:
+    """Hash the rendered artifacts and bind their records and proof to the resulting manifest."""
     finalized_review_records = tuple(
         (expectation, replace(evidence, raw_result_digest="sha256:" + hashlib.sha256(_review_result_payload(expectation, evidence)).hexdigest()))
         for expectation, evidence in review_records
@@ -3509,6 +3615,7 @@ def _artifact_verification(
 
 
 def _replace_native_block(content: bytes, payload: str) -> bytes:
+    """Replace the machine-readable block while preserving the surrounding report."""
     text = content.decode()
     start = text.index(NATIVE_EVIDENCE_BLOCK_OPEN) + len(NATIVE_EVIDENCE_BLOCK_OPEN)
     end = text.index(NATIVE_EVIDENCE_BLOCK_CLOSE, start)
@@ -3516,6 +3623,7 @@ def _replace_native_block(content: bytes, payload: str) -> bytes:
 
 
 def _replace_native_preamble(content: bytes, first_section: str, body: str) -> bytes:
+    """Replace the text between the report title and its first section."""
     text = content.decode()
     heading_end = text.index("\n")
     section_start = text.index(f"{first_section}\n", heading_end)
@@ -3523,6 +3631,7 @@ def _replace_native_preamble(content: bytes, first_section: str, body: str) -> b
 
 
 def _replace_native_section(content: bytes, heading: str, next_heading: str, body: str) -> bytes:
+    """Replace the body between two named report headings."""
     text = content.decode()
     start = text.index(f"{heading}\n") + len(heading) + 1
     end = text.index(f"\n{next_heading}\n", start)
@@ -3530,6 +3639,7 @@ def _replace_native_section(content: bytes, heading: str, next_heading: str, bod
 
 
 def _replace_in_native_section(content: bytes, heading: str, next_heading: str, old: str, new: str) -> bytes:
+    """Change the first occurrence of text within one bounded report section."""
     text = content.decode()
     start = text.index(f"{heading}\n") + len(heading) + 1
     end = text.index(f"\n{next_heading}\n", start)
@@ -3538,6 +3648,7 @@ def _replace_in_native_section(content: bytes, heading: str, next_heading: str, 
 
 
 def _all_none_native_sections(content: bytes, sections: tuple[str, ...]) -> bytes:
+    """Set the body between each successive pair of section headings to the literal absence marker."""
     changed = content
     for heading, next_heading in pairwise(sections):
         changed = _replace_native_section(changed, heading, next_heading, "none")
@@ -3547,6 +3658,7 @@ def _all_none_native_sections(content: bytes, sections: tuple[str, ...]) -> byte
 def _rebase_artifact_payload(
     proof: RepositoryReviewProof, manifest: ArtifactManifest, verifier: TrustedArtifactVerifier, *, evidence_id: str, content: bytes
 ) -> tuple[RepositoryReviewProof, ArtifactManifest, TrustedArtifactVerifier]:
+    """Update the artifact, manifest, verifier, and proof to agree on replacement bytes."""
     artifact_id = next(entry.artifact_id for entry in manifest.entries if entry.evidence_id == evidence_id)
     artifacts = tuple(replace(artifact, content=content) if artifact.artifact_id == artifact_id else artifact for artifact in verifier.artifacts)
     content_by_artifact = {artifact.artifact_id: artifact.content for artifact in artifacts}
@@ -3566,6 +3678,7 @@ def _evidence_bundle_fixture() -> tuple[
     ArtifactManifest,
     TrustedArtifactVerifier,
 ]:
+    """Assemble consistent review and validation records with their artifact verification inputs."""
     expectation = _repository_review_expectation()
     proof = _repository_review_proof(expectation)
     audit_expectation, audit_evidence = _review_evidence()
@@ -3613,6 +3726,7 @@ def _routed_reuse_binding(
     ArtifactManifest,
     TrustedArtifactVerifier,
 ]:
+    """Build a verified Rust plan whose synthesis includes routed reuse evidence."""
     document = _exhaustive_rust_document(capture)
     decisions = cast("list[dict[str, object]]", document["routing_decisions"])
     for decision in decisions:
@@ -4071,6 +4185,7 @@ def test_native_artifact_gate_rejects_arbitrary_malformed_truncated_duplicate_an
 
 
 def test_evidence_bundle_rejects_independent_native_semantic_adversaries() -> None:
+    """Start from accepted independent evidence and vary its native report while keeping the associated artifact bindings consistent."""
     expectation = _repository_review_expectation(include_independent=True)
     expectation, proof, review_records, validation_records, _, _ = _verified_binding(expectation)
     review_records = tuple(

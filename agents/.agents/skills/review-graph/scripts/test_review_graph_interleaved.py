@@ -11,28 +11,8 @@ from capture_scope import _scope_data
 from review_graph_results import EvaluationBoundaryError, EvaluationRejection, RecoveryKind, RejectionKind
 from review_graph_reuse import metadata_transition, source_snapshot
 from review_graph_schema import SchemaValidationError, require_schema_definition
-from test_review_graph_repair_staging import _finish_repair, _staged_repair
-from test_review_graph_runtime import SCHEMA_ROOT, _run_test_git
-
-
-def _interleaved(tmp_path: Path, dependency: str = "source") -> tuple[str, Path, dict[str, Any], dict[str, Any], dict[Path, bytes]]:
-    git, repository, request, audit, history = _staged_repair(tmp_path, dependency)
-    # Earlier diagnostic captures are allowed; no capture exists for either final
-    # repair before staging. Leave a mixture of staged and unstaged final edits.
-    request.pop("post_repair_capture")
-    path = repository / "state.rs"
-    path.write_text("pub fn state() { assert_eq!(1, 1); }\n")
-    _run_test_git(git, "-C", str(repository), "add", "state.rs")
-    path.write_text("pub fn state() { assert_eq!(2, 2); }\n")
-    _run_test_git(git, "-C", str(repository), "add", "state.rs")
-    path.write_text("pub fn state() { assert_eq!(3, 3); }\n")
-    request["new_capture"] = _scope_data(git, repository, "baseline", None, ())
-    request["interleaved_staging"] = {
-        "repair_attribution": "All changed_paths are agent edits within the existing authorized repair batch.",
-        "staging_attribution": "The maintainer said they staged files as they reviewed the agent's repairs.",
-    }
-    history[repository / ".git" / "index"] = (repository / ".git" / "index").read_bytes()
-    return git, repository, request, audit, history
+from test_support_review_graph import SCHEMA_ROOT, _run_test_git
+from test_support_review_graph_repair_staging import _finish_repair, _interleaved
 
 
 @pytest.mark.parametrize("dependency", ["source", "source-discovery", "index"])
@@ -122,6 +102,7 @@ def test_interleaved_repair_rechecks_live_state_before_publication(tmp_path: Pat
     original = runtime._plan_delta_audits
 
     def race(*args: Any, **kwargs: Any) -> Any:
+        """Change the source after the initial check and before repair publication."""
         result = original(*args, **kwargs)
         (repository / "tool.py").write_text("concurrent_edit = True\n")
         return result

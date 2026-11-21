@@ -108,6 +108,7 @@ class EvaluationRejection:
 
 
 def _object_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Build a JSON object and report its first duplicate field as malformed input."""
     result = dict(pairs)
     if len(result) != len(pairs):
         seen: set[str] = set()
@@ -136,6 +137,7 @@ def parse_json_object(content: str | bytes) -> dict[str, Any]:
     nonfinite = False
 
     def number(raw: str) -> float:
+        """Convert a JSON number to float and remember whether decoding produced a nonfinite value."""
         nonlocal nonfinite
         value = float(raw)
         nonfinite = nonfinite or not math.isfinite(value)

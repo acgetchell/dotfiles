@@ -74,8 +74,11 @@ def timed_phase[**P, T](name: str) -> Callable[[Callable[P, T]], Callable[P, T]]
     """Measure an existing operation while preserving its signature and semantics."""
 
     def decorate(function: Callable[P, T]) -> Callable[P, T]:
+        """Preserve the wrapped callable's metadata while adding the named timing phase."""
+
         @wraps(function)
         def measured(*args: P.args, **kwargs: P.kwargs) -> T:
+            """Run the callable inside the timing context and propagate its return value or exception."""
             with phase(name):
                 return function(*args, **kwargs)
 

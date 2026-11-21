@@ -16,7 +16,8 @@ from review_graph_lifecycle import lifecycle_from_document
 from review_graph_plan import graph_plan_digest, graph_plan_digest_matches
 from review_graph_results import EvaluationBoundaryError, EvaluationRejection, RecoveryKind, RejectionKind, parse_json_object
 from review_graph_schema import SchemaValidationError
-from test_review_graph_runtime import _compact_audit_payload, _compile_cli_paths, _sparse_plan, _worker_input_fixture
+from test_support_review_graph import _sparse_plan, _worker_input_fixture
+from test_support_review_graph_evidence import _compact_audit_payload, _compile_cli_paths
 
 
 @pytest.mark.parametrize(

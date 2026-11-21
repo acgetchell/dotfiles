@@ -1,15 +1,13 @@
 """Behavioral tests for the review-graph scope capture helper."""
 
-import json
 import os
 import shlex
 import shutil
-import subprocess
 import sys
 from collections.abc import Sequence  # noqa: TC003 - keep available for runtime annotation evaluation.
 from dataclasses import asdict
-from pathlib import Path
 from typing import cast
+lazy from pathlib import Path
 
 import capture_scope
 import pytest
@@ -17,8 +15,7 @@ from capture_scope import _file_blob_id, _scope_data, captured_head_changes
 from review_graph_git_objects import GitPathIdentity
 from review_graph_integrity import digest_json
 from review_graph_reuse import source_snapshot
-
-_TIMEOUT_SECONDS = 30
+from test_support_review_graph_capture import _capture, _capture_result, _commit_all, _git, _init_repo
 
 
 @pytest.mark.parametrize("mode", ["baseline", "branch", "staged", "worktree"])
@@ -107,6 +104,7 @@ def test_source_capture_uses_native_git_objects_without_mutating_git(tmp_path: P
     run_git = capture_scope._run_git
 
     def without_per_file_hash(git: str, repository: Path, arguments: Sequence[str], *, payload: bytes | None = None) -> bytes:
+        """Forward Git operations while detecting a regression to one hash-object process per file."""
         assert arguments[0] != "hash-object"
         return run_git(git, repository, arguments, payload=payload)
 
@@ -198,55 +196,6 @@ def test_baseline_capture_retains_staged_deletions(tmp_path: Path) -> None:
     assert isinstance(bounds, dict)
     assert bounds["removed.txt"] == 2
     assert captured_head_changes(git, repo, capture) == ("removed.txt",)
-
-
-def _run(command: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
-    result = subprocess.run(  # noqa: S603 - tests invoke resolved Git and the current Python executable only.
-        command, cwd=cwd, check=False, capture_output=True, text=True, timeout=_TIMEOUT_SECONDS
-    )
-    assert result.returncode == 0, result.stderr
-    return result
-
-
-def _git(repo: Path, *arguments: str) -> str:
-    git = shutil.which("git")
-    assert git is not None
-    # Keep the complete object/index mutation oracle independent of asynchronous
-    # maintenance started by fixture commits, including inherited Git settings.
-    return _run((git, "-c", "maintenance.auto=false", "-c", "gc.auto=0", *arguments), repo).stdout
-
-
-def _init_repo(repo: Path) -> None:
-    repo.mkdir()
-    _git(repo, "init", "--quiet")
-    _git(repo, "config", "user.name", "Review Graph Test")
-    _git(repo, "config", "user.email", "review-graph@example.invalid")
-
-
-def _commit_all(repo: Path) -> None:
-    _git(repo, "add", ".")
-    _git(repo, "-c", "user.name=Review Graph Test", "-c", "user.email=review-graph@example.invalid", "commit", "--quiet", "-m", "fixture")
-
-
-def _capture(repo: Path, mode: str, *arguments: str) -> dict[str, object]:
-    script = Path(__file__).with_name("capture_scope.py")
-    result = _run((sys.executable, str(script), "--repo", str(repo), "--mode", mode, *arguments), repo)
-    payload: object = json.loads(result.stdout)
-    assert isinstance(payload, dict)
-    assert all(isinstance(key, str) for key in payload)
-    return cast("dict[str, object]", payload)
-
-
-def _capture_result(repo: Path, mode: str, *arguments: str) -> subprocess.CompletedProcess[str]:
-    script = Path(__file__).with_name("capture_scope.py")
-    return subprocess.run(  # noqa: S603 - tests invoke the current Python executable only.
-        (sys.executable, str(script), "--repo", str(repo), "--mode", mode, *arguments),
-        cwd=repo,
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=_TIMEOUT_SECONDS,
-    )
 
 
 def test_path_boundary_excludes_unrelated_changes(tmp_path: Path) -> None:

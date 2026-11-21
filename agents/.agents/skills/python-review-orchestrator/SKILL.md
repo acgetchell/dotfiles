@@ -35,4 +35,6 @@ For a directly requested Python orchestration outside graph-routing mode, read
 completely and follow its scope, routing, trace, validation, and reporting
 workflow.
 
+Record an explicit decision for [python-style-hygiene](../python-style-hygiene/SKILL.md). Select it for Python source, tests, stubs, and code examples, including examples embedded in documentation.
+
 Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

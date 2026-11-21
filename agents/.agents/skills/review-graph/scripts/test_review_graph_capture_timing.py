@@ -16,7 +16,7 @@ from research_repo_tools import git_inspect
 from review_graph_capture_timing import collect_timings
 from review_graph_commit import verify_live_commit
 from review_graph_results import EvaluationBoundaryError, RejectionKind
-from test_capture_scope import _capture, _capture_result, _commit_all, _git, _init_repo
+from test_support_review_graph_capture import _capture, _capture_result, _commit_all, _git, _init_repo
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -123,6 +123,7 @@ def test_capture_still_reads_both_content_observations(tmp_path: Path, monkeypat
     original = capture_scope._captured_path_line_bounds
 
     def change_between_observations(**kwargs: Any) -> dict[str, int]:
+        """Change file bytes between observations while preserving size and modification time."""
         bounds = original(**kwargs)
         metadata = source.stat()
         # Preserve size and mtime: cached stat metadata cannot prove content.
@@ -149,6 +150,7 @@ def test_batch_blob_transport_rejects_incomplete_or_unbound_bytes(tmp_path: Path
         output += b"unbound\n"
 
     def query(_git: str, _repo: Path, arguments: Any, **_kwargs: Any) -> bytes:
+        """Report a valid blob header before supplying the malformed content response."""
         return object_id + b" blob 4\n" if "--batch-check" in arguments else output
 
     monkeypatch.setattr(capture_scope, "_run_git", query)
@@ -169,6 +171,7 @@ def test_blob_batches_bound_payload_bytes_and_keep_oversized_blobs_supported(tmp
     run_git = capture_scope._run_git
 
     def query(git: str, root: Path, arguments: Any, *, payload: bytes | None = None) -> bytes:
+        """Record which object IDs share each payload request while letting Git serve the actual bytes."""
         if "--batch" in arguments:
             assert payload is not None
             batches.append(payload.splitlines())
@@ -190,6 +193,7 @@ def test_blob_metadata_failure_stops_before_reading_payloads(tmp_path: Path, mon
     output = {"missing": object_id + b" missing\n", "truncated": b"", "trailing": object_id + b" blob 4\nextra\n"}[failure]
 
     def query(_git: str, _repo: Path, arguments: Any, **_kwargs: Any) -> bytes:
+        """Return the malformed metadata and fail if capture proceeds to a payload request."""
         assert "--batch-check" in arguments
         return output
 
@@ -207,6 +211,7 @@ def test_repeated_426_path_capture_observes_content_index_mode_and_symlink_chang
     git = shutil.which("git") or "git"
 
     def capture() -> dict[str, object]:
+        """Measure capture subprocess counts and confirm that its Git index bytes and staged entries are unchanged."""
         index = (repo / ".git/index").read_bytes()
         entries = _git(repo, "ls-files", "--stage", "-z")
         with collect_timings() as timing:
@@ -247,6 +252,7 @@ def test_repeated_426_path_capture_observes_content_index_mode_and_symlink_chang
 @pytest.mark.parametrize("failure", ["error", "timeout"])
 def test_published_inspection_preserves_binary_errors_and_bounded_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str) -> None:
     def result(args: Any, **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        """Check the literal binary path and simulate a timeout or Git failure with non-UTF-8 diagnostics."""
         assert kwargs["timeout"] == 30
         assert kwargs["input"] == b""
         assert args[-2:] == ["--", "literal\t[*]\n.bin"]

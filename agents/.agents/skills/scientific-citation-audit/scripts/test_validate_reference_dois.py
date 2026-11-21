@@ -8,6 +8,7 @@ import io
 import json
 import sys
 import tempfile
+from http.client import IncompleteRead
 from pathlib import Path
 from typing import Any
 
@@ -407,6 +408,16 @@ def test_complete_author_records_accept_family_or_literal(author: dict[str, str]
     assert result.resolved_authors == ("Li",)
 
 
+@pytest.mark.parametrize(("resolved_doi", "status"), [(["10.1234/other"], "FAIL"), (None, "FAIL"), ("10.1234/other", "MISMATCH"), ("10.1234/test", "OK")])
+def test_scholarly_results_require_a_well_formed_resolver_doi_when_present(resolved_doi: object, status: str) -> None:
+    entry = MODULE.extract_entries("Shewchuk. Robust predicates. (1997). DOI: https://doi.org/10.1234/test")[0]
+    raw = {**metadata("Robust predicates"), "DOI": resolved_doi}
+    result = MODULE.validate_entry(entry, 1.0, 0.45, lambda *_: raw)
+    assert result.status == status
+    if status == "MISMATCH":
+        assert result.mismatched_fields == ("doi",)
+
+
 def test_validation_reports_malformed_fetcher_response() -> None:
     """Malformed resolver data should produce a failed audit result."""
     entry = MODULE.DoiEntry(doi=MODULE.Doi.parse("10.1007/PL00009321"), line=1, entry="- Fixture entry.")
@@ -419,6 +430,27 @@ def test_validation_reports_malformed_fetcher_response() -> None:
 
     assert result.status == MODULE.AuditStatus.FAIL
     assert result.message == "TypeError: DOI resolver response must be a JSON object"
+
+
+def test_truncated_response_fails_one_occurrence_and_allows_a_retry() -> None:
+    entries = [
+        MODULE.DoiEntry(MODULE.Doi.parse(doi), line, "Shewchuk. (1997). Robust predicates.")
+        for line, doi in enumerate(("10.1234/one", "10.1234/two", "10.1234/one"), start=1)
+    ]
+    requests: list[str] = []
+
+    def fetcher(doi: Any, _timeout: float) -> dict[str, object]:
+        """Simulate a truncated first transfer and resolve the repeated DOI on its next request."""
+        requests.append(doi.value)
+        if len(requests) == 1:
+            partial_body = b"{"
+            raise IncompleteRead(partial_body, 5)
+        return metadata("Robust predicates")
+
+    rows = MODULE.validate_entries(entries, 1.0, 0.45, fetcher)
+    assert requests == [entry.doi.value for entry in entries]
+    assert [(row.line, row.status) for row in rows] == [(1, MODULE.AuditStatus.FAIL), (2, MODULE.AuditStatus.OK), (3, MODULE.AuditStatus.OK)]
+    assert "IncompleteRead" in rows[0].message
 
 
 @pytest.mark.parametrize("heading", ["# Project\n\n", "# Project\n", "### Project\n", "   ###### Project\n", "#\tProject\n", "#\n"])
@@ -1094,6 +1126,17 @@ def software_metadata() -> dict[str, object]:
     return {**metadata(SOFTWARE_TITLE, family="Getchell", year=2026), "DOI": SOFTWARE_DOI}
 
 
+def test_direct_software_reconciliation_uses_the_supplied_doi_claim(tmp_path: Path) -> None:
+    cff = tmp_path / "CITATION.cff"
+    cff.write_text(CFF, encoding="utf-8")
+    citation = MODULE.SoftwareCitation.load(cff)
+    raw = software_metadata()
+    metadata = MODULE.CslMetadata.parse(raw)
+    result = MODULE.validate_entry(MODULE.extract_entries(SOFTWARE_LINKS[0])[0], 1.0, 0.45, lambda *_: raw)
+    assert MODULE.reconcile_software(result, metadata, raw, citation).status == MODULE.AuditStatus.OK
+    assert MODULE.reconcile_software(result, metadata, {**raw, "DOI": "10.1234/other"}, citation).status == MODULE.AuditStatus.MISMATCH
+
+
 @pytest.mark.parametrize("link", SOFTWARE_LINKS)
 def test_software_link_requires_context_then_matches_explicit_cff(tmp_path: Path, link: str) -> None:
     cff = tmp_path / "CITATION.cff"
@@ -1201,6 +1244,7 @@ def test_canonical_cli_keeps_scholarly_checks_and_input_provenance(tmp_path: Pat
     original = MODULE.validate_entries
 
     def fetcher(doi: Any, _timeout: float) -> dict[str, object]:
+        """Return distinct registry records for the software citation and the scholarly paper."""
         return software_metadata() if str(doi.value) == SOFTWARE_DOI else metadata("Robust predicates")
 
     monkeypatch.setattr(MODULE, "validate_entries", lambda entries, timeout, score, **kwargs: original(entries, timeout, score, fetcher, **kwargs))

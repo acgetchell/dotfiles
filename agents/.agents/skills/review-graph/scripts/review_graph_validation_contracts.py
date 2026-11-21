@@ -76,6 +76,7 @@ def repository_path(raw: str) -> str:
 
 
 def _require_git_inputs(raw: object) -> None:
+    """Require an immutable tuple of recognized Git input categories."""
     if not isinstance(raw, tuple) or any(not isinstance(item, ContractGitInput) for item in raw):
         msg = "contract git_inputs must be typed immutable categories"
         raise TypeError(msg)

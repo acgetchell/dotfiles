@@ -28,6 +28,7 @@ def retained_input_texts(root: Path, instructions: tuple[str, ...], payload: dic
 
 
 def _verified_text(path: str, text: str, fingerprint: str) -> GitPathIdentity:
+    """Verify the supplied instruction text against its captured Git identity and return that identity."""
     identity = GitPathIdentity.parse(fingerprint)
     if (
         identity.mode not in {"100644", "100755"}
@@ -101,6 +102,7 @@ def effective_units(context: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _check_judgment(judgment: dict[str, Any], unit: dict[str, Any], payload: dict[str, Any]) -> None:
+    """Require assessments for every changed instruction and inspection of affected paths when changes are material."""
     assessments = judgment["assessments"]
     paths = {delta["path"] for delta in unit["input_deltas"]}
     if len(assessments) != len(paths) or {item["path"] for item in assessments} != paths or not paths <= set(payload["nearby_contract_owners"]):

@@ -64,6 +64,8 @@ Check:
 - subprocess invocations use safe argument lists, bounded execution where appropriate, and useful failure context
 - cleanup cannot target broad or user-controlled paths accidentally
 
+For a command that promises to preserve an existing output, trace what happens if another process creates the destination after the CLI checks it. Opening with `"x"` enforces exclusive creation at open time. If the command also promises that readers see only complete files, check that guarantee separately at publication. See [Real Python on file handling](https://realpython.com/ref/best-practices/file-handling/) and [Python's file modes](https://docs.python.org/3/library/functions.html#open).
+
 Route package-resource and installed-entry-point failures to the build specialist. Route complex reusable subprocess orchestration for development tools to the support-script specialist.
 
 ## Maintainability

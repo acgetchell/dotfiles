@@ -189,7 +189,10 @@ to routing control. This runner deliberately provides no promotion switch.
 ## Account For The Whole Graph
 
 Set `REVIEW_GRAPH_USAGE_LEDGER` to `<proof-store>/usage.jsonl` for graph runtime
-commands. Each operation records a start and completion with measured wall time;
+commands. Keep the ledger outside the reviewed checkout. For standalone inputs
+that do not identify the reviewed checkout, set `REVIEW_GRAPH_REPOSITORY_ROOT`
+to its absolute path if the proof store is in another Git worktree.
+Each operation records a start and completion with measured wall time;
 failure and interruption do not erase earlier work. Its zero model cost applies
 only to the deterministic process and excludes coordinator inference and compute.
 

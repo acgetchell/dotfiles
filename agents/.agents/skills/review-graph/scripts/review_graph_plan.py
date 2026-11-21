@@ -12,6 +12,7 @@ import sys
 import tomllib
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, replace
+from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
@@ -20,6 +21,7 @@ from research_repo_tools.process import ExecutableNotFoundError, format_exceptio
 from review_graph_control import issue_run_control
 from review_graph_coverage import coverage_reference, reused_dependency_paths, reused_paths
 from review_graph_executor import executor_permissions
+from review_graph_frontmatter import frontmatter_text, parse_frontmatter
 from review_graph_git import covers_captured_worktree
 from review_graph_integrity import MAX_NATIVE_IDENTIFIER_LENGTH, digest_bytes, digest_json
 from review_graph_lifecycle import ReviewLifecycle, lifecycle_from_document
@@ -38,6 +40,7 @@ from review_graph_reuse import (
     verify_reuse_inputs,
 )
 from review_graph_scope import excluded_paths, scope_exclusions
+from review_graph_validation_contracts import texts
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -154,7 +157,6 @@ ROUTING_LAYERS = frozenset({"repository", "surface", "finalization"})
 _CLASSIFIER_SURFACES = ("tooling", "cpp", "rust", "python", "documentation")
 DEFAULT_SKILL_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ROUTING_CATALOG = Path(__file__).resolve().parents[1] / "references" / "routing-catalog.json"
-_FRONTMATTER_NAME = re.compile(r"^name:\s*[\"']?([^\"'\s]+)[\"']?\s*$")
 
 
 @dataclass(frozen=True)
@@ -506,6 +508,18 @@ class WorkerBudget:
 
     total: int = DEFAULT_TOTAL_FRESH_WORKER_BUDGET
     recovery_finalization_reserve: int = DEFAULT_RECOVERY_FINALIZATION_RESERVE
+
+    def require_planning_capacity(self) -> None:
+        """Reject invalid counts and reserves that leave no worker available."""
+        if type(self.total) is not int or type(self.recovery_finalization_reserve) is not int:
+            msg = "worker_budget and recovery_finalization_reserve must be integers"
+            raise ValueError(msg)
+        if self.total < 1 or self.recovery_finalization_reserve < 0:
+            msg = "worker budget must be positive and recovery/finalization reserve nonnegative"
+            raise ValueError(msg)
+        if self.recovery_finalization_reserve >= self.total:
+            msg = "recovery/finalization reserve must leave capacity for at least one worker"
+            raise ValueError(msg)
 
 
 @dataclass(frozen=True)
@@ -1102,6 +1116,7 @@ def _priority_rank(priority: str) -> int:
 
 
 def _validate_unique_ids(items: Iterable[str], *, label: str) -> None:
+    """Consume the iterable once and reject empty or repeated IDs within the labeled group."""
     values = tuple(items)
     if len(values) != len(set(values)):
         msg = f"{label} IDs must be unique"
@@ -1112,10 +1127,12 @@ def _validate_unique_ids(items: Iterable[str], *, label: str) -> None:
 
 
 def _path_is_within(path: Path, roots: Sequence[Path]) -> bool:
+    """Check whether the supplied path equals or descends from any supplied root."""
     return any(path == root or root in path.parents for root in roots)
 
 
 def _resolve_skill_root_path(raw_path: str, skill_roots: Sequence[Path]) -> Path:
+    """Resolve a skill file within the approved roots and reject ambiguous relative references."""
     roots = tuple(root.resolve() for root in skill_roots)
     if not roots:
         msg = "at least one approved skill root is required"
@@ -1143,23 +1160,22 @@ def _resolve_skill_root_path(raw_path: str, skill_roots: Sequence[Path]) -> Path
     return resolved
 
 
-def _frontmatter_skill_name(skill_path: Path) -> str:
-    lines = skill_path.read_text(encoding="utf-8").splitlines()
-    if not lines or lines[0].strip() != "---":
-        msg = f"skill file lacks YAML frontmatter: {skill_path}"
-        raise ValueError(msg)
-    for line in lines[1:]:
-        if line.strip() == "---":
-            break
-        if match := _FRONTMATTER_NAME.match(line.strip()):
-            return str(match.group(1))
-    msg = f"skill file lacks a frontmatter name: {skill_path}"
-    raise ValueError(msg)
+@lru_cache(maxsize=256)
+def _frontmatter_skill_name(header: str) -> str:
+    """Cache the immutable name by exact YAML text so file edits take effect immediately."""
+    frontmatter, diagnostic = parse_frontmatter(header)
+    if frontmatter is None:
+        raise ValueError(diagnostic)
+    return _text_field(frontmatter, "name")
 
 
 def _resolve_checked_skill_path(raw_path: str, skill_id: str, skill_roots: Sequence[Path]) -> Path:
+    """Require the resolved file's top-level YAML name to match the catalog skill ID."""
     resolved = _resolve_skill_root_path(raw_path, skill_roots)
-    actual_name = _frontmatter_skill_name(resolved)
+    header, diagnostic = frontmatter_text(resolved.read_text(encoding="utf-8"))
+    if header is None:
+        raise ValueError(f"{resolved}: {diagnostic}")
+    actual_name = _frontmatter_skill_name(header)
     if actual_name != skill_id:
         msg = f"skill/path mismatch: {skill_id} != {actual_name} at {resolved}"
         raise ValueError(msg)
@@ -1167,11 +1183,30 @@ def _resolve_checked_skill_path(raw_path: str, skill_id: str, skill_roots: Seque
 
 
 def _catalog_path_patterns(raw: Mapping[str, Any], key: str) -> tuple[str, ...]:
+    """Preserve pattern order and return an empty tuple when the optional catalog field is absent."""
     patterns = raw.get(key, [])
     if not isinstance(patterns, list) or any(not isinstance(pattern, str) or not pattern for pattern in patterns):
         msg = f"{key} must be an array of non-empty path patterns"
         raise ValueError(msg)
     return tuple(str(pattern) for pattern in patterns)
+
+
+def _text_field(raw: Mapping[str, Any], key: str) -> str:
+    """Read a required nonblank string without altering its whitespace."""
+    value = raw.get(key)
+    if not isinstance(value, str) or not value.strip():
+        msg = f"{key} must be a nonblank string"
+        raise ValueError(msg)
+    return value
+
+
+def required_routing_texts(raw: Mapping[str, Any], key: str) -> tuple[str, ...]:
+    """Read one or more nonblank routing statements from a document or saved plan."""
+    values = texts(raw.get(key), key)
+    if not values:
+        msg = f"{key} must contain at least one nonblank string"
+        raise ValueError(msg)
+    return values
 
 
 def load_routing_catalog(path: Path, *, skill_roots: Sequence[Path] = (DEFAULT_SKILL_ROOT,)) -> tuple[RoutingCatalogEntry, ...]:
@@ -1185,8 +1220,8 @@ def load_routing_catalog(path: Path, *, skill_roots: Sequence[Path] = (DEFAULT_S
         if not isinstance(raw, Mapping):
             msg = "routing catalog entries must be objects"
             raise TypeError(msg)
-        skill_id = str(raw["skill_id"])
-        skill_path = _resolve_checked_skill_path(str(raw["skill_path"]), skill_id, skill_roots)
+        skill_id = _text_field(raw, "skill_id")
+        skill_path = _resolve_checked_skill_path(_text_field(raw, "skill_path"), skill_id, skill_roots)
         raw_guarded_patterns = raw.get("classifier_guarded_path_patterns", [])
         if not isinstance(raw_guarded_patterns, list) or any(not isinstance(item, Mapping) for item in raw_guarded_patterns):
             msg = "classifier_guarded_path_patterns must be an array of classifier-surface/path-pattern objects"
@@ -1206,20 +1241,20 @@ def load_routing_catalog(path: Path, *, skill_roots: Sequence[Path] = (DEFAULT_S
                 raise ValueError(msg)
             guarded_patterns.append((classifier_surface, tuple(path_patterns)))
         entry = RoutingCatalogEntry(
-            catalog_id=str(raw["catalog_id"]),
-            router_id=str(raw["router_id"]),
-            rule_id=str(raw["rule_id"]),
-            layer=str(raw["layer"]),
-            surface=str(raw["surface"]),
+            catalog_id=_text_field(raw, "catalog_id"),
+            router_id=_text_field(raw, "router_id"),
+            rule_id=_text_field(raw, "rule_id"),
+            layer=_text_field(raw, "layer"),
+            surface=_text_field(raw, "surface"),
             skill_id=skill_id,
             skill_path=str(skill_path),
-            target_kind=str(raw["target_kind"]),
-            default_priority=str(raw["default_priority"]),
-            synthesis_dependency=(str(raw["synthesis_dependency"]) if raw.get("synthesis_dependency") is not None else None),
-            required_static_references=tuple(str(_resolve_skill_root_path(str(item), skill_roots)) for item in raw.get("required_static_references", [])),
+            target_kind=_text_field(raw, "target_kind"),
+            default_priority=_text_field(raw, "default_priority"),
+            synthesis_dependency=(_text_field(raw, "synthesis_dependency") if raw.get("synthesis_dependency") is not None else None),
+            required_static_references=tuple(str(_resolve_skill_root_path(item, skill_roots)) for item in _tuple_field(raw, "required_static_references")),
             path_patterns=_catalog_path_patterns(raw, "path_patterns"),
             classifier_guarded_path_patterns=tuple(guarded_patterns),
-            semantic_triggers=tuple(str(item) for item in raw.get("semantic_triggers", [])),
+            semantic_triggers=required_routing_texts(raw, "semantic_triggers"),
             excluded_path_patterns=_catalog_path_patterns(raw, "excluded_path_patterns"),
         )
         if entry.layer not in ROUTING_LAYERS:
@@ -1229,15 +1264,13 @@ def load_routing_catalog(path: Path, *, skill_roots: Sequence[Path] = (DEFAULT_S
             msg = f"unknown routing target kind for {entry.catalog_id}: {entry.target_kind}"
             raise ValueError(msg)
         _priority_rank(entry.default_priority)
-        if not entry.rule_id or not entry.semantic_triggers:
-            msg = f"routing catalog entry {entry.catalog_id} needs a rule ID and semantic triggers"
-            raise ValueError(msg)
         entries.append(entry)
     _validate_unique_ids((entry.catalog_id for entry in entries), label="routing catalog")
     return tuple(entries)
 
 
 def _decision_matches_entry(decision: RoutingDecision, entry: RoutingCatalogEntry) -> tuple[str, ...]:  # noqa: C901, PLR0912
+    """Collect conflicts between a routing decision, its catalog identity, and the evidence its disposition requires."""
     blockers: list[str] = []
     for actual, expected, label in (
         (decision.router_id, entry.router_id, "router"),
@@ -1464,6 +1497,7 @@ def classify_repository_paths(paths: Sequence[str], *, release_readiness: bool =
     signals: dict[str, set[str]] = {surface: set() for surface in _CLASSIFIER_SURFACES}
 
     def add(surface: str, path: str, reason: str) -> None:
+        """Record a path and reason once per classified surface."""
         signals[surface].add(f"{path}: {reason}")
 
     has_cpp = any(fnmatch.fnmatch(path, pattern) for path in normalized for pattern in ("*.cc", "*.cpp", "*.cxx", "*.hh", "*.hpp", "*.hxx", "*.ixx", "*.cppm"))
@@ -1626,8 +1660,8 @@ def expand_compact_routing(  # noqa: C901, PLR0912, PLR0913, PLR0915
         disposition = str(override.get("disposition")) if override is not None else ("selected" if default_selected else "not-applicable")
 
         if override is not None:
-            reason = str(override.get("reason", ""))
-            applicability_evidence = tuple(str(value) for value in override.get("applicability_evidence", ()))
+            reason = _text_field(override, "reason")
+            applicability_evidence = required_routing_texts(override, "applicability_evidence")
         elif selected_by_classifier:
             reason = f"deterministic repository classifier selected the {entry.surface} surface"
             applicability_evidence = signals[entry.surface]
@@ -1643,10 +1677,6 @@ def expand_compact_routing(  # noqa: C901, PLR0912, PLR0913, PLR0915
         else:
             reason = f"no {entry.rule_id} trigger was selected for the captured scope"
             applicability_evidence = (f"router {entry.router_id} considered {entry.catalog_id}",)
-
-        if not reason or not applicability_evidence:
-            msg = f"compact routing override {entry.catalog_id} requires reason and applicability evidence"
-            raise ValueError(msg)
 
         default_surface: tuple[str, ...] = ()
         if selected_by_classifier and entry.target_kind == "leaf":
@@ -1790,6 +1820,7 @@ def assess_repository_classifier_floor(
 
 
 def _reserved_node_ids(evidence_ids: Iterable[str]) -> frozenset[str]:
+    """Extract node IDs already claimed by retained review, validation, or artifact evidence."""
     reserved: set[str] = set()
     for evidence_id in evidence_ids:
         for prefix in ("review:", "validation:", "artifact://"):
@@ -1799,6 +1830,7 @@ def _reserved_node_ids(evidence_ids: Iterable[str]) -> frozenset[str]:
 
 
 def _allocate_node_id(prefix: str, ordinal: int, reserved: set[str] | frozenset[str]) -> str:
+    """Choose the first available numbered ID at or above the requested ordinal, starting at one."""
     candidate = max(1, ordinal)
     while f"{prefix}-{candidate:03d}" in reserved:
         candidate += 1
@@ -1806,6 +1838,7 @@ def _allocate_node_id(prefix: str, ordinal: int, reserved: set[str] | frozenset[
 
 
 def _expected_planned_evidence_id(node: WorkerNode) -> str:
+    """Derive the evidence ID from the worker's node ID and whether it runs validation."""
     return f"{'validation' if node.mode == 'validation' else 'review'}:{node.node_id}"
 
 
@@ -1884,6 +1917,7 @@ def coalesce_review_requirements(
 
 
 def _validation_group_key(item: ValidationRequirement) -> tuple[object, ...]:
+    """Select the source, command, environment, and output constraints under which validations may share a worker."""
     command_identity: object = item.canonical_recipe or item.commands
     return (
         item.source_state,
@@ -1911,6 +1945,7 @@ def _validation_group_key(item: ValidationRequirement) -> tuple[object, ...]:
 
 
 def _validate_validation_isolation(item: ValidationRequirement) -> None:
+    """Check that an isolated requirement declares a root and confines its working directories to that root."""
     if item.requires_isolation and item.isolation_root is None:
         msg = f"validation requirement {item.requirement_id} requires an isolation root"
         raise ValueError(msg)
@@ -2074,6 +2109,7 @@ def _schedule_nodes(nodes: Sequence[WorkerNode]) -> tuple[WorkerNode, ...]:
 def _validation_nodes(
     units: Sequence[ValidationUnit], *, skill_path: str, skill_digest: str, reference_digests: tuple[tuple[str, str], ...]
 ) -> tuple[WorkerNode, ...]:
+    """Create one validation worker per unit with its requirement IDs and validator skill provenance."""
     return tuple(
         WorkerNode(
             node_id=unit.node_id,
@@ -2129,6 +2165,7 @@ def _synthesis_nodes(
     validation_units: Sequence[ValidationUnit],
     additional_nodes: Sequence[WorkerNode],
 ) -> tuple[WorkerNode, ...]:
+    """Connect declared synthesis workers to the audits, validations, and additional workers they must consume."""
     review_by_id = {item.requirement_id: item for item in review_requirements}
     validation_node_by_requirement = {requirement_id: unit.node_id for unit in validation_units for requirement_id in unit.requirement_ids}
     result: list[WorkerNode] = []
@@ -2171,6 +2208,7 @@ def _synthesis_nodes(
 
 
 def _additional_nodes(nodes: Sequence[WorkerNode]) -> tuple[WorkerNode, ...]:
+    """Check which extra worker modes may declare a change target and retain their input order."""
     for node in nodes:
         if node.mode not in {"independent-review", "fix", "revalidation"}:
             msg = f"additional node {node.node_id} must use independent-review, fix, or revalidation mode"
@@ -2186,6 +2224,7 @@ def _additional_nodes(nodes: Sequence[WorkerNode]) -> tuple[WorkerNode, ...]:
 
 
 def _validate_plan_edges(nodes: Sequence[WorkerNode]) -> None:
+    """Reject duplicate worker IDs and dependencies on workers absent from the plan."""
     _validate_unique_ids((node.node_id for node in nodes), label="worker node")
     node_ids = {node.node_id for node in nodes}
     missing = sorted({predecessor for node in nodes for predecessor in node.predecessors if predecessor not in node_ids})
@@ -2227,6 +2266,7 @@ def _resolved_provenance(
 
 
 def _bind_worker_node_provenance(node: WorkerNode) -> WorkerNode:
+    """Return a worker with digests bound to its skill and static references."""
     skill_digest, reference_digests = _resolved_provenance(
         skill_path=node.skill_path, static_references=node.static_references, skill_digest=node.skill_digest, reference_digests=node.reference_digests
     )
@@ -2234,6 +2274,7 @@ def _bind_worker_node_provenance(node: WorkerNode) -> WorkerNode:
 
 
 def _bind_reused_review_provenance(identity: ReusedReviewEvidencePlan) -> ReusedReviewEvidencePlan:
+    """Bind the reused review identity to its skill bytes and static reference digests."""
     skill_digest, reference_digests = _resolved_provenance(
         skill_path=identity.skill_path,
         static_references=identity.static_references,
@@ -2288,7 +2329,12 @@ def plan_graph(  # noqa: C901, PLR0913, PLR0915
     control_root: Path | None = None,
     repository_root: Path | None = None,
 ) -> GraphPlan:
-    """Build the complete required graph for one exact execution profile."""
+    """Schedule the review, validation, and synthesis nodes for one execution profile.
+
+    For a new lifecycle, an explicit repository_root creates run-control files
+    under the external control_root or a temporary directory. Omitting the
+    repository root leaves a new plan unbound. A supplied lifecycle retains its binding.
+    """
     if not isinstance(execution_profile, str) or execution_profile not in {"grouped", "isolated", "isolated-only", "mixed"}:
         msg = "execution_profile must be exactly grouped, isolated, isolated-only, or mixed"
         raise ValueError(msg)
@@ -2296,12 +2342,7 @@ def plan_graph(  # noqa: C901, PLR0913, PLR0915
     if type(independent_review_after_audits) is not bool:
         msg = "independent_review_after_audits must be a boolean"
         raise ValueError(msg)
-    if budget.total < 1 or budget.recovery_finalization_reserve < 0:
-        msg = "worker budget must be positive and recovery/finalization reserve nonnegative"
-        raise ValueError(msg)
-    if budget.recovery_finalization_reserve >= budget.total:
-        msg = "recovery/finalization reserve must leave capacity for at least one worker"
-        raise ValueError(msg)
+    budget.require_planning_capacity()
     normalized_line_bounds: dict[str, int] = {}
     for path, bound in captured_path_line_bounds:
         normalized_path = _normalize_repository_path(path, label="captured_path_line_bounds")
@@ -2455,6 +2496,7 @@ def assess_node_acceptance(evidence: NodeAcceptanceEvidence) -> Assessment:
 
 
 def _nonempty_text(value: object) -> bool:
+    """Check whether a value is a string containing at least one non-whitespace character."""
     return isinstance(value, str) and bool(value.strip())
 
 
@@ -2464,10 +2506,12 @@ def _runtime_isinstance(value: object, expected: type) -> bool:
 
 
 def _has_three_fingerprints(values: Sequence[object]) -> bool:
+    """Check that all three source identity fields are present and nonblank."""
     return len(values) == 3 and all(_nonempty_text(value) for value in values)
 
 
 def _duplicate_values(values: Sequence[str]) -> tuple[str, ...]:
+    """Return each repeated value once, in sorted order for stable diagnostics."""
     seen: set[str] = set()
     duplicates: set[str] = set()
     for value in values:
@@ -2478,6 +2522,7 @@ def _duplicate_values(values: Sequence[str]) -> tuple[str, ...]:
 
 
 def _identifier_tuple_blockers(values: Sequence[str], *, label: str) -> tuple[str, ...]:
+    """Report blank and duplicate identifiers within the labeled sequence."""
     blockers: list[str] = []
     if any(not _nonempty_text(value) for value in values):
         blockers.append(f"{label} must be non-empty strings")
@@ -2572,6 +2617,7 @@ def validate_isolation_root(isolation_root: str, repository_root: Path) -> None:
 
 
 def _native_heading_blockers(text: str, *, expected_heading: str, required_sections: Sequence[str]) -> tuple[str, ...]:
+    """Check the document heading and require each expected section exactly once in order."""
     blockers: list[str] = []
     lines = text.splitlines()
     if not lines or lines[0] != expected_heading:
@@ -2622,6 +2668,7 @@ def _native_preamble(text: str, first_section: str) -> tuple[str | None, tuple[s
 
 
 def _native_json_block(text: str) -> tuple[Mapping[str, Any] | None, tuple[str, ...]]:
+    """Extract the canonical evidence object and return diagnostics for malformed or noncanonical blocks."""
     blockers: list[str] = []
     if text.count(NATIVE_EVIDENCE_BLOCK_OPEN) != 1:
         return None, ("native result must contain exactly one canonical evidence block",)
@@ -2671,6 +2718,7 @@ def _parse_native_result(
 
 
 def _native_identifier_list_blockers(value: object, *, field_name: str) -> tuple[str, ...]:
+    """Check a native evidence array for bounded length and unique, nonblank identifiers."""
     if not isinstance(value, list):
         return (f"native result evidence {field_name} must be an array",)
     if len(value) > MAX_NATIVE_IDENTIFIER_COUNT:
@@ -2683,6 +2731,7 @@ def _native_identifier_list_blockers(value: object, *, field_name: str) -> tuple
 
 
 def _native_payload_shape_blockers(payload: Mapping[str, Any], *, expected_keys: frozenset[str]) -> tuple[str, ...]:
+    """Compare the envelope with the expected keys and check its version and identity fields."""
     blockers: list[str] = []
     observed_keys = frozenset(payload)
     if observed_keys != expected_keys:
@@ -2712,11 +2761,13 @@ def _native_payload_shape_blockers(payload: Mapping[str, Any], *, expected_keys:
 
 
 def _native_field_values(body: str, label: str, *, indent: str = "") -> tuple[str, ...]:
+    """Collect values from matching labeled bullet lines at the specified indentation, in document order."""
     prefix = f"{indent}- {label}: "
     return tuple(line[len(prefix) :].strip() for line in body.splitlines() if line.startswith(prefix))
 
 
 def _native_values_blockers(body: str, *, section: str, label: str, expected: Sequence[str], indent: str = "") -> tuple[str, ...]:
+    """Compare the ordered values of a report field with the corresponding evidence envelope."""
     observed = _native_field_values(body, label, indent=indent)
     if observed != tuple(expected):
         return (f"native result {section} {label} values do not match its evidence envelope",)
@@ -2752,12 +2803,14 @@ def _native_record_fields(body: str, *, section: str, labels: Sequence[str], ind
 
 
 def _native_nonempty_section_blockers(body: str, *, section: str) -> tuple[str, ...]:
+    """Flag a required evidence section that is empty or contains only the absence marker."""
     if not body or body == "none":
         return (f"native result {section} section must contain concrete evidence",)
     return ()
 
 
 def _native_records(body: str, label: str) -> tuple[tuple[str, str], ...]:
+    """Split a report section into labeled records, preserving the text associated with each label."""
     lines = body.splitlines()
     prefix = f"- {label}:"
     positions = tuple(index for index, line in enumerate(lines) if line == prefix or line.startswith(prefix + " "))
@@ -2771,6 +2824,7 @@ def _native_records(body: str, label: str) -> tuple[tuple[str, str], ...]:
 def _native_mutation_blockers(  # noqa: PLR0913
     body: str, *, section: str, source_label: str, git_label: str, source_mutated: bool, git_mutated: bool
 ) -> tuple[str, ...]:
+    """Check that the source and Git mutation declarations agree with the evidence flags."""
     blockers: list[str] = []
     source_values = _native_field_values(body, source_label)
     source_matches = len(source_values) == 1 and bool(source_values[0]) and ((source_values[0] != "none") if source_mutated else (source_values[0] == "none"))
@@ -2781,6 +2835,7 @@ def _native_mutation_blockers(  # noqa: PLR0913
 
 
 def _native_routing_discovery_blockers(body: str, evidence: ReviewEvidence, *, section: str) -> tuple[str, ...]:
+    """Compare handoff IDs and their discovery details with the worker's reported evidence."""
     records = _native_records(body, "Handoff ID")
     blockers: list[str] = []
     if tuple(handoff_id for handoff_id, _record in records) != evidence.handoff_ids:
@@ -2796,6 +2851,7 @@ def _native_routing_discovery_blockers(body: str, evidence: ReviewEvidence, *, s
 
 
 def _native_fingerprint_proof_blockers(body: str, fingerprints: FingerprintEvidence) -> tuple[str, ...]:
+    """Check the expected and observed fingerprint groups against the recorded source identities."""
     blockers: list[str] = []
     lines = body.splitlines()
     group_positions = tuple(tuple(index for index, line in enumerate(lines) if line == heading) for heading in ("- Expected:", "- Before:", "- After:"))
@@ -2817,6 +2873,7 @@ def _native_fingerprint_proof_blockers(body: str, fingerprints: FingerprintEvide
 
 
 def _independent_finding_location_matches_dispatch(location: str, planned_paths: Sequence[str], planned_path_line_bounds: Sequence[tuple[str, int]]) -> bool:
+    """Check that a reported file and its optional line range fall within the independent review assignment."""
     if len(location) >= 2 and location.startswith("`") and location.endswith("`"):
         location = location[1:-1]
     if len(location) > MAX_NATIVE_IDENTIFIER_LENGTH:
@@ -2837,6 +2894,7 @@ def _independent_finding_location_matches_dispatch(location: str, planned_paths:
 
 
 def _independent_finding_blockers(body: str, expectation: ReviewEvidenceExpectation, evidence: ReviewEvidence) -> tuple[str, ...]:
+    """Check finding IDs, locations, and required explanatory fields against the independent review dispatch."""
     records = _native_records(body, "ID")
     if tuple(finding_id for finding_id, _ in records) != evidence.finding_ids:
         return ("native independent result finding IDs do not match its evidence envelope",)
@@ -2861,6 +2919,7 @@ def _independent_finding_blockers(body: str, expectation: ReviewEvidenceExpectat
 
 
 def _ordinary_finding_blockers(body: str, evidence: ReviewEvidence) -> tuple[str, ...]:
+    """Compare ordinary finding records with the envelope and check their required fields."""
     records = _native_records(body, "ID")
     if tuple(finding_id for finding_id, _ in records) != evidence.finding_ids:
         return ("native review result finding IDs do not match its evidence envelope",)
@@ -2880,6 +2939,7 @@ def _ordinary_finding_blockers(body: str, evidence: ReviewEvidence) -> tuple[str
 
 
 def _native_repository_path_list(value: str, *, label: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Parse the report's portable path list, treating the literal 'none' as an empty list."""
     if value == "none":
         return (), ()
     raw_paths = tuple(item[1:-1] if len(item) >= 2 and item.startswith("`") and item.endswith("`") else item for item in value.split(", "))
@@ -2891,6 +2951,7 @@ def _native_repository_path_list(value: str, *, label: str) -> tuple[tuple[str, 
 
 
 def _fix_change_record_blockers(change_id: str, record_body: str, *, expected_id: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Extract changed paths and report missing change details or a mismatched change ID."""
     blockers: list[str] = []
     if change_id != expected_id:
         blockers.append("native fix result Change IDs do not match the ordered node identity")
@@ -2913,6 +2974,7 @@ def _fix_change_record_blockers(change_id: str, record_body: str, *, expected_id
 
 
 def _fix_change_blockers(state_verification: str, changes: str, expectation: ReviewEvidenceExpectation, evidence: ReviewEvidence) -> tuple[str, ...]:
+    """Reconcile a fix worker's change records with its declared changed paths and state verification."""
     if expectation.mode != "fix":
         return ()
     blockers: list[str] = []
@@ -2958,6 +3020,7 @@ def _native_metadata_transition_blockers(body: str, fingerprints: FingerprintEvi
 
 
 def _native_state_verification_blockers(body: str, fingerprints: FingerprintEvidence, *, status: str, changed_as_reported: bool = False) -> tuple[str, ...]:
+    """Compare observed fingerprints and verification results with the reported state transition."""
     blockers = list(_native_metadata_transition_blockers(body, fingerprints, section="State Verification"))
     for ordinal, label in enumerate(("Observed scope fingerprint", "Observed worktree fingerprint", "Observed repository state fingerprint")):
         blockers.extend(
@@ -3034,6 +3097,7 @@ def _scope_provenance_blockers(scope: str, expectation: ReviewEvidenceExpectatio
 def _ordinary_review_native_blockers(  # noqa: C901, PLR0912
     sections: Mapping[str, str], expectation: ReviewEvidenceExpectation, evidence: ReviewEvidence
 ) -> tuple[str, ...]:
+    """Reconcile the ordinary worker's Markdown sections with its dispatch and structured result."""
     blockers: list[str] = []
     skill_loading = sections["## Skill Loading"]
     references_loaded = ", ".join(path for path, _ in expectation.reference_digests) or "none"
@@ -3102,6 +3166,7 @@ def _ordinary_review_native_blockers(  # noqa: C901, PLR0912
 def _independent_review_native_blockers(  # noqa: C901, PLR0912, PLR0915
     sections: Mapping[str, str], expectation: ReviewEvidenceExpectation, evidence: ReviewEvidence
 ) -> tuple[str, ...]:
+    """Check the independent report's scope, findings, limitations, and source evidence against its assignment."""
     blockers: list[str] = []
     scope = sections["## Scope Inspected"]
     blockers.extend(_scope_provenance_blockers(scope, expectation))
@@ -3206,6 +3271,7 @@ def _independent_review_native_blockers(  # noqa: C901, PLR0912, PLR0915
 
 
 def _validation_environment_identity(unit: ValidationUnit) -> str:
+    """Serialize the execution environment and artifact policy as canonical JSON for comparison."""
     return json.dumps(
         {
             "artifact_owner": unit.artifact_owner,
@@ -3224,6 +3290,7 @@ def _validation_environment_identity(unit: ValidationUnit) -> str:
 
 
 def _validation_reused_evidence_blockers(body: str, expectation: ValidationEvidenceExpectation, evidence: ValidationEvidence) -> tuple[str, ...]:
+    """Verify cited reuse records or require the absence marker for an executed validation."""
     if evidence.status != "reused":
         return () if body == "none" else ("native validation result Reused Evidence must be exact none when validation was executed",)
     records = _native_records(body, "Ledger entry")
@@ -3253,6 +3320,7 @@ def _validation_reused_evidence_blockers(body: str, expectation: ValidationEvide
 def _validation_artifact_blockers(  # noqa: C901
     body: str, expectation: ValidationEvidenceExpectation
 ) -> tuple[tuple[ValidationArtifact, ...], tuple[str, ...]]:
+    """Parse reported artifacts and return discrepancies from the validation unit's allowed outputs."""
     expected = expectation.validation_unit.allowed_artifacts
     if not expected:
         blockers = () if body == "none" else ("native validation result claims artifacts absent from its dispatch",)
@@ -3310,6 +3378,7 @@ def _validation_artifact_blockers(  # noqa: C901
 
 
 def _validation_execution_artifact_reference_blockers(value: str | None, artifacts: Sequence[ValidationArtifact], *, execution_id: str) -> tuple[str, ...]:
+    """Match an execution's artifact references to declared paths, IDs, digest modes, and digests."""
     if value == "none":
         return ()
     if value is None:
@@ -3357,6 +3426,7 @@ def _validation_execution_artifact_reference_blockers(value: str | None, artifac
 
 
 def _validation_ledger_expected_fields(expectation: ValidationEvidenceExpectation, evidence: ValidationEvidence) -> tuple[tuple[str, str], ...]:
+    """Derive the ledger fields and reuse disposition from the dispatched unit and its observed result."""
     mutated = evidence.source_mutated or evidence.git_mutated
     disposition = "ineligible" if mutated else "candidate-for-reuse" if evidence.status in {"passed", "reused"} else "evidence-only"
     if evidence.status in {"passed", "failed"}:
@@ -3384,6 +3454,7 @@ def _validation_ledger_expected_fields(expectation: ValidationEvidenceExpectatio
 
 
 def _validation_coalescing_identity(unit: ValidationUnit) -> str:
+    """Serialize the fields that determine whether validation requests can share an execution."""
     return json.dumps(
         {
             "allowed_artifacts": [asdict(artifact) for artifact in unit.allowed_artifacts],
@@ -3406,6 +3477,7 @@ def _validation_coalescing_identity(unit: ValidationUnit) -> str:
 
 
 def _validation_plan_expected_body(expectation: ValidationEvidenceExpectation) -> str:
+    """Render the expected Markdown validation plan from the dispatched unit and its requirement authorities."""
     unit = expectation.validation_unit
     authorities = tuple(dict.fromkeys(authority for _, authority, *_ in unit.requirement_plans))
     lines = [
@@ -3450,6 +3522,7 @@ def _validation_plan_expected_body(expectation: ValidationEvidenceExpectation) -
 
 
 def _validation_requirements_expected_body(expectation: ValidationEvidenceExpectation, evidence: ValidationEvidence) -> str:
+    """Render each requirement's expected disposition, or the absence marker when there are no requirements."""
     if not evidence.requirement_ids:
         return "none"
     disposition = evidence.status if evidence.status in {"passed", "failed", "blocked", "reused"} else "blocked"
@@ -3516,6 +3589,7 @@ def validation_command_field(command: object) -> tuple[str, str]:
 def _validation_native_sections_blockers(  # noqa: C901, PLR0912, PLR0915
     sections: Mapping[str, str], expectation: ValidationEvidenceExpectation, evidence: ValidationEvidence
 ) -> tuple[str, ...]:
+    """Check the validator's Markdown plan, executions, artifacts, and ledger against the structured evidence."""
     blockers: list[str] = []
     skill_loading = sections["## Skill Loading"]
     references_loaded = ", ".join(path for path, _ in expectation.reference_digests) or "none"
@@ -3684,6 +3758,7 @@ def _validation_native_sections_blockers(  # noqa: C901, PLR0912, PLR0915
 
 
 def _review_native_header_blockers(body: str, expectation: ReviewEvidenceExpectation, evidence: ReviewEvidence) -> tuple[str, ...]:
+    """Match a native review report header against its node, authorization, and expected source state."""
     return _native_header_blockers(
         body,
         result_kind="Review Node Result",
@@ -3705,6 +3780,7 @@ def _review_native_header_blockers(body: str, expectation: ReviewEvidenceExpecta
 
 
 def _validation_native_header_blockers(body: str, evidence: ValidationEvidence) -> tuple[str, ...]:
+    """Match a validation report header against the validator invocation and expected fingerprints."""
     return _native_header_blockers(
         body,
         result_kind="Validation Result",
@@ -3724,6 +3800,7 @@ def _validation_native_header_blockers(body: str, evidence: ValidationEvidence) 
 
 
 def _review_native_result_blockers(content: bytes, expectation: ReviewEvidenceExpectation, evidence: ReviewEvidence) -> tuple[str, ...]:
+    """Parse the native review report and reconcile its envelope and mode-specific sections."""
     independent = evidence.mode == "independent-review"
     payload, preamble, sections, parse_blockers = _parse_native_result(
         content,
@@ -3786,6 +3863,7 @@ def _review_native_result_blockers(content: bytes, expectation: ReviewEvidenceEx
 
 
 def _validation_native_result_blockers(content: bytes, expectation: ValidationEvidenceExpectation, evidence: ValidationEvidence) -> tuple[str, ...]:
+    """Parse the native validation report and reconcile its envelope, fields, and evidence sections."""
     payload, preamble, sections, parse_blockers = _parse_native_result(
         content, expected_heading="# Validation Result", required_sections=_VALIDATION_RESULT_SECTIONS
     )
@@ -3872,10 +3950,12 @@ def validation_evidence_expectation(  # noqa: PLR0913
 
 
 def _manifest_entry_digest(*, evidence_id: str, artifact_id: str, artifact_digest: str) -> str:
+    """Bind an evidence ID, artifact ID, and content digest into one manifest entry digest."""
     return digest_json({"artifact_digest": artifact_digest, "artifact_id": artifact_id, "evidence_id": evidence_id})
 
 
 def _manifest_digest(manifest: ArtifactManifest) -> str:
+    """Hash the manifest identity and its entries in a stable order independent of declaration order."""
     entries = sorted(
         (
             {"artifact_digest": entry.artifact_digest, "artifact_id": entry.artifact_id, "entry_digest": entry.entry_digest, "evidence_id": entry.evidence_id}
@@ -4124,6 +4204,7 @@ def assess_validation_evidence(  # noqa: C901, PLR0912, PLR0915
 def _proof_mapping_blockers(
     *, label: str, required_ids: Sequence[str], mapping: Sequence[tuple[str, str]], accepted_evidence_ids: Sequence[str], stale_evidence_ids: Sequence[str]
 ) -> tuple[str, ...]:
+    """Check that every required ID maps to accepted, current evidence and diagnose missing or stale mappings."""
     blockers: list[str] = []
     required = set(required_ids)
     mapped_ids = tuple(requirement_id for requirement_id, _ in mapping)
@@ -4325,6 +4406,7 @@ def review_source_state_blockers(  # noqa: PLR0911 - fail closed at each provena
 def _review_bundle_blockers(  # noqa: C901, PLR0912
     proof_expectation: RepositoryReviewProofExpectation, proof: RepositoryReviewProof, records: Sequence[tuple[ReviewEvidenceExpectation, ReviewEvidence]]
 ) -> tuple[tuple[str, ...], dict[str, tuple[ReviewEvidenceExpectation, ReviewEvidence]]]:
+    """Index review records by evidence ID and check their identity, source state, and reuse against the proof."""
     blockers = list(_identifier_tuple_blockers(tuple(evidence.evidence_id for _, evidence in records), label="review bundle evidence IDs"))
     by_id = {evidence.evidence_id: (expectation, evidence) for expectation, evidence in records}
     accepted_handoff_ids = tuple(
@@ -4408,6 +4490,7 @@ def _review_bundle_blockers(  # noqa: C901, PLR0912
 def _validation_bundle_blockers(
     proof: RepositoryReviewProof, records: Sequence[tuple[ValidationEvidenceExpectation, ValidationEvidence]]
 ) -> tuple[tuple[str, ...], dict[str, tuple[ValidationEvidenceExpectation, ValidationEvidence]]]:
+    """Index validation records by evidence ID and compare outcomes and source states with the proof."""
     blockers = list(_identifier_tuple_blockers(tuple(evidence.evidence_id for _, evidence in records), label="validation bundle evidence IDs"))
     by_id = {evidence.evidence_id: (expectation, evidence) for expectation, evidence in records}
     extra_ids = sorted(set(by_id) - set(proof.accepted_validation_evidence_ids))
@@ -4430,6 +4513,7 @@ def _validation_bundle_blockers(
 
 
 def _mapping_ownership_blockers(*, label: str, mapping: Sequence[tuple[str, str]], records: Mapping[str, tuple[Any, Any]]) -> tuple[str, ...]:
+    """Check that both the dispatch expectation and its evidence claim each mapped requirement."""
     blockers: list[str] = []
     for requirement_id, evidence_id in mapping:
         record = records.get(evidence_id)
@@ -4451,6 +4535,7 @@ def _planned_mapping_blockers(
     planned_node_evidence: Sequence[tuple[str, str]],
     records: Mapping[str, tuple[Any, Any]],
 ) -> tuple[str, ...]:
+    """Compare proof mappings with the worker nodes and evidence IDs assigned during planning."""
     blockers: list[str] = []
     planned_nodes = dict(planned_mapping)
     evidence_by_node = dict(planned_node_evidence)
@@ -4566,6 +4651,7 @@ def _artifact_manifest_blockers(  # noqa: C901, PLR0912, PLR0915
     review_records: Mapping[str, tuple[ReviewEvidenceExpectation, ReviewEvidence]],
     validation_records: Mapping[str, tuple[ValidationEvidenceExpectation, ValidationEvidence]],
 ) -> tuple[str, ...]:
+    """Verify artifact claims and recomputed digests against the trusted verifier and repository proof."""
     blockers: list[str] = []
     if not isinstance(trusted_verifier, TrustedArtifactVerifier):
         blockers.append("artifact verification requires a typed trusted verifier")
@@ -4719,6 +4805,7 @@ def stop_after_worker_creation_failure(failure: CreationFailure) -> ResumeManife
         raise ValueError(msg)
 
     def resume_node(node: WorkerNode) -> ResumeNode:
+        """Preserve the failed worker's assignment and provenance for the resume plan."""
         return ResumeNode(
             node_id=node.node_id,
             skill_id=node.skill_id,
@@ -4758,12 +4845,17 @@ def stop_after_worker_creation_failure(failure: CreationFailure) -> ResumeManife
 
 
 def _missing_completion_evidence(required: Sequence[str], satisfied: Sequence[str], label: str) -> str | None:
+    """Return a sorted diagnostic for unsatisfied IDs or None when every requirement is covered."""
     missing = sorted(set(required) - set(satisfied))
     return f"{label}: {', '.join(missing)}" if missing else None
 
 
 def assess_completion(evidence: CompletionEvidence) -> Assessment:  # noqa: C901
-    """Enforce the graph-completion gate."""
+    """Return whether the review can complete, with the blockers that prevented completion.
+
+    Reconcile the caller's coverage claims against the verified review and
+    validation records. Outstanding handoffs or missing synthesis also block completion.
+    """
     blockers: list[str] = []
     expectation = evidence.repository_review_expectation
     proof = evidence.repository_review_proof
@@ -4897,6 +4989,7 @@ def assess_completion(evidence: CompletionEvidence) -> Assessment:  # noqa: C901
 
 
 def _migration_trial_blockers(trial: MigrationTrial) -> tuple[str, ...]:
+    """Compare observed routing and findings with the migration expectations and check required recovery evidence."""
     expected_skills = set(trial.expected_applicable_skill_ids)
     observed_skills = set(trial.observed_applicable_skill_ids)
     expected_findings = set(trial.expected_canonical_finding_ids)
@@ -5200,6 +5293,7 @@ def select_execution_profile(  # noqa: C901, PLR0912
 
 
 def _validate_nodes(nodes: Sequence[PlanNode]) -> dict[str, PlanNode]:
+    """Index timing nodes after checking their IDs, durations, and predecessor references."""
     by_id = {node.node_id: node for node in nodes}
     if len(by_id) != len(nodes):
         msg = "node IDs must be unique"
@@ -5225,6 +5319,7 @@ def critical_path_seconds(nodes: Sequence[PlanNode], *, sequential: bool) -> int
     complete: dict[str, int] = {}
 
     def visit(node_id: str) -> int:
+        """Memoize the longest predecessor path through this node and reject dependency cycles."""
         if node_id in complete:
             return complete[node_id]
         if node_id in visiting:
@@ -5363,6 +5458,7 @@ def reconcile_execution(ledger: ExecutionLedger) -> Assessment:
 
 
 def _tuple_field(item: Mapping[str, Any], name: str) -> tuple[str, ...]:
+    """Read a JSON string array in order and use an empty tuple for an absent field."""
     value = item.get(name, [])
     if not isinstance(value, list) or not all(isinstance(entry, str) for entry in value):
         msg = f"{name} must be a list of strings"
@@ -5371,6 +5467,7 @@ def _tuple_field(item: Mapping[str, Any], name: str) -> tuple[str, ...]:
 
 
 def _bounded_text_field(item: Mapping[str, Any], name: str) -> str:
+    """Require nonblank text within the native identifier length limit."""
     value = item.get(name)
     if not isinstance(value, str) or not value.strip() or len(value) > MAX_NATIVE_IDENTIFIER_LENGTH:
         msg = f"{name} must be a bounded non-empty string"
@@ -5379,10 +5476,12 @@ def _bounded_text_field(item: Mapping[str, Any], name: str) -> str:
 
 
 def _optional_bounded_text_field(item: Mapping[str, Any], name: str) -> str | None:
+    """Return None for an absent or null field and validate the length of supplied text."""
     return None if item.get(name) is None else _bounded_text_field(item, name)
 
 
 def _source_state_field(item: Mapping[str, Any]) -> tuple[str, str, str]:
+    """Read the scope, worktree, and repository fingerprints in their declared order."""
     value = item.get("source_state")
     if not isinstance(value, list) or len(value) != 3:
         msg = "source_state must be exactly three bounded non-empty strings"
@@ -5506,6 +5605,7 @@ def _verified_artifact_status(  # noqa: C901, PLR0912, PLR0915
 
 
 def _allowed_artifacts_field(item: Mapping[str, Any], repository_root: Path | None, isolation_root: str | None) -> tuple[ValidationArtifact, ...]:
+    """Parse artifact declarations, checking path ownership and paired digest and digest-mode fields."""
     value = item.get("allowed_artifacts", [])
     required_keys = {"kind", "path", "repository_status"}
     optional_keys = {"artifact_digest", "artifact_digest_mode", "artifact_id"}
@@ -5548,6 +5648,7 @@ def _allowed_artifacts_field(item: Mapping[str, Any], repository_root: Path | No
 
 
 def _boolean_field(item: Mapping[str, Any], name: str, *, default: bool, label: str | None = None) -> bool:
+    """Apply the default only when the field is absent and require a boolean when supplied."""
     if name not in item:
         return default
     value = item[name]
@@ -5558,6 +5659,7 @@ def _boolean_field(item: Mapping[str, Any], name: str, *, default: bool, label: 
 
 
 def _normalize_repository_path(value: str, *, label: str) -> str:
+    """Normalize a concrete repository-relative POSIX path and reject absolute paths or traversal."""
     if not value.strip() or "\\" in value:
         msg = f"{label} must contain portable repository-relative paths"
         raise ValueError(msg)
@@ -5573,6 +5675,7 @@ def _normalize_repository_path(value: str, *, label: str) -> str:
 
 
 def _normalized_repository_paths(values: Sequence[str], *, label: str) -> tuple[str, ...]:
+    """Normalize paths in input order and reject duplicates after normalization."""
     normalized = tuple(_normalize_repository_path(value, label=label) for value in values)
     if len(normalized) != len(set(normalized)):
         msg = f"{label} must not contain duplicate normalized paths"
@@ -5609,6 +5712,7 @@ def _captured_path_line_bounds_from_document(document: Mapping[str, Any], captur
 
 
 def _capture_pathspecs_from_document(document: Mapping[str, Any]) -> tuple[str, ...]:
+    """Normalize requested capture paths while preserving the repository-wide dot selector."""
     raw_pathspecs = _tuple_field(document, "requested_paths")
     normalized = tuple("." if path == "." else _normalize_repository_path(path, label="requested_paths") for path in raw_pathspecs)
     if len(normalized) != len(set(normalized)):
@@ -5713,6 +5817,7 @@ def _independent_change_surface(decision: RoutingDecision, command: str, capture
 def _constrain_routing_surfaces(
     catalog: Sequence[RoutingCatalogEntry], decisions: Sequence[RoutingDecision], *, captured_paths: Sequence[str]
 ) -> tuple[tuple[RoutingDecision, ...], tuple[str, ...]]:
+    """Normalize decision paths and report selected or reused worker surfaces outside the capture."""
     catalog_by_id = {entry.catalog_id: entry for entry in catalog}
     captured = set(captured_paths)
     normalized: list[RoutingDecision] = []
@@ -5767,10 +5872,12 @@ def _baseline_skill_coverage(
 
 
 def _resolved_reference_tuple(item: Mapping[str, Any], name: str, skill_roots: Sequence[Path]) -> tuple[str, ...]:
+    """Resolve the declared static references against the approved skill roots in input order."""
     return tuple(str(_resolve_skill_root_path(path, skill_roots)) for path in _tuple_field(item, name))
 
 
 def _validated_repository_root(repository_root: Path | None) -> Path | None:
+    """Resolve an explicitly supplied absolute checkout directory, preserving None for an unbound plan."""
     if repository_root is None:
         return None
     if not repository_root.is_absolute():
@@ -5784,6 +5891,7 @@ def _validated_repository_root(repository_root: Path | None) -> Path | None:
 
 
 def _resolve_repository_instruction_path(raw_path: str, repository_root: Path | None, skill_roots: Sequence[Path]) -> Path:
+    """Resolve the instruction file against the repository or approved skill roots and check containment."""
     roots = tuple(root.resolve() for root in skill_roots)
     if raw_path.startswith("$SKILLS_ROOT/"):
         return _resolve_skill_root_path(raw_path, roots)
@@ -5812,10 +5920,12 @@ def _resolve_repository_instruction_path(raw_path: str, repository_root: Path | 
 
 
 def _resolved_instruction_tuple(item: Mapping[str, Any], name: str, repository_root: Path | None, skill_roots: Sequence[Path]) -> tuple[str, ...]:
+    """Resolve instruction paths in declaration order against the allowed repository and skill roots."""
     return tuple(str(_resolve_repository_instruction_path(path, repository_root, skill_roots)) for path in _tuple_field(item, name))
 
 
 def _routing_decisions_from_document(document: Mapping[str, Any], repository_root: Path | None, skill_roots: Sequence[Path]) -> tuple[RoutingDecision, ...]:
+    """Parse explicit routing decisions and bind their skill, instruction, and reference paths."""
     return tuple(
         RoutingDecision(
             catalog_id=str(item["catalog_id"]),
@@ -5825,8 +5935,8 @@ def _routing_decisions_from_document(document: Mapping[str, Any], repository_roo
             skill_id=str(item["skill_id"]),
             skill_path=str(_resolve_checked_skill_path(str(item["skill_path"]), str(item["skill_id"]), skill_roots)),
             disposition=str(item["disposition"]),
-            reason=str(item["reason"]),
-            applicability_evidence=_tuple_field(item, "applicability_evidence"),
+            reason=_text_field(item, "reason"),
+            applicability_evidence=required_routing_texts(item, "applicability_evidence"),
             review_surface=_tuple_field(item, "review_surface"),
             instruction_paths=_resolved_instruction_tuple(item, "instruction_paths", repository_root, skill_roots),
             static_references=_resolved_reference_tuple(item, "static_references", skill_roots),
@@ -5841,6 +5951,7 @@ def _routing_decisions_from_document(document: Mapping[str, Any], repository_roo
 
 
 def _routing_discoveries_from_document(document: Mapping[str, Any]) -> tuple[RoutingDiscovery, ...]:
+    """Recover handoff discoveries in the order supplied by the planning document."""
     return tuple(
         RoutingDiscovery(
             handoff_id=str(item["handoff_id"]), source_node_id=str(item["source_node_id"]), catalog_id=str(item["catalog_id"]), evidence=str(item["evidence"])
@@ -5876,6 +5987,7 @@ def synthesis_nodes_from_routing(catalog: Sequence[RoutingCatalogEntry], decisio
 def _compact_routing_overrides_from_document(
     document: Mapping[str, Any], repository_root: Path | None, skill_roots: Sequence[Path]
 ) -> tuple[Mapping[str, Any], ...]:
+    """Copy compact overrides and resolve any instruction and static-reference paths they declare."""
     overrides: list[Mapping[str, Any]] = []
     for raw in document.get("routing_overrides", []):
         if not isinstance(raw, Mapping):
@@ -5891,6 +6003,7 @@ def _compact_routing_overrides_from_document(
 
 
 def _workspace_effects_field(item: Mapping[str, Any], repository_root: Path | None) -> tuple[str, ...]:
+    """Normalize workspace effects and check them as ignored output paths when a repository is available."""
     label = f"validation requirement {item.get('requirement_id', '<unknown>')} expected_workspace_effects"
     paths = _normalized_repository_paths(_tuple_field(item, "expected_workspace_effects"), label=label)
     for path in paths:
@@ -5974,7 +6087,12 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0913, PLR0915
     observed_metadata_transition: MetadataTransition | None = None,
     control_root: Path | None = None,
 ) -> GraphPlan:
-    """Build a graph plan from the exhaustive fixture/CLI JSON schema."""
+    """Resolve the planning document's routing and requirements into a graph.
+
+    Supply the absolute repository_root to bind a new plan for execution.
+    control_root selects an external directory for its run-control files.
+    Check dispatch_allowed and blockers on the returned plan before dispatch.
+    """
     lifecycle = lifecycle_from_document(document.get("review_lifecycle"))
     lifecycle.require_active()
     purpose = document.get("planning_purpose", "initial-review")
@@ -6249,8 +6367,8 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0913, PLR0915
         execution_profile=execution_profile,
         independent_review_after_audits=_boolean_field(document, "independent_review_after_audits", default=False),
         budget=WorkerBudget(
-            total=int(document.get("worker_budget", DEFAULT_TOTAL_FRESH_WORKER_BUDGET)),
-            recovery_finalization_reserve=int(document.get("recovery_finalization_reserve", DEFAULT_RECOVERY_FINALIZATION_RESERVE)),
+            total=document.get("worker_budget", DEFAULT_TOTAL_FRESH_WORKER_BUDGET),
+            recovery_finalization_reserve=document.get("recovery_finalization_reserve", DEFAULT_RECOVERY_FINALIZATION_RESERVE),
         ),
         validator_skill_path=str(_resolve_checked_skill_path("$SKILLS_ROOT/review-validator/SKILL.md", "review-validator", skill_roots)),
         captured_path_line_bounds=captured_path_line_bounds,

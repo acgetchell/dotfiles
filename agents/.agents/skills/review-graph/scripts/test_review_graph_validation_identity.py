@@ -14,21 +14,23 @@ import review_graph_runtime as runtime
 from capture_scope import _scope_data
 from review_graph_bootstrap import bootstrap_document
 from review_graph_plan import ValidationArtifact, plan_from_document
-from test_review_graph_runtime import (
+from test_support_review_graph import (
     ROUTING_CATALOG,
     SKILL_ROOT,
-    _baseline_mutation_fixture,
-    _compile_materialized_evidence,
-    _compile_repair_fixture_entry,
+    _finalize_fixture_proof,
     _json_plan,
+    _materialize,
+    _prepare_all_fixture_timing,
+    _sparse_plan_document,
+)
+from test_support_review_graph_evidence import _compile_materialized_evidence, _payload, _source_by_node
+from test_support_review_graph_lifecycle import (
+    _baseline_mutation_fixture,
+    _compile_repair_fixture_entry,
     _late_validation_plan,
     _late_validation_requirement,
     _mutation_with_audit_source,
-    _source_by_node,
-    _sparse_plan_document,
 )
-from test_review_graph_transitions import _materialize, _payload
-from test_support_review_graph import _finalize_fixture_proof, _prepare_all_fixture_timing
 
 
 def _runtime_cli(arguments: list[str]) -> None:
@@ -40,6 +42,7 @@ def _runtime_cli(arguments: list[str]) -> None:
 
 
 def _absolute_command() -> str:
+    """Build a shell-quoted no-op command using the running interpreter's absolute path."""
     return shlex.join((sys.executable, "-c", "pass"))
 
 
@@ -133,6 +136,7 @@ def test_instruction_discovery_includes_nested_directories_and_deleted_sources(t
 
 
 def test_planned_validation_reference_survives_two_repairs_with_fresh_validation(tmp_path: Path) -> None:  # noqa: PLR0915 - multi-epoch scheduler, synthesis, and proof regression.
+    """Keep the audit's original source binding through two repairs while reconciling it with the current validation unit."""
     request, original, original_source = _mutation_with_audit_source(tmp_path, reference_planned_validation=True)
     original_bytes = {Path(path): Path(path).read_bytes() for path in original_source.values()}
     original_requirement = json.loads(Path(original_source["metadata_path"]).read_bytes())["normalized_record"]["validation_requirements"][0]
@@ -216,6 +220,7 @@ def test_planned_validation_reference_survives_two_repairs_with_fresh_validation
 
 
 def test_restoring_unowned_file_to_head_rebinds_paths_without_reexecuting_audit(tmp_path: Path) -> None:
+    """Restore an unowned file to shrink the captured scope, then verify that only the current validator needs to execute."""
     git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
     (repository / "tool.py").write_text("value = 2\n")
     (repository / "state.rs").write_text("pub fn state() { assert!(true); }\n")
@@ -292,12 +297,13 @@ def test_restoring_unowned_file_to_head_rebinds_paths_without_reexecuting_audit(
                 executed_validators.append(dispatched["node_id"])
     else:
         pytest.fail("repair graph did not complete within its node bound")
-    assert len(executed_audits) == result["audit_reuse_counts"]["scheduled_audits"] == 4
+    assert len(executed_audits) == result["audit_reuse_counts"]["scheduled_audits"] == 5
     assert {node.skill_id for node in current.actual_worker_nodes if node.node_id in executed_audits} == {
         "python-api-design",
         "python-parse-dont-validate",
         "python-scientific-review",
         "python-simplification-review",
+        "python-style-hygiene",
     }
     assert executed_validators == [current.coalesced_validation_units[0].node_id]
     assert all(Path(entry[key]).read_bytes() == value for key, value in saved.items())

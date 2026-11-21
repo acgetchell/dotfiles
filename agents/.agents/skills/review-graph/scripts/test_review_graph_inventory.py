@@ -7,7 +7,8 @@ import pytest
 import review_graph_runtime as runtime
 from review_graph_isolation import IsolationPublicationError, isolation_violations
 from review_graph_reads import path_only_inventory, source_read_operands
-from test_review_graph_runtime import _compact_audit_payload, _worker_input_fixture
+from test_support_review_graph import _worker_input_fixture
+from test_support_review_graph_evidence import _compact_audit_payload
 
 
 @pytest.mark.parametrize(

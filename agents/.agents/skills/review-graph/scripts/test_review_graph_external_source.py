@@ -9,50 +9,10 @@ import pytest
 import review_graph_runtime as runtime
 import review_graph_source_change
 from capture_scope import _scope_data
-from test_review_graph_git import _accept
-from test_review_graph_runtime import ROUTING_CATALOG, _compile_repair_fixture_entry, _mutation_with_audit_source
-from test_review_graph_transitions import _payload
-from test_review_graph_validation_handoff import _handoff
-
-
-def _external(
-    tmp_path: Path, *, changed: str = "README.md", repairs_completed: int = 0, dependency: str | None = None, git_dependency: str | None = None
-) -> tuple[dict[str, Any], dict[str, Any], Path, dict[str, Any]]:
-    lifecycle, validator, capture, git, repository, _metadata = _handoff(
-        tmp_path,
-        dependencies=[{"kind": "index", "reason": "The fixture validation depends on staged contents."}] if git_dependency == "index" else [],
-        prefixes=["tool.py"],
-        readme=True,
-        repairs_completed=repairs_completed,
-    )
-    entries = json.loads(Path(lifecycle["dispatches_path"]).read_bytes())
-    for entry in entries["dispatches"]:
-        if entry["dispatch"]["mode"] == "audit":
-            payload = _payload(entry["dispatch"]["owned_paths"], dispatch=entry["dispatch"])
-            if git_dependency is not None and "tool.py" in payload["files_inspected"]:
-                command = "git --no-pager diff --cached -- tool.py"
-                payload.update(commands_executed=[command], git_dependencies=[{"kind": git_dependency, "command": command, "reason": "Fixture Git input."}])
-            if dependency is not None and "tool.py" in payload["files_inspected"]:
-                payload["coverage_units"] = [
-                    {
-                        "unit_id": "tool",
-                        "owned_paths": payload["files_inspected"],
-                        "finding_indices": [],
-                        "dependency_paths": [*payload["nearby_contract_owners"], *([] if dependency == "uncertain" else [dependency])],
-                        "dependency_uncertainty": "Dynamic configuration is not fully classified." if dependency == "uncertain" else "",
-                    }
-                ]
-            _accept(lifecycle, entry, payload)
-    (repository / changed).write_text("# Fixture\n\nDescription.\n" if changed == "README.md" else "value = 42\n")
-    request = {
-        **lifecycle,
-        "previous_capture": capture,
-        "new_capture": _scope_data(git, repository, "baseline", None, ()),
-        "artifact_store": str(tmp_path / "external"),
-        "external_source_actor": "maintainer",
-        "external_source_attribution": "The maintainer confirmed this edit in the review chat.",
-    }
-    return request, validator, repository, entries
+from test_support_review_graph import ROUTING_CATALOG
+from test_support_review_graph_evidence import _payload
+from test_support_review_graph_handoffs import _external
+from test_support_review_graph_lifecycle import _compile_repair_fixture_entry, _mutation_with_audit_source
 
 
 def test_external_readme_edit_preserves_validation_audits_and_exhausted_budget(tmp_path: Path) -> None:
@@ -143,6 +103,7 @@ def test_external_reconciliation_rejects_concurrent_edit(tmp_path: Path, monkeyp
         original = runtime._metadata_resume_decisions
 
         def race(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+            """Rewrite tool.py after the original operation to force a mismatch at the next source check."""
             result = original(*args, **kwargs)
             (repository / "tool.py").write_text("concurrent = True\n")
             return result

@@ -11,15 +11,16 @@ import pytest
 import review_graph_runtime as runtime
 from capture_scope import _scope_data
 from review_graph_reuse import StagedExternalSourceTransition, metadata_transition, source_snapshot
-from test_review_graph_external_source import _external
-from test_review_graph_lifecycle import _control_args
-from test_review_graph_runtime import _baseline_mutation_fixture, _run_test_git
-from test_review_graph_transitions import _materialize, _payload
+from test_support_review_graph import _materialize, _run_test_git
+from test_support_review_graph_evidence import _payload
+from test_support_review_graph_handoffs import _external
+from test_support_review_graph_lifecycle import _baseline_mutation_fixture, _control_args
 
 
 def _staged_external(
     tmp_path: Path, *, changed: str = "README.md", git_dependency: str | None = None
 ) -> tuple[str, Path, dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Prepare a source transition with maintainer attribution for the staged changes."""
     request, validator, repository, entries = _external(tmp_path, changed=changed, repairs_completed=1, git_dependency=git_dependency)
     git = shutil.which("git")
     assert git is not None
@@ -145,6 +146,7 @@ def test_staged_external_change_rechecks_live_index_before_publication(tmp_path:
     original = runtime._metadata_resume_decisions
 
     def race(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        """Unstage README.md between observations so the live index differs at publication."""
         result = original(*args, **kwargs)
         _run_test_git(git, "-C", str(repository), "reset", "HEAD", "--", "README.md")
         return result
@@ -160,6 +162,7 @@ def test_staged_external_change_composes_between_two_authorized_repairs(tmp_path
     lifecycle, _entries, _dispatches = _materialize(tmp_path, capture, plan)
 
     def repair(document: dict[str, Any], previous: dict[str, Any], epoch: int) -> dict[str, Any]:
+        """Edit tool.py for the next epoch and advance using the supplied prior capture."""
         (repository / "tool.py").write_text(f"value = {epoch + 1}\n")
         return runtime.advance_after_mutation(
             {

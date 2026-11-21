@@ -6,6 +6,7 @@ from functools import lru_cache
 
 @lru_cache(maxsize=4096)
 def _tokens(pattern: str) -> tuple[str, ...]:
+    """Tokenize a glob component while keeping a bracket class together as one token."""
     tokens = []
     index = 0
     while index < len(pattern):
@@ -23,6 +24,7 @@ def _tokens(pattern: str) -> tuple[str, ...]:
 
 @lru_cache(maxsize=4096)
 def _characters_overlap(left: str, right: str) -> bool:
+    """Check whether a single path-component character can satisfy both glob tokens."""
     if len(left) == 1 and left not in "*?[":
         return left not in {"/", "\0"} and fnmatchcase(left, right)
     if len(right) == 1 and right not in "*?[":
@@ -37,6 +39,7 @@ def _characters_overlap(left: str, right: str) -> bool:
 
 @lru_cache(maxsize=4096)
 def _intersects(left: tuple[str, ...], right: tuple[str, ...], *, paths: bool) -> bool:
+    """Decide whether two glob token streams can match the same component or path."""
     if left == right:
         return True
     pending = [(0, 0)]

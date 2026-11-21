@@ -89,6 +89,7 @@ def test_partial_link_failure_rolls_back_only_new_links(tmp_path: Path, monkeypa
     original = Path.symlink_to
 
     def fail_third(path: Path, target: Path, target_is_directory: bool = False) -> None:
+        """Allow the earlier real symlinks to be created before refusing the third link."""
         if path.name == "third":
             msg = "fixture permission denial"
             raise PermissionError(msg)
@@ -129,6 +130,7 @@ def test_failed_helper_creation_is_unpublished_and_retryable(tmp_path: Path, mon
     calls: list[list[str]] = []
 
     def run(argv: list[str], *, env: dict[str, str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        """Simulate the helper environment on disk and check that its final destination stays unpublished during sync."""
         nonlocal failed
         calls.append(argv)
         directory = Path(env["UV_PROJECT_ENVIRONMENT"])
@@ -145,6 +147,7 @@ def test_failed_helper_creation_is_unpublished_and_retryable(tmp_path: Path, mon
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     def verify(python: Path) -> dict[str, object]:
+        """Check the staged helper marker and inject the requested verification failure only once."""
         nonlocal failed
         assert (python.parent.parent / "ready").read_text() == "verified helper"
         if failure == "verification" and not failed:

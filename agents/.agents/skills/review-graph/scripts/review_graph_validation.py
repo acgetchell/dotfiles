@@ -66,6 +66,7 @@ class GitDependencyKind(StrEnum):
 
 
 def _object(raw: object, label: str) -> dict[str, object]:
+    """Require a string-keyed validation object and return a shallow copy."""
     if not isinstance(raw, dict) or any(not isinstance(key, str) for key in raw):
         msg = f"{label} must be an object with string keys"
         raise TypeError(msg)
@@ -73,6 +74,7 @@ def _object(raw: object, label: str) -> dict[str, object]:
 
 
 def _text(raw: object, label: str) -> str:
+    """Require nonblank validation text and preserve its spelling."""
     if not isinstance(raw, str) or not raw.strip():
         msg = f"{label} must be a nonempty string"
         raise ValueError(msg)
@@ -80,6 +82,7 @@ def _text(raw: object, label: str) -> str:
 
 
 def _digest(raw: object, label: str) -> str:
+    """Require a lowercase SHA-256 identity with its algorithm prefix."""
     value = _text(raw, label)
     if re.fullmatch(r"sha256:[0-9a-f]{64}", value) is None:
         msg = f"{label} must be a SHA-256 digest"
@@ -88,6 +91,7 @@ def _digest(raw: object, label: str) -> str:
 
 
 def _array(raw: object, label: str) -> tuple[object, ...]:
+    """Accept a list or tuple and return an immutable sequence of its elements."""
     if not isinstance(raw, (list, tuple)):
         msg = f"{label} must be an array"
         raise TypeError(msg)
@@ -95,10 +99,12 @@ def _array(raw: object, label: str) -> tuple[object, ...]:
 
 
 def _texts(raw: object, label: str) -> tuple[str, ...]:
+    """Parse a sequence of nonblank strings in declaration order."""
     return tuple(_text(value, label) for value in _array(raw, label))
 
 
 def _require_tuple(raw: object, element_type: type, label: str) -> None:
+    """Require an immutable sequence containing only instances of the declared element type."""
     if not isinstance(raw, tuple) or any(not isinstance(item, element_type) for item in raw):
         msg = f"{label} must be an immutable tuple of {element_type.__name__}"
         raise TypeError(msg)
@@ -564,6 +570,7 @@ class VerifiedValidationRecord:
 
 
 def _unproven_inputs(inputs: tuple[tuple[str, str], ...], symlink_paths: tuple[str, ...]) -> bool:
+    """Detect submodule identities and inputs reached through captured symlinks."""
     return any(identity.startswith("submodule:") or any(path == link or path.startswith(link + "/") for link in symlink_paths) for path, identity in inputs)
 
 
@@ -606,6 +613,7 @@ def bind_validation_payload(payload: ValidationPayload, unit: ValidationUnit) ->
 
 
 def _require_disposition(status: ValidationStatus, executions: tuple[ValidationExecution, ...], limitations: tuple[str, ...]) -> None:
+    """Require validation status to agree with the executions and any reported limitations."""
     if status == ValidationStatus.PASSED and (not executions or any(item.result != ExecutionResult.PASSED for item in executions)):
         msg = "passed validation requires passed executions"
         raise ValueError(msg)
@@ -630,6 +638,7 @@ def _command_requires_git_declaration(command: str) -> bool:
 
 
 def _require_git_dependencies(executions: tuple[ValidationExecution, ...], dependencies: tuple[GitDependency, ...] | None) -> None:
+    """Check that declared Git dependencies account for the Git commands actually executed."""
     from review_graph_git import _source_discovery_command  # noqa: PLC0415 - same standard Git declaration policy as audits.
 
     if dependencies is None:

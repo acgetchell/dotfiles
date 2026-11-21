@@ -15,16 +15,10 @@ from capture_scope import _scope_data
 from review_graph_bootstrap import bootstrap_document
 from review_graph_integrity import digest_bytes, digest_json
 from review_graph_plan import plan_from_document
-from test_review_graph_reuse import _compile_args
-from test_review_graph_runtime import (
-    ROUTING_CATALOG,
-    SKILL_ROOT,
-    _baseline_mutation_fixture,
-    _complete_structural_fixture_routing,
-    _run_test_git,
-    _set_fixture_routing,
-)
-from test_review_graph_transitions import _materialize, _payload
+from test_support_review_graph import ROUTING_CATALOG, SKILL_ROOT, _complete_structural_fixture_routing, _materialize, _run_test_git, _set_fixture_routing
+from test_support_review_graph_evidence import _payload
+from test_support_review_graph_lifecycle import _baseline_mutation_fixture
+from test_support_review_graph_reuse import _compile_args
 
 CAPABILITIES = {
     "notebook": ("notebook.py", "docs/contracts/notebook.md"),

@@ -69,6 +69,7 @@ ALL_ROUTER_IDS = ("review-graph", "cpp-review-orchestrator", "rust-review-orches
 
 
 def _word_count(paths: tuple[Path, ...]) -> int:
+    """Count whitespace-delimited words across the UTF-8 documents in the instruction budget."""
     return sum(len(path.read_text(encoding="utf-8").split()) for path in paths)
 
 
@@ -92,6 +93,8 @@ def test_path_matches_require_semantic_assessment_before_planning(path: str, rou
     [
         ("src/app.py", "python-review-orchestrator", "python.parse"),
         ("src/api.pyi", "python-review-orchestrator", "python.api-design"),
+        ("scripts/check.py", "python-review-orchestrator", "python.style"),
+        ("src/api.pyi", "python-review-orchestrator", "python.style"),
         ("README.md", "docs-review-orchestrator", "docs.repository"),
     ],
 )

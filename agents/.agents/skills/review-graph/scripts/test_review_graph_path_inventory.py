@@ -13,13 +13,15 @@ from review_graph_integrity import digest_bytes
 from review_graph_path_inventory import captured_path_inventory
 from review_graph_reuse import ExternalMetadataTransition, source_snapshot
 from review_graph_starter import prepare_release
-from test_review_graph_reuse import _audit_request
-from test_review_graph_runtime import _baseline_mutation_fixture, _run_test_git
+from test_support_review_graph import _run_test_git
+from test_support_review_graph_lifecycle import _baseline_mutation_fixture
+from test_support_review_graph_reuse import _audit_request
 
 FIXTURE = Path(__file__).parent / "fixtures" / "baseline_path_inventory.json"
 
 
 def _mixed_baseline(tmp_path: Path) -> tuple[Path, dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Capture a mixed-path checkout and derive routing choices from its matched inventory."""
     git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
     fixture = json.loads(FIXTURE.read_bytes())
     for group in fixture.values():
@@ -110,6 +112,7 @@ def test_closed_specialist_ledger_blocks_unassessed_paths_before_fanout(tmp_path
 
 
 def _assert_inventory_dispatches(bundle: dict[str, Any], repository: Path) -> None:
+    """Verify the materialized path assignments and the instructions available on continuation."""
     dispatches = runtime.materialize_dispatches(bundle["materialization_input"])
     tooling_dispatch = next(entry["dispatch"] for entry in dispatches["dispatches"] if entry["dispatch"]["skill_id"] == "project-tooling-review")
     assert "build.policy" in tooling_dispatch["owned_paths"]

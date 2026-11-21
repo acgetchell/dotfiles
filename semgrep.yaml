@@ -160,6 +160,7 @@ rules:
     paths:
       include:
         - "/scripts/skill_validate.py"
+        - "/agents/.agents/skills/review-graph/scripts/review_graph_frontmatter.py"
         - "/tests/semgrep/python315/**/*.py"
     pattern-either:
       - pattern: yaml.UnsafeLoader

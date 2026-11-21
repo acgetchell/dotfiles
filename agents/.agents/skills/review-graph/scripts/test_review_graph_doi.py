@@ -16,7 +16,7 @@ from review_graph_doi_gate import SoftwareDoiRecheck
 from review_graph_integrity import canonical_json, digest_bytes, digest_json
 from review_graph_phases import pending_validation_barrier
 from review_graph_plan import GraphPlan, plan_from_document
-from review_graph_reuse import SNAPSHOT_FORMAT, regular_file_fingerprint, source_snapshot
+from review_graph_reuse import source_snapshot
 from review_graph_runtime import (
     JournalEventRequest,
     _graph_plan,
@@ -37,116 +37,12 @@ from review_graph_runtime import (
 )
 from review_graph_schema import SchemaValidationError, require_schema, require_schema_definition
 from review_graph_synthesis import validate_synthesis
-from test_capture_scope import _capture, _commit_all, _init_repo
-from test_review_graph_repairs import _block_validator
-from test_review_graph_runtime import ROUTING_CATALOG, SCHEMA_ROOT, SKILL_ROOT, _compile_repair_fixture_entry, _json_plan, _sparse_plan_document
-from test_review_graph_transitions import _synthesis_payload
-from test_support_review_graph import _prepare_all_fixture_timing
-
-CFF_CONTENT = b"title: 'Project: Scientific software'\n"
-
-
-def _source_capture(root: Path) -> dict[str, Any]:
-    capture = {
-        "repository_state_format": SNAPSHOT_FORMAT,
-        "repository_root": str(root),
-        "capture_mode": "baseline",
-        "head": "fixture",
-        "branch": "main",
-        "base_ref": None,
-        "merge_base": None,
-        "requested_paths": [],
-        "captured_scope_paths": ["CITATION.cff"],
-        "scope_fingerprint": "a" * 64,
-        "captured_worktree_fingerprint": "b" * 64,
-        "repository_state_fingerprint": "pending",
-        "index_fingerprint": "c" * 64,
-        "repository_path_fingerprints": {"CITATION.cff": regular_file_fingerprint("CITATION.cff", CFF_CONTENT)},
-        "repository_symlink_paths": [],
-    }
-    capture["repository_state_fingerprint"] = source_snapshot(capture).computed_fingerprint()
-    return capture
-
-
-def _save_report(path: Path, rows: list[dict[str, Any]]) -> dict[str, Any]:
-    content = json.dumps(rows).encode()
-    path.write_bytes(content)
-    return {
-        "path": str(path),
-        "kind": "report",
-        "repository_status": "outside-repository",
-        "artifact_digest_mode": "content-sha256-v1",
-        "artifact_digest": "sha256:" + sha256(content).hexdigest(),
-    }
-
-
-def _fixture(tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    source = {"path": str(tmp_path / "README.md"), "digest": "sha256:" + "a" * 64}
-    row = {
-        "doi": "10.5281/zenodo.123",
-        "line": 3,
-        "status": "INSUFFICIENT_CONTEXT",
-        "resolved_title": "Project: Scientific software",
-        "resolved_year": "2026",
-        "resolved_authors": ["Getchell"],
-        "resolved_container": None,
-        "source": source,
-    }
-    canonical = {
-        "path": str(tmp_path / "CITATION.cff"),
-        "digest": "sha256:" + sha256(CFF_CONTENT).hexdigest(),
-        "content_base64": base64.b64encode(CFF_CONTENT).decode("ascii"),
-        "doi": row["doi"],
-        "title": row["resolved_title"],
-        "authors": row["resolved_authors"],
-        "year": row["resolved_year"],
-    }
-    records: list[dict[str, Any]] = []
-    for name, status, report_row in (
-        ("original", "failed", row),
-        ("verified", "passed", {**row, "status": "OK", "local_status": "INSUFFICIENT_CONTEXT", "canonical_software": canonical}),
-    ):
-        artifact = _save_report(tmp_path / f"{name}.json", [report_row])
-        command = "uv run validate_reference_dois.py README.md --json"
-        if name == "verified":
-            command += " --citation-cff CITATION.cff"
-        records.append(
-            {
-                "record_type": "validation",
-                "evidence_id": f"validation:{name}",
-                "node_id": name,
-                "status": status,
-                "requirement_ids": [name],
-                "observed_source_state": list(source_snapshot(_source_capture(tmp_path)).source_state),
-                "artifacts": [artifact],
-                "executions": [
-                    {
-                        "command": command,
-                        "working_directory": str(tmp_path),
-                        "result": status,
-                        "exit_code": 1 if name == "original" else 0,
-                        "elapsed": "0.1s",
-                        "executor": "fixture",
-                        "evidence": "DOI metadata report",
-                        "artifact_paths": [artifact["path"]],
-                    }
-                ],
-            }
-        )
-    records[1]["captured_software_inputs"] = captured_software_inputs(records[1], _source_capture(tmp_path))
-    resolution = {
-        "reason": "Canonical software identity independently checked on the same source.",
-        "checks": [
-            {
-                "execution_index": 0,
-                "original_report": str(tmp_path / "original.json"),
-                "verification_evidence_id": records[1]["evidence_id"],
-                "verification_execution_index": 0,
-                "verification_report": str(tmp_path / "verified.json"),
-            }
-        ],
-    }
-    return records[0], records[1], resolution
+from test_support_review_graph import ROUTING_CATALOG, SCHEMA_ROOT, SKILL_ROOT, _json_plan, _prepare_all_fixture_timing, _sparse_plan_document
+from test_support_review_graph_capture import _capture, _commit_all, _init_repo
+from test_support_review_graph_doi import CFF_CONTENT, _fixture, _requirement, _save_report, _source_capture
+from test_support_review_graph_evidence import _synthesis_payload
+from test_support_review_graph_lifecycle import _compile_repair_fixture_entry
+from test_support_review_graph_recovery import _block_validator
 
 
 @pytest.mark.parametrize("legacy", [False, True])
@@ -207,6 +103,7 @@ def test_resolution_requires_one_captured_cff_digest_across_rows(tmp_path: Path,
 
 
 def _validate_recheck_path(path: str) -> None:
+    """Check a proposed original-report path against the reconciliation input schema."""
     require_schema_definition(
         {
             "plan": {},
@@ -469,27 +366,6 @@ def test_resolution_rejects_unverified_or_contradictory_metadata(tmp_path: Path,
         validate_software_doi_resolution(resolution, original, {verified["evidence_id"]: verified})
 
 
-def _requirement(record: dict[str, Any], *, baseline: bool) -> dict[str, Any]:
-    requirement = deepcopy(_sparse_plan_document()["validation_requirements"][0])
-    requirement.update(
-        {
-            "baseline": baseline,
-            "canonical_recipe": None,
-            "requirement_id": record["requirement_ids"][0],
-            "source_state": record["observed_source_state"],
-            "commands": [record["executions"][0]["command"]],
-            "working_directories": [record["executions"][0]["working_directory"]],
-            "requires_isolation": True,
-            "isolation_root": record["executions"][0]["working_directory"],
-            "expected_workspace_effects": [],
-            "allowed_artifacts": [
-                {"path": artifact["path"], "kind": artifact["kind"], "repository_status": "outside-repository"} for artifact in record["artifacts"]
-            ],
-        }
-    )
-    return requirement
-
-
 def _bound_doi_fixture(tmp_path: Path, *, failed_followup: bool = False) -> tuple[GraphPlan, SoftwareDoiRecheck, dict[str, Any], dict[str, Any]]:
     """Bind real compiled original evidence, retaining independent canonical report data."""
     original, verified, _resolution = _fixture(tmp_path)
@@ -626,6 +502,7 @@ def test_doi_binding_rejects_invalid_construction_and_detaches_exports(tmp_path:
 
 
 def _compile_validator(entry: dict[str, Any], lifecycle: dict[str, Any], journal: Path, record: dict[str, Any]) -> dict[str, str]:
+    """Compile the validator's result and register its evidence as accepted in the journal."""
     dispatch = {
         **entry["dispatch"],
         "before_state": lifecycle["source_state"],
@@ -648,6 +525,7 @@ def _compile_validator(entry: dict[str, Any], lifecycle: dict[str, Any], journal
 
 
 def _doi_recovery_fixture(tmp_path: Path, *, checks_started: bool = True) -> tuple[dict[str, Any], Namespace, dict[str, Any], dict[str, Any]]:
+    """Prepare a failed DOI follow-up for recovery with its verification record."""
     plan, binding, original, verified = _bound_doi_fixture(tmp_path, failed_followup=True)
     # Early validators keep their superseded events in the migrated journal.
     plan = replace(plan, pre_review_validation_nodes=(*plan.pre_review_validation_nodes, binding.node_id))
@@ -776,6 +654,7 @@ def test_doi_recheck_request_rejects_missing_or_invalid_evidence_id(fields: dict
 
 
 def _followup_planning(original: dict[str, Any], verified: dict[str, Any], *, early: bool, later_check: bool) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Build a plan containing the original DOI check and a later validation requirement."""
     planning = _sparse_plan_document()
     planning["validation_requirements"] = [_requirement(original, baseline=True)]
     if early:
@@ -793,6 +672,7 @@ def _followup_planning(original: dict[str, Any], verified: dict[str, Any], *, ea
 def test_canonical_followup_expands_only_validation_and_finalizes_with_failed_history(  # noqa: C901, PLR0915 - complete preserved-history continuation.
     tmp_path: Path, capsys: pytest.CaptureFixture[str], early: bool, later_check: bool
 ) -> None:
+    """Bind a later DOI check to its original failed report and verify that both records survive finalization."""
     original, verified, resolution = _fixture(tmp_path)
     planning, later = _followup_planning(original, verified, early=early, later_check=later_check)
     plan = plan_from_document(planning, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=SKILL_ROOT.parents[2])

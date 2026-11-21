@@ -29,6 +29,7 @@ def digest(value: object) -> str:
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Reject duplicate accounting fields before converting JSON pairs into a mapping."""
     result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
@@ -56,9 +57,21 @@ def read_json(path: Path) -> dict[str, Any]:
     return parse_json(path.read_text(encoding="utf-8"))
 
 
-def measure_call(callback: Callable[[], int], ledger: Path, *, stage: str, scope_digest: str) -> int:
-    """Measure a deterministic runtime operation, separately from coordinator inference."""
-    if ledger.resolve().is_relative_to(Path.cwd().resolve()):
+def measure_call(callback: Callable[[], int], ledger: Path, *, stage: str, scope_digest: str, repository_root: Path | None = None) -> int:
+    """Time a callback and append both events to the same external ledger.
+
+    For operations without a repository binding, supply repository_root if the
+    ledger is in a different Git worktree.
+    """
+    ledger = ledger.resolve()
+    if repository_root is None:
+        if any((parent / ".git").exists() for parent in ledger.parents):
+            msg = "accounting inside a Git worktree requires the reviewed repository_root"
+            raise ValueError(msg)
+    elif not repository_root.is_absolute() or not repository_root.is_dir():
+        msg = "accounting repository_root must be an existing absolute directory"
+        raise ValueError(msg)
+    elif ledger.is_relative_to(repository_root.resolve()):
         msg = "usage ledger must be outside the reviewed repository"
         raise ValueError(msg)
     request_id = start_request(ledger, stage=stage, provider="deterministic-runtime", model=None, scope_digest=scope_digest)
@@ -114,6 +127,7 @@ def start_request(path: Path, *, stage: str, provider: str, model: str | None, s
 
 
 def _nonnegative_finite_number(value: object) -> bool:
+    """Check whether a measurement is a nonnegative finite number representable by the accounting routines."""
     if not isinstance(value, int | float) or type(value) not in {int, float}:
         return False
     try:
@@ -154,16 +168,45 @@ def measurements(value: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _finished_status(status: object) -> str:
+    """Require a terminal request status that can contribute to the corresponding ledger count."""
+    if not isinstance(status, str) or status not in {"succeeded", "failed", "cancelled"}:
+        msg = "invalid request status"
+        raise AccountingInputError(msg)
+    return status
+
+
 def finish_request(path: Path, request_id: str, *, status: str, usage: dict[str, Any]) -> None:
     """Record only sanitized measurement fields; never headers or error bodies."""
-    if status not in {"succeeded", "failed", "cancelled"}:
-        msg = "invalid request status"
-        raise ValueError(msg)
-    append_event(path, {"event": "finished", "id": request_id, "status": status, "finished_at": time.time(), **measurements(usage)})
+    append_event(path, {"event": "finished", "id": request_id, "status": _finished_status(status), "finished_at": time.time(), **measurements(usage)})
+
+
+def _add_measurements(group: dict[str, Any], usage: dict[str, Any]) -> None:
+    """Add known measurements to their totals and count attempts missing each measurement."""
+    for direction in ("input", "output"):
+        count = usage.get(f"{direction}_tokens")
+        if count is None:
+            group[f"unknown_{direction}_attempts"] += 1
+        else:
+            group[f"{direction}_tokens_known"] += count
+    elapsed = usage.get("elapsed_seconds")
+    if elapsed is None:
+        group["unknown_elapsed_attempts"] += 1
+    else:
+        group["elapsed_seconds_known"] += elapsed
+    basis = usage["cost_basis"]
+    if basis == "unavailable":
+        group["unknown_cost_attempts"] += 1
+    else:
+        group[f"{basis}_cost_usd"] += usage["cost_usd"]
 
 
 def summarize(paths: list[Path]) -> dict[str, Any]:
-    """Group actual attempts by stage/provider/model; retain partial totals explicitly."""
+    """Group ledger attempts by stage, provider, and model, including unfinished attempts.
+
+    Count missing measurements separately for each field. totals_are_partial
+    indicates that at least one attempt has unknown cost.
+    """
     starts: dict[str, dict[str, Any]] = {}
     ends: dict[str, dict[str, Any]] = {}
     for path in paths:
@@ -204,19 +247,14 @@ def summarize(paths: list[Path]) -> dict[str, Any]:
         )
         group["attempts"] += 1
         end = ends.get(request_id)
-        group[end["status"] if end is not None else "unfinished"] += 1
+        group[_finished_status(end.get("status")) if end is not None else "unfinished"] += 1
         usage = measurements(end) if end is not None else {"cost_basis": "unavailable"}
-        for direction in ("input", "output"):
-            count = usage.get(f"{direction}_tokens")
-            group[f"unknown_{direction}_attempts" if count is None else f"{direction}_tokens_known"] += 1 if count is None else count
-        elapsed = usage.get("elapsed_seconds")
-        group["unknown_elapsed_attempts" if elapsed is None else "elapsed_seconds_known"] += 1 if elapsed is None else elapsed
-        basis = usage["cost_basis"]
-        group["unknown_cost_attempts" if basis == "unavailable" else f"{basis}_cost_usd"] += 1 if basis == "unavailable" else usage["cost_usd"]
-    return {"schema_version": 1, "groups": list(groups.values()), "totals_are_partial": any(g["unknown_cost_attempts"] for g in groups.values())}
+        _add_measurements(group, usage)
+    return {"schema_version": 1, "groups": list(groups.values()), "totals_are_partial": any(group["unknown_cost_attempts"] for group in groups.values())}
 
 
 def _read_usage(path: Path) -> dict[str, Any]:
+    """Read and validate provider measurements, translating input errors into sanitized CLI diagnostics."""
     try:
         return measurements(read_json(path))
     except AccountingInputError as error:

@@ -62,7 +62,7 @@ Route scientific property selection and mathematical oracle validity to `python-
 
 Control randomness, time, timezone, locale, environment, current directory, filesystem order, network, subprocesses, and services. Use explicit seeds or generator objects when exact replay matters. Avoid global random state and tests whose expected value comes from `now()`.
 
-Use `tmp_path` for writes and `monkeypatch` at stable seams. Keep fixtures small and cohesive. Prevent shared mutable fixture state, import-order dependence, hidden environment requirements, and tests that read user data or machine-specific paths.
+Use `tmp_path` for writes. Patch dependencies [where the caller looks them up](references/runtime-and-selection.md#choose-the-owning-boundary). Keep fixtures small and cohesive. Prevent mutable fixture sharing, import-order dependence, hidden environment requirements, and tests that read user data or machine-specific paths.
 
 ## Evidence Cost
 

@@ -11,16 +11,10 @@ from review_graph_bootstrap import bootstrap_document
 from review_graph_plan import plan_from_document
 from review_graph_reuse import source_snapshot
 from review_graph_runtime import JournalEventRequest, advance_after_mutation, append_journal_event, compile_review, resume_after_external_metadata
-from test_review_graph_git import _accept, _discovery_payload
-from test_review_graph_runtime import (
-    ROUTING_CATALOG,
-    SKILL_ROOT,
-    _baseline_mutation_fixture,
-    _complete_structural_fixture_routing,
-    _run_test_git,
-    _set_fixture_routing,
-)
-from test_review_graph_transitions import _materialize, _payload, _staging_fixture
+from test_support_review_graph import ROUTING_CATALOG, SKILL_ROOT, _complete_structural_fixture_routing, _materialize, _run_test_git, _set_fixture_routing
+from test_support_review_graph_evidence import _accept, _discovery_payload, _payload
+from test_support_review_graph_handoffs import _staging_fixture
+from test_support_review_graph_lifecycle import _baseline_mutation_fixture
 
 
 @pytest.mark.parametrize("absolute", [False, True])
@@ -82,6 +76,7 @@ def test_incomplete_or_obsolete_capture_requires_recapture(tmp_path: Path, chang
 
 
 def _partial_audit(tmp_path: Path, kind: str, *, stage_before_repair: bool = False) -> tuple[str, Path, dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Advance a real Git fixture to a partial audit with previously inspected coverage."""
     git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
     (repository / "pyproject.toml").write_text('[project]\nname = "example"\nversion = "0.1.0"\n')
     _run_test_git(git, "-C", str(repository), "add", "pyproject.toml")

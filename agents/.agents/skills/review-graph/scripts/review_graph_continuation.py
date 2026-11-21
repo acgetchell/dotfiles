@@ -8,6 +8,7 @@ from review_graph_schema import require_schema_definition
 
 
 def _valid_command(raw: object) -> bool:
+    """Check for an immutable argument vector with at least one argument and no empty or NUL-containing words."""
     return isinstance(raw, tuple) and bool(raw) and all(isinstance(word, str) and bool(word) and "\0" not in word for word in raw)
 
 

@@ -113,6 +113,7 @@ def audit_git_context(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def _inherited_metadata_context(record: dict[str, Any]) -> dict[str, Any] | None:
+    """Reconstruct the original Git context for reused coverage units, returning None when there is no reuse."""
     context = record.get("coverage_reuse")
     if not context:
         return None
@@ -126,6 +127,7 @@ def _inherited_metadata_context(record: dict[str, Any]) -> dict[str, Any] | None
 
 
 def _metadata_context_blockers(record: dict[str, Any], transition: MetadataTransition) -> list[dict[str, str]]:
+    """Identify Git dependencies whose recorded assumptions no longer hold across the metadata transition."""
     blockers = git_dependency_blockers(record)
     if transition.before.capture_mode == "branch" and transition.before.merge_base == transition.after.merge_base:
         blockers = [

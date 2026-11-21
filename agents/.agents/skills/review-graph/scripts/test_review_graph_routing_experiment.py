@@ -23,12 +23,26 @@ EVALUATION_FIXTURE = Path(__file__).parent / "fixtures" / "routing_evaluation.js
 
 @pytest.fixture
 def case() -> dict[str, Any]:
+    """Load the first routing scenario from the checked-in experiment fixture."""
     return read_json(FIXTURE)["cases"][0]
 
 
 @pytest.fixture
 def packet(case: dict[str, Any]) -> dict[str, Any]:
+    """Prepare the frozen request shared by the experiment assertions."""
     return experiment.prepare(case)
+
+
+def _bound_result(packet: dict[str, Any], probabilities: dict[str, float]) -> dict[str, Any]:
+    """Bind fixture probabilities to the prepared request digest and configured response model."""
+    return {"status": "succeeded", "request_digest": packet["request_digest"], "response_model": experiment.MODEL, "probabilities": probabilities}
+
+
+def test_packet_owns_its_source_and_baseline(case: dict[str, Any], packet: dict[str, Any]) -> None:
+    original = copy.deepcopy(packet)
+    case["scope"]["files"][0]["content"] += "changed"
+    case["baseline"]["decisions"].clear()
+    assert packet == original
 
 
 def test_every_leaf_is_asked_and_labels_do_not_leak(case: dict[str, Any], packet: dict[str, Any]) -> None:
@@ -57,7 +71,7 @@ def test_independently_labeled_source_fixtures_prepare_offline(evaluation_case: 
 
 
 def test_multiple_skills_and_failure_never_change_execution(packet: dict[str, Any]) -> None:
-    result = {"status": "succeeded", "probabilities": dict.fromkeys(packet["request"]["questions"], 0.95)}
+    result = _bound_result(packet, dict.fromkeys(packet["request"]["questions"], 0.95))
     report = experiment.compare(packet, result)
     assert all(row["jev"] == "applicable" for row in report["rows"])
     assert not report["execution_routing_changed"]
@@ -73,7 +87,7 @@ def test_incomplete_context_cannot_become_a_negative(case: dict[str, Any], scope
     case["scope"]["complete"] = scope_complete
     case["scope"]["files"][0]["complete"] = file_complete
     packet = experiment.prepare(case)
-    report = experiment.compare(packet, {"status": "succeeded", "probabilities": dict.fromkeys(packet["request"]["questions"], 0.0)})
+    report = experiment.compare(packet, _bound_result(packet, dict.fromkeys(packet["request"]["questions"], 0.0)))
     assert len(report["uncertain"]) == len(packet["catalog"])
 
 
@@ -129,6 +143,7 @@ class Response:
         """Close the mock response."""
 
     def read(self, limit: int) -> bytes:
+        """Return at most the requested bytes from the fixture response body."""
         return self.body[:limit]
 
 
@@ -138,6 +153,7 @@ def test_live_request_counts_usage_without_leaking_secret(packet: dict[str, Any]
 
     class Opener:
         def open(self, request: Any, timeout: int) -> Response:
+            """Inspect the outgoing request for credentials and hidden answer labels, then provide a metered response."""
             assert request.full_url == experiment.ENDPOINT
             assert request.get_header("Authorization") == f"Bearer {secret}"
             assert timeout == 60
@@ -156,9 +172,18 @@ def test_live_request_counts_usage_without_leaking_secret(packet: dict[str, Any]
     ledger = tmp_path / "usage.jsonl"
     result = experiment.call_jev(packet, ledger)
     assert result["status"] == "succeeded"
+    assert experiment.compare(packet, result)["evidence_status"] == "complete"
     assert result["usage"]["cost_usd"] == pytest.approx(0.000042)
     assert result["usage"]["cost_basis"] == "estimated"
     assert secret not in ledger.read_text() + json.dumps(result)
+
+
+def test_stale_request_cannot_start_an_attempt(packet: dict[str, Any], tmp_path: Path) -> None:
+    ledger = tmp_path / "usage.jsonl"
+    packet["request"]["state"]["request"] += "changed"
+    with pytest.raises(ValueError, match="stale routing request"):
+        experiment.call_jev(packet, ledger)
+    assert not ledger.exists()
 
 
 @pytest.mark.parametrize("error", [HTTPError(experiment.ENDPOINT, 401, "secret", Message(), io.BytesIO(b"secret")), URLError("secret")])
@@ -188,6 +213,7 @@ def test_overflowing_probability_publishes_failure_without_retry(
 
     class Opener:
         def open(self, request: Request, **_kwargs: object) -> Response:
+            """Supply an out-of-range value for one answer and record each request so retries stay observable."""
             assert isinstance(request.data, bytes)
             body = json.loads(request.data)
             calls.append(body)
@@ -291,6 +317,7 @@ def test_dry_run_does_not_charge_an_imported_baseline_again(case: dict[str, Any]
 
 
 def test_instrumented_runtime_keeps_routing_output_identical(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
     source = tmp_path / "input.json"
     source.write_text(json.dumps({"captured_paths": ["src/lib.py"], "consulted_routers": ["review-graph", "python-review-orchestrator"]}))
     original = tmp_path / "original.json"
@@ -306,6 +333,26 @@ def test_instrumented_runtime_keeps_routing_output_identical(tmp_path: Path, mon
     assert group["succeeded"] == 1
 
 
+def test_standalone_accounting_in_another_worktree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repository = tmp_path / "reviewed"
+    repository.mkdir()
+    other = tmp_path / "artifacts"
+    other.mkdir()
+    (other / ".git").write_text("gitdir: ../worktrees/artifacts", encoding="utf-8")
+    ledger = other / "usage.jsonl"
+    source = tmp_path / "input.json"
+    source.write_text(json.dumps({"captured_paths": ["src/lib.py"], "consulted_routers": ["review-graph", "python-review-orchestrator"]}), encoding="utf-8")
+    args = ["routing-projection", "--input", str(source), "--output", str(other / "projection.json")]
+    monkeypatch.chdir(other)
+    monkeypatch.setenv("REVIEW_GRAPH_USAGE_LEDGER", str(ledger))
+    monkeypatch.delenv("REVIEW_GRAPH_REPOSITORY_ROOT", raising=False)
+    assert runtime.main(args) == 2
+    assert not ledger.exists()
+    monkeypatch.setenv("REVIEW_GRAPH_REPOSITORY_ROOT", str(repository))
+    assert runtime.main(args) == 0
+    assert summarize([ledger])["groups"][0]["succeeded"] == 1
+
+
 def test_uncertainty_is_not_hidden_from_recall(packet: dict[str, Any]) -> None:
     report = experiment.compare(packet, {"probabilities": {}})
     quality = report["quality_by_method"]["jev"]
@@ -319,6 +366,7 @@ def test_invalid_answers_retain_billable_usage(packet: dict[str, Any], tmp_path:
 
     class Opener:
         def open(self, *_args: object, **_kwargs: object) -> Response:
+            """Return metered usage alongside an empty answer set."""
             return Response({"model": experiment.MODEL, "answers": {}, "usage": {"input_tokens": 1000}})
 
     monkeypatch.setattr(experiment, "build_opener", lambda *_: Opener())
@@ -336,7 +384,7 @@ def test_endpoint_redirect_is_not_followed() -> None:
 def test_threshold_sweep_is_monotone_and_includes_half(packet: dict[str, Any]) -> None:
     probabilities = dict.fromkeys(packet["request"]["questions"], 0.0)
     probabilities.update({"python.scientific": 0.5, "python.parse": 0.499})
-    rows = experiment.threshold_sweep(packet, {"status": "succeeded", "probabilities": probabilities})
+    rows = experiment.threshold_sweep(packet, _bound_result(packet, probabilities))
     assert [row["selected_count"] for row in rows] == sorted([row["selected_count"] for row in rows], reverse=True)
     half = next(row for row in rows if row["include_at_or_above"] == 0.5)
     assert half["selected_count"] == 1
@@ -362,7 +410,7 @@ def test_replay_detects_modified_packet_and_makes_no_network_request(case: dict[
 def test_primary_cutoff_reports_selected_ids_and_disagreements(packet: dict[str, Any]) -> None:
     probabilities = dict.fromkeys(packet["request"]["questions"], 0.0)
     probabilities.update({"python.scientific": 0.5, "python.parse": 0.499, "python.cli": 0.6})
-    report = experiment.compare(packet, {"status": "succeeded", "probabilities": probabilities})
+    report = experiment.compare(packet, _bound_result(packet, probabilities))
     assert set(report["selected_catalog_ids"]) == {"python.scientific", "python.cli"}
     assert set(report["disagreements"]) == {"python.parse", "python.cli"}
     row = next(row for row in report["rows"] if row["catalog_id"] == "python.scientific")
@@ -495,15 +543,21 @@ def test_cli_replays_bound_coordinator_assessment_without_network(packet: dict[s
     assert not (output / "usage.jsonl").exists()
 
 
-@pytest.mark.parametrize("failure", ["failed", "cancelled", "not-run", "partial", "stale", "model"])
+@pytest.mark.parametrize(
+    "failure", ["failed", "cancelled", "not-run", "partial", "stale", "model", "request_digest", "response_model", "mutated-request", "complete"]
+)
 def test_unusable_evidence_never_supplies_selections_or_sweep_negatives(packet: dict[str, Any], failure: str) -> None:
-    result = {"status": "succeeded", "probabilities": dict.fromkeys(packet["request"]["questions"], 0.99)}
+    result = _bound_result(packet, dict.fromkeys(packet["request"]["questions"], 0.99))
     if failure == "partial":
         result["probabilities"].pop(next(iter(result["probabilities"])))
     elif failure == "stale":
         result["request_digest"] = "changed-source-request"
     elif failure == "model":
         result["response_model"] = "jev-0.0.0"
+    elif failure in {"request_digest", "response_model"}:
+        del result[failure]
+    elif failure == "mutated-request":
+        packet["request"]["state"]["files"][0]["content"] += "changed"
     else:
         result["status"] = failure
     original = copy.deepcopy(packet)
@@ -519,7 +573,7 @@ def test_unusable_evidence_never_supplies_selections_or_sweep_negatives(packet: 
 
 def test_no_match_and_unresolved_ownership_labels_remain_distinct(packet: dict[str, Any]) -> None:
     packet["expected"] = {"python.parse": None, "python.cli": False}
-    report = experiment.compare(packet, {"status": "succeeded", "probabilities": dict.fromkeys(packet["request"]["questions"], 0.0)})
+    report = experiment.compare(packet, _bound_result(packet, dict.fromkeys(packet["request"]["questions"], 0.0)))
     assert report["selected_catalog_ids"] == []
     assert report["quality_by_method"]["jev"]["unresolved_labels"] == 1
     assert report["quality_by_method"]["jev"]["true_negative"] == 1
@@ -599,6 +653,7 @@ def test_retry_success_does_not_hide_unknown_earlier_cost(case: dict[str, Any], 
 
     class Opener:
         def open(self, request: Any, **_kwargs: object) -> Response:
+            """Time out before returning usage on the first call and provide a metered answer on the retry."""
             calls.append(1)
             if len(calls) == 1:
                 raise TimeoutError

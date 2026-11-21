@@ -7,13 +7,13 @@ import shutil
 import statistics
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
-import types
 from contextlib import redirect_stdout
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import review_graph_runtime as runtime
 from research_repo_tools.process import ExecutableNotFoundError, format_exception_diagnostics, run_command_bytes
@@ -22,7 +22,6 @@ from review_graph_integrity import digest_bytes
 from review_graph_metrics import projected_waves, source_demand
 from review_graph_plan import (
     DEFAULT_ROUTING_CATALOG,
-    DEFAULT_SKILL_ROOT,
     ValidationRequirement,
     expand_compact_routing,
     independent_nodes_from_routing,
@@ -34,16 +33,20 @@ from review_graph_plan import (
     validation_requirements_from_document,
 )
 
+if TYPE_CHECKING:
+    import types
+
 RUNTIME_PATH = Path(runtime.__file__).resolve()
 RUNTIME_INPUT_SCHEMA = RUNTIME_PATH.parents[1] / "references/schemas/runtime-operation-inputs-v1.schema.json"
 BASELINE_REF = "da0e045d420a890d53a1e0993a0ecdfee5057c72"
 
 
 def benchmark_fixture(root: Path, *, scale: int = 1) -> dict[str, Any]:
-    """Build a scalable mixed-surface fixture, exhaustive routing, and 15 required nodes."""
+    """Write a mixed Python, tooling, and documentation fixture and return its dispatch plan."""
     if scale < 1:
         msg = "fixture scale must be positive"
         raise ValueError(msg)
+    root = root.resolve()
     python_paths = [f"src/module_{index}.py" for index in range(6 * scale)] + ["scripts/check.py", "tests/test_check.py"]
     doc_paths = ["README.md", *(f"docs/topic_{index}.md" for index in range(7 * scale))]
     files = {path: f'"""Benchmark source {path}."""\n\ndef normalize(value):\n    return int(value)\n' for path in python_paths}
@@ -106,6 +109,16 @@ def benchmark_fixture(root: Path, *, scale: int = 1) -> dict[str, Any]:
         ],
         "validation_requirements": json.loads(json.dumps(validations)),
     }
+    document["routing_overrides"].append(
+        {
+            "catalog_id": "python.style",
+            "disposition": "selected",
+            "reason": "Review the names and callable documentation in the fixture's Python modules, script, and test",
+            "applicability_evidence": ["Each Python file defines normalize(value) with an undocumented conversion to int"],
+            "review_surface": python_paths,
+            "owners": ["python"],
+        }
+    )
     document["routing_overrides"].extend(
         {"catalog_id": catalog_id, "disposition": "not-applicable", "reason": reason, "applicability_evidence": [reason]}
         for catalog_id, reason in (
@@ -134,7 +147,7 @@ def benchmark_fixture(root: Path, *, scale: int = 1) -> dict[str, Any]:
         routing_assessment=validate_routing_ledger(catalog, decisions, consulted_routers=document["consulted_routers"]),
         routing_decisions=decisions,
         captured_path_line_bounds=tuple(document["captured_path_line_bounds"].items()),
-        repository_root=root.resolve(),
+        repository_root=root,
     )
     return {
         "plan": json.loads(json.dumps(asdict(plan))),
@@ -146,7 +159,8 @@ def benchmark_fixture(root: Path, *, scale: int = 1) -> dict[str, Any]:
     }
 
 
-def _baseline_runtime(repository: Path, ref: str, *, schema_store: Path) -> types.ModuleType:
+def _snapshot_baseline(skill: Path, ref: str, destination: Path) -> str:
+    """Save the trusted revision's runtime, helpers, and references and return its commit ID."""
     if not ref or ref.startswith("-"):
         msg = "baseline-ref must be a nonempty Git revision, not an option"
         raise ValueError(msg)
@@ -155,34 +169,20 @@ def _baseline_runtime(repository: Path, ref: str, *, schema_store: Path) -> type
         msg = "benchmark comparison requires Git to read the baseline runtime"
         raise ValueError(msg)
 
-    def read_revision(path: Path) -> bytes:
-        relative = path.relative_to(repository).as_posix()
-        try:
-            return run_command_bytes(git, ("show", f"{ref}:{relative}"), cwd=repository, check=True, timeout=30).stdout
-        except (ExecutableNotFoundError, OSError, subprocess.SubprocessError) as error:
-            msg = (
-                f"cannot read benchmark baseline {ref}; ensure the revision and its runtime/schema are available locally: {format_exception_diagnostics(error)}"
-            )
-            raise ValueError(msg) from error
-
-    content = read_revision(RUNTIME_PATH)
-    schema_content = read_revision(RUNTIME_INPUT_SCHEMA)
-    schema_store.mkdir(parents=True, exist_ok=False)
-    schema_path = schema_store / RUNTIME_INPUT_SCHEMA.name
-    schema_path.write_bytes(schema_content)
-    module = types.ModuleType("review_graph_benchmark_baseline")
-    # Share planner/dependencies and skills; each runtime keeps its own public
-    # input schema so removed current formats remain historical benchmark data.
-    module.__file__ = str(RUNTIME_PATH)
-    sys.modules[module.__name__] = module
-    exec(compile(content, str(RUNTIME_PATH), "exec"), module.__dict__)  # noqa: S102 - explicitly selected trusted repository revision.
-    module.__dict__["_RUNTIME_OPERATION_INPUT_SCHEMA"] = schema_path
-    module.__dict__["benchmark_source_digest"] = digest_bytes(content)
-    module.__dict__["benchmark_schema_digest"] = digest_bytes(schema_content)
-    return module
+    try:
+        commit = run_command_bytes(git, ("rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}"), cwd=skill).stdout.decode("ascii").strip()
+        archive = run_command_bytes(git, ("archive", "--format=tar", commit, "scripts", "references", ":(exclude)scripts/test_*.py"), cwd=skill).stdout
+    except (ExecutableNotFoundError, OSError, subprocess.SubprocessError) as error:
+        msg = f"cannot read benchmark baseline {ref} from local Git history: {format_exception_diagnostics(error)}"
+        raise ValueError(msg) from error
+    destination.mkdir()
+    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as snapshot:
+        snapshot.extractall(destination, filter="data")
+    return commit
 
 
 def _payload(entry: dict[str, Any], ordinal: int) -> dict[str, Any]:
+    """Build a completed audit payload for a seeded finding or a no-findings payload for the remaining workers."""
     findings = (
         [
             {
@@ -212,6 +212,7 @@ def _payload(entry: dict[str, Any], ordinal: int) -> dict[str, Any]:
 
 
 def _read_worker_sources(entries: list[dict[str, Any]], repository: Path) -> dict[str, int]:
+    """Read the assigned sources and count repeated reads, packet bytes, and navigation overhead across audit workers."""
     reads: list[str] = []
     source_bytes = packet_bytes = navigation_read_bytes = 0
     for entry in entries:
@@ -279,6 +280,7 @@ def _independent_replay(module: types.ModuleType, entry: dict[str, Any], state: 
     attempts = retries = operations = 0
 
     def publish(content: bytes) -> None:
+        """Publish the replay bytes with the selected revision and count the attempted publication."""
         nonlocal attempts, operations
         attempts += 1
         if hasattr(module, "publish_worker_payload_bytes"):
@@ -323,6 +325,7 @@ def _independent_replay(module: types.ModuleType, entry: dict[str, Any], state: 
 
 
 def _verify_publication(receipt: dict[str, Any], entry: dict[str, Any], content: bytes) -> None:
+    """Check that the receipt identifies the dispatch destination and the exact bytes that reached disk."""
     path = Path(entry["worker_payload_path"])
     if receipt.get("worker_payload_digest") != digest_bytes(content) or receipt.get("worker_payload_path") != str(path.resolve()):
         msg = "benchmark publication receipt does not match the payload digest or dispatch path"
@@ -333,6 +336,7 @@ def _verify_publication(receipt: dict[str, Any], entry: dict[str, Any], content:
 
 
 def _validation_identity_metrics(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    """Count inline execution identities by occurrence and shared identity files by distinct path."""
     embedded: list[bytes] = []
     sidecars: dict[str, int] = {}
     for entry in entries:
@@ -366,11 +370,15 @@ def _partition_payload(entry: dict[str, Any], payload: dict[str, Any]) -> bool:
 
 
 def _trial(module: types.ModuleType, document: dict[str, Any], store: Path) -> dict[str, Any]:
+    """Replay the fixture with the supplied runtime and return the benchmark manifest.
+
+    Use a fresh store for each trial. Dispatch input and output JSON go beside
+    it, while worker artifacts and benchmark-manifest.json go inside it.
+    """
     started = time.perf_counter()
     input_path, output_path = store.with_suffix(".input.json"), store.with_suffix(".output.json")
     input_path.write_text(json.dumps({**document, "artifact_store": str(store)}), encoding="utf-8")
-    stdout = io.StringIO()
-    with redirect_stdout(stdout):
+    with redirect_stdout(io.StringIO()) as stdout:
         result = module.main(["materialize-dispatches", "--input", str(input_path), "--output", str(output_path)])
     if result != 0:
         msg = "benchmark materialization CLI failed"
@@ -458,20 +466,35 @@ def _trial(module: types.ModuleType, document: dict[str, Any], store: Path) -> d
     return manifest
 
 
+def _replay_trial(scripts: Path, fixture: Path, store: Path) -> dict[str, Any]:
+    """Run the shared trial driver with the selected runtime in its own interpreter."""
+    worker = RUNTIME_PATH.with_name("review_graph_benchmark_worker.py")
+    try:
+        run_command_bytes(sys.executable, ("-I", "-B", str(worker), str(scripts), str(fixture), str(store)), timeout=None)
+    except (ExecutableNotFoundError, OSError, subprocess.SubprocessError) as error:
+        msg = f"benchmark trial {store.name} failed: {format_exception_diagnostics(error)}"
+        raise ValueError(msg) from error
+    return json.loads((store / "benchmark-manifest.json").read_bytes())
+
+
 def run_benchmark(output: Path, *, baseline_ref: str = BASELINE_REF, repeats: int = 5, scale: int = 20) -> dict[str, Any]:
     """Retain paired immutable trials and honest measurements in a new output directory."""
     if repeats < 1:
         msg = "repeats must be positive"
         raise ValueError(msg)
+    output = output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     document = benchmark_fixture(output / "repository", scale=scale)
-    baseline = _baseline_runtime(DEFAULT_SKILL_ROOT.parents[2], baseline_ref, schema_store=output / "baseline-schema")
+    baseline = output / "baseline"
+    commit = _snapshot_baseline(RUNTIME_PATH.parents[1], baseline_ref, baseline)
+    fixture_path = output / "fixture.json"
+    fixture_path.write_text(json.dumps(document), encoding="utf-8")
     trials: dict[str, list[dict[str, Any]]] = {"before": [], "after_": []}
     for index in range(repeats):
         # Alternate first execution to reduce warm-cache ordering bias.
-        order = [("before", baseline), ("after_", runtime)]
-        for name, module in order if index % 2 == 0 else reversed(order):
-            trials[name].append(_trial(module, document, output / f"{name}-{index:03d}"))
+        order = [("before", baseline / "scripts"), ("after_", RUNTIME_PATH.parent)]
+        for name, scripts in order if index % 2 == 0 else reversed(order):
+            trials[name].append(_replay_trial(scripts, fixture_path, output / f"{name}-{index:03d}"))
         if trials["before"][-1]["findings"] != trials["after_"][-1]["findings"]:
             msg = "baseline/current compiled findings differ"
             raise ValueError(msg)
@@ -480,8 +503,9 @@ def run_benchmark(output: Path, *, baseline_ref: str = BASELINE_REF, repeats: in
         "schema_version": 1,
         "fixture_source_state": document["source_state"],
         "baseline_ref": baseline_ref,
-        "baseline_runtime_digest": baseline.benchmark_source_digest,
-        "baseline_input_schema_digest": baseline.benchmark_schema_digest,
+        "baseline_commit": commit,
+        "baseline_runtime_digest": digest_bytes((baseline / "scripts" / RUNTIME_PATH.name).read_bytes()),
+        "baseline_input_schema_digest": digest_bytes((baseline / "references/schemas" / RUNTIME_INPUT_SCHEMA.name).read_bytes()),
         "current_input_schema_digest": digest_bytes(RUNTIME_INPUT_SCHEMA.read_bytes()),
         "current_runtime_digest": digest_bytes(RUNTIME_PATH.read_bytes()),
         "plan": document["plan"],
@@ -498,12 +522,12 @@ def run_benchmark(output: Path, *, baseline_ref: str = BASELINE_REF, repeats: in
             }
             for name, samples in trials.items()
         },
-        "limits": "Scripted protocol replay, not a model review. Four-slot waves are projections; nine audit payloads are published and compiled. "
+        "limits": "Scripted protocol replay with projected four-slot waves. Each audit payload is published and compiled. "
         "One independent transcript is published/compiled with a scripted legacy label error and retry; "
         "validation/synthesis dispatches are not executed. Reads follow complete source packets with direct fallback. "
-        "Four seeded findings test preservation, not recall. Current planner/dependencies/skills with each runtime's input schema isolate protocol changes. "
+        "Four seeded findings test preservation. Both runtimes replay the same current plan and skills using their own helpers and schemas. "
         "Coordinator bytes count stdout, or a full saved-result read when the legacy CLI is silent; actual stdout bytes are reported separately. "
-        "No repository checks or Git mutations run. Timings exclude model work and Git baseline loading.",
+        "No repository checks or Git mutations run. Timings exclude model work, interpreter startup, and Git baseline loading.",
     }
     (output / "report.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return report
@@ -519,7 +543,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     output = args.output or Path(tempfile.mkdtemp(prefix="review-workflow-benchmark-")) / "results"
     try:
-        run_benchmark(output.resolve(), baseline_ref=args.baseline_ref, repeats=args.repeats, scale=args.scale)
+        run_benchmark(output, baseline_ref=args.baseline_ref, repeats=args.repeats, scale=args.scale)
     except (OSError, ValueError) as error:
         print(f"review_graph_benchmark: {error}", file=sys.stderr)
         return 2

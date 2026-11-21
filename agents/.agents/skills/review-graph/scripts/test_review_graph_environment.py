@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 from review_graph_environment import HELPER_VERSION, ORIGIN_FILE, REQUIRED_APIS, capture_python_origin
 from review_graph_session import freeze_runtime
-from test_review_graph_runtime import _baseline_mutation_fixture
+from test_support_review_graph_lifecycle import _baseline_mutation_fixture
 
 SCRIPTS = Path(__file__).resolve().parent
 VERSION = "0.2.3"
@@ -40,10 +40,12 @@ SELECTORS = (
 
 
 def _run(argv: list[str], directory: Path, environment: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    """Capture both streams and the exit status under the supplied environment."""
     return subprocess.run(argv, cwd=directory, env=environment, text=True, capture_output=True, check=False, timeout=60)  # noqa: S603 - offline fixture commands.
 
 
 def _wheel(directory: Path) -> Path:
+    """Write a minimal wheel whose import marker identifies the packaged distribution."""
     directory.mkdir()
     files = {
         "research_repo_tools/__init__.py": b"ORIGIN = 'packaged distribution'\n",
@@ -63,6 +65,7 @@ def _wheel(directory: Path) -> Path:
 
 
 def _editable(repository: Path, environment: dict[str, str]) -> Path:
+    """Create a project virtual environment and a conflicting Python version pin for isolation tests."""
     target = repository / ".venv"
     venv.EnvBuilder(with_pip=False, symlinks=True).create(target)
     python = target / "bin/python"
@@ -84,6 +87,7 @@ def _editable(repository: Path, environment: dict[str, str]) -> Path:
 
 
 def _skills(directory: Path) -> Path:
+    """Write a probe skill that reports its import origin and the runtime command it resolved."""
     scripts = directory / "review-graph/scripts"
     scripts.mkdir(parents=True)
     for name in ("review_graph_session.py", "review_graph_environment.py", "review_graph_execution.py"):
@@ -99,6 +103,7 @@ def _skills(directory: Path) -> Path:
 
 @pytest.mark.parametrize("active", [False, True])
 def test_isolated_launch_selects_packaged_bytes_and_retains_environment(tmp_path: Path, active: bool) -> None:  # noqa: PLR0915 - complete offline provenance lifecycle.
+    """Give an editable checkout and wheel the same version so their import markers reveal which distribution the runner actually loaded."""
     uv = shutil.which("uv")
     assert uv is not None
     repository = tmp_path / "consumer"

@@ -123,7 +123,8 @@ def check_stowed_skill(link: Path, source: Path, report: Report) -> bool:
         if source_file.is_dir() and not source_file.is_symlink():
             continue
         target_file = link / relative
-        all_stowed = check_stowed_skill_file(target_file, source_file, report) and all_stowed
+        if not check_stowed_skill_file(target_file, source_file, report):
+            all_stowed = False
     return all_stowed
 
 
@@ -152,7 +153,8 @@ def check_skills(home: Path, dotfiles_dir: Path) -> Report:
         if (skills_dir / entry.name / "SKILL.md").is_symlink():
             report.fail(f"SKILL.md is a file symlink and Codex will skip {entry.name} (run: just stow-restow agents)")
             all_stowed = False
-        all_stowed = check_stowed_skill(skills_dir / entry.name, entry, report) and all_stowed
+        if not check_stowed_skill(skills_dir / entry.name, entry, report):
+            all_stowed = False
 
     if all_stowed:
         report.ok(f"all repo skills reachable from {skills_dir}")
@@ -183,7 +185,7 @@ def print_report(title: str, report: Report) -> None:
 
 
 def default_dotfiles_dir() -> Path:
-    """Return the dotfiles directory from DOTFILES_DIR or the standard location."""
+    """Use a nonempty DOTFILES_DIR, falling back to the checkout containing this script."""
     env_value = os.environ.get("DOTFILES_DIR", "")
     if env_value:
         return Path(env_value)

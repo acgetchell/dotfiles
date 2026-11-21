@@ -9,20 +9,13 @@ import pytest
 import review_graph_runtime as runtime
 from review_graph_bootstrap import bootstrap_document
 from review_graph_plan import plan_from_document
-from test_review_graph_runtime import (
-    ROUTING_CATALOG,
-    SKILL_ROOT,
-    _baseline_mutation_fixture,
-    _compile_repair_fixture_entry,
-    _late_validation_plan,
-    _late_validation_requirement,
-    _set_fixture_routing,
-)
-from test_review_graph_transitions import _materialize, _payload
-from test_support_review_graph import _prepare_all_fixture_timing
+from test_support_review_graph import ROUTING_CATALOG, SKILL_ROOT, _materialize, _prepare_all_fixture_timing, _set_fixture_routing
+from test_support_review_graph_evidence import _payload
+from test_support_review_graph_lifecycle import _baseline_mutation_fixture, _compile_repair_fixture_entry, _late_validation_plan, _late_validation_requirement
 
 
 def _fixture(tmp_path: Path, *, changed_observation: bool = False) -> tuple[dict[str, Any], Namespace, dict[str, Any], dict[str, Any]]:
+    """Prepare a blocked validation run and a request to expand its requirements."""
     _git, repository, template, capture, _plan = _baseline_mutation_fixture(tmp_path)
     _set_fixture_routing(
         template,

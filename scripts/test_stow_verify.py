@@ -109,6 +109,7 @@ def test_stow_and_verifier_ignore_generated_python_bytecode(tmp_path: Path) -> N
 
 
 def prepare_leftover(target: Path, cache: Path, dotfiles: Path, leftover: str) -> Path:
+    """Create the requested residual file or symlink in the simulated Stow target."""
     extra = target / "notes.txt"
     if leftover == "cache-user-file":
         extra = cache / "notes.txt"

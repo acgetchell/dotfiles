@@ -15,13 +15,33 @@ from review_graph_bootstrap import bootstrap_document
 from review_graph_control import control_marker_paths, verify_run_control
 from review_graph_lifecycle import lifecycle_from_document
 from review_graph_plan import graph_plan_digest, plan_from_document, plan_graph, validation_requirements_from_document
-from test_review_graph_commit import _commit_fixture
-from test_review_graph_lifecycle import _control_args, _control_cli, _control_fixture, _two_repairs
-from test_review_graph_runtime import _baseline_mutation_fixture
-from test_review_graph_transitions import _materialize
+from test_support_review_graph import _materialize
+from test_support_review_graph_handoffs import _commit_fixture
+from test_support_review_graph_lifecycle import _baseline_mutation_fixture, _control_args, _control_cli, _control_fixture, _two_repairs
+
+
+def test_accounting_respects_bound_checkout_before_appending(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    _git, repository, _template, _capture, plan = _baseline_mutation_fixture(tmp_path)
+    nested = repository / "subdir"
+    nested.mkdir()
+    monkeypatch.chdir(nested)
+    ledger = repository / "usage.jsonl"
+    alias = tmp_path / "checkout-link"
+    alias.symlink_to(repository, target_is_directory=True)
+    monkeypatch.setenv("REVIEW_GRAPH_USAGE_LEDGER", str(alias / ledger.name))
+    monkeypatch.setenv("REVIEW_GRAPH_REPOSITORY_ROOT", str(tmp_path / "unrelated"))
+    source = tmp_path / "input.json"
+    source.write_text(json.dumps({"plan": asdict(plan), "source_state": ["scope", "worktree", "repository"]}), encoding="utf-8")
+    journal = tmp_path / "journal.jsonl"
+
+    assert runtime.main(["journal-append", "--input", str(source), "--journal", str(journal), "--node-id", "audit-001", "--status", "in-flight"]) == 2
+    assert "usage ledger must be outside the reviewed repository" in capsys.readouterr().err
+    assert not ledger.exists()
+    assert not journal.exists()
 
 
 def _ready(result: dict[str, Any]) -> dict[str, Any]:
+    """Replay the journal against the current source state to find runnable dispatches."""
     lifecycle = result["lifecycle_input"]
     plan = runtime._graph_plan(lifecycle["plan"])
     events, _state, _head = runtime.read_execution_journal(Path(result["journal_path"]), plan=plan, source_state=tuple(lifecycle["source_state"]))
@@ -89,6 +109,7 @@ def test_stop_racing_publication_blocks_the_returned_continuation(tmp_path: Path
     stopped: list[dict[str, Any]] = []
 
     def stop_before_publish(store: Path, pending: dict[Path, tuple[bytes, int]]) -> bool:
+        """Apply the stop exactly once, immediately before allowing the pending files to publish."""
         if not stopped:
             stopped.append({})
             stopped[0] = runtime.review_control(stop, args)
@@ -154,6 +175,7 @@ def test_journal_marker_failure_keeps_shared_stop_and_replay_receipt(
     publish = runtime._write_bytes_atomically_once
 
     def fail_journal_copy(path: Path, content: bytes, *, mode: int) -> bool:
+        """Reject the journal marker write while allowing the shared stop marker to publish."""
         if path == journal_marker:
             msg = "journal marker storage failed"
             raise OSError(msg)

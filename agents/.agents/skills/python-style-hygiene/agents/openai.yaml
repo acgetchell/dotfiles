@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python Style Hygiene"
+  short_description: "Review Python docstrings, naming, and imports"
+  default_prompt: "Use $python-style-hygiene to review and improve Python function documentation and readability."

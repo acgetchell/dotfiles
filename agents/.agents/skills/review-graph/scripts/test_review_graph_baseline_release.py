@@ -10,14 +10,16 @@ import review_graph_runtime as runtime
 from capture_scope import _scope_data
 from review_graph_bootstrap import main as bootstrap_main
 from review_graph_integrity import digest_bytes
+from review_graph_repair_followup import verify_followup_origin
 from review_graph_schema import require_schema
 from review_graph_starter import RELEASE_EXAMPLE, STARTER_SCHEMA, main as prepare_main, starter_template
-from test_review_graph_git import _accept
-from test_review_graph_runtime import _baseline_mutation_fixture, _compact_audit_payload, _compile_repair_fixture_entry, _run_test_git
-from test_support_review_graph import _prepare_all_fixture_timing
+from test_support_review_graph import _prepare_all_fixture_timing, _run_test_git
+from test_support_review_graph_evidence import _accept, _compact_audit_payload
+from test_support_review_graph_lifecycle import _baseline_mutation_fixture, _compile_repair_fixture_entry
 
 
 def _setup(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> tuple[str, Path, dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Materialize a review of the temporary repository and retain the sizes of its on-disk artifacts."""
     git, repository, _template, _capture, _plan = _baseline_mutation_fixture(tmp_path, instructions=True)
     for path, content in {
         "state.rs": "pub fn square(value: f64) -> f64 { value * value }\n",
@@ -104,6 +106,7 @@ def _setup(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> tuple[str, Pat
 
 
 def _initial_audits(tmp_path: Path, bundle: dict[str, Any], dispatches: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    """Record the initial audits and return their sources for the repair handoff."""
     lifecycle = {**bundle["lifecycle_input"], "journal_path": str(tmp_path / "initial.jsonl"), "dispatches_path": str(tmp_path / "dispatches.json")}
     sources = []
     for entry in dispatches["dispatches"]:
@@ -155,6 +158,7 @@ def _initial_audits(tmp_path: Path, bundle: dict[str, Any], dispatches: dict[str
 
 
 def _repair(tmp_path: Path, capsys: pytest.CaptureFixture[str], *, instructions: bool = False) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Apply the fixture repair and verify that the previous attempt's files retain their original bytes."""
     git, repository, capture, bundle, dispatches = _setup(tmp_path, capsys)
     lifecycle, sources = _initial_audits(tmp_path, bundle, dispatches)
     history = {path: Path(path).read_bytes() for source in sources for path in source.values()}
@@ -208,6 +212,7 @@ def test_baseline_release_first_repair_retains_bound_contracts(tmp_path: Path, c
 
 
 def _finish_repair(result: dict[str, Any], tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Complete verification and assert that every validation unit passes."""
     lifecycle = {**result["lifecycle_input"], "journal_path": result["journal_path"], "dispatches_path": result["dispatches_path"]}
     plan = runtime._graph_plan(lifecycle["plan"])
     dispatches = result["dispatch_set"]
@@ -325,6 +330,7 @@ def test_baseline_release_template_rejects_partial_capture_and_misplaced_outputs
 
 
 def _assert_verification_namespace(original: dict[str, Any], verification: dict[str, Any]) -> None:
+    """Check that verification uses fresh node IDs and identifies the nodes each replacement supersedes."""
     assert verification["new_plan"]["review_lifecycle"]["repairs_completed"] == 1
     original_node_ids = {node["node_id"] for node in original["new_plan"]["actual_worker_nodes"]}
     verification_node_ids = {node["node_id"] for node in verification["new_plan"]["actual_worker_nodes"]}
@@ -337,6 +343,7 @@ def _assert_verification_namespace(original: dict[str, Any], verification: dict[
 
 
 def test_verification_followup_keeps_batch_and_rejects_repeated_or_expanded_work(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Corrupt and restore earlier evidence, then check that only one follow-up can cover the remaining paths."""
     request, result, _metrics = _repair(tmp_path, capsys)
     previous_path = tmp_path / "first-repair.json"
     previous_path.write_text(json.dumps(result))
@@ -447,8 +454,6 @@ def test_verification_followup_keeps_batch_and_rejects_repeated_or_expanded_work
         "previous_capture": second["capture"],
         "verification_followup": {**followup, "previous_repair": {"path": str(second_path), "digest": digest_bytes(second_path.read_bytes())}},
     }
-    from review_graph_repair_followup import verify_followup_origin  # noqa: PLC0415 - inspect the rejected boundary without performing another mutation.
-
     with pytest.raises(ValueError, match="one follow-up"):
         verify_followup_origin(repeated, repeated["verification_followup"])
 

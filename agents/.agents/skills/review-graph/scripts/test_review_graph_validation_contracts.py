@@ -11,6 +11,7 @@ from review_graph_validation_contracts import CONTRACT_PATH, CheckContract, Cont
 
 
 def _contract() -> dict[str, object]:
+    """Build a deterministic repository-wide validation contract for the fixture recipe."""
     return {
         "contract_id": "fixture",
         "commands": ["just check"],

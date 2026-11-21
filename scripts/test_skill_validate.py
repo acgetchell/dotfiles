@@ -7,7 +7,6 @@ import sys
 from typing import TYPE_CHECKING
 
 import pytest
-import yaml
 
 import skill_validate
 
@@ -15,10 +14,15 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-@pytest.fixture(autouse=True, params=list(dict.fromkeys([yaml.SafeLoader, getattr(yaml, "CSafeLoader", yaml.SafeLoader)])))
+@pytest.fixture(
+    autouse=True,
+    params=[skill_validate.frontmatter_yaml.PythonSkillLoader, skill_validate.frontmatter_yaml.CSkillLoader]
+    if hasattr(skill_validate.frontmatter_yaml, "CSkillLoader")
+    else [skill_validate.frontmatter_yaml.PythonSkillLoader],
+)
 def safe_loader(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """Replay validation contracts against every available safe implementation."""
-    monkeypatch.setattr(skill_validate, "SAFE_YAML_LOADER", request.param)
+    monkeypatch.setattr(skill_validate.frontmatter_yaml, "SAFE_YAML_LOADER", request.param)
 
 
 def test_import_falls_back_without_libyaml() -> None:
@@ -27,7 +31,8 @@ def test_import_falls_back_without_libyaml() -> None:
         "import sys, yaml\n"
         "if hasattr(yaml, 'CSafeLoader'): del yaml.CSafeLoader\n"
         "import skill_validate\n"
-        "assert skill_validate.SAFE_YAML_LOADER is yaml.SafeLoader\n"
+        "assert skill_validate.frontmatter_yaml.SAFE_YAML_LOADER is skill_validate.frontmatter_yaml.PythonSkillLoader\n"
+        "assert issubclass(skill_validate.frontmatter_yaml.SAFE_YAML_LOADER, yaml.SafeLoader)\n"
         "assert skill_validate.parse_frontmatter('name: example\\ndescription: Example.')[0] == {'name': 'example', 'description': 'Example.'}\n"
         "assert 'research_repo_tools.selection' not in sys.modules\n"
     )
@@ -211,17 +216,27 @@ def test_validate_skill_rejects_invalid_frontmatter(tmp_path: Path, directory_na
         ("{<<: {owner: inherited}, revision: 1}", {"owner": "inherited", "revision": 1}),
         ("{owner: explicit, <<: {owner: inherited}}", {"owner": "explicit"}),
         ("{<<: [{owner: first}, {owner: second, revision: 1}]}", {"owner": "first", "revision": 1}),
+        ("{<<: [&base {owner: first}, {owner: second}, *base]}", {"owner": "first"}),
+        ("{<<: [{<<: {owner: base}, owner: local}, {owner: later, extra: kept}]}", {"owner": "local", "extra": "kept"}),
+        ('{<<: [{1: number}, {"1": text}]}', {1: "number", "1": "text"}),
         ('{<<: {owner: inherited}, "<<": literal}', {"owner": "inherited", "<<": "literal"}),
         ("{=: literal}", {"=": "literal"}),
     ],
 )
-def test_parse_frontmatter_preserves_mapping_key_semantics(metadata: str, expected: dict[str, object]) -> None:
+def test_parse_frontmatter_preserves_mapping_key_semantics(metadata: str, expected: dict[object, object]) -> None:
     """Merges, explicit overrides, and mapping-context tags retain YAML semantics."""
     frontmatter, message = skill_validate.parse_frontmatter(f"name: example-skill\ndescription: Use for tests.\nmetadata: {metadata}")
 
     assert message == ""
     assert frontmatter is not None
     assert frontmatter["metadata"] == expected
+
+
+@pytest.mark.parametrize("merge", ["value", "[{owner: first}, value]"])
+def test_parse_frontmatter_rejects_non_mapping_merge_sources(merge: str) -> None:
+    frontmatter, message = skill_validate.parse_frontmatter(f"metadata: {{<<: {merge}}}")
+    assert frontmatter is None
+    assert message.startswith("Invalid YAML in frontmatter:")
 
 
 @pytest.mark.parametrize(
@@ -301,6 +316,31 @@ def test_validate_skill_rejects_missing_openai_metadata(tmp_path: Path) -> None:
 
     assert not valid
     assert message == "agents/openai.yaml not found"
+
+
+def test_metadata_loader_rejects_non_string_top_level_keys(tmp_path: Path) -> None:
+    skill_dir = tmp_path / "example-skill"
+    write_skill(skill_dir, "name: example-skill\ndescription: Validate this skill.")
+    metadata_path = skill_dir / "agents/openai.yaml"
+    with metadata_path.open("a", encoding="utf-8") as stream:
+        stream.write("1: unexpected\n")
+    message = "agents/openai.yaml keys must be strings: 1"
+    assert skill_validate.load_openai_metadata(skill_dir) == (None, message)
+    assert skill_validate.validate_skill(skill_dir) == (False, message)
+
+
+def test_validate_skill_uses_first_merged_interface_prompt(tmp_path: Path) -> None:
+    """Use the same merge order in agents/openai.yaml and SKILL.md."""
+    skill_dir = tmp_path / "example-skill"
+    write_skill(skill_dir, "name: example-skill\ndescription: Validate this skill.")
+    (skill_dir / "agents/openai.yaml").write_text(
+        "interface:\n"
+        "  <<: [{default_prompt: 'Use $example-skill.'}, {default_prompt: 'Fallback only.'}]\n"
+        "  display_name: Example\n"
+        "  short_description: Validate a skill with a merged prompt\n",
+        encoding="utf-8",
+    )
+    assert skill_validate.validate_skill(skill_dir) == (True, "Skill is valid!")
 
 
 def test_validate_skill_rejects_short_ui_description(tmp_path: Path) -> None:

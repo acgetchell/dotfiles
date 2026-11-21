@@ -14,18 +14,19 @@ from review_graph_eligibility import reuse_eligibility
 from review_graph_read_provenance import bind_runtime_reads
 from review_graph_reuse import source_snapshot
 from review_graph_runtime import compile_review
-from test_review_graph_continuity_e2e import _frozen_run
-from test_review_graph_runtime import _compact_audit_payload
-from test_review_graph_sessions import _cli
+from test_support_review_graph_evidence import _compact_audit_payload
+from test_support_review_graph_sessions import _cli, _frozen_run
 
 
 def _shell(command: str, repository: Path) -> bytes:
+    """Return the bytes produced by running a discovery command in the fixture checkout."""
     shell = shutil.which("sh")
     assert shell is not None
     return subprocess.run([shell, "-c", command], cwd=repository, check=True, capture_output=True, timeout=60).stdout  # noqa: S603 - exact generated fixture commands.
 
 
 def _instruction_commands(dispatch: dict[str, Any]) -> list[str]:
+    """Construct one shell-quoted read command for every chunk in the instruction manifest."""
     context = dispatch["instruction_context"]
     manifest = json.loads(Path(context["manifest"]["path"]).read_bytes())
     return [

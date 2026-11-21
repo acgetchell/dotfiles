@@ -7,80 +7,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from review_graph_plan import plan_from_document
 from review_graph_runtime import JournalEventRequest, _graph_plan, append_journal_event, main, materialize_dispatches, next_ready_nodes
 from review_graph_scheduling import select_execution_lanes
-from test_review_graph_runtime import (
-    ROUTING_CATALOG,
-    SKILL_ROOT,
-    _compact_audit_payload,
-    _compile_repair_fixture_entry,
-    _complete_structural_fixture_routing,
-    _json_plan,
-    _publish_worker_bytes,
-    _sparse_plan_document,
-    _typed_synthesis_payload,
-)
-from test_support_review_graph import _prepare_fixture_timing
-
-
-def _fixture(tmp_path: Path, *, profile: str = "grouped", mixed_surfaces: bool = False) -> tuple[dict[str, Any], dict[str, Any], dict[str, Path]]:
-    planning = _sparse_plan_document()
-    planning["execution_profile"] = profile
-    if mixed_surfaces:
-        path = "scripts/skill_validate.py"
-        planning["captured_paths"].append(path)
-        planning["consulted_routers"].append("python-review-orchestrator")
-        planning["routing_overrides"].append(
-            {
-                "applicability_evidence": ["Python support script boundary"],
-                "catalog_id": "python.support-scripts",
-                "disposition": "selected",
-                "owners": ["python"],
-                "reason": "inspect support script behavior",
-                "review_surface": [path],
-            }
-        )
-    for catalog_id in ("rust.errors", "rust.api-design", "rust.trait-bounds", "rust.tests", "rust.style"):
-        planning["routing_overrides"].append({**planning["routing_overrides"][0], "catalog_id": catalog_id})
-    _complete_structural_fixture_routing(planning, planning["captured_paths"])
-    plan = plan_from_document(planning, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=SKILL_ROOT.parents[2])
-    lifecycle = {"plan": _json_plan(plan), "source_state": ["scope", "worktree", "repository"]}
-    dispatches = materialize_dispatches(
-        {
-            **lifecycle,
-            "authorization": "review-only",
-            "repository_root": str(SKILL_ROOT.parents[2]),
-            "state_verification_command": "capture_scope.py --mode baseline",
-            "artifact_store": str(tmp_path / "proof"),
-        }
-    )
-    paths = {key: tmp_path / f"{key}.json" for key in ("input", "dispatches", "journal", "current-capture")}
-    for entry in dispatches["dispatches"]:
-        if entry["dispatch"]["mode"] == "validation":
-            # Scheduling fixtures explicitly approve their stand-in shell policy.
-            _prepare_fixture_timing(entry)
-    paths["dispatches"].write_text(json.dumps(dispatches))
-    paths["current-capture"].write_text(
-        json.dumps({"scope_fingerprint": "scope", "captured_worktree_fingerprint": "worktree", "repository_state_fingerprint": "repository"})
-    )
-    return lifecycle, dispatches, paths
-
-
-def _run_schedule(tmp_path: Path, paths: dict[str, Path], request: dict[str, Any], name: str = "schedule") -> dict[str, Any]:
-    paths["input"] = tmp_path / f"{name}.input.json"
-    paths["input"].write_text(json.dumps({"artifact_store": str(tmp_path / "schedules"), **request}))
-    output = tmp_path / f"{name}.json"
-    assert main(["schedule-ready", *(arg for key, path in paths.items() for arg in (f"--{key}", str(path))), "--output", str(output)]) == 0
-    return json.loads(output.read_text())
-
-
-def _capacity(active: int) -> dict[str, Any]:
-    return {"source": "authoritative aggregate host slots (coordinator excluded)", "concurrent_worker_limit": 3, "active_workers": active}
-
-
-def _audits(dispatches: dict[str, Any]) -> list[dict[str, Any]]:
-    return [entry for entry in dispatches["dispatches"] if entry["dispatch"].get("mode") == "audit"]
+from test_support_review_graph import SKILL_ROOT
+from test_support_review_graph_evidence import _compact_audit_payload, _publish_worker_bytes, _typed_synthesis_payload
+from test_support_review_graph_lifecycle import _compile_repair_fixture_entry
+from test_support_review_graph_scheduling import _audits, _capacity, _fixture, _run_schedule
 
 
 @pytest.mark.parametrize("active", [0, 3])
@@ -269,6 +201,7 @@ def test_known_full_capacity_completes_all_nodes_without_worker_failures_or_repl
 
 def _publish_compile_synthesis(entry: dict[str, Any], lifecycle: dict[str, Any], paths: dict[str, Path], tmp_path: Path) -> None:
     # Public compile-node binds the actual accepted predecessor bundle.
+    """Publish the synthesis payload and compile it against the current capture."""
     payload = _typed_synthesis_payload(entry["dispatch"], _compact_audit_payload(entry), _graph_plan(lifecycle["plan"]))
     _publish_worker_bytes(entry, json.dumps(payload).encode())
     assert (

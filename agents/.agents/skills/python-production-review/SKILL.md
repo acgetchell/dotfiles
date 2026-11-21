@@ -81,11 +81,15 @@ Check that callers can distinguish actionable failure categories, exceptions pre
 
 Avoid broad exception swallowing, exception-driven control flow across large regions, and `assert` for runtime validation.
 
+Check library log propagation and application ownership of handlers.
+
 ### Resource And Lifetime Contracts
 
 Check files, sockets, subprocesses, temporary paths, database connections, locks, generators, iterators, context managers, callbacks, and background work for deterministic cleanup. Trace early returns, exceptions, cancellation, partial iteration, and interpreter shutdown where relevant.
 
 Flag resources whose ownership is unclear, generators that defer required cleanup without a documented close path, callbacks retaining objects unexpectedly, and import-time acquisition of external resources.
+
+Check cleanup when acquiring a later resource fails.
 
 ### Async And Concurrency
 
