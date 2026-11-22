@@ -1083,6 +1083,10 @@
               "minimum": 1,
               "maximum": 2
             },
+            "retry_ineligible": {
+              "description": "A retained capacity failure already adjudicated ineligible for an automatic retry.",
+              "const": true
+            },
             "reason": {
               "type": "string",
               "minLength": 1

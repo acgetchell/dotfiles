@@ -120,7 +120,8 @@ brew-cleanup-preview: _ensure-brew
 brew-install: _ensure-brew
     brew bundle install --file="$PWD/Brewfile"
 
-check: python-sync test-review-contracts _check-policy _check-execution
+# Run the early review guards and static checks during iteration.
+check: python-sync test-review-contracts _check-policy
     @echo "Checks complete!"
 
 # Stop on inexpensive policy failures before starting either independent lane.
@@ -139,7 +140,8 @@ _check-semgrep: semgrep semgrep-test
 check-skills: _ensure-uv
     uv run --locked python scripts/skill_validate.py --repository .
 
-ci: check
+# Run the full validation suite, including Semgrep and the remaining Python tests.
+ci: check _check-execution
     @echo "CI checks complete!"
 
 fix: justfile-fmt python-fix yaml-fix markdown-fix

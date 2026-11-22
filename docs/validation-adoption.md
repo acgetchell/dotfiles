@@ -9,8 +9,9 @@ published `research-repo-tools==0.2.7`; no managed Cargo tools are declared here
 so shared Cargo compilation caching is not applicable.
 
 The current [adoption](shared-tooling.md) pins v0.3.1 and includes `actions-check`
-in `github-actions-check`. The graph and measurements below retain their v0.2.7
-scope; they do not establish hosted acceptance for the later upgrade.
+in `github-actions-check`. The current `just check` runs the early guards and
+static checks; `just ci` adds the Semgrep and Python execution lanes. The graph
+and measurements below record the v0.2.7 configuration.
 
 ## Command and dependency graph
 

@@ -96,6 +96,21 @@ class TestTimingRunner(unittest.TestCase):
         self.assertIsNone(finish["exit_code"])
         self.assertEqual(finish["error_type"], "FileNotFoundError")
 
+    @unittest.skipUnless(os.name == "posix", "POSIX encodes arguments before the OS call")
+    def test_unencodable_posix_argument_has_a_finished_launch_failure(self) -> None:
+        command = self.launch("from pathlib import Path; Path('child-started').touch()", "\ud800")
+        outcome = self.run_cli(command)
+        self.assertEqual(outcome.returncode, 2)
+        self.assertEqual(outcome.stderr, "")
+        self.assertFalse((self.root / "child-started").exists())
+        start, finish = self.events()
+        self.assertEqual(start["event"], "attempt-started")
+        self.assertEqual(finish["status"], "launch-failed")
+        self.assertEqual(finish["error_type"], "UnicodeEncodeError")
+        self.assertIsNone(finish["exit_code"])
+        self.assertIsNone(finish["errno"])
+        assert finish["command_started"] is False
+
     def test_command_exit_two_is_still_an_executed_failure(self) -> None:
         outcome = self.run_cli(self.launch("raise SystemExit(2)"))
         self.assertEqual(outcome.returncode, 2)

@@ -26,7 +26,8 @@ The Python security-update group remains configured, but shares that runtime
 limitation; the required OSV audit remains available. Manual Python updates use
 `just update-python-dependencies`, which selects Homebrew-managed uv and runs the
 published `deps update-python --all-projects --adopt-supplier tooling` command.
-It updates root development pins, checks for a newer compatible RRT supplier,
+It updates root development pins, checks for a newer compatible
+[research-repo-tools](https://pypi.org/project/research-repo-tools/) release,
 and synchronizes the root lock and shared Python 3.15 environment.
 Semgrep and its compatibility overrides belong to the root manifest and lock;
 the obsolete separate Python 3.14 scanner project has been removed. Review the manifest, source policy and lock,

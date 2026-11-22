@@ -1,8 +1,8 @@
 # Shared tooling adoption
 
-The exact published `research-repo-tools==0.3.1` package owns reusable mechanics.
-Dotfiles retains policy, machine provisioning, fixtures, and its skill protocols.
-No sibling checkout or unreleased code is needed.
+Dotfiles pins the published [research-repo-tools](https://pypi.org/project/research-repo-tools/)
+package for shared tooling. This repo owns policy, machine provisioning, fixtures,
+and skill protocols. See the [upstream repository](https://github.com/acgetchell/research-repo-tools).
 
 ## Evolving the shared boundary
 
@@ -12,7 +12,7 @@ small local adapter when the required behavior is still being developed. Keep
 generic parsing, process and publication mechanics upstream, and keep review
 protocols, scientific acceptance and repository policy with their consumer.
 
-The [RRT v0.3.1 release](https://github.com/acgetchell/research-repo-tools/releases/tag/v0.3.1)
+The [research-repo-tools v0.3.1 release](https://github.com/acgetchell/research-repo-tools/releases/tag/v0.3.1)
 adds automatic supplier adoption and Gitleaks exception review. Its
 [`release visibility` command](https://github.com/acgetchell/research-repo-tools/blob/v0.3.1/docs/publishing-api.md)
 can verify an immutable upstream release, its required assets, and the exact
@@ -23,7 +23,7 @@ The JIT benchmark uses `evidence.fingerprint_files` for its selected regular
 files. Linux environment evidence needs file kinds, executable modes, symlink
 targets and missing tracked paths; its local framing remains pending a separately
 scoped migration to the API delivered by
-[RRT #239](https://github.com/acgetchell/research-repo-tools/issues/239) in v0.2.9.
+[research-repo-tools #239](https://github.com/acgetchell/research-repo-tools/issues/239) in v0.2.9.
 The review graph's native Git-object identities and
 reuse policy remain its own protocol contract.
 
@@ -47,9 +47,9 @@ reuse policy remain its own protocol contract.
 
 ## Python authority and upgrades
 
-CI synchronizes the root environment,
-runs the early guards and static policy checks, then runs the serialized Semgrep
-lane alongside the remaining Python tests. `DOTFILES_TEST_WORKERS=0 just --jobs 1 ci`
+`just check` synchronizes the root environment and runs the early guards and
+static policy checks. `just ci` adds the serialized Semgrep lane alongside the
+remaining Python tests. `DOTFILES_TEST_WORKERS=0 just --jobs 1 ci`
 provides the complete serial fallback. There are no managed Cargo tools here, so
 the shared managed Cargo build cache does not apply to this repository.
 
@@ -106,7 +106,8 @@ source distribution lacks the native engine. The root also retains the
 `just update-python-dependencies` selects Homebrew uv and invokes the published
 `deps update-python --all-projects --adopt-supplier tooling` command from an
 isolated environment built from the locked tooling group. It checks PyPI for a
-newer stable, non-yanked RRT release compatible with the declared Python range.
+newer stable, non-yanked research-repo-tools release compatible with the declared
+Python range.
 An eligible release updates the supplier policy, both exact requirements (including
 the Semgrep extra), the root lock and the installed environment together.
 The same command updates root development pins. Dotfiles owns its Ruff, ty and

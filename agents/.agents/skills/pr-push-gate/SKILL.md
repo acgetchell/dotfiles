@@ -33,9 +33,9 @@ and avoids spending hosted CodeRabbit reviews on incomplete fixes.
    any intended uncommitted changes. `just review-uncommitted` alone is
    insufficient when outgoing committed changes have not been reviewed.
 
-Use the existing RRT recipes where available; do not duplicate their orchestration
-or silently substitute narrower commands. If a required recipe or tool is
-missing, report that limitation and hold the push instead of declaring it passed.
+Use the existing [research-repo-tools](https://pypi.org/project/research-repo-tools/)
+recipes where available to preserve their full orchestration and check coverage.
+If a required recipe or tool is missing, report the limitation and hold the push.
 Independent validation commands may overlap when they do not interfere. Keep
 reviewed source and configuration stable while CodeRabbit runs.
 

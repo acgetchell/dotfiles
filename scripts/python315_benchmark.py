@@ -13,10 +13,13 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from research_repo_tools.evidence import fingerprint_files
 from research_repo_tools.selection import select_files
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 GRAPH = REPOSITORY / "agents/.agents/skills/review-graph/scripts"
@@ -117,10 +120,32 @@ def worker(root: Path, output: Path, scale: int) -> dict[str, Any]:
     }
 
 
+def _median(samples: Iterable[float]) -> float:
+    """Compute a median without overflowing the mean of two finite middle values."""
+    ordered = sorted(samples)
+    if not ordered:
+        msg = "no median for empty data"
+        raise statistics.StatisticsError(msg)
+    middle = len(ordered) // 2
+    upper = ordered[middle]
+    if len(ordered) % 2:
+        return upper
+    lower = ordered[middle - 1]
+    total = lower + upper
+    # Halve first only on overflow, so subnormal inputs retain normal rounding.
+    return total / 2 if math.isfinite(total) else lower / 2 + upper / 2
+
+
+def _median_and_mad(samples: list[float]) -> tuple[float, float]:
+    """Return the median and median absolute deviation in the samples' units."""
+    median = _median(samples)
+    return median, _median(abs(sample - median) for sample in samples)
+
+
 def summary(samples: list[float]) -> dict[str, object]:
     """Retain raw samples plus median and robust dispersion."""
-    median = statistics.median(samples)
-    return {"samples_seconds": samples, "median_seconds": median, "mad_seconds": statistics.median(abs(sample - median) for sample in samples)}
+    median, mad = _median_and_mad(samples)
+    return {"samples_seconds": samples, "median_seconds": median, "mad_seconds": mad}
 
 
 def trial_metrics(trial: dict[str, Any]) -> dict[str, float]:
@@ -130,9 +155,9 @@ def trial_metrics(trial: dict[str, Any]) -> dict[str, float]:
     Cold replay and whole-process time each contribute their single observation.
     """
     return {
-        "planner": statistics.median(_positive_durations(trial["planner_seconds"])),
+        "planner": _median(_positive_durations(trial["planner_seconds"])),
         "cold_replay": _positive_durations([trial["cold_replay_seconds"]])[0],
-        "warm_replay": statistics.median(_positive_durations(trial["warm_replay_seconds"])),
+        "warm_replay": _median(_positive_durations(trial["warm_replay_seconds"])),
         "whole_process": _positive_durations([trial["process_seconds"]])[0],
     }
 
@@ -164,10 +189,10 @@ def paired_effects(off: list[dict[str, Any]], on: list[dict[str, Any]]) -> dict[
     effects = {}
     for metric in pairs[0][0]:
         ratios = list(_positive_durations([after[metric] / before[metric] for before, after in pairs]))
-        median = statistics.median(ratios)
+        median, mad = _median_and_mad(ratios)
         effects[metric] = {
             "on_minus_off": summary([after[metric] - before[metric] for before, after in pairs]),
-            "on_over_off": {"samples": ratios, "median": median, "mad": statistics.median(abs(ratio - median) for ratio in ratios)},
+            "on_over_off": {"samples": ratios, "median": median, "mad": mad},
         }
     return effects
 

@@ -121,6 +121,26 @@ def test_doctor_checks_interactive_bash_overrides(tmp_path: Path, monkeypatch: p
         profile_doctor.check_shell("bash", {"git": ""})
 
 
+def test_doctor_requires_shell_startup_to_expose_managed_tools(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    prefix = tmp_path / "managed review tools"
+    binaries = prefix / "bin"
+    binaries.mkdir(parents=True)
+    tool = binaries / "dotfiles-fixture-tool"
+    tool.write_text("#!/bin/sh\necho fixture-version\n", encoding="utf-8")
+    tool.chmod(0o700)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("DOTFILES_REVIEW_PREFIX", str(prefix))
+    monkeypatch.setenv("PATH", str(binaries), prepend=os.pathsep)
+    profile = tmp_path / ".bash_profile"
+    profile.write_text(":\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="Fresh bash"):
+        profile_doctor.check_shell("bash", {tool.name: "fixture-version"})
+
+    shutil.copyfile(ROOT / "zsh/.dotfiles-env", tmp_path / ".dotfiles-env")
+    profile.write_text('. "$HOME/.dotfiles-env"\n', encoding="utf-8")
+    profile_doctor.check_shell("bash", {tool.name: "fixture-version"})
+
+
 def test_shell_check_detects_syntax_error_after_first_file(tmp_path: Path) -> None:
     for name in ("justfile", "pyproject.toml"):
         shutil.copy2(ROOT / name, tmp_path)

@@ -88,10 +88,15 @@ def link_skills(source: Path, destination: Path) -> None:
     try:
         for path in sources:
             target = destination / path.name
-            if not target.is_symlink():
-                target.symlink_to(path.resolve(), target_is_directory=True)
+            expected = path.resolve()
+            try:
+                target.symlink_to(expected, target_is_directory=True)
+            except FileExistsError:
+                if not target.is_symlink() or target.resolve() != expected:
+                    raise ValueError(f"Skill collision: {target}; preserve existing content and resolve it manually") from None
+            else:
                 created.append(target)
-    except OSError:
+    except OSError, ValueError:
         # Roll back only links this invocation created; preserve all existing data.
         for target in reversed(created):
             if target.is_symlink() and target.resolve() == (source / target.name).resolve():
@@ -100,7 +105,7 @@ def link_skills(source: Path, destination: Path) -> None:
 
 
 def locked_helper_versions() -> tuple[str, str]:
-    """Read the RRT and Markdown versions that locked tooling setup will install."""
+    """Read the locked research-repo-tools and markdown-it-py versions."""
     packages = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8")).get("package")
     if not isinstance(packages, list):
         msg = "uv.lock must contain a package list"
@@ -223,8 +228,8 @@ def main(argv: list[str] | None = None) -> int:
         destination = args.destination.absolute()
         if args.mode == "install":
             link_skills(SKILLS, destination)
-        inspect_links(SKILLS, destination, installed=True)
-        print(f"Verified {len(skill_sources(SKILLS))} skill directory links, metadata, and isolated helper at {destination}.")
+        installed = inspect_links(SKILLS, destination, installed=True)
+        print(f"Verified {len(installed)} skill directory links, metadata, and isolated helper at {destination}.")
         print("Start a new agent session to verify discovery. This command does not verify an agent's loaded skill catalog.")
         return 0
     except (OSError, TypeError, ValueError, subprocess.SubprocessError) as error:

@@ -32,7 +32,7 @@ def _failure_action(failure: dict[str, Any] | None, capacity_state: str) -> str 
     """Allow one retry for a capacity failure while capacity may remain, then hand recovery to the coordinator."""
     if failure is None:
         return None
-    if failure["failure_kind"] == "capacity" and failure["attempts"] == 1 and capacity_state != "known-exhausted":
+    if failure["failure_kind"] == "capacity" and failure["attempts"] == 1 and not failure.get("retry_ineligible") and capacity_state != "known-exhausted":
         return "bounded-retry"
     return "coordinator-fallback"
 

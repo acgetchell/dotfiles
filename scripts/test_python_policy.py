@@ -27,13 +27,11 @@ def test_native_scan_uses_the_configured_root_environment(tmp_path: Path, monkey
 
 
 def test_ci_requires_full_python_inventory_and_shared_baseline() -> None:
-    """CI includes fixtures once through the complete Python gate."""
+    """CI runs the iteration checks before both execution lanes."""
     recipes = inspect_justfile(REPOSITORY_ROOT).recipes
+    assert [dependency["recipe"] for dependency in recipes["check"]["dependencies"]] == ["python-sync", "test-review-contracts", "_check-policy"]
+    assert [dependency["recipe"] for dependency in recipes["ci"]["dependencies"]] == ["check", "_check-execution"]
     for parent, child in (
-        ("ci", "check"),
-        ("check", "python-sync"),
-        ("check", "_check-policy"),
-        ("check", "_check-execution"),
         ("_check-policy", "python-check"),
         ("_check-execution", "test-python"),
         ("_check-execution", "_check-semgrep"),

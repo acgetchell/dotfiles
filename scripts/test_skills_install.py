@@ -105,6 +105,27 @@ def test_partial_link_failure_rolls_back_only_new_links(tmp_path: Path, monkeypa
     assert marker.read_text() == "preserve"
 
 
+def test_link_collision_after_preflight_rolls_back_and_preserves_the_other_link(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = sources(tmp_path)
+    destination = tmp_path / "discovery"
+    nearby = tmp_path / "another installation"
+    nearby.mkdir()
+    collision = destination / "second"
+    original = Path.symlink_to
+
+    def link_with_race(path: Path, target: Path, target_is_directory: bool = False) -> None:
+        original(path, target, target_is_directory=target_is_directory)
+        if path == destination / "first":
+            original(collision, nearby, target_is_directory=True)
+
+    monkeypatch.setattr(Path, "symlink_to", link_with_race)
+    with pytest.raises(ValueError, match="Skill collision"):
+        skills_install.link_skills(root, destination)
+    assert set(destination.iterdir()) == {collision}
+    assert collision.is_symlink()
+    assert collision.samefile(nearby)
+
+
 @pytest.mark.parametrize("report", [[], {}, {"version": "0.0.0"}, "invalid JSON"])
 def test_helper_rejects_malformed_or_incomplete_origin_reports(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, report: object) -> None:
     helper = tmp_path / "helper"

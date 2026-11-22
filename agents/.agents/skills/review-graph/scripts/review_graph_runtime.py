@@ -1070,7 +1070,7 @@ def _reconciled_coverage(dispatch: dict[str, Any], payload: dict[str, Any]) -> d
     return context
 
 
-def _validate_review_coverage_partitions(dispatch: dict[str, Any], payload: dict[str, Any]) -> None:
+def _validate_review_coverage_partitions(dispatch: dict[str, Any], payload: dict[str, Any], *, retained: bool = False) -> None:
     """Apply the same partition contract before publication and compilation."""
     if not payload.get("coverage_units"):
         return
@@ -1079,7 +1079,7 @@ def _validate_review_coverage_partitions(dispatch: dict[str, Any], payload: dict
         raise ValueError(msg)
     owned = _text_list(dispatch, "owned_paths")
     try:
-        require_schema(payload, _REVIEW_PAYLOAD_SCHEMA)
+        require_schema(payload, _REVIEW_PAYLOAD_SCHEMA, allow_legacy_duplicates=retained)
     except SchemaValidationError as error:
         diagnostics = tuple(
             SchemaDiagnostic("$.coverage_units", "coverage", message, "complete coverage partition") for message in coverage_diagnostics(payload, owned)
@@ -1088,14 +1088,14 @@ def _validate_review_coverage_partitions(dispatch: dict[str, Any], payload: dict
     validate_coverage_units(payload, owned)
 
 
-def _validate_audit_caveats(dispatch: dict[str, Any], payload: dict[str, Any]) -> None:
+def _validate_audit_caveats(dispatch: dict[str, Any], payload: dict[str, Any], *, retained: bool = False) -> None:
     """Retain typed attestations and reject contradictions with dispatch facts."""
     if not any(key in payload for key in ("execution_facts", "validation_limits", "unresolved_uncertainties", "git_dependencies")):
         return
     if dispatch.get("mode") != "audit":
         msg = "typed audit caveats apply only to audit payloads"
         raise ValueError(msg)
-    require_schema(payload, _REVIEW_PAYLOAD_SCHEMA)
+    require_schema(payload, _REVIEW_PAYLOAD_SCHEMA, allow_legacy_duplicates=retained)
     validate_git_dependencies(payload)
     facts = payload.get("execution_facts", [])
     policy = dispatch.get("command_policy")
@@ -1975,7 +1975,7 @@ def _review_expectation(raw: dict[str, Any]) -> ReviewEvidenceExpectation:
     expected_after = tuple(raw["expected_after_state"]) if raw.get("expected_after_state") is not None else None
     payload = raw.get("canonical_worker_payload")
     if payload is not None:
-        require_schema(payload, _REVIEW_PAYLOAD_SCHEMA)
+        require_schema(payload, _REVIEW_PAYLOAD_SCHEMA, allow_legacy_duplicates=True)
     return ReviewEvidenceExpectation(
         node_id=_required_text(raw, "node_id"),
         requirement_ids=_string_tuple(raw, "requirement_ids"),
@@ -3184,7 +3184,9 @@ def _load_evidence_source_once(  # noqa: C901, PLR0912, PLR0915
             msg = "bound canonical worker payload differs from sealed worker bytes"
             raise ValueError(msg)
         _validate_review_coverage_partitions(
-            {**expectation_raw, "owned_paths": list(expectation.audit_input_identity.owned_paths) if expectation.audit_input_identity else []}, bound_payload
+            {**expectation_raw, "owned_paths": list(expectation.audit_input_identity.owned_paths) if expectation.audit_input_identity else []},
+            bound_payload,
+            retained=True,
         )
 
     if isinstance(expectation, ReviewEvidenceExpectation) and isinstance(evidence, ReviewEvidence) and expectation.mode == "independent-review":
@@ -3213,6 +3215,7 @@ def _load_evidence_source_once(  # noqa: C901, PLR0912, PLR0915
                         "git_mutated": evidence.git_mutated,
                     },
                     payload,
+                    retained=True,
                 )
                 _verify_audit_metadata(
                     {**payload, **normalized_read_provenance(expectation.audit_input_identity)}, evidence.fingerprints, expectation.coverage_reuse
@@ -7860,6 +7863,8 @@ def _schedule_ready_locked(document: dict[str, Any], args: argparse.Namespace) -
     }
     failure = selection["creation_failure"]
     if failure is not None and failure["node_id"] not in selected_ids:
+        if failure["failure_kind"] == "capacity" and failure["attempts"] == 1 and selection["creation_failure_action"] != "bounded-retry":
+            failure = {**failure, "retry_ineligible": True}
         schedule_input["creation_failure"] = failure
     result = {
         **ready,

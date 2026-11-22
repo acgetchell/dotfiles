@@ -11,8 +11,9 @@ the locked Semgrep wheel. Ubuntu 24.04
 x86_64 is the CI target. Native evidence is recorded below for Ubuntu 24.04 CI
 and the Debian 13.6 x86_64 cloud executor. Other distributions and aarch64 remain
 unverified until their native checks pass. musl, older glibc, other architectures,
-and Windows full setup fail with actionable diagnostics. macOS continues to use `just setup`.
-The [README support matrix](../README.md#platform-scope) records current scope.
+and Windows full setup fail with actionable diagnostics. See the
+[platform overview](../README.md#platform-scope) for the macOS and Linux rebuild
+profiles.
 
 The host must provide Bash, Git, Zsh, GNU Stow, and a native Rust toolchain
 (`rustc` >= 1.85, Cargo, and its native linker). Zsh is required by the native
@@ -51,8 +52,8 @@ Setup is idempotent and fails on a conflicting skill installation. Checks run
 the same full `just ci` inventory used by macOS, including Python/skill/runtime,
 Markdown, YAML, workflow, and Semgrep checks. The bootstrap regression uses
 isolated macOS tool stand-ins; it does not provision desktop files on Linux.
-macOS operational commands (`just setup`, Brewfile/health checks, Stow of desktop
-files, and macOS defaults) remain separate from Linux installation.
+Desktop setup (`just setup macos`), Brewfile/health checks, and macOS defaults
+are separate from this installer.
 
 Network destinations for provisioning include GitHub release assets, Python
 distributions selected by uv, the configured package index, and the pinned
@@ -133,10 +134,11 @@ process bound. It sends no code and makes no inference request. Keys, raw
 responses, proxy details, and exception bodies are neither printed nor persisted.
 Missing/unresolved credentials, blocked networks, malformed responses, and
 authentication failures return nonzero and record an unavailable capability.
-Default CI never injects a TypeSafe credential or calls this probe. See the
-[existing TypeSafe secret-provider instructions](../README.md#optional-typesafe-evaluation)
-for local/cloud injection; provisioning credentials and compute-node credentials
-are separate. Never put keys in shell arguments, public site configuration, or
+Default CI runs without the TypeSafe credential or probe. The
+[routing experiment guide](../agents/.agents/skills/review-graph/references/routing-experiment.md#run-the-pilot)
+shows how to inject a credential with 1Password for a local command or use an
+existing cloud secret. Configure provisioning and compute-node credentials
+separately. Never put keys in shell arguments, public site configuration, or
 artifact files.
 
 ## Cloud and HPC execution placement
@@ -197,7 +199,7 @@ operation described in [the settings guide](../.github/DEPENDABOT.md).
 | Target | Status for this implementation | Remaining evidence |
 | --- | --- | --- |
 | Native Ubuntu 24.04 x86_64 CI | Passed [run 37267493289](https://github.com/acgetchell/dotfiles/actions/runs/37267493289): fresh/repeated setup, offline suite, scripted smoke, artifact publication | New changes still require their own CI |
-| Cara's cloud computer: Debian 13.6 x86_64, glibc 2.41 | Setup, repeat setup, full portable suite, scripted smoke, and fresh restore verified on 2026-10-05; actual RRT #91 review accepted in [#123](https://github.com/acgetchell/dotfiles/issues/123) | New rebuild lifecycle and later review baselines need fresh evidence |
+| Cara's cloud computer: Debian 13.6 x86_64, glibc 2.41 | Setup, repeat setup, full portable suite, scripted smoke, and fresh restore verified on 2026-10-05. The review of [research-repo-tools #91](https://github.com/acgetchell/research-repo-tools/pull/91) was accepted in [#123](https://github.com/acgetchell/dotfiles/issues/123). | New rebuild lifecycle and later review baselines need fresh evidence |
 | HPC system | Unverified; site execution path not provided | Discovered modules/scheduler/allocation policy, authorized native smoke/check job receipt and artifacts |
 | Other Linux distributions and aarch64 | Unverified | Native setup, repeated setup, checks, and smoke on each claimed target |
 
@@ -232,7 +234,7 @@ separates completed portable-environment work from the then-remaining real cloud
 review. Its TypeSafe probe criterion is superseded by the no-go decision;
 actual coordinator/worker review was accepted in
 [#123](https://github.com/acgetchell/dotfiles/issues/123), closed on 2026-10-14.
-The accepted evidence was [RRT #91](https://github.com/acgetchell/research-repo-tools/pull/91),
+The accepted evidence was [research-repo-tools #91](https://github.com/acgetchell/research-repo-tools/pull/91),
 reviewed commit `556106ed` and skill baseline `9b2077b`, with a complete 13-node
 proof and passing source/native checks. The original proof still recorded failed
 validation and blocked readiness because of the superseded draft/unmerged

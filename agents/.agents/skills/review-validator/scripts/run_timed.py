@@ -87,7 +87,7 @@ def execute(launch: Launch, stream: TextIO) -> int:
     try:
         # Inherit all three streams and the environment; never use shell=True.
         process = subprocess.Popen(launch.argv, cwd=launch.working_directory)  # noqa: S603 -- exact authorized dispatch arguments
-    except OSError as error:
+    except (OSError, UnicodeEncodeError) as error:
         _record(
             stream,
             {
@@ -97,7 +97,7 @@ def execute(launch: Launch, stream: TextIO) -> int:
                 "exit_code": None,
                 "elapsed_seconds": (time.monotonic_ns() - started) / 1_000_000_000,
                 "error_type": type(error).__name__,
-                "errno": error.errno,
+                "errno": error.errno if isinstance(error, OSError) else None,
             },
         )
         return 2

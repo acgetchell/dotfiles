@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def check_shell(shell: str, expected: dict[str, str]) -> None:
-    """Resolve tools through the user's actual fresh login/interactive startup."""
+    """Resolve tools in a fresh shell without inheriting the profile's tool paths."""
     executable = shutil.which(shell)
     if executable is None:
         raise ValueError(f"Missing {shell}")
@@ -27,6 +27,10 @@ def check_shell(shell: str, expected: dict[str, str]) -> None:
             commands.append(f'[ "$({shlex.quote(name)} --version | head -n 1)" = {shlex.quote(version)} ] || exit 2')
     options = "-lic" if shell in {"bash", "zsh"} else "-lc"
     environment = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+    prefix = Path(environment.get("DOTFILES_REVIEW_PREFIX", Path.home() / ".local/share/dotfiles-review"))
+    provisioned = {(prefix / directory).resolve() for directory in ("bin", "cargo/bin")}
+    inherited = environment.get("PATH", os.defpath).split(os.pathsep)
+    environment["PATH"] = os.pathsep.join(entry for entry in inherited if Path(entry).resolve() not in provisioned)
     result = subprocess.run(  # noqa: S603 - fixed shells and read-only version probes.
         [executable, options, "\n".join(commands)], check=False, capture_output=True, text=True, env=environment, timeout=30
     )
