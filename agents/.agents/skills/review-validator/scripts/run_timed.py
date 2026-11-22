@@ -137,7 +137,7 @@ def main(argv: list[str] | None = None) -> int:
         if not args.receipt.is_absolute():
             msg = "receipt path must be absolute"
             raise ValueError(msg)
-    except OSError, ValueError:
+    except (OSError, ValueError, RecursionError):  # fmt: skip
         print("run_timed: invalid or unreadable launch specification; command not started", file=sys.stderr)
         return 2
     try:

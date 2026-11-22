@@ -1,6 +1,6 @@
 # Shared tooling adoption
 
-The exact published `research-repo-tools==0.3.0` package owns reusable mechanics.
+The exact published `research-repo-tools==0.3.1` package owns reusable mechanics.
 Dotfiles retains policy, machine provisioning, fixtures, and its skill protocols.
 No sibling checkout or unreleased code is needed.
 
@@ -12,9 +12,9 @@ small local adapter when the required behavior is still being developed. Keep
 generic parsing, process and publication mechanics upstream, and keep review
 protocols, scientific acceptance and repository policy with their consumer.
 
-The [RRT v0.3.0 release](https://github.com/acgetchell/research-repo-tools/releases/tag/v0.3.0)
-tightens archive validation used by dependency provenance. Its
-[`release visibility` command](https://github.com/acgetchell/research-repo-tools/blob/v0.3.0/docs/publishing-api.md)
+The [RRT v0.3.1 release](https://github.com/acgetchell/research-repo-tools/releases/tag/v0.3.1)
+adds automatic supplier adoption and Gitleaks exception review. Its
+[`release visibility` command](https://github.com/acgetchell/research-repo-tools/blob/v0.3.1/docs/publishing-api.md)
 can verify an immutable upstream release, its required assets, and the exact
 PyPI version before adoption. Retain consumer integration and native-platform
 checks when replacing an adapter.
@@ -36,18 +36,18 @@ reuse policy remain its own protocol contract.
 | File selection | Shared inventory and bounded batches for Python, Markdown, YAML, actionlint, and Semgrep |
 | Python lint/type policy | Complete configured Ruff and ty checks over tracked/nonignored `.py` and `.pyi`, including fixtures; fixers retain the narrower safe scope |
 | Workflow auditing | One locked Python zizmor pin and explicit persona; SHA pinning, offline local gate, required-online hosted audit, guarded SARIF upload; shared Actions allowlist and offline pin consistency checks |
-| Dependency/secret scanning | Managed OSV/Gitleaks, the root lock, full reachable history and current files, redacted reports; required CI `verify` includes the gate |
+| Dependency/secret scanning | Managed OSV/Gitleaks scan the lock, history and current files in CI. `security-findings` summarizes reports and `security-check-exceptions` compares policies. |
 | Scanner lifecycle | `tools-sync`, `tools-check`, `update-security-tools`, and preview-first `clean`; package-owned cache store |
-| Dependency/tool updates | Shared `deps update-python --all-projects` for the single root environment; Homebrew uv pin reconciliation; machine Cargo tools retain their existing owner |
+| Dependency/tool updates | Shared `deps update-python --all-projects --adopt-supplier tooling` for the root environment, Homebrew uv pin reconciliation and machine-owned Cargo tools |
 | Semgrep fixtures | Shared assertion runner over repository rules, syntax mutation pairs, and count expectations that retain path filters; integration tests exercise real review-graph source/test paths |
 | Notebooks | Published inspection/advice/lint/cleanup/execution in the Jupyter skill; its consumer template prohibits dependency installs inside cells |
 | Reviews | Shared opt-in CodeRabbit wrapper defaults to verified `origin/main`; no review is sent merely by running CI |
 | Review-graph helpers | Public exact-byte hashing, subprocess, and index-preserving status/diff APIs; graph serialization and immutable publication retain their protocol contracts |
-| Dependabot | SHA-pinned v0.3.0 reusable workflow, byte-identical to the previously reviewed workflow. See [the rollout guide](../.github/DEPENDABOT.md). |
+| Dependabot | SHA-pinned v0.3.1 reusable workflow, byte-identical to the previously reviewed workflow. See [the rollout guide](../.github/DEPENDABOT.md). |
 
 ## Python authority and upgrades
 
-The current supplier is published v0.3.0. CI synchronizes the root environment,
+CI synchronizes the root environment,
 runs the early guards and static policy checks, then runs the serialized Semgrep
 lane alongside the remaining Python tests. `DOTFILES_TEST_WORKERS=0 just --jobs 1 ci`
 provides the complete serial fallback. There are no managed Cargo tools here, so
@@ -78,6 +78,7 @@ When upstream publishes the desired Python baseline, run:
 ```sh
 just shared-python-plan VERSION
 just shared-python-update VERSION
+# Set [sources.tooling].version in dependency-sources.toml to VERSION.
 just ci
 just security
 ```
@@ -86,8 +87,7 @@ Preview resolves a temporary candidate and may download packages or Python.
 Apply updates all direct shared-package pins, both Python mirrors, the lockfile,
 and the environment with upstream's recovery protocol. It runs outside the old
 environment, so upgrading to Python 3.15 does not require editing dotfiles'
-Python literals by hand. Publication alone does not change the pinned consumer.
-Review the resulting diff and commit through the normal maintainer workflow.
+Python literals by hand. Review the resulting diff.
 
 The v0.1.9 adoption sets Python 3.15 as the floor. `just python-check` uses
 the published `python check` pipeline: one complete inventory, then format,
@@ -104,8 +104,14 @@ source distribution lacks the native engine. The root also retains the
 `rust-just==1.59.0` override, aligned with `just_version`.
 
 `just update-python-dependencies` selects Homebrew uv and invokes the published
-`deps update-python --all-projects` command. It updates root development pins,
-upgrades the root lock and synchronizes the shared environment. Notebook skill
+`deps update-python --all-projects --adopt-supplier tooling` command from an
+isolated environment built from the locked tooling group. It checks PyPI for a
+newer stable, non-yanked RRT release compatible with the declared Python range.
+An eligible release updates the supplier policy, both exact requirements (including
+the Semgrep extra), the root lock and the installed environment together.
+The same command updates root development pins. Dotfiles owns its Ruff, ty and
+pytest pins, which are newer than the v0.3.1 optional `python-tools` profile.
+New managed review helpers use the locked versions in a fresh directory. Notebook skill
 assets are consumer templates and are never synchronized as projects.
 `just python-sync` restores the locked environment. Native scan recipes and shared
 fixture checks select its absolute scanner entry point. Linux provisioning
@@ -146,7 +152,7 @@ blanket `persist-credentials: false` policy, which remains in Semgrep. The share
 allowlist command covers reusable-workflow calls independently of zizmor's
 `forbidden-uses` audit.
 
-`just actions-check` invokes the installed v0.3.0 checker with no environment sync,
+`just actions-check` invokes the installed v0.3.1 checker with no environment sync,
 Python download, or network access. `.github/action-updates.toml` requires the
 `astral-sh/setup-uv` full SHAs and version comments in CI and zizmor to match.
 Both shared Actions checks scan `actions_inputs = .github/workflows`, matching
@@ -155,11 +161,10 @@ Dependabot owns the coupled workflow bumps; the policy's empty `[actions]` table
 deliberately selects no competing updater or explicit version tag. Add any future
 composite metadata paths to the checker scope and approval policy together.
 
-The Python package group is maintainer-owned: use `shared-python-plan` and
-`shared-python-update` to move both exact RRT requirements and `uv.lock`, then
-reconcile `[sources.tooling]` in `dependency-sources.toml`. The reusable approval
-workflow is an independent SHA-pinned dependency. Its v0.3.0 workflow blob
-`23a810c620d0692b28c9bc535e3be699364ffcdb` matches the v0.2.9 and v0.2.7 blobs, preserving
+The macOS update includes the supplier check. Linux profile updates restore the
+checked-in lock. The reusable approval
+workflow is an independent SHA-pinned dependency. Its v0.3.1 workflow blob
+`23a810c620d0692b28c9bc535e3be699364ffcdb` matches the v0.3.0 blob, preserving
 the approval behavior on this upgrade. Required checks and reviews still gate
 merge; local validation does not establish hosted acceptance for the new pin.
 
@@ -211,6 +216,14 @@ The Gitleaks policy keeps all default detectors. Two rule-specific exceptions
 match only the exact `Validation/Test` routing label in the two review-routing
 references and the historical `ABCDEF123456` README placeholder. Neither skips
 a file or commit; other credentials in those locations still fail the scan.
+
+After `just security-secrets`, read the redacted history and working-tree
+locations with `just security-findings`. Use `just security-secrets --output DIRECTORY`
+to save reports elsewhere and `just security-findings --reports DIRECTORY` to
+read that pair. To review an exception, copy `.gitleaks.toml` to a separate TOML file
+and edit that copy. Run `just security-check-exceptions PATH/TO/candidate.toml`
+to compare both policies on the same files and refs. Inspect every suppressed
+or introduced location before adopting a change, then rerun `just security-secrets`.
 
 `just ci` is the local validation tier. `just security` is the explicit
 network/scanner tier, also required inside the hosted `verify` job;

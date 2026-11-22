@@ -130,10 +130,10 @@ else:
     assert manifest.read_text() == expected_manifest
     if "update-python" in stages:
         call = next(call for call in calls if "update-python" in call)
-        assert call[-1] == "--all-projects"
-        assert "--only-group" in call
-        assert "tooling" in call
-        assert "--inexact" in call
+        assert call[call.index("deps") :] == ["deps", "update-python", "--all-projects", "--adopt-supplier", "tooling"]
+        assert call[call.index("--only-group") + 1] == "tooling"
+        assert {"--locked", "--isolated"} <= set(call)
+        assert "--inexact" not in call
     if "install-update" in stages:
         assert ["cargo", "install-update", "-a", "--locked"] in calls
 

@@ -8,8 +8,8 @@ and [Linux launcher](../scripts/linux_review.py). These measurements used the
 published `research-repo-tools==0.2.7`; no managed Cargo tools are declared here,
 so shared Cargo compilation caching is not applicable.
 
-The current [adoption](shared-tooling.md) pins v0.3.0 and includes `actions-check`
-to `github-actions-check`. The graph and measurements below retain their v0.2.7
+The current [adoption](shared-tooling.md) pins v0.3.1 and includes `actions-check`
+in `github-actions-check`. The graph and measurements below retain their v0.2.7
 scope; they do not establish hosted acceptance for the later upgrade.
 
 ## Command and dependency graph

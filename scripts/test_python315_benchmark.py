@@ -210,7 +210,13 @@ def test_worker_preserves_checkout_behind_nested_symlinks(tmp_path: Path, monkey
 
 @pytest.mark.parametrize(
     ("path_name", "interpreter_root", "placeholder"),
-    [("plain", "checkout", "$REPO"), ("Zoë", "checkout", "$REPO"), ("Zoë", "results", "$RUN"), ("Zoë", "home", "$HOME")],
+    [
+        ("plain", "checkout", "$REPO"),
+        ("Zoë", "checkout", "$REPO"),
+        ("Zoë", "results", "$RUN"),
+        ("Zoë", "home", "$HOME"),
+        pytest.param('Zoë "lab"', "checkout", "$REPO", marks=pytest.mark.skipif(os.name == "nt", reason="quotes are invalid in Windows file names")),
+    ],
 )
 def test_successful_report_records_pairs_identity_and_equal_process_weight(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path_name: str, interpreter_root: str, placeholder: str

@@ -12,10 +12,11 @@ import sys
 import tomllib
 import venv
 import zipfile
+from importlib.metadata import version
 from pathlib import Path
 
 import pytest
-from review_graph_environment import HELPER_VERSION, ORIGIN_FILE, REQUIRED_APIS, capture_python_origin
+from review_graph_environment import ORIGIN_FILE, REQUIRED_APIS, STANDALONE_HELPER_VERSION, capture_python_origin
 from review_graph_session import freeze_runtime
 from test_support_review_graph_lifecycle import _baseline_mutation_fixture
 
@@ -288,17 +289,38 @@ def test_documented_helper_matches_dependency_policy_and_all_runtime_imports() -
         item for group in ("dev", "tooling") for item in policy["dependency-groups"][group] if isinstance(item, str) and item.startswith("research-repo-tools")
     ]
     assert pins
-    assert all(pin.endswith("==" + HELPER_VERSION) for pin in pins)
+    assert all(pin.endswith("==" + version("research-repo-tools")) for pin in pins)
     guide = (SCRIPTS.parent / "references/python-environment.md").read_text()
-    assert set(re.findall(r"research-repo-tools==([\d.]+)", guide)) == {HELPER_VERSION}
-    assert set(re.findall(r"--helper-version ([\d.]+)", guide)) == {HELPER_VERSION}
-    assert f"Dotfiles pins version {HELPER_VERSION}." in guide
+    assert set(re.findall(r"research-repo-tools==([\d.]+)", guide)) == {STANDALONE_HELPER_VERSION}
+    assert set(re.findall(r"--helper-version ([\d.]+)", guide)) == {STANDALONE_HELPER_VERSION}
     for path in SCRIPTS.glob("*.py"):
         if path.name.startswith("test"):
             continue
         for node in ast.walk(ast.parse(path.read_bytes())):
             if isinstance(node, ast.ImportFrom) and node.module is not None and node.module.startswith("research_repo_tools."):
                 assert {alias.name for alias in node.names} <= set(REQUIRED_APIS[node.module.removeprefix("research_repo_tools.")]), path
+
+
+def _assert_markdown_pin(python: Path, repository: Path, environment: dict[str, str]) -> None:
+    """Probe both version outcomes in the same freshly installed external helper."""
+    probe = [
+        str(python),
+        "-E",
+        "-s",
+        str(SCRIPTS / "review_graph_environment.py"),
+        "--repository",
+        str(repository),
+        "--helper-version",
+        version("research-repo-tools"),
+        "--markdown-version",
+    ]
+    wrong = _run([*probe, "0.0.0"], repository, environment)
+    assert wrong.returncode == 2
+    assert not wrong.stdout
+    assert "markdown-it-py==0.0.0" in wrong.stderr
+    correct = _run([*probe, version("markdown-it-py")], repository, environment)
+    assert correct.returncode == 0, correct.stderr
+    assert json.loads(correct.stdout)["executable"] == str(python)
 
 
 @pytest.mark.parametrize("supported", [True, False])
@@ -343,11 +365,12 @@ def test_clean_external_helper_captures_and_bootstraps_real_repository(tmp_path:
     if not supported:
         assert result.returncode == 2
         assert "incompatible review helper" in result.stderr
-        assert f"research-repo-tools=={HELPER_VERSION}" in result.stderr
+        assert f"research-repo-tools=={STANDALONE_HELPER_VERSION}" in result.stderr
         assert not capture.exists()
         return
     assert result.returncode == 0, result.stderr
     captured = json.loads(capture.read_bytes())
+    _assert_markdown_pin(python, repository, environment)
     assert {"tool.py", "state.rs"} <= set(captured["captured_scope_paths"])
     result = _run(
         [
@@ -356,7 +379,7 @@ def test_clean_external_helper_captures_and_bootstraps_real_repository(tmp_path:
             "-s",
             str(SCRIPTS / "review_graph_bootstrap.py"),
             "--helper-version",
-            HELPER_VERSION,
+            version("research-repo-tools"),
             "--capture",
             str(capture),
             "--input",
@@ -370,7 +393,7 @@ def test_clean_external_helper_captures_and_bootstraps_real_repository(tmp_path:
     assert result.returncode == 0, result.stderr
     bundle = json.loads(output.read_bytes())
     origin = json.loads((Path(bundle["runtime_snapshot"]["path"]).parent / ORIGIN_FILE).read_bytes())
-    assert origin["version"] == HELPER_VERSION
+    assert origin["version"] == version("research-repo-tools")
     assert origin["executable"] == str(python)
     dispatched = _run(json.loads(result.stdout)["next_command"], repository, environment)
     assert dispatched.returncode == 0, dispatched.stderr

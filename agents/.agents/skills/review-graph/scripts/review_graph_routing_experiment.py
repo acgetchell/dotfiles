@@ -347,9 +347,9 @@ def evidence_status(packet: dict[str, Any], result: dict[str, Any]) -> str:
     if not packet["request"]["state"]["complete"] or not all(f["complete"] for f in packet["request"]["state"]["files"]):
         return "insufficient-evidence"
     probabilities = result.get("probabilities", {})
-    if set(probabilities) != set(packet["request"]["questions"]):
+    if isinstance(probabilities, dict) and set(probabilities) != set(packet["request"]["questions"]):
         return "partial-response"
-    if any(type(p) not in {int, float} or not 0 <= p <= 1 for p in probabilities.values()):
+    if not isinstance(probabilities, dict) or any(type(p) not in {int, float} or not 0 <= p <= 1 for p in probabilities.values()):
         return "invalid-response"
     return "complete"
 
@@ -368,14 +368,15 @@ def compare(
         msg = "inclusion threshold must lie in [0, 1]"
         raise ValueError(msg)
     status = evidence_status(packet, result)
+    probabilities = result.get("probabilities")
     rows: list[dict[str, Any]] = []
     counts = {"missed_required": 0, "unnecessary": 0, "unresolved_required": 0, "labeled": 0}
     for candidate in packet["catalog"]:
         key = candidate["catalog_id"]
-        probability = result["probabilities"].get(key)
+        probability = probabilities.get(key) if isinstance(probabilities, dict) else None
         decision = "uncertain"
         band = "unknown"
-        if status == "complete":
+        if status == "complete" and probability is not None:
             decision = "applicable" if probability >= inclusion_threshold else "not-applicable"
             band = "positive" if probability >= yes_threshold else "negative" if probability <= no_threshold else "ambiguous"
         baseline = packet["baseline"]["decisions"].get(key)
@@ -448,8 +449,8 @@ def assess_borderline(
         msg = "coordinator floor must be below the inclusion threshold, within [0, 1]"
         raise ValueError(msg)
     complete = evidence_status(packet, result) == "complete"
-    probabilities = result.get("probabilities", {})
-    borderline = sorted(key for key, p in probabilities.items() if complete and coordinator_floor <= p < inclusion_threshold)
+    probabilities = result["probabilities"] if complete else {}
+    borderline = sorted(key for key, p in probabilities.items() if coordinator_floor <= p < inclusion_threshold)
     binding = {
         "packet_digest": packet["packet_digest"],
         "result_digest": result.get("result_digest"),
@@ -631,12 +632,16 @@ def replay_case(
     ) != result.get("result_digest"):
         msg = "saved result digest or request binding mismatch"
         raise ValueError(msg)
-    if result["status"] == "succeeded":
+    probabilities = result.get("probabilities")
+    if not isinstance(probabilities, dict):
+        msg = "saved result probabilities must be an object"
+        raise TypeError(msg)
+    if result.get("status") == "succeeded":
         _validate_response(
-            {"model": result["response_model"], "answers": {key: {"type": "noul", "noul": value} for key, value in result["probabilities"].items()}},
+            {"model": result.get("response_model"), "answers": {key: {"type": "noul", "noul": value} for key, value in probabilities.items()}},
             set(packet["request"]["questions"]),
         )
-    elif result["probabilities"]:
+    elif probabilities:
         msg = "unsuccessful result cannot supply accepted probabilities"
         raise ValueError(msg)
     report = compare(packet, result, inclusion_threshold=inclusion_threshold, coordinator_floor=coordinator_floor, assessment=assessment)

@@ -284,6 +284,32 @@ def test_cloud_launcher_ignores_ambient_python_home(tmp_path: Path) -> None:
     assert "provision,startup,doctor" in result.stdout
 
 
+def test_receipt_destination_error_has_a_private_cli_diagnostic(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    destination = tmp_path / "private-filename"
+    destination.write_text("preserve", encoding="utf-8")
+    assert cloud_profile.main(["doctor", "--receipts", str(destination)]) == 2
+    captured = capsys.readouterr()
+    assert "receipt" in captured.err
+    assert "private-filename" not in captured.err
+    assert not captured.out
+    assert destination.read_text(encoding="utf-8") == "preserve"
+
+
+def test_unwritable_final_receipt_prevents_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    def no_repositories(_inventory: Path) -> tuple[tuple[()], str]:
+        attempt = next(tmp_path.glob("doctor-*"))
+        (attempt / "receipt.json").mkdir()
+        return (), "fixture"
+
+    monkeypatch.setattr(cloud_profile, "load_inventory", no_repositories)
+    previous = signal.getsignal(signal.SIGTERM)
+    assert cloud_profile.main(["doctor", "--receipts", str(tmp_path)]) == 2
+    assert signal.getsignal(signal.SIGTERM) == previous
+    captured = capsys.readouterr()
+    assert "cannot write lifecycle receipt" in captured.err
+    assert not captured.out
+
+
 def test_receipt_hashes_the_inventory_bytes_actually_parsed(checkout: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     inventory = tmp_path / "inventory.toml"
     original = f'schema_version=1\n[[repository]]\nname="fixture"\npath={json.dumps(str(checkout))}\n'.encode()

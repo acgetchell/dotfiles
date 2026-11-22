@@ -408,7 +408,10 @@ def test_complete_author_records_accept_family_or_literal(author: dict[str, str]
     assert result.resolved_authors == ("Li",)
 
 
-@pytest.mark.parametrize(("resolved_doi", "status"), [(["10.1234/other"], "FAIL"), (None, "FAIL"), ("10.1234/other", "MISMATCH"), ("10.1234/test", "OK")])
+@pytest.mark.parametrize(
+    ("resolved_doi", "status"),
+    [(["10.1234/other"], "FAIL"), (None, "FAIL"), ("10.1234/other", "MISMATCH"), ("10.1234/test", "OK"), ("HTTPS://DOI.Org/10.1234/Test", "OK")],
+)
 def test_scholarly_results_require_a_well_formed_resolver_doi_when_present(resolved_doi: object, status: str) -> None:
     entry = MODULE.extract_entries("Shewchuk. Robust predicates. (1997). DOI: https://doi.org/10.1234/test")[0]
     raw = {**metadata("Robust predicates"), "DOI": resolved_doi}

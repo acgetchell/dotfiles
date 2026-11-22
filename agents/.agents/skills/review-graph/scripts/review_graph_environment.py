@@ -13,7 +13,8 @@ from typing import Any
 
 ORIGIN_FILE = "python-origin.json"
 _PACKAGE = "research_repo_tools"
-HELPER_VERSION = "0.3.0"
+# Tested pin for standalone skill installations without the dotfiles lockfile.
+STANDALONE_HELPER_VERSION = "0.3.1"
 REQUIRED_APIS = {
     "evidence": ("sha256",),
     "git_inspect": ("git_diff_paths_bytes", "git_status_bytes"),
@@ -34,8 +35,8 @@ def check_helper_compatibility(*, require_markdown: bool = True) -> None:
             raise ImportError(msg)
     except (ImportError, TypeError) as error:
         msg = (
-            f"incompatible review helper: {error}; create a new isolated packaged helper with research-repo-tools=={HELPER_VERSION} and markdown-it-py "
-            "using review-graph/references/python-environment.md. Preserve existing frozen runs and their original helper."
+            f"incompatible review helper: {error}; create a new isolated packaged helper with research-repo-tools=={STANDALONE_HELPER_VERSION} "
+            "and markdown-it-py using review-graph/references/python-environment.md. Preserve existing frozen runs and their original helper."
         )
         raise ValueError(msg) from error
 
@@ -133,11 +134,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repository", type=Path, required=True)
     parser.add_argument("--helper-version", required=True)
+    parser.add_argument("--markdown-version", help="require the managed helper's locked markdown-it-py version")
     args = parser.parse_args()
     try:
-        check_helper_compatibility(require_markdown=args.helper_version == HELPER_VERSION)
+        from packaging.version import Version  # noqa: PLC0415 - only the versioned origin probe needs the release boundary.
+
+        check_helper_compatibility(require_markdown=Version(args.helper_version) >= Version("0.3.0"))
+        if args.markdown_version is not None:
+            installed = importlib.metadata.version("markdown-it-py")
+            if installed != args.markdown_version:
+                raise ValueError(f"review helper requires markdown-it-py=={args.markdown_version}, found {installed}")
         print(json.dumps(capture_python_origin(args.repository, args.helper_version), sort_keys=True))
-    except (OSError, ValueError) as error:
+    except (ImportError, OSError, ValueError) as error:
         print(f"review helper origin: {error}", file=sys.stderr)
         return 2
     return 0
