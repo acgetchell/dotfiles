@@ -293,8 +293,10 @@ def test_strict_json_rejects_duplicate_or_nonfinite_values(content: str) -> None
 def test_duplicate_finishes_cannot_double_count(tmp_path: Path) -> None:
     ledger = tmp_path / "usage.jsonl"
     request_id = start_request(ledger, stage="routing", provider="test", model=None, scope_digest="source")
-    for _ in range(2):
-        finish_request(ledger, request_id, status="succeeded", usage={"measurement_source": "fixture"})
+    finish_request(ledger, request_id, status="succeeded", usage={"measurement_source": "fixture"})
+    completion = ledger.read_bytes().splitlines(keepends=True)[-1]
+    with ledger.open("ab") as stream:
+        stream.write(completion)
     with pytest.raises(ValueError, match="duplicate"):
         summarize([ledger])
 

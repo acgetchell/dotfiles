@@ -70,6 +70,22 @@ def _assert_write_review_reference(receipt: dict[str, Any], entry: dict[str, Any
     return review
 
 
+def test_worker_publication_rejects_duplicate_execution_facts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    _lifecycle, dispatches = _worker_input_fixture(tmp_path)
+    audit = next(entry for entry in dispatches["dispatches"] if entry["dispatch"]["mode"] == "audit")
+    payload = {**_compact_audit_payload(audit), "execution_facts": ["git-not-mutated", "git-not-mutated"]}
+    assert _publish_cli(audit, json.dumps(payload).encode(), monkeypatch) == 2
+    receipt = capsys.readouterr()
+    (diagnostic,) = json.loads(receipt.err)["diagnostics"]
+    assert diagnostic["path"] == "$.execution_facts"
+    assert diagnostic["code"] == "uniqueItems"
+    assert not Path(audit["worker_payload_path"]).exists()
+
+    payload["execution_facts"].pop()
+    assert _publish_cli(audit, json.dumps(payload).encode(), monkeypatch) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "published"
+
+
 def test_broad_publication_stdout_is_bounded_with_lazy_and_full_evidence(
     broad_publication: tuple[dict[str, Any], bytes], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

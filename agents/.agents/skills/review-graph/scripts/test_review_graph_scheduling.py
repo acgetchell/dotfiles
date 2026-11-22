@@ -60,6 +60,38 @@ def test_model_requirement_blocks_exhausted_creation_fallback(tmp_path: Path) ->
     assert result["creation_failure_blockers"]
 
 
+def test_blocked_creation_continuation_requires_explicit_recovery(tmp_path: Path) -> None:
+    lifecycle, dispatches, paths = _fixture(tmp_path)
+    node_id = _audits(dispatches)[0]["node_id"]
+    requirement = {"node_id": node_id, "model": "requested-model", "reason": "Use the explicitly selected model."}
+    failure = {"node_id": node_id, "failure_kind": "capacity", "attempts": 1, "reason": "Worker pool is full.", "worker_created": False}
+    blocked = _run_schedule(
+        tmp_path, paths, {**lifecycle, "worker_capacity": _capacity(3), "worker_requirements": [requirement], "creation_failure": failure}, "blocked"
+    )
+    assert blocked["creation_failure_action"] == "fresh-worker-blocked"
+    assert blocked["creation_failure"] == failure
+    paths.update(input=Path(blocked["schedule_input_path"]), dispatches=Path(blocked["dispatches_path"]))
+    output = tmp_path / "replayed.json"
+    args = [arg for key, path in paths.items() for arg in (f"--{key}", str(path))]
+    assert main(["schedule-ready", *args, "--output", str(output)]) == 0
+    replayed = json.loads(output.read_bytes())
+    assert replayed["creation_failure_action"] == "fresh-worker-blocked"
+    assert node_id not in replayed["ready_node_ids"]
+    assert replayed["retry_after_seconds"] == 0
+
+    recovery = json.loads(Path(replayed["schedule_input_path"]).read_bytes())
+    recovery["worker_capacity"] = _capacity(0)
+    paths["dispatches"] = Path(replayed["dispatches_path"])
+    still_blocked = _run_schedule(tmp_path, paths, recovery, "capacity-only")
+    assert still_blocked["creation_failure_action"] == "fresh-worker-blocked"
+    assert node_id not in still_blocked["ready_node_ids"]
+
+    del recovery["creation_failure"]
+    resumed = _run_schedule(tmp_path, paths, recovery, "recovered")
+    assert node_id in resumed["worker_node_ids"]
+    assert node_id != resumed["coordinator_node_id"]
+
+
 @pytest.mark.parametrize("active", [0, 3])
 def test_explicit_model_can_use_a_serial_validator_worker(tmp_path: Path, active: int) -> None:
     _lifecycle, dispatches, _paths = _fixture(tmp_path)
@@ -433,8 +465,10 @@ def test_isolated_profiles_reject_scheduling_and_explicit_coordinator_materializ
         )
 
 
-@pytest.mark.parametrize("case", ["stale", "output", "dangling-output", "bad-capacity", "unknown-reservation", "created", "started-failure"])
-def test_invalid_schedule_publishes_no_continuation(tmp_path: Path, case: str) -> None:
+@pytest.mark.parametrize(
+    "case", ["stale", "output", "dangling-output", "bad-capacity", "unknown-reservation", "created", "started-failure", "too-many-attempts"]
+)
+def test_invalid_schedule_publishes_no_continuation(tmp_path: Path, capsys: pytest.CaptureFixture[str], case: str) -> None:
     lifecycle, dispatches, paths = _fixture(tmp_path)
     request = {**lifecycle, "artifact_store": str(tmp_path / "schedules"), "worker_capacity": _capacity(3)}
     audit = _audits(dispatches)[0]
@@ -454,7 +488,7 @@ def test_invalid_schedule_publishes_no_continuation(tmp_path: Path, case: str) -
         request["creation_failure"] = {
             "node_id": audit["node_id"],
             "failure_kind": "unexpected",
-            "attempts": 1,
+            "attempts": 3 if case == "too-many-attempts" else 1,
             "reason": "creation error",
             "worker_created": case == "created",
         }
@@ -468,6 +502,11 @@ def test_invalid_schedule_publishes_no_continuation(tmp_path: Path, case: str) -
     if case == "dangling-output":
         assert Path(audit["worker_payload_path"]).is_symlink()
         assert not (tmp_path / "absent-output").exists()
+    if case == "too-many-attempts":
+        (diagnostic,) = json.loads(capsys.readouterr().err)["diagnostics"]
+        assert diagnostic["path"] == "$.creation_failure.attempts"
+        assert diagnostic["code"] == "maximum"
+        assert diagnostic["accepted_shape"] == "number <= 2"
 
 
 def test_independent_review_and_serial_work_do_not_use_parallel_coordinator_lane(tmp_path: Path) -> None:

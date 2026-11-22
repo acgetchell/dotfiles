@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypedDict
 
 if TYPE_CHECKING:
+    from collections.abc import Hashable
     from pathlib import Path
 
 
@@ -133,6 +134,19 @@ def _shape(schema: dict[str, Any]) -> str:
     return "value described by schema"
 
 
+def _json_value_key(value: object) -> Hashable:
+    """Key JSON values by equality, distinguishing booleans from numbers and ignoring object order."""
+    if isinstance(value, dict):
+        return ("object", frozenset((name, _json_value_key(item)) for name, item in value.items()))
+    if isinstance(value, list):
+        return ("array", tuple(map(_json_value_key, value)))
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return ("number", value)
+    if value is None or isinstance(value, (bool, str)):
+        return (_type_name(value), value)
+    return ("unknown", id(value))
+
+
 def _diagnose(  # noqa: C901, PLR0912, PLR0915
     value: object, schema: dict[str, Any], root: dict[str, Any], path: str, output: list[SchemaDiagnostic]
 ) -> None:
@@ -170,13 +184,19 @@ def _diagnose(  # noqa: C901, PLR0912, PLR0915
     pattern = schema.get("pattern")
     if isinstance(value, str) and isinstance(pattern, str) and re.fullmatch(pattern, value) is None:
         output.append(SchemaDiagnostic(path, "pattern", f"does not match {pattern}", f"string matching {pattern}"))
-    minimum = schema.get("minimum")
-    if isinstance(value, (int, float)) and not isinstance(value, bool) and isinstance(minimum, (int, float)) and value < minimum:
-        output.append(SchemaDiagnostic(path, "minimum", f"must be at least {minimum}", f"number >= {minimum}"))
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        minimum, maximum = schema.get("minimum"), schema.get("maximum")
+        if isinstance(minimum, (int, float)) and value < minimum:
+            output.append(SchemaDiagnostic(path, "minimum", f"must be at least {minimum}", f"number >= {minimum}"))
+        if isinstance(maximum, (int, float)) and value > maximum:
+            output.append(SchemaDiagnostic(path, "maximum", f"must be at most {maximum}", f"number <= {maximum}"))
     min_length = schema.get("minLength")
     if isinstance(value, str) and isinstance(min_length, int) and len(value) < min_length:
         output.append(SchemaDiagnostic(path, "minLength", f"must contain at least {min_length} character(s)", f"string length >= {min_length}"))
     if isinstance(value, dict):
+        min_properties = schema.get("minProperties")
+        if isinstance(min_properties, int) and len(value) < min_properties:
+            output.append(SchemaDiagnostic(path, "minProperties", f"must contain at least {min_properties} field(s)", f"object size >= {min_properties}"))
         properties = schema.get("properties", {})
         if not isinstance(properties, dict):
             properties = {}
@@ -211,6 +231,8 @@ def _diagnose(  # noqa: C901, PLR0912, PLR0915
             output.append(SchemaDiagnostic(path, "minItems", f"must contain at least {min_items} item(s)", f"array length >= {min_items}"))
         if isinstance(max_items, int) and len(value) > max_items:
             output.append(SchemaDiagnostic(path, "maxItems", f"must contain at most {max_items} item(s)", f"array length <= {max_items}"))
+        if schema.get("uniqueItems") is True and len(set(map(_json_value_key, value))) != len(value):
+            output.append(SchemaDiagnostic(path, "uniqueItems", "contains duplicate items", "array of unique items"))
         item_schema = schema.get("items")
         if isinstance(item_schema, dict):
             for index, item in enumerate(value):
@@ -233,10 +255,12 @@ def schema_diagnostics(value: object, schema: dict[str, Any]) -> tuple[SchemaDia
     return tuple(sorted(output, key=lambda item: (item.path, item.code, item.message)))
 
 
-def require_schema(value: object, schema_path: Path) -> None:
-    """Raise one aggregate error when a published schema rejects a value."""
+def require_schema(value: object, schema_path: Path, *, allow_legacy_duplicates: bool = False) -> None:
+    """Raise one aggregate error, optionally tolerating duplicates in previously sealed payloads."""
     schema = load_schema(schema_path)
     diagnostics = schema_diagnostics(value, schema)
+    if allow_legacy_duplicates:
+        diagnostics = tuple(item for item in diagnostics if item.code != "uniqueItems")
     if diagnostics:
         raise SchemaValidationError(str(schema.get("$id", schema_path)), diagnostics)
 

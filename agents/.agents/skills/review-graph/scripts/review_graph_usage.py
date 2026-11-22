@@ -17,6 +17,7 @@ from review_graph_integrity import digest_json
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from typing import TextIO
 
 
 class AccountingInputError(ValueError):
@@ -105,14 +106,37 @@ def write_json(path: Path, value: object) -> None:
         stream.write(content)
 
 
+def _completion_exists(stream: TextIO, event: dict[str, Any]) -> bool:
+    """Find a matching completion while the caller holds the ledger's write lock."""
+    stream.seek(0)
+    expected = {key: value for key, value in event.items() if key != "finished_at"}
+    found = False
+    for line in stream:
+        existing = json.loads(line, object_pairs_hook=_unique_object)
+        if not isinstance(existing, dict):
+            msg = "ledger event must be a JSON object"
+            raise AccountingInputError(msg)
+        if existing.get("event") != "finished" or existing.get("id") != event["id"]:
+            continue
+        if found:
+            msg = "ledger already contains duplicate completions"
+            raise AccountingInputError(msg)
+        if {key: value for key, value in existing.items() if key != "finished_at"} != expected:
+            msg = "usage retry conflicts with the recorded completion"
+            raise AccountingInputError(msg)
+        found = True
+    return found
+
+
 def append_event(path: Path, event: dict[str, Any]) -> None:
-    """Durably append one event, including before starting a paid request."""
+    """Durably append one event, reusing an identical completion on retry."""
     content = json.dumps(event, sort_keys=True, allow_nan=False) + "\n"
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-    with os.fdopen(fd, "a", encoding="utf-8") as stream:
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_APPEND, 0o600)
+    with os.fdopen(fd, "a+", encoding="utf-8") as stream:
         fcntl.flock(stream, fcntl.LOCK_EX)
-        stream.write(content)
-        stream.flush()
+        if event.get("event") != "finished" or not _completion_exists(stream, event):
+            stream.write(content)
+            stream.flush()
         os.fsync(stream.fileno())
 
 
@@ -225,6 +249,7 @@ def summarize(paths: list[Path]) -> dict[str, Any]:
     ends: dict[str, dict[str, Any]] = {}
     for path in paths:
         with path.open(encoding="utf-8") as ledger:
+            fcntl.flock(ledger, fcntl.LOCK_SH)
             for line in ledger:
                 event = json.loads(line, object_pairs_hook=_unique_object)
                 target = starts if event["event"] == "started" else ends if event["event"] == "finished" else None

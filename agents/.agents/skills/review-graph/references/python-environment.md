@@ -1,8 +1,9 @@
 # Review Graph Python Environment
 
 Run the graph scripts with Python 3.15 or newer and the published
-`research-repo-tools` package. In dotfiles, `just skills-helper-setup` selects the
-RRT and Markdown versions from `uv.lock` and prepares a versioned helper directory.
+[research-repo-tools](https://pypi.org/project/research-repo-tools/) package.
+In dotfiles, `just skills-helper-setup` reads the tooling pins from `uv.lock`
+and prepares a versioned helper directory.
 The standalone commands below use a tested pair of exact pins. Markdown scope
 capture uses `markdown-it-py` to recognize CommonMark fences. Consuming repositories
 can declare both tooling dependencies in an environment supporting Python
@@ -106,7 +107,7 @@ For offline regression checks from a prepared dotfiles checkout, replace the
 that checkout. This installs only its locked, published tooling dependencies
 into the new helper. Set `UV_CACHE_DIR` to the cache containing those locked artifacts;
 offline `uv pip install` also needs registry index metadata that locked setup
-does not populate. With this route, pass the RRT version from that checkout's
+does not populate. Pass the research-repo-tools version from that checkout's
 `uv.lock` to both `--helper-version` invocations.
 
 ```sh

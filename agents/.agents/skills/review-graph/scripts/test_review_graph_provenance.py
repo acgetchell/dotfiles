@@ -21,7 +21,7 @@ from test_support_review_graph import (
     _sparse_plan_document,
     _worker_input_fixture,
 )
-from test_support_review_graph_evidence import _compact_independent_payload, _compile_cli_paths, _payload
+from test_support_review_graph_evidence import _compact_audit_payload, _compact_independent_payload, _compile_cli_paths, _payload, _save
 
 
 @pytest.fixture
@@ -198,6 +198,27 @@ def test_compact_reference_cannot_verify_without_bound_payload(broad_audit: dict
     content = Path(broad_audit["source"]["artifact_path"]).read_bytes()
     with pytest.raises(ValueError, match="bound canonical worker payload"):
         runtime._canonical_worker_payload(content)
+
+
+def test_retained_audit_with_legacy_duplicate_facts_verifies_without_rewriting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    lifecycle, dispatches = _worker_input_fixture(tmp_path)
+    audit = next(entry for entry in dispatches["dispatches"] if entry["dispatch"]["mode"] == "audit")
+    payload = {**_compact_audit_payload(audit), "execution_facts": ["git-not-mutated", "git-not-mutated"]}
+    require_schema = runtime.require_schema
+
+    def validate_as_legacy(value: object, schema_path: Path, *, allow_legacy_duplicates: bool = False) -> None:
+        require_schema(value, schema_path, allow_legacy_duplicates=allow_legacy_duplicates or schema_path == runtime._REVIEW_PAYLOAD_SCHEMA)
+
+    with monkeypatch.context() as legacy:
+        legacy.setattr(runtime, "require_schema", validate_as_legacy)
+        source = _save(audit, lifecycle, tmp_path / "journal.jsonl", payload)
+
+    artifact = Path(source["artifact_path"])
+    sealed = artifact.read_bytes()
+    _kind, _expectation, _evidence, verified, record = runtime._load_evidence_source(source, require_normalized=True)
+    assert record is not None
+    assert verified == sealed == artifact.read_bytes()
+    assert runtime._canonical_worker_payload(verified)["execution_facts"] == payload["execution_facts"]
 
 
 @pytest.mark.parametrize("large", [False, True])

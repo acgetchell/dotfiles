@@ -56,6 +56,9 @@ explicit executor-recovery decision may resume from the returned lifecycle
 with a fresh capacity observation and no active `creation_failure`; preserve
 the failed scheduling continuation as history. This is a new authorized attempt,
 not another automatic retry or a coordinator reconciliation waiver.
+If the first creation attempt failed while capacity was known to be exhausted,
+the generated scheduling input records `retry_ineligible: true`. This preserves
+the block across capacity refreshes until explicit recovery.
 
 Use `preflight_blocked_nodes` for unstarted validators whose execution preflight
 is blocked. These holds persist in the continuation and receipt, consume no

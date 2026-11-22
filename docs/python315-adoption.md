@@ -1,10 +1,9 @@
 # Python 3.15 adoption
 
-Dotfiles adopts the published `research-repo-tools==0.1.9` package for
-[issue #169](https://github.com/acgetchell/dotfiles/issues/169). Its inherited
-Python floor and development selector are both 3.15. No sibling checkout is
-required. The upstream package owns consolidated Python validation and file
-selection; dotfiles retains its fixtures, skill validation, and graph protocols.
+Dotfiles adopted `research-repo-tools==0.1.9` for
+[issue #169](https://github.com/acgetchell/dotfiles/issues/169), setting both the
+Python floor and the development selector to 3.15. See
+[shared tooling](shared-tooling.md) for the current update workflow.
 
 ## Language and tooling changes
 
@@ -246,14 +245,13 @@ override when Semgrep advances its pin. The lock resolves across supported
 platforms, and CI exercises the native Windows Semgrep entry point. Local
 macOS validation cannot establish a native Windows or Linux result.
 
-Hosted Dependabot's uv updater currently rejects the 3.15 floor, as recorded
+At adoption, hosted Dependabot's uv updater rejected the 3.15 floor, as recorded
 by the [upstream v0.1.9 release](https://github.com/acgetchell/research-repo-tools/releases/tag/v0.1.9).
-Python version-update PRs are paused with `open-pull-requests-limit: 0`, which
+The repository paused Python version-update PRs with `open-pull-requests-limit: 0`, which
 [preserves security-update policy](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/manage-your-dependency-security/customizing-dependabot-security-prs).
-That runtime limitation can also affect security PR creation; the required
-OSV audit continues. The published manual updater also loses project overrides
-in its isolated resolver, which previously downgraded Semgrep. The local recipe
-now skips shared direct-pin resolution and refreshes the project lock while
-overrides are present; see the [Python update instructions](shared-tooling.md).
-Restore the limit to 10 after a hosted 3.15 update succeeds. GitHub Actions
-updates and the separately pinned approval workflow remain enabled.
+The same runtime could also block security PR creation. The initial local
+workaround refreshed the lock without shared direct-pin resolution because the
+isolated resolver lost overrides and downgraded Semgrep. The current recipe
+preserves project overrides and supports automatic supplier adoption. See
+[Python updates](shared-tooling.md#python-authority-and-upgrades) and the
+[Dependabot guide](../.github/DEPENDABOT.md) for current policy.

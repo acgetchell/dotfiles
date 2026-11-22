@@ -298,6 +298,18 @@ def test_receipt_destination_error_has_a_private_cli_diagnostic(tmp_path: Path, 
     assert destination.read_text(encoding="utf-8") == "preserve"
 
 
+def test_unresolved_inventory_home_reports_a_failed_attempt(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    inventory = tmp_path / "inventory.toml"
+    inventory.write_text('schema_version=1\n[[repository]]\nname="fixture"\npath="~__dotfiles_profile_user_does_not_exist__/project"\n', encoding="utf-8")
+    receipts = tmp_path / "receipts"
+    assert cloud_profile.main(["doctor", "--inventory", str(inventory), "--receipts", str(receipts)]) == 2
+    report = json.loads(next(receipts.glob("*/receipt.json")).read_text(encoding="utf-8"))
+    assert report["status"] == "failed"
+    assert report["repositories"] == []
+    assert report["diagnostic"] == "fixture: cannot expand the repository path"
+    assert report["diagnostic"] in capsys.readouterr().err
+
+
 def test_unwritable_final_receipt_prevents_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     def no_repositories(_inventory: Path) -> tuple[tuple[()], str]:
         attempt = next(tmp_path.glob("doctor-*"))

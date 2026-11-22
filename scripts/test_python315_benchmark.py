@@ -109,8 +109,8 @@ def test_summary_preserves_samples_and_robust_dispersion() -> None:
     assert benchmark.summary([1.0, 3.0, 100.0]) == {"samples_seconds": [1.0, 3.0, 100.0], "median_seconds": 3.0, "mad_seconds": 2.0}
 
 
-def test_overflowing_ratio_median_cannot_publish_a_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Two finite ratios near 1e308 overflow the median's intermediate sum."""
+def test_median_of_large_finite_ratios_can_be_published(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The median of two equal finite ratios is that ratio, with zero dispersion."""
     values = iter(float(value) for value in range(8))
     monkeypatch.setattr(benchmark.time, "perf_counter", lambda: next(values))
     monkeypatch.setattr(benchmark, "source_identity", lambda: "unchanged")
@@ -130,9 +130,12 @@ def test_overflowing_ratio_median_cannot_publish_a_report(tmp_path: Path, monkey
 
     monkeypatch.setattr(benchmark.subprocess, "run", subprocess_result)
     output = tmp_path / "results"
-    with pytest.raises(ValueError, match="Out of range float values"):
-        benchmark.run(output, 2, 1)
-    assert not (output / "report.json").exists()
+    benchmark.run(output, 2, 1)
+    report = json.loads((output / "report.json").read_text(encoding="utf-8"))
+    ratios = report["paired"]["cold_replay"]["on_over_off"]
+    assert ratios["samples"] == pytest.approx([1e308, 1e308], rel=1e-15)
+    assert ratios["median"] == pytest.approx(1e308, rel=1e-15)
+    assert ratios["mad"] == 0.0
     assert len(list(output.glob("*/worker.stdout"))) == 4
 
 

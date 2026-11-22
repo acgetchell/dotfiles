@@ -237,6 +237,8 @@ just review-usage finish --ledger <proof-store>/usage.jsonl --id <attempt-id> \
 ```
 
 `just review-usage finish --help` includes the same example and field rules.
+Retrying a completion with the same status and measurements preserves the
+original record. A conflicting retry fails without changing the ledger.
 Unreadable files, invalid JSON, and invalid fields produce distinct sanitized
 diagnostics without printing submitted values or file contents. Invalid input
 does not append a completion event.

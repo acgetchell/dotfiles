@@ -1,8 +1,7 @@
 # Machine rebuild profiles
 
-Group 2 combines platform setup (#272), skills-only installation (#274), cloud
-lifecycle (#273), and a disposable rebuild harness (#275). The repository's
-existing version pins and lockfile remain authoritative.
+Use these profiles to set up a host, install skills independently, or provision
+and restore locked environments on a cloud machine.
 
 ## Platform setup
 
@@ -24,11 +23,12 @@ Then run user-space setup as the ordinary user, from any checkout location:
 
 ```sh
 bash bin/setup-profile.sh linux-cloud setup
-just setup linux-cloud
-just profile-doctor linux-cloud
 ```
 
-The direct Bash entry point bootstraps Just when it is not installed yet. Setup
+The Bash entry point bootstraps Just. Open a fresh Bash or Zsh session so the
+installed shell startup files add the profile tools to `PATH`. From the checkout,
+run `just profile-doctor linux-cloud` to recheck the setup. With Just already
+available, `just setup linux-cloud` is the setup entry point. Setup
 checks Stow collisions before downloads, prepares pinned user-owned review
 tools and an isolated review helper, links whole skill directories, and installs
 Bash/Zsh/Git links. It preserves existing unrelated files and local overrides;
@@ -76,16 +76,15 @@ not establish discovery. These commands do not change agent settings or AGENTS.m
 
 ## Connected provisioning and offline restoration
 
-The versioned `profiles/cloud.toml` selects only this checkout by default. Paths
-are relative to the inventory file. Copy it to an ignored local file to select
-additional repositories explicitly:
+The versioned `profiles/cloud.toml` selects only this checkout. To include other
+repositories, copy it to `target/cloud-inventory.toml` and append an entry for
+each checkout. Paths resolve relative to the inventory file. For example, a
+checkout beside dotfiles uses `../../my-project` from the `target/` directory.
 
 ```toml
-schema_version = 1
-
 [[repository]]
 name = "my-project"
-path = "../my-project"
+path = "../../my-project"
 groups = ["dev"]
 # Optional owning-repository recipes: [connected provisioning, read-only check].
 tools = [["tools-sync", "tools-check"]]
@@ -104,9 +103,9 @@ Optional tool recipes must already exist in the owning repository and honor the
 chosen lifecycle: provisioning may install tools, checks must only inspect them.
 
 ```sh
-just cloud-provision profiles/cloud.toml
-just cloud-startup profiles/cloud.toml
-just cloud-doctor profiles/cloud.toml
+just cloud-provision target/cloud-inventory.toml
+just cloud-startup target/cloud-inventory.toml
+just cloud-doctor target/cloud-inventory.toml
 ```
 
 Provisioning is connected and uses locked dependencies. Startup disables uv
@@ -153,10 +152,11 @@ working files into a temporary build context without Git metadata or untracked
 files. Stage intended new public source files explicitly before running it;
 untracked files such as a private `.env` stay outside the context. It uses a digest-pinned Ubuntu 24.04
 image, an ordinary user with an empty home, and a checkout path containing
-spaces. It seeds the old helper directory with published RRT v0.2.9 and runs
-profile update twice, then starts a separate container with networking
-disabled. No host home or checkout is mounted. Disposable Git fixture metadata
-exists only inside the image so source-preservation checks can run.
+spaces. It seeds the old helper directory with
+[research-repo-tools 0.2.9](https://pypi.org/project/research-repo-tools/0.2.9/),
+runs profile update twice, then starts a separate container with networking
+disabled. The container uses a disposable checkout and home directory. Git
+fixture metadata inside the image lets it check source preservation.
 
 The disconnected phase checks shells, skills, both helper origins, repeated startup,
 deleted editable metadata, changed locked source, stale locks, missing build

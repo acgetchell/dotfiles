@@ -107,8 +107,11 @@ def parse_repository(raw: object, directory: Path) -> RepositoryProfile:
         msg = "Each repository needs name/path and only supported inventory fields"
         raise ValueError(msg)
     name, path = raw["name"], raw["path"]
-    if not isinstance(name, str) or not isinstance(path, str) or not path.strip():
-        msg = "Repository name/path must be nonempty strings"
+    if not isinstance(name, str) or not NAME.fullmatch(name):
+        msg = "Repository name must be a simple identifier"
+        raise ValueError(msg)
+    if not isinstance(path, str) or not path.strip():
+        msg = "Repository path must be a nonempty string"
         raise ValueError(msg)
     tools = raw.get("tools", [])
     if not isinstance(tools, list):
@@ -122,8 +125,12 @@ def parse_repository(raw: object, directory: Path) -> RepositoryProfile:
     if type(review) is not bool:
         msg = "review-environment must be a boolean"
         raise TypeError(msg)
+    try:
+        checkout = Path(path).expanduser()
+    except RuntimeError as error:
+        raise ValueError(f"{name}: cannot expand the repository path") from error
     return RepositoryProfile(
-        name, (directory / Path(path).expanduser()).resolve(), names(raw.get("groups", ["dev"]), "groups"), tuple((pair[0], pair[1]) for pair in pairs), review
+        name, (directory / checkout).resolve(), names(raw.get("groups", ["dev"]), "groups"), tuple((pair[0], pair[1]) for pair in pairs), review
     )
 
 
