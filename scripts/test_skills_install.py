@@ -115,6 +115,44 @@ def test_helper_rejects_malformed_or_incomplete_origin_reports(tmp_path: Path, m
         skills_install.check_helper(helper)
 
 
+def test_supplier_upgrade_selects_new_locked_helper_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(skills_install, "ROOT", tmp_path)
+    monkeypatch.setenv("DOTFILES_REVIEW_PREFIX", str(tmp_path / "helpers"))
+    for supplier in ("0.3.1", "0.3.2"):
+        (tmp_path / "uv.lock").write_text(
+            f'[[package]]\nname = "research-repo-tools"\nversion = "{supplier}"\n[[package]]\nname = "markdown-it-py"\nversion = "4.3.0"\n', encoding="utf-8"
+        )
+        assert skills_install.default_helper_directory() == tmp_path / "helpers" / f"helper-{supplier}-markdown-it-4.3.0"
+
+
+@pytest.mark.parametrize("packages", ["", '[[package]]\nname = "research-repo-tools"\nversion = "0.3.2"\n'])
+def test_invalid_helper_lock_fails_before_creating_helper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], packages: str
+) -> None:
+    monkeypatch.setattr(skills_install, "ROOT", tmp_path)
+    monkeypatch.setenv("DOTFILES_REVIEW_PREFIX", str(tmp_path / "helpers"))
+    content = (
+        ('[[package]]\nname = "research-repo-tools"\nversion = "0.3.1"\n[[package]]\nname = "markdown-it-py"\nversion = "4.0.0"\n' + packages)
+        if packages
+        else ""
+    )
+    (tmp_path / "uv.lock").write_text(content, encoding="utf-8")
+    assert skills_install.main(["helper-setup"]) == 2
+    assert "uv.lock" in capsys.readouterr().err
+    assert not (tmp_path / "helpers").exists()
+
+
+def test_link_skills_rejects_linked_manifest_before_creating_links(tmp_path: Path) -> None:
+    root = sources(tmp_path)
+    marker = root / "second/SKILL.md"
+    marker.unlink()
+    marker.symlink_to(root / "first/SKILL.md")
+    destination = tmp_path / "discovery"
+    with pytest.raises(ValueError, match=r"SKILL\.md"):
+        skills_install.link_skills(root, destination)
+    assert not destination.exists()
+
+
 def test_missing_helper_does_not_create_skill_links(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = sources(tmp_path)
     monkeypatch.setattr(skills_install, "SKILLS", root)

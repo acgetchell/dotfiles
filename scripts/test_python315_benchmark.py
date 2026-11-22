@@ -4,14 +4,12 @@ import json
 import os
 import subprocess
 import sys
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 import python315_benchmark as benchmark
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def test_source_identity_frames_inventory_and_content(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -210,7 +208,14 @@ def test_worker_preserves_checkout_behind_nested_symlinks(tmp_path: Path, monkey
 
 @pytest.mark.parametrize(
     ("path_name", "interpreter_root", "placeholder"),
-    [("plain", "checkout", "$REPO"), ("Zoë", "checkout", "$REPO"), ("Zoë", "results", "$RUN"), ("Zoë", "home", "$HOME")],
+    [
+        ("plain", "checkout", "$REPO"),
+        ("Zoë", "checkout", "$REPO"),
+        ("Zoë", "results", "$RUN"),
+        ("Zoë", "home", "$HOME"),
+        ("Zoë", "checkout-venv", "$HOME/checkout-venv"),
+        pytest.param('Zoë "lab"', "checkout", "$REPO", marks=pytest.mark.skipif(os.name == "nt", reason="quotes are invalid in Windows file names")),
+    ],
 )
 def test_successful_report_records_pairs_identity_and_equal_process_weight(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path_name: str, interpreter_root: str, placeholder: str
@@ -260,6 +265,17 @@ def test_successful_report_records_pairs_identity_and_equal_process_weight(
         for trial in persisted["results"][mode]["trials"]:
             assert trial["environment"]["executable"] == f"{placeholder}/.venv/bin/python"
     assert len(list(output.glob("*/worker.stdout"))) == 4
+
+
+def test_portable_report_preserves_unicode_and_surrogateescaped_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repository = tmp_path / "private-\udcff"
+    monkeypatch.setattr(benchmark, "REPOSITORY", repository)
+    executable = str(repository / "Zoë-\udcfe" / "python")
+    benchmark.write_portable_report(tmp_path, {"root": str(repository), "executable": executable, "build": f"built with {executable}"})
+    text = (tmp_path / "report.json").read_bytes().decode("utf-8")
+    assert "Zoë" in text
+    portable_executable = str(Path("$REPO") / "Zoë-\udcfe" / "python")
+    assert json.loads(text) == {"root": "$REPO", "executable": portable_executable, "build": f"built with {portable_executable}"}
 
 
 @pytest.mark.parametrize("failure", ["exit", "timeout"])

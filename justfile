@@ -13,6 +13,8 @@ python_primary_paths := "agents/.agents/skills scripts"
 review_contract_tests := "agents/.agents/skills/review-graph/scripts/test_review_graph_contracts.py"
 # Match Dependabot's workflow-only inventory; no local composite actions exist.
 actions_inputs := quote(".github/workflows")
+# Named PyPI supplier in dependency-sources.toml.
+supplier_update := "tooling"
 cargo_update_version := "22.1.5"
 cargo_version_pattern := '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?'
 dprint_version := "0.65.0"
@@ -297,8 +299,19 @@ files +args: _ensure-uv
 security-osv: _ensure-uv
     uv run --locked --group dev research-repo-tools security osv uv.lock
 
-security-secrets: _ensure-uv
-    uv run --locked --group dev research-repo-tools security secrets
+[positional-arguments]
+security-secrets *args: _ensure-uv
+    uv run --locked --group dev research-repo-tools security secrets "$@"
+
+# Read the redacted history and working-tree reports from a completed scan.
+[positional-arguments]
+security-findings *args: _ensure-uv
+    uv run --locked --group dev research-repo-tools security findings "$@"
+
+# Compare both Gitleaks policies against the same files and Git refs.
+[positional-arguments]
+security-check-exceptions candidate *args: _ensure-uv
+    uv run --locked --group dev research-repo-tools security check-exceptions "$@"
 
 # Scan dependency vulnerabilities and secrets with the pinned OSV/Gitleaks tools.
 security: security-osv security-secrets
@@ -384,7 +397,11 @@ _shared-deps action: _ensure-brew
         echo "Homebrew-managed uv is unavailable at $uv_executable." >&2
         exit 1
     fi
-    PATH="$(dirname "$uv_executable"):$PATH" "$uv_executable" run --locked --no-config --only-group tooling --inexact research-repo-tools deps {{ quote(action) }} {{ if action == "update-python" { "--all-projects" } else { "" } }}
+    export PATH="$(dirname "$uv_executable"):$PATH"
+    if [[ {{ quote(action) }} == update-python ]]; then
+        exec "$uv_executable" run --locked --no-config --isolated --only-group tooling research-repo-tools deps update-python --all-projects --adopt-supplier {{ quote(supplier_update) }}
+    fi
+    exec "$uv_executable" run --locked --no-config --only-group tooling --inexact research-repo-tools deps {{ quote(action) }}
 
 # Update Homebrew, Python pins/environment, and all installed Cargo tools.
 update-macos: update-dependencies update-cargo-tools

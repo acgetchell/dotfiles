@@ -179,6 +179,23 @@ def write_worker_logs(directory: Path, stdout: str | bytes | None, stderr: str |
         (directory / f"worker.{name}").write_bytes(data)
 
 
+def write_portable_report(output: Path, report: dict[str, Any]) -> None:
+    """Write the shareable summary using JSON-escaped roots to redact machine paths."""
+    portable = json.dumps(report, indent=2, sort_keys=True, allow_nan=False, ensure_ascii=False)
+    separator = json.dumps(os.sep)[1:-1]
+    for root, placeholder in ((REPOSITORY, "$REPO"), (output, "$RUN"), (Path.home(), "$HOME")):
+        quoted_root = json.dumps(str(root), ensure_ascii=False)
+        portable = portable.replace(quoted_root, f'"{placeholder}"')
+        if root == root.parent:
+            # A filesystem root already includes the separator. Match it at the start of a path.
+            portable = portable.replace(quoted_root[:-1], f'"{placeholder}{separator}')
+        else:
+            # Build metadata can also contain an absolute path inside a longer string.
+            portable = portable.replace(quoted_root[1:-1] + separator, placeholder + separator)
+    # Preserve readable Unicode and emit lone filesystem surrogates as JSON escapes.
+    (output / "report.json").write_text(portable + "\n", encoding="utf-8", errors="backslashreplace")
+
+
 def run(output: Path, repeats: int, scale: int) -> dict[str, Any]:
     """Alternate isolated JIT modes and verify source/semantic preservation."""
     if repeats < 2 or scale < 1:
@@ -228,6 +245,10 @@ def run(output: Path, repeats: int, scale: int) -> dict[str, Any]:
     if before != source_identity():
         msg = "source changed during benchmark"
         raise ValueError(msg)
+    results = {}
+    for mode, samples in trials.items():
+        measurements = [trial_metrics(trial) for trial in samples]
+        results[mode] = {**{metric: summary([row[metric] for row in measurements]) for metric in measurements[0]}, "trials": samples}
     report = {
         "schema_version": 2,
         "source_sha256": before,
@@ -235,22 +256,12 @@ def run(output: Path, repeats: int, scale: int) -> dict[str, Any]:
         "scale": scale,
         "pair_order": pair_order,
         "paired": paired_effects(trials["off"], trials["on"]),
-        "results": {
-            mode: {**{metric: summary([trial_metrics(trial)[metric] for trial in samples]) for metric in trial_metrics(samples[0])}, "trials": samples}
-            for mode, samples in trials.items()
-        },
+        "results": results,
         "limits": "Sequential alternating subprocesses on one interpreter/build. Planner setup and imports are excluded from operation times; "
         "whole-process times include imports, fixture preparation, and cold/warm operations. No model work, live validators, or Git mutations. "
         "Four seeded findings prove preservation, not discovery quality. JIT is queried only after timed operations.",
     }
-    # Machine paths remain in private replay artifacts; the shareable summary uses placeholders.
-    portable = (
-        json.dumps(report, indent=2, sort_keys=True, allow_nan=False, ensure_ascii=False)
-        .replace(str(REPOSITORY), "$REPO")
-        .replace(str(output), "$RUN")
-        .replace(str(Path.home()), "$HOME")
-    )
-    (output / "report.json").write_text(portable + "\n", encoding="utf-8")
+    write_portable_report(output, report)
     return report
 
 

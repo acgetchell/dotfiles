@@ -127,6 +127,15 @@ class TestTimingRunner(unittest.TestCase):
         self.assertEqual(self.run_cli(argv).returncode, 2)
         self.assertFalse(self.receipt.exists())
 
+    def test_excessively_nested_launch_fails_before_creating_a_receipt(self) -> None:
+        argv = self.launch()
+        self.source.write_text("[" * 1_000_000 + "]" * 1_000_000, encoding="utf-8")
+        outcome = self.run_cli(argv)
+        self.assertEqual(outcome.returncode, 2)
+        self.assertIn("invalid or unreadable launch", outcome.stderr)
+        self.assertNotIn("Traceback", outcome.stderr)
+        self.assertFalse(self.receipt.exists())
+
     def test_receipt_failure_prevents_execution_and_preserves_old_evidence(self) -> None:
         argv = self.launch("from pathlib import Path; Path('child-started').touch()")
         self.receipt.write_text("prior evidence\n", encoding="utf-8")

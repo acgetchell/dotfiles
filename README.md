@@ -195,13 +195,14 @@ brew bundle dump --file=~/projects/dotfiles/Brewfile.local --force --describe
 
 `just update` upgrades the Brewfile dependencies and reconciles uv, refreshes Python
 dependencies, then updates Cargo tools and managed security scanners.
-`just update-python-dependencies` advances root development-tool pins and refreshes
-the root lock and environment through the shared `deps update-python --all-projects`
-command, preserving its constraints and security overrides. See the
+`just update-python-dependencies` checks PyPI for a compatible stable RRT release
+and advances the root development-tool pins. It updates the exact supplier pins,
+source policy, lock and environment together, preserving resolver constraints
+and security overrides. See the
 [update instructions](docs/shared-tooling.md#python-authority-and-upgrades).
 The locked `research-repo-tools` package supplies pin updates, uv preflight, and tool-pin
-reconciliation. Its exact pin lives in the included `tooling` group and changes only through
-an explicit package upgrade; ranges, markers, and other included-group constraints remain intact.
+reconciliation. The `tooling` selection in `dependency-sources.toml` identifies
+the supplier to update. Other included groups retain their own constraints.
 It also runs `cargo install-update -a --locked`, updating all Cargo-installed tools with
 their published lockfiles, including tools such as `cargo-nextest` that require `--locked`.
 The `cup` shell alias runs the same Cargo command; `just update-cargo-tools` additionally
@@ -226,14 +227,14 @@ resolving the failure to finish synchronization and pin reconciliation.
 
 The same locked package owns the Semgrep fixture runner and CodeRabbit wrapper.
 `just python-sync` restores one root Python 3.15 environment for tooling and
-the native Semgrep scanner. Updates use `deps update-python --all-projects`;
+the native Semgrep scanner. Updates use `deps update-python --all-projects --adopt-supplier tooling`;
 there are no additional scanner projects, and notebook skill assets remain templates.
 `just semgrep-test` reads `[tool.research-repo-tools.semgrep]`; the repository keeps its
 rules and real fixtures while generic runner tests live upstream.
 The shared runner and native scan recipes select the same locked Semgrep
 installation and published compatibility pins.
 The Jupyter review skill delegates notebook inspection, advice, validation, native
-Ruff/ty lint, cleanup, and execution to published v0.3.0 shared commands. It keeps
+Ruff/ty lint, cleanup, and execution to published v0.3.1 shared commands. It keeps
 only review policy and a tested consumer configuration template; generic notebook
 implementation and regression coverage live upstream. See the
 [shared notebook workflow](agents/.agents/skills/jupyter-notebook-review/references/shared-notebooks.md)
@@ -243,7 +244,7 @@ execution dependencies belong to each consumer's locked notebook environment.
 
 ### Shared tooling and Python upgrades
 
-Dotfiles adopts `research-repo-tools==0.3.0` for Python baseline inheritance,
+Dotfiles adopts `research-repo-tools==0.3.1` for Python baseline inheritance,
 tracked and nonignored file selection, notebook policy, workflow audits, dependency
 and secret scans, managed scanner setup/cleanup, and index-preserving review
 scope inspection. The
@@ -255,14 +256,16 @@ as the sole allowlist. `just actions-check` uses the same workflow-only scope to
 check repeated `astral-sh/setup-uv` SHAs and version comments offline. Both remain
 part of `github-actions-check` and CI; actionlint owns workflow syntax and zizmor
 owns SHA pinning. Dependabot owns workflow updates, including the coupled CI and
-zizmor pins. The reusable approval workflow selects the v0.3.0 commit; its workflow
-bytes match the previously reviewed v0.2.9 pin.
+zizmor pins. The reusable approval workflow selects the v0.3.1 commit; its workflow
+bytes match the previously reviewed v0.3.0 pin.
 
-Python 3.15 is inherited from v0.2.3. Preview and apply future upgrades with the published version:
+Python 3.15 is inherited from RRT. To select a specific release or change the
+Python baseline, preview and apply the migration.
 
 ```sh
 just shared-python-plan VERSION
 just shared-python-update VERSION
+# Set [sources.tooling].version in dependency-sources.toml to VERSION.
 just ci
 just security
 ```
@@ -270,7 +273,6 @@ just security
 The shared package updates the Python selector, dependency-only runtime requirement,
 package pin, lockfile, and environment together. CI checks these mirrors against the
 installed package. Ruff and ty infer the target; workflows read `.python-version`.
-A new upstream release takes effect here through this explicit pinned migration.
 Homebrew's unversioned `python` formula serves the host; uv selects repository Python.
 
 `just tools-sync` installs checksum-verified OSV/Gitleaks into the package-owned
@@ -280,6 +282,9 @@ reports under `target/security`. It requires online advisory access and runs in 
 required CI `verify` job. `just security-check` remains an alias. Run
 `just security-osv` or `just security-secrets` for either scan separately;
 `just update-security-tools` updates their managed pins and installations.
+Use `just security-findings` to read the redacted reports. Before changing an
+exception, run `just security-check-exceptions PATH/TO/candidate.toml` to see which
+findings the proposed policy suppresses or introduces on the same files and history.
 `just clean` previews obsolete managed installations;
 `just clean --apply` removes eligible package-owned candidates after checking again.
 Pass `--keep-root PATH` for other consumers that share this store.

@@ -194,11 +194,25 @@ def _add_measurements(group: dict[str, Any], usage: dict[str, Any]) -> None:
         group["unknown_elapsed_attempts"] += 1
     else:
         group["elapsed_seconds_known"] += elapsed
+        if not math.isfinite(group["elapsed_seconds_known"]):
+            msg = "elapsed time total exceeds the finite reporting range"
+            raise AccountingInputError(msg)
     basis = usage["cost_basis"]
     if basis == "unavailable":
         group["unknown_cost_attempts"] += 1
     else:
         group[f"{basis}_cost_usd"] += usage["cost_usd"]
+        if not math.isfinite(group[f"{basis}_cost_usd"]):
+            raise AccountingInputError(f"{basis} cost total exceeds the finite reporting range")
+
+
+def _group_key(start: dict[str, Any]) -> tuple[str, str, str | None]:
+    """Require the same stage, provider, and optional model types as a new request."""
+    stage, provider, model = start["stage"], start["provider"], start["model"]
+    if not isinstance(stage, str) or not isinstance(provider, str) or (model is not None and not isinstance(model, str)):
+        msg = "invalid accounting group identity"
+        raise AccountingInputError(msg)
+    return stage, provider, model
 
 
 def summarize(paths: list[Path]) -> dict[str, Any]:
@@ -210,19 +224,24 @@ def summarize(paths: list[Path]) -> dict[str, Any]:
     starts: dict[str, dict[str, Any]] = {}
     ends: dict[str, dict[str, Any]] = {}
     for path in paths:
-        for line in path.read_text(encoding="utf-8").splitlines():
-            event = json.loads(line, object_pairs_hook=_unique_object)
-            target = starts if event["event"] == "started" else ends if event["event"] == "finished" else None
-            if target is None or event["id"] in target:
-                msg = "unknown or duplicate usage event"
-                raise ValueError(msg)
-            target[event["id"]] = event
+        with path.open(encoding="utf-8") as ledger:
+            for line in ledger:
+                event = json.loads(line, object_pairs_hook=_unique_object)
+                target = starts if event["event"] == "started" else ends if event["event"] == "finished" else None
+                request_id = event["id"]
+                if not isinstance(request_id, str):
+                    msg = "invalid request id"
+                    raise AccountingInputError(msg)
+                if target is None or request_id in target:
+                    msg = "unknown or duplicate usage event"
+                    raise ValueError(msg)
+                target[request_id] = event
     if set(ends) - set(starts):
         msg = "usage completion has no matching start"
         raise ValueError(msg)
     groups: dict[tuple[str, str, str | None], dict[str, Any]] = {}
     for request_id, start in starts.items():
-        key = (start["stage"], start["provider"], start["model"])
+        key = _group_key(start)
         group = groups.setdefault(
             key,
             {
@@ -324,7 +343,7 @@ Never infer tokens or costs from byte counts or account-wide allowances.""",
         elif args.command == "finish":
             finish_request(args.ledger, args.id, status=args.status, usage=_read_usage(args.usage))
         else:
-            print(json.dumps(summarize(args.ledgers), indent=2))
+            print(json.dumps(summarize(args.ledgers), indent=2, allow_nan=False))
     except AccountingInputError as error:
         print(f"review_graph_usage: {error}", file=sys.stderr)
         return 2
@@ -335,7 +354,7 @@ Never infer tokens or costs from byte counts or account-wide allowances.""",
         print(f"review_graph_usage: invalid ledger JSON at line {error.lineno}, column {error.colno}", file=sys.stderr)
         return 2
     # Keep parentheses for Semgrep's exception-pattern parser.
-    except (ValueError, KeyError, TypeError, UnicodeError):  # fmt: skip
+    except (ValueError, KeyError, TypeError, RecursionError):  # fmt: skip
         print("review_graph_usage: invalid accounting fields", file=sys.stderr)
         return 2
     return 0

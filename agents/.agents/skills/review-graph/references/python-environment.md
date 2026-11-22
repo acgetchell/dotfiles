@@ -1,21 +1,23 @@
 # Review Graph Python Environment
 
 Run the graph scripts with Python 3.15 or newer and the published
-`research-repo-tools` package. Dotfiles pins version 0.3.0. Markdown scope
+`research-repo-tools` package. In dotfiles, `just skills-helper-setup` selects the
+RRT and Markdown versions from `uv.lock` and prepares a versioned helper directory.
+The standalone commands below use a tested pair of exact pins. Markdown scope
 capture uses `markdown-it-py` to recognize CommonMark fences. Consuming repositories
 can declare both tooling dependencies in an environment supporting Python
 3.15. Use the consumer's migration recipes when upgrading an existing pin;
 reconcile its Python selector and requirement before adding the dependency:
 
 ```sh
-uv add --group dev 'research-repo-tools==0.3.0' 'markdown-it-py==4.3.0'
+uv add --group dev 'research-repo-tools==0.3.1' 'markdown-it-py==4.3.0'
 uv run --locked python "$SKILLS_ROOT/review-graph/scripts/capture_scope.py" --help
 ```
 
 For a repository without those dependencies, supply them for the invocation:
 
 ```sh
-uv run --python 3.15 --with 'research-repo-tools==0.3.0' --with 'markdown-it-py==4.3.0' \
+uv run --python 3.15 --with 'research-repo-tools==0.3.1' --with 'markdown-it-py==4.3.0' \
   python "$SKILLS_ROOT/review-graph/scripts/review_graph_runtime.py" --help
 ```
 
@@ -75,13 +77,13 @@ an approved external proof store with a new helper directory:
   export UV_CACHE_DIR="$PROOF_STORE/helper-cache"
   uv venv --no-project --no-config --python 3.15 "$PROOF_STORE/helper"
   uv pip install --no-config --python "$PROOF_STORE/helper/bin/python" \
-    --link-mode copy 'research-repo-tools==0.3.0' 'markdown-it-py==4.3.0'
+    --link-mode copy 'research-repo-tools==0.3.1' 'markdown-it-py==4.3.0'
   "$PROOF_STORE/helper/bin/python" -E -s \
     "$SKILLS_ROOT/review-graph/scripts/capture_scope.py" \
     --repo "$PWD" --mode baseline --output "$PROOF_STORE/initial.capture.json"
   "$PROOF_STORE/helper/bin/python" -E -s \
     "$SKILLS_ROOT/review-graph/scripts/review_graph_bootstrap.py" \
-    --helper-version 0.3.0 \
+    --helper-version 0.3.1 \
     --capture "$PROOF_STORE/initial.capture.json" --input "$PROOF_STORE/planning.json" \
     --output "$PROOF_STORE/bootstrap.json"
 )
@@ -104,7 +106,8 @@ For offline regression checks from a prepared dotfiles checkout, replace the
 that checkout. This installs only its locked, published tooling dependencies
 into the new helper. Set `UV_CACHE_DIR` to the cache containing those locked artifacts;
 offline `uv pip install` also needs registry index metadata that locked setup
-does not populate.
+does not populate. With this route, pass the RRT version from that checkout's
+`uv.lock` to both `--helper-version` invocations.
 
 ```sh
 UV_OFFLINE=1 UV_PROJECT_ENVIRONMENT="$PROOF_STORE/helper" uv sync --locked \
@@ -122,7 +125,7 @@ dispatch command. After setup, a read-only probe is:
 ```sh
 "$PROOF_STORE/helper/bin/python" -E -s \
   "$SKILLS_ROOT/review-graph/scripts/review_graph_environment.py" \
-  --repository "$PWD" --helper-version 0.3.0
+  --repository "$PWD" --helper-version 0.3.1
 ```
 
 Omit `--python-runner` to retain that helper interpreter directly. Keep its

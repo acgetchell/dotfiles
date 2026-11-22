@@ -399,8 +399,12 @@ def main(argv: list[str] | None = None) -> int:
         "platform": platform.platform(),
         "architecture": platform.machine(),
     }
-    args.receipts.mkdir(parents=True, exist_ok=True)
-    attempt = Path(tempfile.mkdtemp(prefix=f"{args.mode}-", dir=args.receipts))
+    try:
+        args.receipts.mkdir(parents=True, exist_ok=True)
+        attempt = Path(tempfile.mkdtemp(prefix=f"{args.mode}-", dir=args.receipts))
+    except OSError:
+        print("cloud profile: cannot create receipt directory", file=sys.stderr)
+        return 2
     previous_handler = signal.signal(signal.SIGTERM, cancel_lifecycle)
     try:
         profiles, report["inventory_sha256"] = load_inventory(args.inventory)
@@ -412,13 +416,11 @@ def main(argv: list[str] | None = None) -> int:
             reports.append(entry)
             run_repository(profile, args.mode, entry)
         report["status"] = "passed"
-        return 0
     except (OSError, ValueError, TypeError, subprocess.SubprocessError) as error:
         # Our validation errors contain public names; subprocess exceptions can contain captured private output.
         diagnostic = str(error) if isinstance(error, (ValueError, TypeError)) else f"{type(error).__name__}: prerequisite or command unavailable"
         report["diagnostic"] = diagnostic
         print(f"cloud profile: {diagnostic}", file=sys.stderr)
-        return 2
     except KeyboardInterrupt, SystemExit:
         report["diagnostic"] = "Lifecycle interrupted; child cleanup completed before releasing its environment lock"
         raise
@@ -426,8 +428,12 @@ def main(argv: list[str] | None = None) -> int:
         try:
             (attempt / "receipt.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
             print(f"Cloud lifecycle receipt: {attempt / 'receipt.json'}")
+        except OSError:
+            report["status"] = "failed"
+            print("cloud profile: cannot write lifecycle receipt", file=sys.stderr)
         finally:
             signal.signal(signal.SIGTERM, previous_handler)
+    return 0 if report["status"] == "passed" else 2
 
 
 if __name__ == "__main__":

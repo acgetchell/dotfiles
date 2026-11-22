@@ -5,7 +5,7 @@ __lazy_modules__ = ("skill_validate",)
 import argparse
 import json
 import os
-import runpy
+import re
 import shutil
 import subprocess
 import sys
@@ -40,6 +40,10 @@ def skill_sources(source: Path) -> tuple[Path, ...]:
     sources = tuple(sorted(path.parent for path in source.glob("*/SKILL.md")))
     if not sources:
         raise ValueError(f"No skills found in {source}")
+    for directory in sources:
+        manifest = directory / "SKILL.md"
+        if directory.is_symlink() or manifest.is_symlink() or not manifest.is_file():
+            raise ValueError(f"Expected a regular SKILL.md in a concrete skill directory: {manifest}")
     return sources
 
 
@@ -95,21 +99,34 @@ def link_skills(source: Path, destination: Path) -> None:
         raise
 
 
-def helper_version() -> str:
-    """Read the existing graph helper authority, without copying its pin."""
-    value = runpy.run_path(str(ENVIRONMENT))["HELPER_VERSION"]
-    if not isinstance(value, str):
-        msg = "Invalid review helper version authority"
+def locked_helper_versions() -> tuple[str, str]:
+    """Read the RRT and Markdown versions that locked tooling setup will install."""
+    packages = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8")).get("package")
+    if not isinstance(packages, list):
+        msg = "uv.lock must contain a package list"
         raise TypeError(msg)
-    return value
+
+    def pinned_version(name: str) -> str:
+        """Require one unambiguous, path-safe version for each helper dependency."""
+        versions: set[str] = set()
+        for package in packages:
+            if isinstance(package, dict) and package.get("name") == name:
+                value = package.get("version")
+                if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.!+_-]*", value):
+                    raise ValueError(f"uv.lock must pin a valid version of {name}")
+                versions.add(value)
+        if len(versions) != 1:
+            raise ValueError(f"uv.lock must pin exactly one version of {name}")
+        return versions.pop()
+
+    return pinned_version("research-repo-tools"), pinned_version("markdown-it-py")
 
 
 def default_helper_directory() -> Path:
     """Select a directory for the pinned helper while preserving older runtimes."""
     prefix = Path(os.environ.get("DOTFILES_REVIEW_PREFIX", Path.home() / ".local/share/dotfiles-review"))
-    packages = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))["package"]
-    parser_version = next(package["version"] for package in packages if package["name"] == "markdown-it-py")
-    return prefix / f"helper-{helper_version()}-markdown-it-{parser_version}"
+    helper_version, parser_version = locked_helper_versions()
+    return prefix / f"helper-{helper_version}-markdown-it-{parser_version}"
 
 
 def check_helper(helper: Path) -> dict[str, object]:
@@ -117,8 +134,9 @@ def check_helper(helper: Path) -> dict[str, object]:
     if not helper.is_absolute() or not helper.is_file():
         msg = f"Isolated helper Python is missing at {helper}; run just skills-helper-setup or Linux profile setup"
         raise ValueError(msg)
+    helper_version, parser_version = locked_helper_versions()
     result = subprocess.run(  # noqa: S603 - explicit interpreter and repository-owned read-only probe.
-        [str(helper), "-E", "-s", str(ENVIRONMENT), "--repository", str(ROOT), "--helper-version", helper_version()],
+        [str(helper), "-E", "-s", str(ENVIRONMENT), "--repository", str(ROOT), "--helper-version", helper_version, "--markdown-version", parser_version],
         check=False,
         capture_output=True,
         text=True,
@@ -140,7 +158,7 @@ def check_helper(helper: Path) -> dict[str, object]:
     if set(report) != required or any(not isinstance(value, str) or not value for value in report.values()):
         msg = "Incomplete isolated helper origin report"
         raise ValueError(msg)
-    if report["version"] != helper_version() or report["helper_version"] != helper_version():
+    if report["version"] != helper_version or report["helper_version"] != helper_version:
         msg = "Isolated helper origin report has an incompatible version"
         raise ValueError(msg)
     return report

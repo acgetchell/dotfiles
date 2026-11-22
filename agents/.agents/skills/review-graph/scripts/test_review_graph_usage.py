@@ -7,6 +7,44 @@ import pytest
 import review_graph_usage as usage
 
 
+def test_report_reads_unicode_separators_inside_a_json_string(tmp_path: Path) -> None:
+    ledger = tmp_path / "usage.jsonl"
+    stage = "plan\u2028review"
+    usage.start_request(ledger, stage=stage, provider="local", model=None, scope_digest="fixture")
+    ledger.write_text(json.dumps(json.loads(ledger.read_bytes()), ensure_ascii=False) + "\n", encoding="utf-8")
+    assert usage.summarize([ledger])["groups"][0]["stage"] == stage
+
+
+@pytest.mark.parametrize("field", ["cost_usd", "elapsed_seconds"])
+def test_report_rejects_unrepresentable_totals(tmp_path: Path, capsys: pytest.CaptureFixture[str], field: str) -> None:
+    ledger = tmp_path / "usage.jsonl"
+    for _ in range(2):
+        request_id = usage.start_request(ledger, stage="review", provider="local", model=None, scope_digest="fixture")
+        usage.finish_request(
+            ledger,
+            request_id,
+            status="succeeded",
+            usage={field: 1e308, "measurement_source": "fixture", "cost_basis": "measured" if field == "cost_usd" else "unavailable"},
+        )
+    assert usage.main(["report", str(ledger)]) == 2
+    captured = capsys.readouterr()
+    assert "total" in captured.err
+    assert not captured.out
+
+
+@pytest.mark.parametrize(("field", "value"), [("id", 1), ("stage", False), ("provider", 1), ("model", 0)])
+def test_report_rejects_mistyped_restored_identity(tmp_path: Path, capsys: pytest.CaptureFixture[str], field: str, value: object) -> None:
+    ledger = tmp_path / "usage.jsonl"
+    usage.start_request(ledger, stage="review", provider="local", model=None, scope_digest="fixture")
+    event = json.loads(ledger.read_bytes())
+    event[field] = value
+    ledger.write_text(json.dumps(event) + "\n", encoding="utf-8")
+    assert usage.main(["report", str(ledger)]) == 2
+    captured = capsys.readouterr()
+    assert not captured.out
+    assert "invalid" in captured.err
+
+
 def _finish_args(ledger: Path, usage_path: Path) -> list[str]:
     """Construct the command that records a successful fixture attempt with usage from a file."""
     return ["finish", "--ledger", str(ledger), "--id", "fixture-attempt", "--status", "succeeded", "--usage", str(usage_path)]
@@ -79,6 +117,14 @@ def deeply_nested_usage(tmp_path: Path) -> Path:
     path = tmp_path / "private-filename.json"
     path.write_text('{"private-value":' + "[" * depth + '"private-value"' + "]" * depth + "}", encoding="utf-8")
     return path
+
+
+def test_deep_ledger_returns_a_private_diagnostic(deeply_nested_usage: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert usage.main(["report", str(deeply_nested_usage)]) == 2
+    captured = capsys.readouterr()
+    assert not captured.out
+    assert "review_graph_usage:" in captured.err
+    assert "private-" not in captured.err
 
 
 def test_deep_usage_json_reports_safe_diagnostic_without_traceback(tmp_path: Path, deeply_nested_usage: Path, capsys: pytest.CaptureFixture[str]) -> None:

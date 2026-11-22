@@ -407,6 +407,19 @@ def test_replay_detects_modified_packet_and_makes_no_network_request(case: dict[
         experiment.replay_case(directory)
 
 
+def test_replay_rejects_malformed_probabilities_with_valid_digest(case: dict[str, Any], tmp_path: Path) -> None:
+    directory = tmp_path / "run"
+    experiment.run_case(case, directory, live=False)
+    path = directory / "result.json"
+    result = read_json(path)
+    result["probabilities"] = []
+    del result["result_digest"]
+    result["result_digest"] = experiment.digest(result)
+    path.write_text(json.dumps(result), encoding="utf-8")
+    with pytest.raises(TypeError, match="probabilities must be an object"):
+        experiment.replay_case(directory)
+
+
 def test_primary_cutoff_reports_selected_ids_and_disagreements(packet: dict[str, Any]) -> None:
     probabilities = dict.fromkeys(packet["request"]["questions"], 0.0)
     probabilities.update({"python.scientific": 0.5, "python.parse": 0.499, "python.cli": 0.6})
@@ -544,7 +557,21 @@ def test_cli_replays_bound_coordinator_assessment_without_network(packet: dict[s
 
 
 @pytest.mark.parametrize(
-    "failure", ["failed", "cancelled", "not-run", "partial", "stale", "model", "request_digest", "response_model", "mutated-request", "complete"]
+    "failure",
+    [
+        "failed",
+        "cancelled",
+        "not-run",
+        "partial",
+        "stale",
+        "model",
+        "request_digest",
+        "response_model",
+        "mutated-request",
+        "complete",
+        "probabilities",
+        "non-mapping",
+    ],
 )
 def test_unusable_evidence_never_supplies_selections_or_sweep_negatives(packet: dict[str, Any], failure: str) -> None:
     result = _bound_result(packet, dict.fromkeys(packet["request"]["questions"], 0.99))
@@ -554,7 +581,9 @@ def test_unusable_evidence_never_supplies_selections_or_sweep_negatives(packet: 
         result["request_digest"] = "changed-source-request"
     elif failure == "model":
         result["response_model"] = "jev-0.0.0"
-    elif failure in {"request_digest", "response_model"}:
+    elif failure == "non-mapping":
+        result["probabilities"] = list(packet["request"]["questions"])
+    elif failure in {"request_digest", "response_model", "probabilities"}:
         del result[failure]
     elif failure == "mutated-request":
         packet["request"]["state"]["files"][0]["content"] += "changed"
