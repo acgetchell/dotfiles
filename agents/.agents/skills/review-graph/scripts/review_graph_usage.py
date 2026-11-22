@@ -134,10 +134,9 @@ def append_event(path: Path, event: dict[str, Any]) -> None:
     fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_APPEND, 0o600)
     with os.fdopen(fd, "a+", encoding="utf-8") as stream:
         fcntl.flock(stream, fcntl.LOCK_EX)
-        if event.get("event") == "finished" and _completion_exists(stream, event):
-            return
-        stream.write(content)
-        stream.flush()
+        if event.get("event") != "finished" or not _completion_exists(stream, event):
+            stream.write(content)
+            stream.flush()
         os.fsync(stream.fileno())
 
 

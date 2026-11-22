@@ -194,6 +194,29 @@ def test_finish_retry_preserves_the_first_completion(tmp_path: Path, capsys: pyt
     assert group["input_tokens_known"] == 4
 
 
+def test_finish_retry_resynchronizes_the_first_completion(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ledger = tmp_path / "usage.jsonl"
+    request_id = usage.start_request(ledger, stage="review", provider="local", model=None, scope_digest="fixture")
+    measurements = {"measurement_source": "fixture", "input_tokens": 4}
+
+    def unavailable_fsync(_fd: int) -> None:
+        msg = "simulated ledger synchronization failure"
+        raise OSError(msg)
+
+    with monkeypatch.context() as failed_disk:
+        failed_disk.setattr(usage.os, "fsync", unavailable_fsync)
+        with pytest.raises(OSError, match="simulated ledger synchronization failure"):
+            usage.finish_request(ledger, request_id, status="succeeded", usage=measurements)
+        original = ledger.read_bytes()
+        assert json.loads(original.splitlines()[-1])["event"] == "finished"
+        with pytest.raises(OSError, match="simulated ledger synchronization failure"):
+            usage.finish_request(ledger, request_id, status="succeeded", usage=measurements)
+
+    usage.finish_request(ledger, request_id, status="succeeded", usage=measurements)
+    assert ledger.read_bytes() == original
+    assert usage.summarize([ledger])["groups"][0]["succeeded"] == 1
+
+
 @pytest.mark.parametrize("status", ["attempts", "measured_cost_usd", "unfinished", None, []])
 def test_report_rejects_invalid_restored_completion(tmp_path: Path, capsys: pytest.CaptureFixture[str], status: object) -> None:
     ledger = tmp_path / "usage.jsonl"
