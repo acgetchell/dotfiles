@@ -76,7 +76,10 @@ def checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def mixed_inventory(checkout: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path, Path]:
     """Two separate checkouts with different owning pins and recipe selections."""
     second = tmp_path / "another checkout"
-    shutil.copytree(checkout, second)
+    git = shutil.which("git")
+    assert git is not None
+    # Clone the committed tree so Git's transient maintenance files stay in the source.
+    subprocess.run([git, "clone", "--no-local", "--quiet", "--", checkout, second], check=True, capture_output=True, timeout=10)  # noqa: S603 - fixture paths.
     metadata = second / "pyproject.toml"
     metadata.write_text(metadata.read_text().replace(f"=={PROFILE_UV_PIN}", "==0.13.7"))
     inventory = tmp_path / "inventory.toml"
