@@ -182,9 +182,18 @@ def write_worker_logs(directory: Path, stdout: str | bytes | None, stderr: str |
 def write_portable_report(output: Path, report: dict[str, Any]) -> None:
     """Write the shareable summary using JSON-escaped roots to redact machine paths."""
     portable = json.dumps(report, indent=2, sort_keys=True, allow_nan=False, ensure_ascii=False)
+    separator = json.dumps(os.sep)[1:-1]
     for root, placeholder in ((REPOSITORY, "$REPO"), (output, "$RUN"), (Path.home(), "$HOME")):
-        portable = portable.replace(json.dumps(str(root), ensure_ascii=False)[1:-1], placeholder)
-    (output / "report.json").write_text(portable + "\n", encoding="utf-8")
+        quoted_root = json.dumps(str(root), ensure_ascii=False)
+        portable = portable.replace(quoted_root, f'"{placeholder}"')
+        if root == root.parent:
+            # A filesystem root already includes the separator. Match it at the start of a path.
+            portable = portable.replace(quoted_root[:-1], f'"{placeholder}{separator}')
+        else:
+            # Build metadata can also contain an absolute path inside a longer string.
+            portable = portable.replace(quoted_root[1:-1] + separator, placeholder + separator)
+    # Preserve readable Unicode and emit lone filesystem surrogates as JSON escapes.
+    (output / "report.json").write_text(portable + "\n", encoding="utf-8", errors="backslashreplace")
 
 
 def run(output: Path, repeats: int, scale: int) -> dict[str, Any]:

@@ -69,7 +69,7 @@ class Doi:
     def parse(cls, raw: str) -> Doi:
         """Parse a raw DOI-ish string into a non-empty DOI label."""
         value = raw.strip().strip(".,;")
-        value = re.sub(r"^https?://doi\.org/", "", value, flags=re.IGNORECASE)
+        value = re.sub(r"^https?://doi\.org/", "", value, flags=re.ASCII | re.IGNORECASE)
         if not value:
             msg = "DOI label was empty"
             raise ValueError(msg)
