@@ -22,16 +22,18 @@ orchestration outside `review-graph` routing mode.
 
 ## Establish Scope And Routing
 
-1. Inspect the supplied scope. Otherwise use read-only git commands to enumerate
+1. Inspect the supplied scope. For a whole-package baseline, include unchanged
+   package sources, metadata, tests, and the workflows that exercise them.
+   For changed-file scope without a supplied inventory, use read-only git commands to enumerate
    the committed branch delta from its merge base, staged changes, unstaged
    changes, and untracked paths.
 2. Read every untracked file completely with a file-appropriate reader before
    selecting skills; a status entry or filename is not evidence.
-3. Read [`check-routing.md`](check-routing.md).
-4. Select individual skills from changed behavior, not file extensions alone.
-5. State selected and not-selected skills with reasons before loading
+3. Use the [specialist routing table](check-routing.md#individual-skill-routing)
+   to select and order passes for the scoped behavior.
+4. State selected and not-selected skills with reasons before loading
    specialist bodies.
-6. Load a repository-specific reference only when both the repository and its
+5. Load a repository-specific reference only when both the repository and its
    concern match.
 
 Validator selection is independent from skill selection. Running tests for
@@ -47,86 +49,6 @@ When a caller supplies an established scope, begin with a handoff receipt
 naming the supplied scope and selected and not-selected skills, then provide
 table-ready evidence. Name not-selected skills whose absence might otherwise
 appear accidental.
-
-## Pass Order And Individual Selection
-
-Order applicable skills by actual contract dependencies, selecting only those whose triggers
-match.
-
-### 1. Build, Install, And Configuration
-
-- Select `python-build-portability` for package builds, wheels, sdists, package
-  discovery and data, entry points, extras, environment markers, declared
-  Python or platform support, editable-versus-installed differences, optional
-  imports, native extensions, or external consumers.
-- Select `project-tooling-review` separately for workflow mechanics, command
-  recipes, validation configuration, installers, or tool-version pins.
-
-### 2. Notebook And Reproducibility
-
-- Select `jupyter-notebook-review` for `.ipynb` structure, cell identity, hidden
-  state, outputs, notebook environments, plotting, headless execution, or
-  generated notebook artifacts.
-- Select additional Python specialists only when cells contain substantial
-  behavior they own. Plotting existing data does not automatically require
-  scientific review.
-
-### 3. Application And Boundary Behavior
-
-- Select `python-api-design` for material public or cross-module concepts,
-  import/export paths, callable signatures, return shapes, protocols, callbacks,
-  type stubs, subclassing hooks, or compatible evolution. Skip private helper
-  changes with no material shared caller contract.
-- Select `python-cli-review` for user-visible application contracts, arguments,
-  output channels, privacy-sensitive output, file workflows, and date/time
-  behavior.
-- Select `python-parse-dont-validate` independently for raw dictionaries,
-  configuration, environment values, structured files, subprocess output,
-  paths, optionals, primitive invariants, or validated domain models.
-
-Do not load the CLI skill for a pure parser/model change or the parsing skill
-for passive shapes with no meaningful invariant.
-
-### 4. Scientific And Data Correctness
-
-- Select `python-scientific-review` for mathematical, numerical, geometric,
-  statistical, stochastic, dataframe-computation, scientific-reproducibility,
-  or independent native-interoperability behavior.
-- Add the parsing skill only when external scientific inputs carry invariants
-  before computation.
-
-### 5. Development And Release Support
-
-- Select `python-support-scripts` for changelog, release, benchmark, CI,
-  fixture, diagnostic, generated-artifact, or development subprocess behavior.
-- Add CLI or parsing skills only when their distinct contracts are material;
-  `argparse` alone does not require another pass.
-
-### 6. Test Evidence
-
-Select `python-test-quality` when tests, fixtures, pytest configuration, or
-helpers changed; test or coverage review was requested; a bug requires
-regression evidence; property, stateful, async, subprocess, install, or matrix
-evidence is material; or weak assertions, mocking, nondeterminism, or duplicated
-logic may conceal a defect.
-
-Skip it when tests are unchanged and focused specialist validation is
-sufficient. Still run appropriate focused tests.
-
-### 7. Simplification
-
-Select `python-simplification-review` when pruning or suite reduction is
-requested, or redundant code, tests, fixtures, wrappers, compatibility paths,
-or accidental complexity are material. Reuse domain and test-quality evidence
-to justify removals; do not create cleanup work solely to fill this pass.
-
-### 8. Production Synthesis
-
-Always load `python-production-review` after selected specialists in
-orchestrated work. Use orchestrated mode without the standalone checklist. It
-owns ordinary reusable Python with no narrower owner, cross-skill
-reconciliation, duplicate removal, residual integration/resource/security
-risk, and the readiness verdict.
 
 ## Per-Skill Fix Loop
 

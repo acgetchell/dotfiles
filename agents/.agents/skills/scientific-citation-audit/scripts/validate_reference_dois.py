@@ -227,15 +227,7 @@ class SoftwareCitation:
 
     def to_json_object(self) -> dict[str, object]:
         """Expose the checked identity alongside its file digest."""
-        return {
-            "path": self.path,
-            "digest": self.digest,
-            "doi": self.doi.value,
-            "title": self.title,
-            "authors": list(self.authors),
-            "year": self.year,
-            "content_base64": base64.b64encode(self.content).decode("ascii"),
-        }
+        return {"path": self.path, "digest": self.digest, "doi": self.doi.value, "title": self.title, "authors": list(self.authors), "year": self.year}
 
 
 def _reported_doi(raw: dict[str, Any]) -> str | None:
@@ -727,6 +719,20 @@ def print_text_report(results: Sequence[DoiResult]) -> None:
         )
 
 
+def json_report(markdown: Path, content: bytes, citation: SoftwareCitation | None, results: Sequence[DoiResult]) -> dict[str, object]:
+    """Reference exact input bytes by SHA-256 from every occurrence in the report."""
+    digest = "sha256:" + sha256(content).hexdigest()
+    inputs = {digest: content}
+    if citation is not None:
+        inputs[citation.digest] = citation.content
+    source = {"path": str(markdown.resolve()), "digest": digest}
+    return {
+        "format": "doi-report-v2",
+        "captures": {key: base64.b64encode(data).decode("ascii") for key, data in inputs.items()},
+        "results": [{**result.to_json_object(), "source": source} for result in results],
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the command-line parser."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -756,26 +762,15 @@ def run(argv: Sequence[str] | None = None) -> int:
         return 2
 
     entries = extract_entries(markdown)
-    if not entries:
+    if not entries and not args.allow_empty:
         message = f"no DOI references found in {args.markdown}"
-        if args.allow_empty:
-            if args.json:
-                print("[]")
-            else:
-                print("DOIs checked: 0")
-            return 0
         print(message, file=sys.stderr)
         return 2
 
     results = validate_entries(entries, args.timeout, args.min_title_score, citation=citation)
 
     if args.json:
-        source = {
-            "path": str(args.markdown.resolve()),
-            "digest": "sha256:" + sha256(markdown_bytes).hexdigest(),
-            "content_base64": base64.b64encode(markdown_bytes).decode("ascii"),
-        }
-        json.dump([{**result.to_json_object(), "source": source} for result in results], sys.stdout, indent=2, sort_keys=True)
+        json.dump(json_report(args.markdown, markdown_bytes, citation, results), sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
     else:
         print_text_report(results)

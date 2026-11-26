@@ -21,7 +21,8 @@ edits and safe checks, but do not imply Git mutations or publication.
 
 When `review-graph` requests a declarative handoff, read
 [`review-graph/references/routing-handoff.md`](../review-graph/references/routing-handoff.md)
-and return its records instead of running this skill's standalone pass loop.
+and apply the [specialist routing table](references/check-routing.md#individual-skill-routing)
+to its records instead of running this skill's standalone pass loop.
 Return semantic decisions for every matched specialist, including justified
 `not-applicable` decisions, and additions beyond path matches. The planner rejects
 unassessed matches, expands unmatched omissions, and selects mandatory synthesis. Preserve the
@@ -34,7 +35,5 @@ For a directly requested Python orchestration outside graph-routing mode, read
 [`references/standalone-workflow.md`](references/standalone-workflow.md)
 completely and follow its scope, routing, trace, validation, and reporting
 workflow.
-
-Record an explicit decision for [python-style-hygiene](../python-style-hygiene/SKILL.md). Select it for Python source, tests, stubs, and code examples, including examples embedded in documentation.
 
 Review outcomes: [typed contract](../review-graph/references/typed-results.md); read on rejection. Missing evidence stays blocked.

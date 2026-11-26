@@ -74,6 +74,10 @@ For each selected skill:
    record the failure and report it as deferred or blocked without editing the
    worktree.
 
+For package README or template navigation, the repository-docs pass can use
+the [offline snapshot link check](../../repository-docs-review/references/readme-navigation.md#check-github-navigation-against-the-reviewed-snapshot)
+when the project's validator misses absolute default-branch fragments.
+
 Do not report one blended pass as orchestrated evidence.
 
 ## Final Summary

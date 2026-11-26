@@ -1,6 +1,6 @@
 # Shared tooling adoption
 
-Dotfiles pins the published [research-repo-tools](https://pypi.org/project/research-repo-tools/)
+Dotfiles pins version 0.3.3 of the published [research-repo-tools](https://pypi.org/project/research-repo-tools/)
 package for shared tooling. This repo owns policy, machine provisioning, fixtures,
 and skill protocols. See the [upstream repository](https://github.com/acgetchell/research-repo-tools).
 
@@ -43,7 +43,7 @@ reuse policy remain its own protocol contract.
 | Notebooks | Published inspection/advice/lint/cleanup/execution in the Jupyter skill; its consumer template prohibits dependency installs inside cells |
 | Reviews | Shared opt-in CodeRabbit wrapper defaults to verified `origin/main`; no review is sent merely by running CI |
 | Review-graph helpers | Public exact-byte hashing, subprocess, and index-preserving status/diff APIs; graph serialization and immutable publication retain their protocol contracts |
-| Dependabot | SHA-pinned v0.3.1 reusable workflow, byte-identical to the previously reviewed workflow. See [the rollout guide](../.github/DEPENDABOT.md). |
+| Dependabot | SHA-pinned v0.3.3 reusable workflow, byte-identical to the previously reviewed workflow. See [the rollout guide](../.github/DEPENDABOT.md). |
 
 ## Python authority and upgrades
 
@@ -111,7 +111,7 @@ Python range.
 An eligible release updates the supplier policy, both exact requirements (including
 the Semgrep extra), the root lock and the installed environment together.
 The same command updates root development pins. Dotfiles owns its Ruff, ty and
-pytest pins, which are newer than the v0.3.1 optional `python-tools` profile.
+pytest pins, which are newer than the v0.3.3 optional `python-tools` profile.
 New managed review helpers use the locked versions in a fresh directory. Notebook skill
 assets are consumer templates and are never synchronized as projects.
 `just python-sync` restores the locked environment. Native scan recipes and shared
@@ -126,6 +126,14 @@ identifies both runs and preserves the scope of the Windows checks.
 The obsolete override-detection preflight has been removed. Each successful
 project update remains applied if a later project fails; inspect the diff and
 retry the same recipe after resolving the failure.
+
+If supplier adoption stops with `source transitions require an unlinked
+candidate checkout`, the updater found a symlink or junction while collecting
+source files. Its inventory can include Git-ignored caches such as
+`.uv-cache/` and `.research-repo-tools/`. For an exact published version,
+use the preview and apply recipes above, update the source-policy version,
+and verify it with `just release-dependencies`. Those recipes select tracked
+and nonignored inputs.
 
 Skill validation uses PyYAML's C safe loader when installed, with the Python
 safe loader as a supported fallback. Explicit Python 3.15 lazy imports defer
@@ -153,7 +161,7 @@ blanket `persist-credentials: false` policy, which remains in Semgrep. The share
 allowlist command covers reusable-workflow calls independently of zizmor's
 `forbidden-uses` audit.
 
-`just actions-check` invokes the installed v0.3.1 checker with no environment sync,
+`just actions-check` invokes the installed v0.3.3 checker with no environment sync,
 Python download, or network access. `.github/action-updates.toml` requires the
 `astral-sh/setup-uv` full SHAs and version comments in CI and zizmor to match.
 Both shared Actions checks scan `actions_inputs = .github/workflows`, matching
@@ -164,8 +172,8 @@ composite metadata paths to the checker scope and approval policy together.
 
 The macOS update includes the supplier check. Linux profile updates restore the
 checked-in lock. The reusable approval
-workflow is an independent SHA-pinned dependency. Its v0.3.1 workflow blob
-`23a810c620d0692b28c9bc535e3be699364ffcdb` matches the v0.3.0 blob, preserving
+workflow is an independent SHA-pinned dependency. Its v0.3.3 workflow blob
+`23a810c620d0692b28c9bc535e3be699364ffcdb` matches the v0.3.1 blob, preserving
 the approval behavior on this upgrade. Required checks and reviews still gate
 merge; local validation does not establish hosted acceptance for the new pin.
 

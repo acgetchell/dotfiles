@@ -8,6 +8,7 @@ import io
 import json
 import sys
 import tempfile
+from hashlib import sha256
 from http.client import IncompleteRead
 from pathlib import Path
 from typing import Any
@@ -234,7 +235,7 @@ def test_incomplete_scholarly_metadata_requires_manual_verification(
     assert MODULE.run([str(path), "--json"]) == 1
     output = capsys.readouterr()
     assert output.err == ""
-    result = json.loads(output.out)[0]
+    result = json.loads(output.out)["results"][0]
     assert result["status"] == "INSUFFICIENT_CONTEXT"
     assert result["resolved_title"] == "Robust predicates"
     assert result["resolved_authors"] == ([] if "author" in missing_fields else ["Shewchuk"])
@@ -476,7 +477,7 @@ def test_resolved_badge_needs_context_instead_of_reporting_mismatch(
         lambda entries, timeout, score, **kwargs: original(entries, timeout, score, lambda *_: metadata("Project", family="Author", year=2026), **kwargs),
     )
     assert MODULE.run([str(path), "--json"]) == 1
-    result = json.loads(capsys.readouterr().out)[0]
+    result = json.loads(capsys.readouterr().out)["results"][0]
     assert result["status"] == "INSUFFICIENT_CONTEXT"
     assert result["line"] == heading.count("\n") + 1
     assert result["resolved_title"] == "Project"
@@ -1259,12 +1260,44 @@ def test_canonical_cli_keeps_scholarly_checks_and_input_provenance(tmp_path: Pat
 
     monkeypatch.setattr(MODULE, "validate_entries", lambda entries, timeout, score, **kwargs: original(entries, timeout, score, fetcher, **kwargs))
     assert MODULE.run([str(markdown), "--citation-cff", str(cff), "--json"]) == 0
-    rows = json.loads(capsys.readouterr().out)
+    report = json.loads(capsys.readouterr().out)
+    rows = report["results"]
     assert [row["status"] for row in rows] == ["OK", "OK"]
     assert rows[0]["local_status"] == "INSUFFICIENT_CONTEXT"
-    assert base64.b64decode(rows[0]["canonical_software"]["content_base64"], validate=True) == cff.read_bytes()
+    assert base64.b64decode(report["captures"][rows[0]["canonical_software"]["digest"]], validate=True) == cff.read_bytes()
     assert "canonical_software" not in rows[1]
     assert rows[0]["source"]["path"] == str(markdown)
+
+
+def test_json_captures_each_input_once_for_three_software_occurrences(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    markdown, cff = tmp_path / "README.md", tmp_path / "CITATION.cff"
+    markdown.write_bytes(f"{SOFTWARE_LINKS[0]}\r\n\r\n{SOFTWARE_LINKS[2]}\r\n\r\n[doi]: https://doi.org/{SOFTWARE_DOI}\r\n".encode())
+    cff.write_bytes(CFF.encode())
+    requests = []
+    original = MODULE.validate_entries
+
+    def fetcher(doi: Any, _timeout: float) -> dict[str, object]:
+        requests.append(doi.value)
+        return software_metadata()
+
+    monkeypatch.setattr(MODULE, "validate_entries", lambda entries, timeout, score, **kwargs: original(entries, timeout, score, fetcher, **kwargs))
+    assert MODULE.run([str(markdown), "--citation-cff", str(cff), "--json"]) == 0
+    output = capsys.readouterr().out
+    report = json.loads(output)
+    assert requests == [SOFTWARE_DOI]
+    assert report["format"] == "doi-report-v2"
+    rows = report["results"]
+    assert [(row["line"], row["doi"], row["status"]) for row in rows] == [(line, SOFTWARE_DOI, "OK") for line in (1, 3, 5)]
+    assert len(report["captures"]) == 2
+    for path, field in ((markdown, "source"), (cff, "canonical_software")):
+        data = path.read_bytes()
+        digest = "sha256:" + sha256(data).hexdigest()
+        encoded = base64.b64encode(data).decode("ascii")
+        assert report["captures"][digest] == encoded
+        assert output.count(encoded) == 1
+        assert all(row[field]["digest"] == digest and row[field]["path"] == str(path) for row in rows)
 
 
 def test_empty_input_fails_without_allow_empty() -> None:

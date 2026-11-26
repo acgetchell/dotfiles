@@ -11,14 +11,14 @@ can declare both tooling dependencies in an environment supporting Python
 reconcile its Python selector and requirement before adding the dependency:
 
 ```sh
-uv add --group dev 'research-repo-tools==0.3.1' 'markdown-it-py==4.3.0'
+uv add --group dev 'research-repo-tools==0.3.3' 'markdown-it-py==4.3.0'
 uv run --locked python "$SKILLS_ROOT/review-graph/scripts/capture_scope.py" --help
 ```
 
 For a repository without those dependencies, supply them for the invocation:
 
 ```sh
-uv run --python 3.15 --with 'research-repo-tools==0.3.1' --with 'markdown-it-py==4.3.0' \
+uv run --python 3.15 --with 'research-repo-tools==0.3.3' --with 'markdown-it-py==4.3.0' \
   python "$SKILLS_ROOT/review-graph/scripts/review_graph_runtime.py" --help
 ```
 
@@ -78,13 +78,13 @@ an approved external proof store with a new helper directory:
   export UV_CACHE_DIR="$PROOF_STORE/helper-cache"
   uv venv --no-project --no-config --python 3.15 "$PROOF_STORE/helper"
   uv pip install --no-config --python "$PROOF_STORE/helper/bin/python" \
-    --link-mode copy 'research-repo-tools==0.3.1' 'markdown-it-py==4.3.0'
+    --link-mode copy 'research-repo-tools==0.3.3' 'markdown-it-py==4.3.0'
   "$PROOF_STORE/helper/bin/python" -E -s \
     "$SKILLS_ROOT/review-graph/scripts/capture_scope.py" \
     --repo "$PWD" --mode baseline --output "$PROOF_STORE/initial.capture.json"
   "$PROOF_STORE/helper/bin/python" -E -s \
     "$SKILLS_ROOT/review-graph/scripts/review_graph_bootstrap.py" \
-    --helper-version 0.3.1 \
+    --helper-version 0.3.3 \
     --capture "$PROOF_STORE/initial.capture.json" --input "$PROOF_STORE/planning.json" \
     --output "$PROOF_STORE/bootstrap.json"
 )
@@ -126,7 +126,7 @@ dispatch command. After setup, a read-only probe is:
 ```sh
 "$PROOF_STORE/helper/bin/python" -E -s \
   "$SKILLS_ROOT/review-graph/scripts/review_graph_environment.py" \
-  --repository "$PWD" --helper-version 0.3.1
+  --repository "$PWD" --helper-version 0.3.3
 ```
 
 Omit `--python-runner` to retain that helper interpreter directly. Keep its

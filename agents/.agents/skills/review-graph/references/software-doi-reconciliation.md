@@ -53,6 +53,12 @@ bytes to the regular-file identity in its source capture and retains that captur
 for evidence reloads. Reports without retained bytes or a matching capture cannot
 justify readiness; rerun the canonical check to obtain that evidence.
 
+The reader accepts retained row-array reports and compact `doi-report-v2`
+reports, including a legacy original with a compact follow-up. In the compact
+format, each row names its Markdown and applicable CFF capture by digest.
+The reader verifies the capture table and its references before reconciliation
+and checks the Markdown identity against the recorded source snapshot.
+
 Follow the returned continuation paths. Accepted audits and validators remain;
 only the additional check and downstream syntheses run. A legacy `MISMATCH`
 may justify a recheck, but cannot by itself justify readiness. No readiness

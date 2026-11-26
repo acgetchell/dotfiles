@@ -14,7 +14,7 @@ from typing import Any
 ORIGIN_FILE = "python-origin.json"
 _PACKAGE = "research_repo_tools"
 # Tested pin for standalone skill installations without the dotfiles lockfile.
-STANDALONE_HELPER_VERSION = "0.3.1"
+STANDALONE_HELPER_VERSION = "0.3.3"
 REQUIRED_APIS = {
     "evidence": ("sha256",),
     "git_inspect": ("git_diff_paths_bytes", "git_status_bytes"),
