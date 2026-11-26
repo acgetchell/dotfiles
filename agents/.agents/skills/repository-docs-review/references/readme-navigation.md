@@ -41,7 +41,7 @@ remove the `origin/` prefix and use `trunk`.
 
 ```sh
 snapshot_uri=$(python -c 'from pathlib import Path; print(Path.cwd().as_uri())')
-github_path='^https://github\.com/example/widgets/(?:blob|tree)/trunk(?:/([^#]*))?(#.*)?$'
+github_path='^https://github\.com/(?i:example/widgets)/(?:blob|tree)/trunk(?:/([^#]*))?(#.*)?$'
 lychee --offline --include-fragments=anchor-only --index-files 'README.md,.' \
   --remap "$github_path $snapshot_uri/"'$1$2' -- README.md
 ```
@@ -52,6 +52,13 @@ so relative paths and Markdown parsing match the packaged README. Lychee
 resolves reference-style links and disambiguates repeated rendered headings
 (for example, `#usage` and `#usage-1`). Fenced examples are skipped by default.
 A broken fragment reports the referring file, destination, and remapped URL.
+
+Lychee 0.24.0–0.24.2 can miss a valid heading when a duplicate collides with
+an existing suffix. For example, GitHub assigns `#foo-1`, `#foo`, and
+`#foo-2` to the headings “Foo 1”, “Foo”, and “Foo” in that order. For a
+collision, verify the disputed fragment offline by passing all rendered
+heading texts from the destination file, in order, to one
+[`github-slugger` instance](https://github.com/Flet/github-slugger).
 
 Keep tag and commit links tied to their named revisions. External sites and
 other GitHub refs are excluded by offline mode. Record this check as evidence
