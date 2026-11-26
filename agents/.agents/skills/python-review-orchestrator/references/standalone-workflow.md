@@ -42,7 +42,7 @@ changed code does not by itself require loading `python-test-quality`.
 ## Review Trace
 
 For each selected skill, record why it applies, skill and reference files
-loaded, changed files inspected, findings or an explicit no-finding outcome,
+loaded, scoped files inspected, findings or an explicit no-finding outcome,
 fixes, and focused validation or matching ledger evidence reused.
 
 When a caller supplies an established scope, begin with a handoff receipt
@@ -56,7 +56,8 @@ For each selected specialist:
 
 1. Announce the skill and why it applies.
 2. Read its `SKILL.md` completely and only directly relevant references.
-3. Inspect the changed surface and nearby contract owners.
+3. Inspect the files and contracts assigned to the specialist. In a baseline,
+   include unchanged files within that assignment.
 4. Record findings or an explicit no-finding result.
 5. Implement minimal fixes when authorized.
 6. Run the smallest risk-covering validator only when equivalent evidence is

@@ -4,8 +4,10 @@ Apply this matrix to the selected scope, including unchanged contracts in a whol
 
 ## Scope Detection
 
-Use a supplied parent scope when present. Otherwise use read-only git commands
-to enumerate the committed branch delta from its merge base, staged changes,
+Use a supplied parent scope when present. For a whole-package baseline,
+inventory the package and its supporting files, including unchanged paths.
+For changed-file reviews, use read-only git commands to enumerate the
+committed branch delta from its merge base, staged changes,
 unstaged changes, and every untracked path. Read the complete contents of each
 untracked file with a file-appropriate reader before routing it; a status entry
 or filename alone is insufficient. Classify the resulting complete scope by
@@ -34,7 +36,7 @@ Run selected rows in contract-dependency order. Establish build and platform con
 | `python-support-scripts` | Release, changelog, benchmark, CI, fixture, diagnostic, generated-artifact, or development subprocess behavior changed | User application or scientific algorithm code |
 | `python-test-quality` | Tests, fixtures, helpers, or pytest configuration changed, coverage/test review was requested, a bug needs regression evidence, or assertions, isolation, install or platform coverage are at risk | Tests are unchanged and focused specialist validation is sufficient |
 | `python-simplification-review` | Pruning or suite reduction is requested; redundant code, tests, fixtures, wrappers, compatibility paths, or accidental complexity are material | No concrete deletion or consolidation opportunity and no simplification request |
-| `python-production-review` | Always last in orchestrated mode. Reconcile specialist findings, ordinary modules, residual integration risks and readiness | Never skip final synthesis during orchestration |
+| `python-production-review` | Always select for final synthesis, including when the Python orchestrator is invoked directly. Run after any selected specialists and reconcile findings, ordinary modules, integration risks and readiness | Required even when no narrower specialist applies |
 
 Select `project-tooling-review` outside this skill when recipes, workflows, validation configuration, installers, or tool versions changed. Select documentation review for suite-wide docs consistency. Shared ownership does not justify loading unrelated Python specialists.
 
