@@ -53,12 +53,14 @@ resolves reference-style links and disambiguates repeated rendered headings
 (for example, `#usage` and `#usage-1`). Fenced examples are skipped by default.
 A broken fragment reports the referring file, destination, and remapped URL.
 
-Lychee 0.24.0–0.24.2 can miss a valid heading when a duplicate collides with
-an existing suffix. For example, GitHub assigns `#foo-1`, `#foo`, and
-`#foo-2` to the headings “Foo 1”, “Foo”, and “Foo” in that order. For a
-collision, verify the disputed fragment offline by passing all rendered
-heading texts from the destination file, in order, to one
-[`github-slugger` instance](https://github.com/Flet/github-slugger).
+Lychee 0.24.0–0.24.2 can assign a duplicate heading ID when a generated suffix
+collides with an existing heading. In a file with such a collision, pass all
+rendered heading texts in document order to one
+[`github-slugger` instance](https://github.com/Flet/github-slugger) and
+compare **each affected link** with the ID of its intended section, including
+links Lychee accepts. For example, GitHub assigns `#foo-1`, `#foo`, `#foo-2`
+and `#foo-3` to “Foo 1”, “Foo”, “Foo” and “Foo”. A link to `#foo-2` passes
+Lychee but lands one section early if the author intended the last heading.
 
 Keep tag and commit links tied to their named revisions. External sites and
 other GitHub refs are excluded by offline mode. Record this check as evidence
