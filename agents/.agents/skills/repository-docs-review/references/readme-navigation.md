@@ -22,3 +22,47 @@
   Verify destinations before tagging; rendering Markdown alone does not establish
   that linked pages exist. Retain immutable image and historical evidence links
   when their purpose requires provenance.
+
+## Check GitHub navigation against the reviewed snapshot
+
+For package README or navigation changes, prefer the repository's link checker
+if it verifies both relative fragments and same-repository default-branch
+fragments. Confirm coverage with a misspelled heading in a disposable copy
+when the check's behavior is unclear.
+
+With [Lychee 0.24.0](https://github.com/lycheeverse/lychee/releases/tag/lychee-v0.24.0) or later, run the
+following from the root of the selected snapshot. Use the worktree for a
+worktree review. For a staged or commit review, materialize the selected tree
+first so the README and its destinations come from the same revision.
+Replace `example/widgets` and `trunk` with the repository slug and its
+configured default branch, escaping any regex metacharacters. If
+`git symbolic-ref --short refs/remotes/origin/HEAD` prints `origin/trunk`,
+remove the `origin/` prefix and use `trunk`.
+
+```sh
+snapshot_uri=$(python -c 'from pathlib import Path; print(Path.cwd().as_uri())')
+github_path='^https://github\.com/(?i:example/widgets)/(?:blob|tree)/trunk(?:/([^#]*))?(#.*)?$'
+lychee --offline --include-fragments=anchor-only --index-files 'README.md,.' \
+  --remap "$github_path $snapshot_uri/"'$1$2' -- README.md
+```
+
+Pass additional in-scope Markdown files as arguments. For a template with a
+non-Markdown extension, use its rendered `.md` path in the disposable snapshot
+so relative paths and Markdown parsing match the packaged README. Lychee
+resolves reference-style links and disambiguates repeated rendered headings
+(for example, `#usage` and `#usage-1`). Fenced examples are skipped by default.
+A broken fragment reports the referring file, destination, and remapped URL.
+
+Lychee 0.24.0–0.24.2 can assign a duplicate heading ID when a generated suffix
+collides with an existing heading. In a file with such a collision, pass all
+rendered heading texts in document order to one
+[`github-slugger` instance](https://github.com/Flet/github-slugger) and
+compare **each affected link** with the ID of its intended section, including
+links Lychee accepts. For example, GitHub assigns `#foo-1`, `#foo`, `#foo-2`
+and `#foo-3` to “Foo 1”, “Foo”, “Foo” and “Foo”. A link to `#foo-2` passes
+Lychee but lands one section early if the author intended the last heading.
+
+Keep tag and commit links tied to their named revisions. External sites and
+other GitHub refs are excluded by offline mode. Record this check as evidence
+for the selected snapshot and assess published availability separately when
+the review calls for it.

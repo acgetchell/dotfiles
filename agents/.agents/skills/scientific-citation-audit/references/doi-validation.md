@@ -66,11 +66,13 @@ author/title/year claims retain those checks. Canonical comparison requires the
 linked and resolved DOI, normalized full title, all author family/entity names,
 and release year to match. Missing resolved fields still require review.
 
-JSON rows retain resolved metadata, a Markdown path/content digest, and the exact
-Markdown bytes in `source.content_base64`. Canonical
-rows additionally retain `local_status: INSUFFICIENT_CONTEXT` and
-`canonical_software` with the CFF path, content digest, checked identity, and
-exact bytes in `content_base64` for verification against the source capture.
+JSON reports use `format: "doi-report-v2"`. The `results` array holds one
+row per occurrence with its line, resolved metadata, and Markdown `source`
+path and digest. Canonical rows also record `local_status` and
+`canonical_software` with the CFF path, digest, and checked identity.
+The `captures` object maps each distinct `sha256:<hex>` input digest to its
+base64-encoded bytes. To reconstruct either file, look up its digest, decode
+the value and verify SHA-256 before using the bytes.
 A successful canonical check is a new execution; it never rewrites an earlier
 nonzero result. In review-graph, preserve both reports as declared validation
 artifacts and follow

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from review_graph_doi import captured_doi_inputs, validate_scholarly_doi_resolution
+from review_graph_doi import captured_doi_inputs, captured_software_inputs, validate_scholarly_doi_resolution
 from review_graph_plan import plan_from_document
 from review_graph_reuse import regular_file_fingerprint, source_snapshot
 from review_graph_runtime import (
@@ -129,6 +129,61 @@ def _scholarly_fixture(
             "report": verified["artifacts"][0]["path"],
         }
     return original, verified, resolution, capture
+
+
+def _compact_report(path: Path) -> dict[str, Any]:
+    """Represent the fixture's historical rows in the versioned capture format."""
+    rows = json.loads(path.read_bytes())
+    captures = {}
+    for row in rows:
+        for field in ("source", "canonical_software"):
+            if field in row:
+                reference = row[field]
+                captures[reference["digest"]] = reference.pop("content_base64")
+    return {"format": "doi-report-v2", "captures": captures, "results": rows}
+
+
+@pytest.mark.parametrize("compact_records", [("original",), ("verified",), ("original", "verified")])
+def test_compact_and_retained_reports_reconcile_the_same_source(tmp_path: Path, compact_records: tuple[str, ...]) -> None:
+    original, verified, resolution, capture = _scholarly_fixture(tmp_path, mixed=True)
+    for record in (original, verified):
+        if record["node_id"] in compact_records:
+            path = Path(record["artifacts"][0]["path"])
+            record["artifacts"] = [_save_report(path, _compact_report(path))]
+            assert captured_doi_inputs(record, capture) == record["captured_doi_inputs"]
+            if record is verified:
+                assert captured_software_inputs(record, capture) == record["captured_software_inputs"]
+    validate_scholarly_doi_resolution(resolution, original, {verified["evidence_id"]: verified})
+
+
+@pytest.mark.parametrize("field", ["source", "canonical_software"])
+@pytest.mark.parametrize("defect", ["missing", "wrong-bytes", "invalid-base64", "unknown-digest"])
+def test_compact_report_rejects_invalid_referenced_capture(tmp_path: Path, field: str, defect: str) -> None:
+    original, verified, resolution, capture = _scholarly_fixture(tmp_path, mixed=True)
+    path = Path(verified["artifacts"][0]["path"])
+    report = _compact_report(path)
+    reference = report["results"][-1][field]
+    digest = reference["digest"]
+    if defect == "missing":
+        del report["captures"][digest]
+    elif defect == "unknown-digest":
+        reference["digest"] = "sha256:" + "0" * 64
+    else:
+        report["captures"][digest] = "!" if defect == "invalid-base64" else base64.b64encode(b"other bytes").decode()
+    verified["artifacts"] = [_save_report(path, report)]
+    assert captured_software_inputs(verified, capture) == {}
+    assert captured_doi_inputs(verified, capture) == {}
+    with pytest.raises(ValueError, match=r"capture|base64"):
+        validate_scholarly_doi_resolution(resolution, original, {verified["evidence_id"]: verified})
+
+
+def test_compact_followup_requires_the_recorded_markdown_binding(tmp_path: Path) -> None:
+    original, verified, resolution, _capture = _scholarly_fixture(tmp_path, mixed=True)
+    path = Path(verified["artifacts"][0]["path"])
+    verified["artifacts"] = [_save_report(path, _compact_report(path))]
+    del verified["captured_doi_inputs"]
+    with pytest.raises(ValueError, match="differs from captured Markdown source"):
+        validate_scholarly_doi_resolution(resolution, original, {verified["evidence_id"]: verified})
 
 
 def _checker_report(markdown: str, rows: list[dict[str, Any]], source: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:

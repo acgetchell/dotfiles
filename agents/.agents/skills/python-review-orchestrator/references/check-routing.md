@@ -1,11 +1,13 @@
 # Python Review Routing
 
-Use this matrix after identifying changed behavior. Select skills individually and choose validators separately.
+Apply this matrix to the selected scope, including unchanged contracts in a whole-package baseline. Select skills individually and choose validators separately.
 
 ## Scope Detection
 
-Use a supplied parent scope when present. Otherwise use read-only git commands
-to enumerate the committed branch delta from its merge base, staged changes,
+Use a supplied parent scope when present. For a whole-package baseline,
+inventory the package and its supporting files, including unchanged paths.
+For changed-file reviews, use read-only git commands to enumerate the
+committed branch delta from its merge base, staged changes,
 unstaged changes, and every untracked path. Read the complete contents of each
 untracked file with a file-appropriate reader before routing it; a status entry
 or filename alone is insufficient. Classify the resulting complete scope by
@@ -20,21 +22,30 @@ behavior:
 
 ## Individual Skill Routing
 
+For a change review, select each row whose contract the change affects. For a
+whole-package baseline, select each row whose contract the package contains,
+including unchanged APIs, commands, scientific code and tests. Account for
+each captured path through an assigned reviewer, matching prior review evidence
+or a documented scope exclusion. In graph mode, use the parent's
+[captured-path accounting rules](../../review-graph/references/planning-contract.md).
+
+Run selected rows in contract-dependency order. Establish build and platform constraints early, use domain and test evidence before pruning, and finish with production synthesis. Record an explicit style decision for every scope.
+
 | Skill | Select when | Skip when |
 |---|---|---|
-| `python-build-portability` | Wheels, sdists, package discovery/data, installed imports, entry points, extras, markers, supported runtimes/platforms, native extensions, external consumers; platform-sensitive scripts and fixtures, including unpackaged tooling | Only workflow commands or tool pins changed and no Python platform contract is affected |
-| `python-style-hygiene` | Python source, tests, stubs, or code examples are in scope, even when lint passes. | The scope contains no Python code or examples. |
-| `python-api-design` | Material public or cross-module concepts, imports/exports, callable signatures, return shapes, protocols, callbacks, stubs, extension hooks, or compatibility changed | Private helper changes with no material shared caller contract |
-| `jupyter-notebook-review` | Notebook cells, metadata, outputs, execution, plotting, environments, or notebook artifacts changed | A normal Python module merely supports a notebook |
-| `python-cli-review` | User-visible arguments, output, privacy, application files, dates/times, or exit behavior changed | Pure parser/model or support-transform change |
+| `python-build-portability` | Whole-package baseline (inspect build/install and supported-platform evidence regardless of staged diff), wheels, sdists, package discovery/data, installed imports, entry points, extras, markers, supported runtimes/platforms, native extensions, external consumers; platform-sensitive scripts and fixtures, including unpackaged tooling | Changed-file scope covers only workflow commands or tool pins and no Python platform contract is affected |
+| `python-style-hygiene` | Python source, tests, stubs, or code examples (including documentation) are in scope, even when lint passes. | The scope contains no Python code or examples. |
+| `python-api-design` | Material public or cross-module concepts, imports/exports, callable signatures, return shapes, protocols, callbacks, stubs, extension hooks, or compatibility | Private helpers with no material shared caller contract |
+| `jupyter-notebook-review` | Notebook cells, metadata, outputs, execution, plotting, environments, or notebook artifacts | A normal Python module merely supports a notebook |
+| `python-cli-review` | User-visible command arguments, output, privacy, application files, dates/times, or exit behavior | Only parser/model or support-transform internals are in scope |
 | `python-parse-dont-validate` | Raw external values carry structural or semantic invariants into trusted code | Passive reports or already-validated values |
-| `python-scientific-review` | Mathematical, numerical, statistical, geometric, stochastic, dataframe-computation, or scientific-oracle behavior changed | Plot formatting or generic file plumbing only |
-| `python-support-scripts` | Release, changelog, benchmark, CI, fixture, diagnostic, generated-artifact, or development subprocess behavior changed | User application or scientific algorithm code |
-| `python-test-quality` | Test artifacts changed, coverage/test review was requested, or durable evidence is itself at risk | Tests are unchanged and focused specialist validation is sufficient |
+| `python-scientific-review` | Mathematical, numerical, statistical, geometric, stochastic, dataframe-computation, or scientific-oracle behavior | Plot formatting or generic file plumbing only |
+| `python-support-scripts` | Release, changelog, benchmark, CI, fixture, diagnostic, generated-artifact, or development subprocess behavior | User application or scientific algorithm code |
+| `python-test-quality` | Tests, fixtures, test helpers, or pytest configuration are in scope, coverage/test review was requested, a bug needs regression evidence, or assertions, isolation, install or platform coverage are at risk | No selection trigger applies and focused specialist validation supplies sufficient evidence |
 | `python-simplification-review` | Pruning or suite reduction is requested; redundant code, tests, fixtures, wrappers, compatibility paths, or accidental complexity are material | No concrete deletion or consolidation opportunity and no simplification request |
-| `python-production-review` | Always in orchestrated mode; also owns ordinary reusable modules and residual integration concerns | Never skip final synthesis during orchestration |
+| `python-production-review` | Always select for final synthesis, including when the Python orchestrator is invoked directly. Run after any selected specialists and reconcile findings, ordinary modules, integration risks and readiness | Required even when no narrower specialist applies |
 
-Select `project-tooling-review` outside this skill when recipes, workflows, validation configuration, installers, or tool versions changed. Select documentation review for suite-wide docs consistency. Shared ownership does not justify loading unrelated Python specialists.
+Select `project-tooling-review` outside this skill when recipes, workflows, validation configuration, installers, or tool versions are in scope. Select documentation review for suite-wide docs consistency. Shared ownership does not justify loading unrelated Python specialists.
 
 For PRs or platform-sensitive changes, apply
 [platform coverage and native CI](../../review-graph/references/platform-ci-review.md)
@@ -44,22 +55,6 @@ path, shell, subprocess, and fixture assumptions relevant even when changed
 files contain no `sys.platform` branch. Consult the portability owner and the
 applicable support/test platform references; record actual reads, not only
 selected skill names.
-
-## Common Combinations
-
-- Pure config parser: parsing, then production; add test-quality only for changed or materially weak evidence.
-- CLI importing structured data: CLI plus parsing, then production.
-- Scientific computation over external data: parsing plus scientific, then production.
-- Scientific notebook plotting existing artifacts: notebook, then production; add scientific only when cells perform or validate scientific computation.
-- Release script with a user-facing CLI: support scripts; add CLI only for a substantial public output/argument contract.
-- Packaging metadata or installed import change: build portability, then production; add tooling only for command or workflow mechanics.
-- Public library interface or stub change: API design, then production; add
-  parsing for input invariants and portability for distribution/runtime concerns.
-- Tests-only change: test quality plus the domain specialist only when the tests encode a domain assumption that could hide a production bug.
-- Code or test-suite pruning: simplification; add test quality when evidence
-  design or fixture isolation changes, and the domain owner when equivalence is
-  uncertain. Reuse their evidence when deciding what can be removed.
-- Ordinary reusable module: production; add a focused specialist only for a matching concern.
 
 ## Focused Validators
 

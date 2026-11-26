@@ -8,7 +8,7 @@ and [Linux launcher](../scripts/linux_review.py). These measurements used the
 published `research-repo-tools==0.2.7`; no managed Cargo tools are declared here,
 so shared Cargo compilation caching is not applicable.
 
-The current [adoption](shared-tooling.md) pins v0.3.1 and includes `actions-check`
+The current [adoption](shared-tooling.md) pins v0.3.3 and includes `actions-check`
 in `github-actions-check`. The current `just check` runs the early guards and
 static checks; `just ci` adds the Semgrep and Python execution lanes. The graph
 and measurements below record the v0.2.7 configuration.

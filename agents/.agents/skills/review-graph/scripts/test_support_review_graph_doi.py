@@ -37,9 +37,9 @@ def _source_capture(root: Path) -> dict[str, Any]:
     return capture
 
 
-def _save_report(path: Path, rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _save_report(path: Path, document: list[dict[str, Any]] | dict[str, Any]) -> dict[str, Any]:
     """Write the DOI report and return an artifact declaration bound to its exact bytes."""
-    content = json.dumps(rows).encode()
+    content = json.dumps(document).encode()
     path.write_bytes(content)
     return {
         "path": str(path),

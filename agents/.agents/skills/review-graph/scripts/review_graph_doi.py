@@ -91,7 +91,52 @@ def _command_inputs(execution: dict[str, Any]) -> tuple[Path, Path | None]:
     return (directory / positional[0]).resolve(), (directory / cff).resolve() if cff is not None and cff else None
 
 
-def _report(record: dict[str, Any], execution: dict[str, Any], path: str) -> dict[tuple[str, int], dict[str, Any]]:
+def _report_rows(document: Any, expected_source: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Resolve compact capture references for the same evidence checks used on retained row-array reports."""
+    if isinstance(document, list):
+        return document
+    if not isinstance(document, dict) or document.get("format") != "doi-report-v2":
+        msg = "software DOI reconciliation: unknown report format"
+        raise _UnusableReportError(msg)
+    captures, rows = document.get("captures"), document.get("results")
+    if not isinstance(captures, dict) or not isinstance(rows, list):
+        msg = "software DOI reconciliation: compact report requires captures and results"
+        raise _UnusableReportError(msg)
+    _verify_captures(captures)
+    for row in rows:
+        if not isinstance(row, dict):
+            msg = "software DOI reconciliation: invalid compact result"
+            raise _UnusableReportError(msg)
+        source = row.get("source")
+        if expected_source is not None and source != expected_source:
+            msg = "software DOI reconciliation: compact report differs from captured Markdown source"
+            raise _UnusableReportError(msg)
+        _resolve_capture(source, captures)
+        if "canonical_software" in row:
+            _resolve_capture(row["canonical_software"], captures)
+    return rows
+
+
+def _verify_captures(captures: dict[str, Any]) -> None:
+    """Check every capture against its key, including any unused input."""
+    for digest, encoded in captures.items():
+        try:
+            if isinstance(encoded, str) and digest == "sha256:" + sha256(base64.b64decode(encoded, validate=True)).hexdigest():
+                continue
+        except ValueError as exc:
+            raise _UnusableReportError(f"software DOI reconciliation: invalid base64 for {digest}") from exc
+        raise _UnusableReportError(f"software DOI reconciliation: capture digest mismatch for {digest}")
+
+
+def _resolve_capture(reference: Any, captures: dict[str, str]) -> None:
+    """Attach the shared encoded bytes only when the row names a verified capture."""
+    if not isinstance(reference, dict) or not isinstance(reference.get("digest"), str) or reference["digest"] not in captures or "content_base64" in reference:
+        msg = "software DOI reconciliation: missing or invalid compact capture reference"
+        raise _UnusableReportError(msg)
+    reference["content_base64"] = captures[reference["digest"]]
+
+
+def _report(record: dict[str, Any], execution: dict[str, Any], path: str, *, markdown: Path | None = None) -> dict[tuple[str, int], dict[str, Any]]:
     """Verify the report artifact and index its rows by case-folded DOI and source line, rejecting duplicate occurrences."""
     artifacts = [item for item in record.get("artifacts", []) if item["path"] == path]
     if path not in execution.get("artifact_paths", []) or len(artifacts) != 1:
@@ -106,10 +151,11 @@ def _report(record: dict[str, Any], execution: dict[str, Any], path: str) -> dic
         if "sha256:" + sha256(content).hexdigest() != artifact["artifact_digest"]:
             msg = "report bytes changed after validation"
             raise _reject(msg)
-        rows = json.loads(content)
+        expected = {"path": str(markdown), "digest": record.get("captured_doi_inputs", {}).get(str(markdown))} if markdown is not None else None
+        rows = _report_rows(json.loads(content), expected)
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise _UnusableReportError(f"software DOI reconciliation: cannot verify report: {exc}") from exc
-    if not isinstance(rows, list) or not rows:
+    if not rows:
         msg = "report must contain DOI results"
         raise _UnusableReportError(f"software DOI reconciliation: {msg}")
     indexed = {}
@@ -318,8 +364,8 @@ def _reconcile_reports(original: dict[str, Any], verified: dict[str, Any], check
     if old_input != new_input or cff is None:
         msg = "canonical check must use the original Markdown input and explicit CITATION.cff"
         raise _reject(msg)
-    old_rows = _report(original, old_execution, check["original_report"])
-    new_rows = _report(verified, new_execution, check["verification_report"])
+    old_rows = _report(original, old_execution, check["original_report"], markdown=old_input)
+    new_rows = _report(verified, new_execution, check["verification_report"], markdown=new_input)
     if old_rows.keys() != new_rows.keys():
         msg = "canonical check must cover exactly the original DOI occurrences"
         raise _reject(msg)
@@ -533,7 +579,7 @@ def validate_scholarly_doi_resolution(resolution: dict[str, Any], original: dict
         inspect_manual_doi_check(original, check["execution_index"], check["original_report"])
         execution = _execution(original, check["execution_index"], "failed")
         markdown, _cff = _command_inputs(execution)
-        rows = _report(original, execution, check["original_report"])
+        rows = _report(original, execution, check["original_report"], markdown=markdown)
         occurrences = {(item["doi"].casefold(), item["line"]): item for item in check["occurrences"]}
         if len(occurrences) != len(check["occurrences"]):
             msg = "scholarly resolution repeats an occurrence"
@@ -571,7 +617,7 @@ def _scholarly_software_followup(
         raise _reject(msg)
     new_execution = _execution(verified, index, "passed" if verified["executions"][index]["result"] == "passed" else "failed")
     new_markdown, cff = _command_inputs(new_execution)
-    new_rows = _report(verified, new_execution, verification["report"])
+    new_rows = _report(verified, new_execution, verification["report"], markdown=new_markdown)
     if markdown != new_markdown or cff is None or rows.keys() != new_rows.keys():
         msg = "software follow-up must cover the original input and every occurrence"
         raise _reject(msg)
