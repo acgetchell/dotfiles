@@ -30,19 +30,20 @@ if it verifies both relative fragments and same-repository default-branch
 fragments. Confirm coverage with a misspelled heading in a disposable copy
 when the check's behavior is unclear.
 
-With [Lychee](https://github.com/lycheeverse/lychee) available, run the
+With [Lychee 0.24.0](https://github.com/lycheeverse/lychee/releases/tag/lychee-v0.24.0) or later, run the
 following from the root of the selected snapshot. Use the worktree for a
 worktree review. For a staged or commit review, materialize the selected tree
 first so the README and its destinations come from the same revision.
 Replace `example/widgets` and `trunk` with the repository slug and its
-configured default branch, escaping any regex metacharacters. A local
-`git symbolic-ref --short refs/remotes/origin/HEAD` can identify that branch.
+configured default branch, escaping any regex metacharacters. If
+`git symbolic-ref --short refs/remotes/origin/HEAD` prints `origin/trunk`,
+remove the `origin/` prefix and use `trunk`.
 
 ```sh
 snapshot_uri=$(python -c 'from pathlib import Path; print(Path.cwd().as_uri())')
-github_path='^https://github\.com/example/widgets/(?:blob|tree)/trunk/(.*)$'
+github_path='^https://github\.com/example/widgets/(?:blob|tree)/trunk(?:/([^#]*))?(#.*)?$'
 lychee --offline --include-fragments=anchor-only --index-files 'README.md,.' \
-  --remap "$github_path $snapshot_uri/"'$1' -- README.md
+  --remap "$github_path $snapshot_uri/"'$1$2' -- README.md
 ```
 
 Pass additional in-scope Markdown files as arguments. For a template with a

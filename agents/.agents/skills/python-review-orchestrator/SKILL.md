@@ -5,7 +5,7 @@ description: "Coordinate Python reviews spanning multiple contracts; use a focus
 
 # Python Review Orchestrator
 
-Coordinate focused Python skills without copying their guidance. Select each skill independently from the changed behavior; selecting a pass does not imply loading every skill listed in that pass.
+Coordinate focused Python skills. Select each specialist independently from the contracts in the supplied scope.
 
 ## Ground Rules
 
