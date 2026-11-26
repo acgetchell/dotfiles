@@ -27,7 +27,7 @@ uv run --locked --group notebook --group dev research-repo-tools notebooks lint 
 types, IDs, line/output/execution counts, and short source previews without
 printing stored outputs or metadata, executing cells, generating IDs, or writing
 source files. Previews expose source text; use `--no-preview` to omit it. Use
-`--json` for the [versioned inventory schema](https://github.com/acgetchell/research-repo-tools/blob/v0.3.3/docs/notebook-inspection.md).
+`--json` for the [versioned inventory schema](https://github.com/acgetchell/research-repo-tools/blob/v0.3.3/docs/notebooks-api.md#notebook-inspection-schema).
 
 Inspection tolerates older nbformat 4 notebooks and missing, invalid, or duplicate
 IDs, reporting repair problems while returning zero for a complete inventory.
