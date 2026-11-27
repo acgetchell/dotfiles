@@ -112,6 +112,27 @@ def test_old_ledger_cannot_supply_an_acknowledged_receipt(tmp_path: Path) -> Non
     assert receipt["files"][0]["status"] == "pending"
 
 
+@pytest.mark.parametrize("damage", ["unknown-status", "missing-file", "completed-with-offer", "out-of-range"])
+def test_invalid_saved_progress_is_rejected_on_retry_and_ack(tmp_path: Path, damage: str) -> None:
+    (tmp_path / "body.md").write_bytes(b"two chunks")
+    step = partial(deliver_instructions, tmp_path, ["body.md"], context="live", scope=SCOPE, skill_id="api", chunk_bytes=4)
+    offered, ledger, _ = step({})
+    assert offered is not None
+    state = ledger["passes"]["api"]
+    match damage:
+        case "unknown-status":
+            state["receipt"]["files"][0]["status"] = "complete"
+        case "missing-file":
+            state["receipt"]["files"].clear()
+        case "completed-with-offer":
+            state["receipt"]["files"][0]["status"] = "loaded"
+        case "out-of-range":
+            state["offered_end"] = 100
+    for ack in (None, offered.token):
+        with pytest.raises(ValueError, match="Invalid instruction ledger"):
+            step(ledger, ack=ack)
+
+
 def test_smaller_retry_replaces_only_the_unacknowledged_offer(tmp_path: Path) -> None:
     (tmp_path / "body.md").write_bytes(b"firstsecondthird")
     step = partial(deliver_instructions, tmp_path, ["body.md"], context="live", scope=SCOPE, skill_id="api")
