@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import re
 import secrets
 import sys
 import tempfile
@@ -95,7 +96,21 @@ def start_pass(skill_id: str, signature: str, files: list[InstructionFile], load
     return {"receipt": {"skill_id": skill_id, "signature": signature, "invalidated": invalidated, "files": files}, "offset": 0, "offered_end": 0, "token": None}
 
 
-def restore_pass(raw: object, skill_id: str, signature: str, files: list[InstructionFile]) -> PassState:
+def utf8_boundary(content: bytes, offset: int) -> bool:
+    """Check an in-range offset in validated UTF-8, including the end of the file."""
+    return offset == len(content) or content[offset] & 0xC0 != 0x80
+
+
+def valid_saved_offer(token: str | None, offset: int, end: int, size: int, content: bytes | None) -> bool:
+    """Check the token and range before retrying or acknowledging a persisted offer."""
+    if token is None or re.fullmatch(r"[0-9a-f]{32}", token) is None:
+        return False
+    if not 0 <= offset <= end <= size or (offset == end and size != 0) or end - offset > MAX_CHUNK_BYTES:
+        return False
+    return content is None or (utf8_boundary(content, offset) and utf8_boundary(content, end))
+
+
+def restore_pass(raw: object, skill_id: str, signature: str, files: list[InstructionFile], contents: dict[str, bytes]) -> PassState:
     """Check saved progress before using it to resume or acknowledge a delivery."""
     match raw:
         case {
@@ -109,7 +124,7 @@ def restore_pass(raw: object, skill_id: str, signature: str, files: list[Instruc
             raise ValueError("Invalid instruction ledger pass")  # noqa: EM101
 
     identities = []
-    pending_size = None
+    pending = None
     for row in rows:
         match row:
             case {"path": str(path), "sha256": str(sha), "bytes": int(size), "status": ("pending" | "loaded" | "reused") as status, "reread": bool()} if (
@@ -118,16 +133,18 @@ def restore_pass(raw: object, skill_id: str, signature: str, files: list[Instruc
                 identities.append((path, sha, size))
             case _:
                 raise ValueError("Invalid instruction ledger file")  # noqa: EM101
-        if status == "pending" and pending_size is None:
-            pending_size = size
-        elif status == "loaded" and pending_size is not None:
+        if status == "pending" and pending is None:
+            pending = (path, size)
+        elif status == "loaded" and pending is not None:
             raise ValueError("Invalid instruction ledger delivery order")  # noqa: EM101
     if saved_signature == signature and identities != [(file["path"], file["sha256"], file["bytes"]) for file in files]:
         raise ValueError("Invalid instruction ledger file inventory")  # noqa: EM101
-    if pending_size is None:
+    if pending is None:
         valid = token is None and offset == 0 and end >= 0
     else:
-        valid = bool(token) and 0 <= offset <= end <= pending_size and (offset < end or pending_size == 0) and end - offset <= MAX_CHUNK_BYTES
+        path, size = pending
+        content = contents[path] if saved_signature == signature else None
+        valid = valid_saved_offer(token, offset, end, size, content)
     if not valid:
         raise ValueError("Invalid instruction ledger chunk progress")  # noqa: EM101
     return cast("PassState", raw)
@@ -155,7 +172,7 @@ def offer_chunk(state: PassState, contents: dict[str, bytes], chunk_bytes: int) 
     start = state["offset"]
     end = min(start + chunk_bytes, len(content))
     # A UTF-8 continuation byte belongs in the next chunk with its leading byte.
-    while end < len(content) and content[end] & 0xC0 == 0x80:
+    while not utf8_boundary(content, end):
         end -= 1
     token = state["token"]
     if token is None or state["offered_end"] != end:
@@ -191,7 +208,7 @@ def deliver_instructions(  # noqa: PLR0913 - explicit receipt identities and del
     loaded = ledger.get("loaded")
     if not isinstance(passes, dict) or not isinstance(loaded, dict) or not all(isinstance(path, str) and isinstance(sha, str) for path, sha in loaded.items()):
         raise ValueError("Invalid instruction ledger cache")  # noqa: EM101
-    state = restore_pass(passes[skill_id], skill_id, signature, files) if skill_id in passes else None
+    state = restore_pass(passes[skill_id], skill_id, signature, files, contents) if skill_id in passes else None
     if ack is not None:
         if state is None:
             raise ValueError("No instruction delivery to acknowledge in this scope and context")  # noqa: EM101

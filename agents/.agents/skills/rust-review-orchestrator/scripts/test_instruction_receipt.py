@@ -112,9 +112,9 @@ def test_old_ledger_cannot_supply_an_acknowledged_receipt(tmp_path: Path) -> Non
     assert receipt["files"][0]["status"] == "pending"
 
 
-@pytest.mark.parametrize("damage", ["unknown-status", "missing-file", "completed-with-offer", "out-of-range"])
+@pytest.mark.parametrize("damage", ["unknown-status", "missing-file", "completed-with-offer", "out-of-range", "split-start", "split-end", "invalid-token"])
 def test_invalid_saved_progress_is_rejected_on_retry_and_ack(tmp_path: Path, damage: str) -> None:
-    (tmp_path / "body.md").write_bytes(b"two chunks")
+    (tmp_path / "body.md").write_bytes("one🦀two".encode())
     step = partial(deliver_instructions, tmp_path, ["body.md"], context="live", scope=SCOPE, skill_id="api", chunk_bytes=4)
     offered, ledger, _ = step({})
     assert offered is not None
@@ -128,6 +128,12 @@ def test_invalid_saved_progress_is_rejected_on_retry_and_ack(tmp_path: Path, dam
             state["receipt"]["files"][0]["status"] = "loaded"
         case "out-of-range":
             state["offered_end"] = 100
+        case "split-start":
+            state.update(offset=4, offered_end=7)
+        case "split-end":
+            state["offered_end"] = 4
+        case "invalid-token":
+            state["token"] = "é" + offered.token[1:]
     for ack in (None, offered.token):
         with pytest.raises(ValueError, match="Invalid instruction ledger"):
             step(ledger, ack=ack)
