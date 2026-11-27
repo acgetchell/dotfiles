@@ -144,6 +144,7 @@ from review_graph_plan import (
     create_artifact_manifest,
     graph_plan_digest,
     graph_plan_digest_matches,
+    is_whole_repository,
     load_routing_catalog,
     plan_from_document,
     repository_review_proof_expectation,
@@ -3663,7 +3664,7 @@ def build_routing_projection_document(
     document: dict[str, Any], *, catalog_path: Path = DEFAULT_ROUTING_CATALOG, skill_roots: tuple[Path, ...] = (DEFAULT_SKILL_ROOT,)
 ) -> dict[str, Any]:
     """Load and project the complete consulted routing catalog."""
-    catalog = load_routing_catalog(catalog_path, skill_roots=skill_roots)
+    catalog = load_routing_catalog(catalog_path, skill_roots=skill_roots, whole_repository=is_whole_repository(document))
     return build_routing_projection(
         catalog,
         consulted_routers=_text_list(document, "consulted_routers", required=True),

@@ -478,7 +478,8 @@
       "default_priority": "optional-hygiene",
       "synthesis_dependency": "rust-synthesis",
       "path_patterns": ["src/**/*.rs", "tests/**/*.rs", "benches/**/*.rs", "examples/**/*.rs"],
-      "semantic_triggers": ["Naming, imports, path clarity, or redundant qualification are material rather than incidental."]
+      "whole_repository_path_patterns": ["**/*.rs"],
+      "semantic_triggers": ["The repository specifies a per-file Rust convention, or naming, imports, path clarity, or redundant qualification are material."]
     },
     {
       "catalog_id": "rust.iter-control",

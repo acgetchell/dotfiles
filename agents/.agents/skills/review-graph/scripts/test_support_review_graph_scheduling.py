@@ -14,6 +14,7 @@ from test_support_review_graph import (
     _complete_structural_fixture_routing,
     _json_plan,
     _prepare_fixture_timing,
+    _set_fixture_routing,
     _sparse_plan,
     _sparse_plan_document,
 )
@@ -51,7 +52,7 @@ def _fixture(tmp_path: Path, *, profile: str = "grouped", mixed_surfaces: bool =
             }
         )
     for catalog_id in ("rust.errors", "rust.api-design", "rust.trait-bounds", "rust.tests", "rust.style"):
-        planning["routing_overrides"].append({**planning["routing_overrides"][0], "catalog_id": catalog_id})
+        _set_fixture_routing(planning, {**planning["routing_overrides"][0], "catalog_id": catalog_id})
     _complete_structural_fixture_routing(planning, planning["captured_paths"])
     plan = plan_from_document(planning, catalog_path=ROUTING_CATALOG, skill_roots=(SKILL_ROOT,), repository_root=SKILL_ROOT.parents[2])
     lifecycle = {"plan": _json_plan(plan), "source_state": ["scope", "worktree", "repository"]}

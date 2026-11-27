@@ -22,8 +22,10 @@ ARCHIVES = ["docs/archive/history.md", "docs/archive/CHANGELOG.md"]
 @pytest.mark.parametrize("mode", ["baseline", "worktree"])
 def test_rust_style_coverage_is_per_skill_and_focused_scope_stays_focused(tmp_path: Path, mode: str) -> None:
     git, repository, template, _capture, _plan = _baseline_mutation_fixture(tmp_path)
-    paths = ["src/lib.rs", "tests/smoke.rs", "benches/common/helpers.rs", "examples/demo.rs"]
-    for path in paths:
+    conventional = ["src/lib.rs", "tests/smoke.rs", "benches/common/helpers.rs", "examples/demo.rs"]
+    nested_module = "crates/helper/src/geometry/predicates.rs"
+    other_rust = ["build.rs", nested_module, "tools/fixtures/input.rs"]
+    for path in [*conventional, *other_rust]:
         target = repository / path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("pub fn demo() {}\n")
@@ -33,6 +35,21 @@ def test_rust_style_coverage_is_per_skill_and_focused_scope_stays_focused(tmp_pa
         template["consulted_routers"] = ["review-graph", "rust-review-orchestrator"]
     _complete_structural_fixture_routing(template, cast("list[str]", capture["captured_scope_paths"]))
     document = bootstrap_document(capture, template)
+    projection = runtime.build_routing_projection_document(document)
+    paths = [*conventional, *other_rust, "state.rs"] if mode == "baseline" else conventional
+    matched = next(item["matched_paths"] for item in projection["entries"] if item["catalog_id"] == "rust.style")
+    assert set(matched) == set(paths)
+    override = {
+        "catalog_id": "rust.style",
+        "disposition": "selected",
+        "reason": "Check Rust file conventions across the projected review surface",
+        "applicability_evidence": matched,
+        "owners": ["rust"],
+        "review_surface": matched,
+    }
+    _set_fixture_routing(document, override)
+    build = next(item for item in document["routing_overrides"] if item["catalog_id"] == "rust.build")
+    build["review_surface"] = list(dict.fromkeys([*build["review_surface"], *other_rust]))
     plan = plan_from_document(document, repository_root=repository)
     assert plan.dispatch_allowed, plan.blockers
     style_id = dict(plan.requirement_to_node)["rust.style"]
@@ -42,12 +59,11 @@ def test_rust_style_coverage_is_per_skill_and_focused_scope_stays_focused(tmp_pa
     assert set(next(item for item in dispatches["dispatches"] if item["node_id"] == style_id)["dispatch"]["owned_paths"]) == set(paths)
     # Other reviewers still own the missing paths; union coverage cannot discharge style.
     assert set(paths[2:]) <= {path for node in plan.actual_worker_nodes if node.node_id != style_id and node.mode == "audit" for path in node.coverage}
-    override = next(item for item in document["routing_overrides"] if item["catalog_id"] == "rust.style")
     override["review_surface"] = paths[:2]
     narrowed = plan_from_document(document, repository_root=repository)
     if mode == "baseline":
         assert not narrowed.dispatch_allowed
-        assert any("rust.style whole-repository coverage" in blocker and paths[2] in blocker and paths[3] in blocker for blocker in narrowed.blockers)
+        assert any("rust.style whole-repository coverage" in blocker and all(path in blocker for path in paths[2:]) for blocker in narrowed.blockers)
     else:
         assert narrowed.dispatch_allowed, narrowed.blockers
         assert next(node for node in narrowed.actual_worker_nodes if "rust.style" in node.requirement_ids).coverage == tuple(paths[:2])

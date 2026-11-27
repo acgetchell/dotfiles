@@ -51,6 +51,9 @@ The planner:
 - requires semantic decisions for projection-matched leaves; a path alone never dispatches a language specialist
 - applies catalog `excluded_path_patterns` to default projection matches only;
   semantic overrides can still select an excluded path with concrete evidence
+- uses `whole_repository_path_patterns` in place of the usual patterns for an
+  unrestricted baseline or release-readiness capture. Pass the capture mode and
+  requested paths with the captured inventory to `routing-projection`.
 - selects required repository and consulted-surface syntheses
 - selects independent review for a concrete change target
 - expands unmatched, untriggered omissions to `not-applicable`

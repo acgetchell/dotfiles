@@ -1624,6 +1624,9 @@
     "routing-projection": {
       "additionalProperties": true,
       "properties": {
+        "capture_mode": {
+          "enum": ["branch", "staged", "worktree", "baseline"]
+        },
         "captured_python_example_paths": {
           "$ref": "#/$defs/stringArray"
         },
@@ -1632,6 +1635,12 @@
         },
         "consulted_routers": {
           "$ref": "#/$defs/stringArray"
+        },
+        "requested_paths": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "scope_mode": {
+          "enum": ["branch", "staged-only", "changed-file-only", "baseline", "release-readiness"]
         }
       },
       "required": [
