@@ -12,6 +12,7 @@ from review_graph_plan import (
     DEFAULT_SKILL_ROOT,
     build_routing_projection,
     classify_repository_paths,
+    is_whole_repository,
     load_routing_catalog,
     validate_isolation_root,
 )
@@ -168,7 +169,7 @@ def prepare_release(capture: dict[str, Any], artifact_root: Path) -> tuple[dict[
         for parent in Path(path).parents
         if (repository / parent / "AGENTS.md").is_file()
     }
-    catalog = load_routing_catalog(DEFAULT_ROUTING_CATALOG, skill_roots=(DEFAULT_SKILL_ROOT,))
+    catalog = load_routing_catalog(DEFAULT_ROUTING_CATALOG, skill_roots=(DEFAULT_SKILL_ROOT,), whole_repository=is_whole_repository(capture))
     return choices, {
         "instruction_paths": sorted(discovered),
         "instruction_policy": (

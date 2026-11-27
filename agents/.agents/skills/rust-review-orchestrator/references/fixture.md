@@ -42,6 +42,21 @@ are not counted as model instruction reads. No token, latency, or general review
 quality inference follows from these bytes. The revisit is an explicit fixture
 scenario, not a claim that every historical review reread every file.
 
+The `resumable_delivery` section replays the six specialist bodies from the
+oversized load in #298. It cuts off an offered response after the first file
+has been acknowledged, retries just the unacknowledged chunk, and reassembles
+the full view in `oversized-view.txt`. It reports first-load, repeat, and
+post-repair instruction bytes and the corresponding file receipts, including
+progress at the interruption. First-load bytes count acknowledged instruction
+content once. The partial response size includes framing and is recorded
+separately.
+
+The fixture applies the source-only callback repair in a temporary copy under
+the same review scope. The delivery report checks whether evidence keyed to the
+original source fingerprint is still eligible. `source` and `repaired_source`
+record distinct Cargo test and callback probe results so delivery and behavioral
+verification can be checked independently.
+
 ## Source and Evidence
 
 `scripts/fixtures/warmup/` is a reduced deterministic source fixture with four
@@ -72,20 +87,12 @@ without a parent receipt and verify scope discovery plus its complete report.
 
 ## Live Receipt Helper
 
-Use a temporary ledger unique to a live context, and supply the actual scope
-fingerprint and all selected references for that pass:
-
-```sh
-uv run python agents/.agents/skills/rust-review-orchestrator/scripts/instruction_receipt.py \
-  --ledger /tmp/rust-review-instructions.json --context review-session-1 \
-  --scope SOURCE_FINGERPRINT --skill-id rust-trait-bounds \
-  rust-trait-bounds/SKILL.md
-```
-
-The helper emits complete new content on stdout and the per-pass receipt on
-stderr. Read all emitted content; if a tool truncates it, discard that context
-receipt and reload with a new context ID. The helper never marks a review pass
-complete and never decides whether validation evidence remains valid.
+Use the [instruction delivery protocol](execution-v1.md#instruction-reuse) to
+replay the fixture in a live context. Inspect the ledger's ordered view
+signature and per-file `pending`, `loaded`, or `reused` receipts. Check for
+elision even when the trailer is visible. A retry of the same offer keeps its
+token. To fit a smaller response budget, lower `--chunk-bytes` (minimum 4) and
+acknowledge only the new offer.
 
 ## Recorded Evaluation: September 26, 2026
 

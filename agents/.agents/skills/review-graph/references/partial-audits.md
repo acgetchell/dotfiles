@@ -41,9 +41,8 @@ and preserves every classification in the plan, dispatch and final proof. Other
 specialists keep their own coverage obligations. If no specialist owns a path,
 the separate whole-repository `captured_path_dispositions` assessment is still
 required. Do not use another specialist's inspection to discharge this skill's
-contract. In particular, selected whole-repository Rust style coverage includes
-source, tests, examples and nested benchmark helpers; missing paths require
-explicit policy-backed exclusions. Focused scope keeps its selected boundary.
+contract. The planning contract defines
+[whole-repository Rust style coverage](planning-contract.md#routing-inputs).
 
 ## Continue Published Partial Evidence
 

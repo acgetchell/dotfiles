@@ -33,9 +33,27 @@ Default mode:
 Whole-repo baseline mode:
 
 - Use when the user explicitly says "whole repo", "entire repo", "baseline audit", or similar.
-- Audit naming, import placement, import grouping, redundant prefixes, and path clarity across Rust source, tests, examples, and benches.
+- Audit naming, import placement, import grouping, redundant prefixes, and path clarity across every captured `.rs` file,
+  including nested workspace members, build scripts, and fixtures.
+- Check [repository file conventions](#repository-file-conventions) against that same inventory.
 - Prioritize findings that affect public API names, repeated import/path friction, generated warnings, or readability in core modules.
 - Do not require fixing every historical style issue in one pass; group low-risk cleanup separately.
+
+### Repository File Conventions
+
+Identify required file conventions from applicable repository guidance or a
+maintained checker. Use the Rust inventory already captured for the review,
+including selected fixtures and other files outside Cargo targets where the
+rule applies. Prefer the repository's own checker. Reuse results that already
+cover the applicable paths under the same rule and source state. Inspect paths
+that lack matching checker evidence. Cite the repository rule and each affected
+path.
+
+Cargo and crate-root lints establish effective compiler policy. Require a
+per-file declaration such as `#![forbid(unsafe_code)]` only where the repository
+specifies it. Repeated headers in nearby files can guide discovery of a local
+rule. Use [the file-conventions fixture](scripts/file-conventions-fixture.sh)
+when validating this skill's behavior.
 
 ---
 
@@ -118,7 +136,7 @@ Clarity must not degrade performance reasoning.
 
 ### Findings
 
-- Concrete, actionable issues with file + function references
+- Concrete, actionable issues with file and line or symbol references
 
 ### Suggested Fixes
 

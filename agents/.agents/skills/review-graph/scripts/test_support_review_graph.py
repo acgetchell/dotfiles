@@ -123,6 +123,14 @@ def _sparse_plan_document() -> dict[str, Any]:
                 "owners": ["rust"],
                 "review_surface": [STATE_FIXTURE],
             },
+            {
+                "catalog_id": "rust.style",
+                "disposition": "not-applicable",
+                "reason": "This synthetic two-audit protocol fixture exercises state and build evidence",
+                "applicability_evidence": ["The fixture has a single state function and specifies no file convention"],
+                "owners": ["rust"],
+                "review_surface": [STATE_FIXTURE],
+            },
         ],
         "scope_mode": "baseline",
         "validation_requirements": [
@@ -248,6 +256,7 @@ def _late_handoff_replan() -> GraphPlan:
     document = _sparse_plan_document()
     document["consulted_routers"] = ["review-graph", "rust-review-orchestrator", "python-review-orchestrator"]
     document["routing_overrides"] = [
+        next(item for item in document["routing_overrides"] if item["catalog_id"] == "rust.style"),
         {
             "applicability_evidence": ["accepted build audit from the unchanged source state"],
             "catalog_id": "rust.build",

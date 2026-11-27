@@ -1209,7 +1209,12 @@ def required_routing_texts(raw: Mapping[str, Any], key: str) -> tuple[str, ...]:
     return values
 
 
-def load_routing_catalog(path: Path, *, skill_roots: Sequence[Path] = (DEFAULT_SKILL_ROOT,)) -> tuple[RoutingCatalogEntry, ...]:
+def is_whole_repository(document: Mapping[str, Any]) -> bool:
+    """Identify an unrestricted baseline or release-readiness capture."""
+    return document.get("capture_mode", document.get("scope_mode")) in {"baseline", "release-readiness"} and not document.get("requested_paths")
+
+
+def load_routing_catalog(path: Path, *, skill_roots: Sequence[Path] = (DEFAULT_SKILL_ROOT,), whole_repository: bool = False) -> tuple[RoutingCatalogEntry, ...]:
     """Load and validate the portable machine-readable routing catalog."""
     document = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(document, Mapping) or document.get("version") != 1 or not isinstance(document.get("entries"), list):
@@ -1240,6 +1245,8 @@ def load_routing_catalog(path: Path, *, skill_roots: Sequence[Path] = (DEFAULT_S
                 msg = "classifier-guarded catalog patterns require a known classifier_surface and non-empty path_patterns"
                 raise ValueError(msg)
             guarded_patterns.append((classifier_surface, tuple(path_patterns)))
+        patterns = _catalog_path_patterns(raw, "path_patterns")
+        whole_repo_patterns = _catalog_path_patterns(raw, "whole_repository_path_patterns")
         entry = RoutingCatalogEntry(
             catalog_id=_text_field(raw, "catalog_id"),
             router_id=_text_field(raw, "router_id"),
@@ -1252,7 +1259,7 @@ def load_routing_catalog(path: Path, *, skill_roots: Sequence[Path] = (DEFAULT_S
             default_priority=_text_field(raw, "default_priority"),
             synthesis_dependency=(_text_field(raw, "synthesis_dependency") if raw.get("synthesis_dependency") is not None else None),
             required_static_references=tuple(str(_resolve_skill_root_path(item, skill_roots)) for item in _tuple_field(raw, "required_static_references")),
-            path_patterns=_catalog_path_patterns(raw, "path_patterns"),
+            path_patterns=whole_repo_patterns if whole_repository and whole_repo_patterns else patterns,
             classifier_guarded_path_patterns=tuple(guarded_patterns),
             semantic_triggers=required_routing_texts(raw, "semantic_triggers"),
             excluded_path_patterns=_catalog_path_patterns(raw, "excluded_path_patterns"),
@@ -6160,7 +6167,8 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0913, PLR0915
     path_inventory: dict[str, Any] = {}
     exclusions = scope_exclusions(document.get("review_scope_exclusions", []))
     if exhaustive_routing:
-        routing_catalog = load_routing_catalog(catalog_path, skill_roots=skill_roots)
+        whole_repository = is_whole_repository(document)
+        routing_catalog = load_routing_catalog(catalog_path, skill_roots=skill_roots, whole_repository=whole_repository)
         if verified_capture is None and captured_paths is not None and repository_root is not None and "capture_mode" in document:
             verified_capture = _verified_captured_source(document, captured_paths, repository_root, captured_path_line_bounds)
         python_example_paths = _tuple_field(verified_capture if verified_capture is not None else document, "captured_python_example_paths")
@@ -6257,7 +6265,7 @@ def plan_from_document(  # noqa: C901, PLR0912, PLR0913, PLR0915
             )
             if not classifier.feasible:
                 routing_metadata_blockers.extend(classifier.blockers)
-            if document.get("capture_mode", scope_mode) in {"baseline", "release-readiness"} and not document.get("requested_paths"):
+            if whole_repository:
                 routing_metadata_blockers.extend(_baseline_skill_coverage(routing_catalog, routing_decisions, captured_paths, exclusions))
                 leaf_ids = {entry.catalog_id for entry in routing_catalog if entry.target_kind == "leaf"}
                 path_inventory = captured_path_inventory(

@@ -84,8 +84,9 @@ not turn a branch review into a baseline audit.
 Reconcile [per-specialist policy exclusions](partial-audits.md#classify-exclusions-before-dispatch)
 through `review_scope_exclusions` before dispatch. Preserve a reason and bound
 policy source for every excluded path. Coverage is also checked per skill:
-whole-repository `rust.style` includes source, tests, benches and examples even
-when other reviewers already own those paths.
+whole-repository `rust.style` covers every captured `.rs` file, including
+nested workspace modules, build scripts, and fixtures. Other reviewers can
+share ownership. Apply any policy-backed exclusions to the style pass itself.
 
 Selected leaves require a concrete scope, evidence, reason, priority, owners,
 references, validators, and synthesis dependency. Convert every selected leaf

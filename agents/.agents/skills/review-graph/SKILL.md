@@ -47,7 +47,8 @@ Use `references/routing-catalog.json` through `scripts/review_graph_plan.py`,
 which owns catalog/router/rule IDs, skill paths, priorities, and synthesis dependencies.
 
 1. Classify the captured repository paths.
-2. Run `review_graph_runtime.py routing-projection` with consulted routers and any `captured_python_example_paths`.
+2. Run `review_graph_runtime.py routing-projection` with the capture mode, requested and captured paths,
+   consulted routers, and any `captured_python_example_paths`.
    Inspect candidates, path matches, and semantic triggers. Consult a surface's `references/check-routing.md`
    for unresolved ownership or applicability. Keep orchestrator bodies unloaded during routing.
 3. Inspect the affected contracts and return `routing_overrides` for each matched

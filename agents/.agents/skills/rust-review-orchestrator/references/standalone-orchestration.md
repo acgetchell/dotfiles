@@ -6,7 +6,10 @@ Read [references/execution-v1.md](../references/execution-v1.md) once for the
 versioned parent receipt, instruction reuse, compact pass results, and shared
 validation rules. Preserve graph-routing behavior above.
 
-At the start, record the scope, changed Rust-owned files, selected and skipped individual skills with reasons, repository references to load, focused validators, and the initial validation ledger.
+At the start, record the stable review scope, user authorization, captured source
+fingerprint, changed Rust-owned files, selected and skipped individual skills
+with reasons, repository references to load, focused validators, and the initial
+validation ledger.
 
 For every selected skill:
 
@@ -108,7 +111,8 @@ For each selected skill:
    record paths and content digests in the instruction receipt.
 3. Inspect scoped files and nearby owners of the affected contract.
 4. Record findings or an explicit no-finding result.
-5. Apply the smallest safe correction when fixes were requested.
+5. Apply the smallest safe correction when fixes were requested. Recapture source
+   and reassess affected evidence under the same review scope after an in-scope repair.
 6. Run the focused validator selected from routing guidance only when equivalent evidence is not already valid in the shared ledger.
 7. Resolve caused failures or document a genuine blocker.
 8. Record one compact execution-v1 evidence row, including changed files or
